@@ -144,12 +144,7 @@ SKILL.md 是工作流编排规范文件，定义了技能的工作流程、工�
 ```yaml
 ---
 name: actuary-sleuth
-description: Use when reviewing insurance product clauses for compliance, checking against regulatory negative lists, calculating pricing reasonableness, or querying insurance regulations and laws.
-metadata:
-  openclaw:
-    emoji: "📊"
-    requires:
-      bins: ["python3"]
+description: Use when reviewing insurance product clauses for compliance, checking against regulatory negative lists, calculating pricing reasonableness, or querying insurance regulations and laws. Use for精算师日常评审工作 including新产品条款审核、法规查询、负面清单检查、定价合理性计算和评审报告生成.
 ---
 ```
 
