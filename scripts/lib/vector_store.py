@@ -9,6 +9,8 @@ import pyarrow as pa
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 import json
+import threading
+from numbers import Real
 
 # 数据库路径配置
 DB_URI = str(Path(__file__).parent.parent.parent / 'data' / 'lancedb')
@@ -19,11 +21,12 @@ class VectorDB:
 
     _instance = None
     _tables = {}
+    _lock = threading.Lock()
 
     @classmethod
     def connect(cls):
         """
-        连接到 LanceDB 数据库（单例模式）
+        连接到 LanceDB 数据库（单例模式，线程安全）
 
         Returns:
             LanceDB 数据库连接对象
@@ -32,14 +35,15 @@ class VectorDB:
             Exception: 当连接失败时抛出异常
         """
         try:
-            if cls._instance is None:
-                # 确保数据目录存在
-                db_path = Path(DB_URI)
-                db_path.mkdir(parents=True, exist_ok=True)
+            with cls._lock:
+                if cls._instance is None:
+                    # 确保数据目录存在
+                    db_path = Path(DB_URI)
+                    db_path.mkdir(parents=True, exist_ok=True)
 
-                # 连接到数据库
-                cls._instance = lancedb.connect(DB_URI)
-                print(f"Connected to LanceDB at: {DB_URI}")
+                    # 连接到数据库
+                    cls._instance = lancedb.connect(DB_URI)
+                    print(f"Connected to LanceDB at: {DB_URI}")
             return cls._instance
         except Exception as e:
             raise Exception(f"Failed to connect to LanceDB: {str(e)}")
@@ -56,17 +60,18 @@ class VectorDB:
             表对象，如果表不存在则返回 None
         """
         try:
-            if table_name not in cls._tables:
-                db = cls.connect()
+            with cls._lock:
+                if table_name not in cls._tables:
+                    db = cls.connect()
 
-                try:
-                    # 尝试打开已存在的表
-                    cls._tables[table_name] = db.open_table(table_name)
-                    print(f"Opened existing table: {table_name}")
-                except Exception as e:
-                    # 表不存在，返回 None 让调用者决定是否创建
-                    print(f"Table '{table_name}' does not exist yet: {str(e)}")
-                    return None
+                    try:
+                        # 尝试打开已存在的表
+                        cls._tables[table_name] = db.open_table(table_name)
+                        print(f"Opened existing table: {table_name}")
+                    except Exception as e:
+                        # 表不存在，返回 None 让调用者决定是否创建
+                        print(f"Table '{table_name}' does not exist yet: {str(e)}")
+                        return None
 
             return cls._tables[table_name]
         except Exception as e:
@@ -91,19 +96,12 @@ class VectorDB:
         try:
             db = cls.connect()
 
-            # 定义表结构
-            schema = pa.schema([
-                pa.field('id', pa.string(), nullable=False),
-                pa.field('regulation_id', pa.string()),
-                pa.field('chunk_text', pa.string()),
-                pa.field('vector', pa.list_(pa.float32()), nullable=False),
-                pa.field('metadata', pa.string())
-            ])
-
-            # 创建表
-            table = db.create_table(table_name, schema=schema)
-            cls._tables[table_name] = table
-            print(f"Created new table: {table_name} with vector dimension {vector_dim}")
+            # 创建空表（修复：不提供 schema，让 LanceDB 从数据自动推断）
+            # 注意：如果需要指定 schema，请使用 pa.fixed_size_list 而不是 pa.list
+            table = db.create_table(table_name, data=[], schema=None)
+            with cls._lock:
+                cls._tables[table_name] = table
+            print(f"Created new table: {table_name} (schema will be inferred from data)")
             return table
 
         except Exception as e:
@@ -121,24 +119,50 @@ class VectorDB:
 
         Returns:
             List[Dict]: 搜索结果列表，每个结果包含 content, metadata, score
+
+        Raises:
+            ValueError: 当输入参数无效时抛出异常
         """
+        # 输入验证
+        if not query_vector or not isinstance(query_vector, list):
+            raise ValueError("query_vector must be a non-empty list of floats")
+
+        if not all(isinstance(x, (Real, float)) and not isinstance(x, bool) for x in query_vector):
+            raise ValueError("query_vector must contain only numeric values")
+
+        if top_k <= 0 or not isinstance(top_k, int):
+            raise ValueError("top_k must be a positive integer")
+
+        if not table_name or not isinstance(table_name, str):
+            raise ValueError("table_name must be a non-empty string")
+
         try:
             table = cls.get_table(table_name)
             if table is None:
                 print(f"Table '{table_name}' not found")
                 return []
 
-            # 执行向量搜索
-            results = table.vectorSearch(query_vector).limit(top_k).to_pydict()
+            # 执行向量搜索（修复：使用 search() 而不是 vectorSearch()，并指定向量列名）
+            results = table.search(query_vector, vector_column_name="vector").limit(top_k).to_arrow()
 
             # 格式化结果
             formatted_results = []
-            for idx in range(len(results['id'])):
+            results_dict = results.to_pydict()
+            for idx in range(len(results_dict['id'])):
+                # 安全地解析 JSON metadata
+                metadata = {}
+                if results_dict.get('metadata') and results_dict['metadata'][idx]:
+                    try:
+                        metadata = json.loads(results_dict['metadata'][idx])
+                    except json.JSONDecodeError as e:
+                        print(f"Warning: Failed to parse metadata for record {results_dict['id'][idx]}: {e}")
+                        metadata = {}
+
                 formatted_results.append({
-                    'id': results['id'][idx],
-                    'content': results['chunk_text'][idx],
-                    'metadata': json.loads(results['metadata'][idx]) if results.get('metadata') else {},
-                    'score': 1 / (1 + results.get('_distance', [0])[idx]) if '_distance' in results else 1.0
+                    'id': results_dict['id'][idx],
+                    'content': results_dict['chunk_text'][idx],
+                    'metadata': metadata,
+                    'score': 1 / (1 + results_dict.get('_distance', [0])[idx]) if '_distance' in results_dict else 1.0
                 })
 
             return formatted_results
@@ -162,28 +186,61 @@ class VectorDB:
         try:
             db = cls.connect()
 
-            # 检查表是否存在
-            existing_tables = db.table_names()
-            if table_name not in existing_tables:
-                # 表不存在，自动创建
-                cls.create_table(table_name)
+            # 检查表是否存在（修复：使用 list_tables() 而不是 table_names()）
+            existing_tables = db.list_tables()
+            if table_name not in existing_tables.tables:
+                # 表不存在，从第一条数据创建表（修复：让 LanceDB 从数据自动推断向量类型）
+                if not data:
+                    print(f"Cannot create table '{table_name}' without data")
+                    return False
 
-            table = cls.get_table(table_name)
+                # 准备第一条数据用于创建表
+                first_data = [{
+                    'id': data[0].get('id', ''),
+                    'regulation_id': data[0].get('regulation_id', ''),
+                    'chunk_text': data[0].get('chunk_text', ''),
+                    'vector': data[0].get('vector', []),
+                    'metadata': json.dumps(data[0].get('metadata', {}), ensure_ascii=False)
+                }]
 
-            # 准备数据
-            vectors_data = []
-            for item in data:
-                vectors_data.append({
-                    'id': item.get('id', ''),
-                    'regulation_id': item.get('regulation_id', ''),
-                    'chunk_text': item.get('chunk_text', ''),
-                    'vector': item.get('vector', []),
-                    'metadata': json.dumps(item.get('metadata', {}), ensure_ascii=False)
-                })
+                table = db.create_table(table_name, data=first_data)
+                with cls._lock:
+                    cls._tables[table_name] = table
+                print(f"Created table '{table_name}' from first data record")
 
-            # 添加数据到表
-            table.add(vectors_data)
-            print(f"Added {len(vectors_data)} vectors to table '{table_name}'")
+                # 如果还有更多数据，添加它们
+                if len(data) > 1:
+                    remaining_data = []
+                    for item in data[1:]:
+                        remaining_data.append({
+                            'id': item.get('id', ''),
+                            'regulation_id': item.get('regulation_id', ''),
+                            'chunk_text': item.get('chunk_text', ''),
+                            'vector': item.get('vector', []),
+                            'metadata': json.dumps(item.get('metadata', {}), ensure_ascii=False)
+                        })
+                    table = cls.get_table(table_name)
+                    table.add(remaining_data)
+                    print(f"Added {len(remaining_data)} more vectors to table '{table_name}'")
+            else:
+                # 表已存在，直接添加数据
+                table = cls.get_table(table_name)
+
+                # 准备数据
+                vectors_data = []
+                for item in data:
+                    vectors_data.append({
+                        'id': item.get('id', ''),
+                        'regulation_id': item.get('regulation_id', ''),
+                        'chunk_text': item.get('chunk_text', ''),
+                        'vector': item.get('vector', []),
+                        'metadata': json.dumps(item.get('metadata', {}), ensure_ascii=False)
+                    })
+
+                # 添加数据到表
+                table.add(vectors_data)
+                print(f"Added {len(vectors_data)} vectors to table '{table_name}'")
+
             return True
 
         except Exception as e:
@@ -193,7 +250,7 @@ class VectorDB:
     @classmethod
     def delete_table(cls, table_name: str) -> bool:
         """
-       删除指定的表
+       删除指定的表（线程安全）
 
         Args:
             table_name: 要删除的表名称
@@ -204,8 +261,9 @@ class VectorDB:
         try:
             db = cls.connect()
             db.drop_table(table_name)
-            if table_name in cls._tables:
-                del cls._tables[table_name]
+            with cls._lock:
+                if table_name in cls._tables:
+                    del cls._tables[table_name]
             print(f"Dropped table: {table_name}")
             return True
         except Exception as e:
@@ -225,7 +283,7 @@ class VectorDB:
         """
         try:
             db = cls.connect()
-            return table_name in db.list_tables()
+            return table_name in db.list_tables().tables
         except Exception as e:
             print(f"Error checking table existence: {str(e)}")
             return False
