@@ -111,7 +111,7 @@ flowchart TB
 │   ├── scoring.py       # 评分模块
 │   ├── lib/             # Python 库
 │   │   ├── db.py        # 数据库操作
-│   │   ├── lancedb.py    # 向量检索
+│   │   ├── vector_store.py # 向量检索
 │   │   ├── ollama.py     # LLM 调用
 │   │   └── feishu2md.py # 文档转换
 │   ├── init_db.py       # 初始化数据库
@@ -353,7 +353,7 @@ if __name__ == '__main__':
 法规查询脚本
 """
 from template import main
-from lib import db, lancedb, ollama
+from lib import db, vector_store, ollama
 
 def execute(params):
     """执行法规查询"""
@@ -561,7 +561,7 @@ def save_audit_record(record):
     conn.close()
 ```
 
-### 6.2 lib/lancedb.py（向量检索）
+### 6.2 lib/vector_store.py（向量检索）
 
 ```python
 #!/usr/bin/env python3
