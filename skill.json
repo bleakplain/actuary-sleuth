@@ -1,0 +1,15 @@
+{
+  "id": "actuary-sleuth",
+  "name": "Actuary Sleuth",
+  "version": "3.0.0",
+  "readme": "SKILL.md",
+  "config": {
+    "scriptsPath": "./scripts",
+    "dataPath": "./data",
+    "pythonEnv": "python3",
+    "lancedbUri": "./data/lancedb",
+    "ollamaHost": "http://localhost:11434",
+    "ollamaModel": "qwen2:7b",
+    "ollamaEmbedModel": "nomic-embed-text"
+  }
+}

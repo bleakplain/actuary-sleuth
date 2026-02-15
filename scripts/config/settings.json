@@ -1,0 +1,36 @@
+{
+  "version": "3.0.0",
+  "data_paths": {
+    "sqlite_db": "../../data/actuary.db",
+    "lancedb_uri": "../../data/lancedb",
+    "negative_list": "data/negative_list.json",
+    "industry_standards": "data/industry_standards.json",
+    "audit_logs": "data/audit_logs.json"
+  },
+  "regulation_search": {
+    "data_dir": "../../references",
+    "default_top_k": 5
+  },
+  "ollama": {
+    "host": "http://localhost:11434",
+    "chat_model": "qwen2:7b",
+    "embed_model": "nomic-embed-text",
+    "timeout": 120
+  },
+  "report": {
+    "default_format": "word",
+    "output_dir": "./reports"
+  },
+  "audit": {
+    "scoring_weights": {
+      "high": 10,
+      "medium": 5,
+      "low": 2
+    },
+    "thresholds": {
+      "excellent": 90,
+      "good": 75,
+      "pass": 60
+    }
+  }
+}
