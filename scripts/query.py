@@ -75,6 +75,23 @@ def execute(params):
             # 精确查询失败，继续其他查询方式
             pass
 
+    # 关键词查询
+    if search_type in ['exact', 'hybrid']:
+        try:
+            keyword_results = db.search_regulations(query_text)
+            for kw in keyword_results:
+                results.append({
+                    'type': 'keyword',
+                    'content': kw.get('content', ''),
+                    'law_name': kw.get('law_name', ''),
+                    'article_number': kw.get('article_number', ''),
+                    'category': kw.get('category', ''),
+                    'score': 0.8
+                })
+        except Exception as e:
+            # 关键词查询失败，继续其他查询方式
+            pass
+
     # 语义检索
     if search_type in ['semantic', 'hybrid']:
         try:
