@@ -41,8 +41,7 @@ Actuary Sleuth 是一个基于 SKILL.md 工作流编排规范的精算审核系�
 ```mermaid
 flowchart TB
     subgraph UI["用户交互层"]
-        FEISHU["飞书客户端<br/>私聊/群聊"]
-        NOTE["用户操作：发送文档链接 + @机器人 + "开始审核""]
+        FEISHU["📱 飞书客户端<br/>━━━━━━━━━━━━<br/>• 私聊/群聊<br/>• 发送文档链接 + @机器人 + "开始审核""]
     end
 
     subgraph GATEWAY["OpenClaw 网关层"]
@@ -134,7 +133,7 @@ flowchart TB
 
 ---
 
-## 四、工作流编排与配置（SKILL.md + skill.json）
+## 四、工作流编排与配置
 
 ### 4.1 SKILL.md 结构
 
