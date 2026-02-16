@@ -2,6 +2,18 @@
 tests/
 test_*.py
 *_test.py
+e2e_test*.py
+scoring_comparison.py
+run_tests.py
+complete_test*.py
+
+# Fix and backup scripts
+fix_*.py
+*_fixed.py
+*_old.py
+rebuild_*.py
+*_final*.py
+import_*.py
 
 # Python
 __pycache__/
@@ -26,3 +38,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Test data files
+test_*.json
