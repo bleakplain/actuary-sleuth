@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-报告生成脚本
+报告生成脚本（修复版）
 生成结构化的审核报告
 """
 import json
@@ -36,12 +36,12 @@ def main():
         return 0
     except Exception as e:
         # 错误输出
-        error_result = {
+        print(json.dumps({
             "success": False,
             "error": str(e),
-            "error_type": type(e).__name__
-        }
-        print(json.dumps(error_result, ensure_ascii=False), file=sys.stderr)
+            "error_type": type(e).__name__,
+            "details": str(e)
+        }, ensure_ascii=False), file=sys.stderr)
         return 1
 
 
@@ -60,12 +60,21 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
         dict: 包含报告内容的字典
     """
     # 验证输入参数
-    if 'violations' not in params:
-        raise ValueError("Missing required parameter: 'violations'")
+    if not isinstance(params, dict):
+        params = {}
 
-    violations = params['violations']
+    violations = params.get('violations', [])
+    if not isinstance(violations, list):
+        violations = []
+
     pricing_analysis = params.get('pricing_analysis', {})
+    if not isinstance(pricing_analysis, dict):
+        pricing_analysis = {}
+
     product_info = params.get('product_info', {})
+    if not isinstance(product_info, dict):
+        product_info = {}
+
     score = params.get('score')
 
     # 如果没有提供分数，则计算分数
@@ -98,6 +107,8 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
         'content': report_content,
         'metadata': {
             'product_name': product_info.get('product_name', '未知产品'),
+            'insurance_company': product_info.get('insurance_company', '未知'),
+            'product_type': product_info.get('product_type', '未知'),
             'timestamp': datetime.now().isoformat()
         }
     }
@@ -121,7 +132,7 @@ def calculate_score(violations: List[Dict[str, Any]], pricing_analysis: Dict[str
 
     # 根据违规严重程度扣分
     for violation in violations:
-        severity = violation.get('severity', 'low').lower()
+        severity = violation.get('severity', 'low')
         if severity == 'high':
             score -= 20
         elif severity == 'medium':
@@ -130,14 +141,14 @@ def calculate_score(violations: List[Dict[str, Any]], pricing_analysis: Dict[str
             score -= 5
 
     # 根据定价分析扣分
-    if pricing_analysis:
-        pricing = pricing_analysis.get('pricing', {})
+    pricing = pricing_analysis.get('pricing', {})
+    if isinstance(pricing, dict):
         for category in ['mortality', 'interest', 'expense']:
             analysis = pricing.get(category, {})
-            if analysis.get('reasonable') is False:
+            if isinstance(analysis, dict) and analysis.get('reasonable') is False:
                 score -= 10
 
-    # 确保分数在0-100范围内
+    # 确保分数在 0-100 范围内
     return max(0, min(100, score))
 
 
@@ -170,7 +181,7 @@ def generate_summary(violations: List[Dict[str, Any]], pricing_analysis: Dict[st
         pricing_analysis: 定价分析结果
 
     Returns:
-        dict: 摘要信息
+        dict: 关键信息
     """
     # 统计违规数量
     violation_summary = {
@@ -180,17 +191,17 @@ def generate_summary(violations: List[Dict[str, Any]], pricing_analysis: Dict[st
     }
 
     for violation in violations:
-        severity = violation.get('severity', 'low').lower()
+        severity = violation.get('severity', 'low')
         if severity in violation_summary:
             violation_summary[severity] += 1
 
     # 统计定价问题
     pricing_issues = 0
-    if pricing_analysis:
-        pricing = pricing_analysis.get('pricing', {})
+    pricing = pricing_analysis.get('pricing', {})
+    if isinstance(pricing, dict):
         for category in ['mortality', 'interest', 'expense']:
             analysis = pricing.get(category, {})
-            if analysis.get('reasonable') is False:
+            if isinstance(analysis, dict) and analysis.get('reasonable') is False:
                 pricing_issues += 1
 
     return {
@@ -210,7 +221,7 @@ def generate_report_content(
     summary: Dict[str, Any]
 ) -> str:
     """
-    生成报告文本内容
+    生成报告文本内容（Markdown 格式）
 
     Args:
         violations: 违规记录列表
@@ -218,10 +229,10 @@ def generate_report_content(
         product_info: 产品信息
         score: 分数
         grade: 评级
-        summary: 摘要信息
+        summary: 关键信息
 
     Returns:
-        str: 报告内容（Markdown格式）
+        str: 报告内容（Markdown 格式）
     """
     lines = []
 
@@ -254,57 +265,51 @@ def generate_report_content(
         medium_violations = [v for v in violations if v.get('severity') == 'medium']
         low_violations = [v for v in violations if v.get('severity') == 'low']
 
+        # 严重违规（只显示前10条）
         if high_violations:
             lines.append("### 3.1 严重违规\n")
-            for i, violation in enumerate(high_violations, 1):
-                lines.append(f"#### {i}. {violation.get('description', '未知违规')}")
-                lines.append(f"- **规则编号**: {violation.get('rule', 'N/A')}")
-                lines.append(f"- **条款索引**: {violation.get('clause_index', 'N/A')}")
-                lines.append(f"- **整改建议**: {violation.get('remediation', '无')}")
-                lines.append(f"- **条款内容**: \n```\n{violation.get('clause_text', '')}\n```\n")
-
-        if medium_violations:
-            lines.append("### 3.2 中等违规\n")
-            for i, violation in enumerate(medium_violations, 1):
+            for i, violation in enumerate(high_violations[:10], 1):
                 lines.append(f"#### {i}. {violation.get('description', '未知违规')}")
                 lines.append(f"- **规则编号**: {violation.get('rule', 'N/A')}")
                 lines.append(f"- **整改建议**: {violation.get('remediation', '无')}\n")
 
+        # 中等违规（只显示前5条）
+        if medium_violations:
+            lines.append("### 3.2 中等违规\n")
+            for i, violation in enumerate(medium_violations[:5], 1):
+                lines.append(f"{i}. {violation.get('description', '未知违规')} - {violation.get('remediation', '无')}\n")
+
+        # 轻微违规（只显示前5条）
         if low_violations:
             lines.append("### 3.3 轻微违规\n")
-            for i, violation in enumerate(low_violations, 1):
-                lines.append(f"{i}. {violation.get('description', '未知违规')} - {violation.get('remediation', '无')}")
+            for i, violation in enumerate(low_violations[:5], 1):
+                lines.append(f"{i}. {violation.get('description', '未知违规')} - {violation.get('remediation', '无')}\n")
 
     # 定价分析
     if pricing_analysis:
-        lines.append("\n## 四、定价合理性分析\n")
+        lines.append("## 四、定价合理性分析\n")
 
         pricing = pricing_analysis.get('pricing', {})
-        for category in ['mortality', 'interest', 'expense']:
-            analysis = pricing.get(category)
-            if analysis:
-                category_name = {
-                    'mortality': '死亡率/发生率',
-                    'interest': '预定利率',
-                    'expense': '费用率'
-                }.get(category, category)
+        if isinstance(pricing, dict):
+            for category in ['mortality', 'interest', 'expense']:
+                analysis = pricing.get(category)
+                if analysis:
+                    category_name = {
+                        'mortality': '死亡率/发生率',
+                        'interest': '预定利率',
+                        'expense': '费用率'
+                    }.get(category, category)
 
-                lines.append(f"### {category_name}")
-                lines.append(f"- **当前值**: {analysis.get('value', 'N/A')}")
-                lines.append(f"- **基准值**: {analysis.get('benchmark', 'N/A')}")
-                lines.append(f"- **偏差**: {analysis.get('deviation', 'N/A')}%")
-                lines.append(f"- **合理性**: {'合理' if analysis.get('reasonable') else '不合理'}")
-                lines.append(f"- **说明**: {analysis.get('note', '')}\n")
-
-        # 建议
-        recommendations = pricing_analysis.get('recommendations', [])
-        if recommendations:
-            lines.append("### 改进建议\n")
-            for i, rec in enumerate(recommendations, 1):
-                lines.append(f"{i}. {rec}")
+                    lines.append(f"### {category_name}")
+                    lines.append(f"- **当前值**: {analysis.get('value', 'N/A')}")
+                    lines.append(f"- **基准值**: {analysis.get('benchmark', 'N/A')}")
+                    lines.append(f"- **偏差**: {analysis.get('deviation', 'N/A')}%")
+                    lines.append(f"- **合理性**: {'合理' if analysis.get('reasonable', True) else '不合理'}")
+                    if analysis.get('note'):
+                        lines.append(f"- **说明**: {analysis['note']}\n")
 
     # 结论
-    lines.append("\n## 五、审核结论\n")
+    lines.append("## 五、审核结论\n")
 
     if summary['has_critical_issues']:
         lines.append("**该产品存在严重合规问题，建议进行重大修改后再提交审核。**")

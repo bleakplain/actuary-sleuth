@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-法规查询脚本
+法规查询脚本（修复版）
 """
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -58,7 +59,14 @@ def execute(params):
 
     results = []
 
-    # 精确查询
+    # 提取查询中的条款编号（如"保险法第十六条" -> "第十六条"）
+    article_match = re.search(r'第([一二三四五六七八九十百千\d]+)[条条]', query_text)
+    if article_match:
+        article_number = f"第{article_match.group(1)}条"
+    else:
+        article_number = None
+
+    # 精确查询（优先）
     if search_type in ['exact', 'hybrid']:
         try:
             exact = db.find_regulation(query_text)
@@ -75,19 +83,33 @@ def execute(params):
             # 精确查询失败，继续其他查询方式
             pass
 
-    # 关键词查询
+    # 关键词查询（优化版）
     if search_type in ['exact', 'hybrid']:
         try:
-            keyword_results = db.search_regulations(query_text)
-            for kw in keyword_results:
-                results.append({
-                    'type': 'keyword',
-                    'content': kw.get('content', ''),
-                    'law_name': kw.get('law_name', ''),
-                    'article_number': kw.get('article_number', ''),
-                    'category': kw.get('category', ''),
-                    'score': 0.8
-                })
+            # 如果提取到了条款编号，先尝试匹配条款编号
+            if article_number:
+                keyword_results = db.search_regulations(article_number)
+                for kw in keyword_results:
+                    results.append({
+                        'type': 'keyword',
+                        'content': kw.get('content', ''),
+                        'law_name': kw.get('law_name', ''),
+                        'article_number': kw.get('article_number', ''),
+                        'category': kw.get('category', ''),
+                        'score': 0.9  # 条款编号匹配给更高分
+                    })
+            else:
+                # 如果没有条款编号，使用原始查询
+                keyword_results = db.search_regulations(query_text)
+                for kw in keyword_results:
+                    results.append({
+                        'type': 'keyword',
+                        'content': kw.get('content', ''),
+                        'law_name': kw.get('law_name', ''),
+                        'article_number': kw.get('article_number', ''),
+                        'category': kw.get('category', ''),
+                        'score': 0.8
+                    })
         except Exception as e:
             # 关键词查询失败，继续其他查询方式
             pass
@@ -109,15 +131,26 @@ def execute(params):
             # 语义检索失败，记录错误但继续
             pass
 
+    # 去重（基于article_number）
+    seen_articles = set()
+    unique_results = []
+    for result in results:
+        article_num = result.get('article_number', '')
+        if article_num and article_num not in seen_articles:
+            seen_articles.add(article_num)
+            unique_results.append(result)
+        elif not article_num:  # 如果没有article_number，也保留
+            unique_results.append(result)
+
     # 排序返回
-    results.sort(key=lambda x: x.get('score', 0), reverse=True)
+    unique_results.sort(key=lambda x: x.get('score', 0), reverse=True)
 
     return {
         'success': True,
         'query': query_text,
         'search_type': search_type,
-        'results': results[:5],
-        'count': len(results[:5])
+        'results': unique_results[:5],
+        'count': len(unique_results[:5])
     }
 
 if __name__ == '__main__':

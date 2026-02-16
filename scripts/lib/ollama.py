@@ -75,7 +75,7 @@ class OllamaClient:
             List[float]: 嵌入向量，失败返回 None
         """
         try:
-            url = f"{self.host}/api/embed"
+            url = f"{self.host}/api/embeddings"
             data = {
                 "model": self.embed_model,
                 "prompt": text
@@ -84,7 +84,21 @@ class OllamaClient:
             response = requests.post(url, json=data, timeout=self.timeout)
             response.raise_for_status()
             result = response.json()
-            return result.get('embedding')
+
+            # 支持两种响应格式
+            # 1. {"embedding": [...]}  - 单个输入
+            # 2. {"embeddings": [[...]]} - 批量输入
+            if 'embedding' in result:
+                return result.get('embedding')
+            elif 'embeddings' in result:
+                embeddings = result.get('embeddings')
+                # 如果是二维数组，返回第一个元素
+                if embeddings and isinstance(embeddings[0], list):
+                    return embeddings[0]
+                return embeddings
+            else:
+                print(f"Warning: Unexpected response format: {list(result.keys())}")
+                return None
 
         except requests.exceptions.RequestException as e:
             print(f"Error calling Ollama embed API: {e}")
