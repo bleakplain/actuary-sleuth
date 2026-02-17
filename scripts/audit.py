@@ -121,23 +121,24 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
             report_result.get('score', 0)
         )
 
-        # Step 6: 导出飞书文档（如果配置启用）
-        feishu_export_result = None
+        # Step 6: 导出报告（如果配置启用）
+        export_result = None
         config = get_config()
 
         if config.report.export_feishu:
-            print(f"[{audit_id}] Step 6: Exporting to Feishu...", file=sys.stderr)
-            feishu_export_result = export_to_feishu_report(
+            print(f"[{audit_id}] Step 6: Exporting report...", file=sys.stderr)
+            export_result = export_report(
                 report_result.get('content', ''),
-                preprocess_result.get('product_info', {})
+                preprocess_result.get('product_info', {}),
+                report_result.get('blocks')  # 传递 blocks 参数
             )
 
-            if feishu_export_result.get('success'):
-                print(f"[{audit_id}] ✅ Feishu document created: {feishu_export_result.get('document_url')}", file=sys.stderr)
+            if export_result.get('success'):
+                print(f"[{audit_id}] ✅ Report exported: {export_result.get('document_url')}", file=sys.stderr)
             else:
-                print(f"[{audit_id}] ⚠️ Feishu export failed: {feishu_export_result.get('error', 'Unknown error')}", file=sys.stderr)
+                print(f"[{audit_id}] ⚠️ Report export failed: {export_result.get('error', 'Unknown error')}", file=sys.stderr)
         else:
-            print(f"[{audit_id}] Step 6: Feishu export skipped (not configured)", file=sys.stderr)
+            print(f"[{audit_id}] Step 6: Report export skipped (not configured)", file=sys.stderr)
 
         # 构建最终结果
         result = {
@@ -159,9 +160,9 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
             }
         }
 
-        # 添加飞书导出结果（如果有）
-        if feishu_export_result:
-            result['feishu_export'] = feishu_export_result
+        # 添加报告导出结果（如果有）
+        if export_result:
+            result['report_export'] = export_result
 
         print(f"[{audit_id}] Audit completed successfully!", file=sys.stderr)
         return result
@@ -327,32 +328,55 @@ def run_report_generation(
         }
 
 
-def export_to_feishu_report(
+def export_report(
     report_content: str,
-    product_info: Dict[str, Any]
+    product_info: Dict[str, Any],
+    report_blocks: List[Dict[str, Any]] = None,
+    export_format: str = None
 ) -> Dict[str, Any]:
     """
-    将审核报告导出为飞书在线文档
+    导出审核报告到目标平台
+
+    基于配置自动选择导出方式：
+    - 默认：导出到飞书在线文档
+    - 可扩展：支持其他导出格式（PDF、本地文件等）
 
     Args:
-        report_content: 报告内容（Markdown 格式）
+        report_content: 报告内容（Markdown 格式，备用）
         product_info: 产品信息
+        report_blocks: 报告块列表（推荐格式）
+        export_format: 导出格式（None 表示使用配置默认值）
 
     Returns:
-        dict: 导出结果
+        dict: 导出结果，包含 success 和 document_url 或 error
     """
     # 导入 report 模块使用其导出功能
     import report
 
-    # 构建文档标题
+    # 构建文档标题（产品名-审核报告）
     product_name = product_info.get('product_name', '未知产品')
-    title = f"审核报告-{product_name}"
+    title = f"{product_name} - 审核报告"
 
     try:
-        return report.export_to_feishu(
-            report_content,
-            title=title
-        )
+        # 如果有 blocks，使用 blocks；否则使用简单转换
+        if report_blocks:
+            return report.export_to_feishu(
+                report_blocks,
+                title=title
+            )
+        else:
+            # 备用方案：将 Markdown 内容转换为简单块
+            import re
+            blocks = []
+            for line in report_content.split('\n'):
+                if line.strip():
+                    blocks.append(report.create_text(line))
+                else:
+                    blocks.append(report.create_text(""))
+            return report.export_to_feishu(
+                blocks,
+                title=title
+            )
     except Exception as e:
         return {
             'success': False,

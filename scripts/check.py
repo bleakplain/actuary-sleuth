@@ -77,18 +77,25 @@ def execute(params):
     # 执行检查
     violations = []
     for idx, clause in enumerate(clauses):
-        # 确保条款是字符串
-        if not isinstance(clause, str):
+        # 兼容新旧格式：字符串或字典
+        if isinstance(clause, str):
+            clause_text = clause
+            clause_reference = f"条款{idx+1}"
+        elif isinstance(clause, dict):
+            clause_text = clause.get('text', '')
+            clause_reference = clause.get('reference', f"条款{idx+1}")
+        else:
             continue
 
         for rule in rules:
-            if match_rule(clause, rule):
+            if match_rule(clause_text, rule):
                 # 截断过长的条款文本用于显示
-                clause_preview = clause[:100] + '...' if len(clause) > 100 else clause
+                clause_preview = clause_text[:100] + '...' if len(clause_text) > 100 else clause_text
 
                 violations.append({
                     'clause_index': idx,
                     'clause_text': clause_preview,
+                    'clause_reference': clause_reference,  # 新增：保存条款引用
                     'rule': rule['rule_number'],
                     'description': rule['description'],
                     'severity': rule['severity'],

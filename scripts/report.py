@@ -225,148 +225,6 @@ def parse_table_to_text_blocks(table_lines: List[str]) -> List[Dict[str, Any]]:
     return blocks
 
 
-def create_heading_1_block(text: str) -> Dict[str, Any]:
-    """创建一级标题块"""
-    return {
-        "block_type": 2,  # heading1
-        "heading1": {
-            "elements": [
-                {
-                    "text_run": {
-                        "content": text,
-                        "text_element_style": {
-                            "bold": True
-                        }
-                    }
-                }
-            ]
-        }
-    }
-
-
-def create_heading_2_block(text: str) -> Dict[str, Any]:
-    """创建二级标题块"""
-    return {
-        "block_type": 3,  # heading2
-        "heading2": {
-            "elements": [
-                {
-                    "text_run": {
-                        "content": text,
-                        "text_element_style": {
-                            "bold": True
-                        }
-                    }
-                }
-            ]
-        }
-    }
-
-
-def create_heading_3_block(text: str) -> Dict[str, Any]:
-    """创建三级标题块"""
-    return {
-        "block_type": 4,  # heading3
-        "heading3": {
-            "elements": [
-                {
-                    "text_run": {
-                        "content": text,
-                        "text_element_style": {
-                            "bold": True
-                        }
-                    }
-                }
-            ]
-        }
-    }
-
-
-def create_text_block(text: str) -> Dict[str, Any]:
-    """创建文本块"""
-    # 处理粗体标记
-    content = text.replace('**', '').replace('*', '')
-    return {
-        "block_type": 2,  # text
-        "text": {
-            "elements": [
-                {
-                    "text_run": {
-                        "content": content
-                    }
-                }
-            ]
-        }
-    }
-
-
-def create_divider_block() -> Dict[str, Any]:
-    """创建分隔线块"""
-    return {
-        "block_type": 13  # divider
-    }
-
-
-def parse_table_to_blocks(table_lines: List[str]) -> List[Dict[str, Any]]:
-    """
-    将 Markdown 表格解析为飞书表格块
-
-    Args:
-        table_lines: 表格行列表
-
-    Returns:
-        List[Dict]: 飞书表格块
-    """
-    if len(table_lines) < 2:
-        return []
-
-    # 解析表格数据
-    rows = []
-    for line in table_lines:
-        if line.startswith('|'):
-            cells = [cell.strip() for cell in line.split('|')[1:-1]]
-            # 跳过分隔行
-            if not all(cell.startswith('---') or cell == '' for cell in cells):
-                rows.append(cells)
-
-    if not rows:
-        return []
-
-    # 创建表格块
-    table_block = {
-        "block_type": 3,  # table
-        "table": {
-            "table_block_id": f"table_{datetime.now().timestamp()}",
-            "column_size": len(rows[0]),
-            "row_size": len(rows),
-            "header": {
-                "cells": [
-                    {
-                        "column_id": str(i),
-                        "value": rows[0][i] if i < len(rows[0]) else ""
-                    }
-                    for i in range(min(5, len(rows[0])))  # 最多5列
-                ]
-            }
-        }
-    }
-
-    # 添加数据行
-    for row_idx, row in enumerate(rows[1:20], 1):  # 最多20行
-        for col_idx, cell_value in enumerate(row[:5]):  # 最多5列
-            table_block["table"][f"row_{row_idx}"] = {
-                "cells": [
-                    {
-                        "column_id": str(col_idx),
-                        "value": cell_value
-                    }
-                    for col_idx in range(min(5, len(row)))
-                ]
-            }
-
-    return [table_block]
-
-
 def create_feishu_document(access_token: str, title: str, blocks: List[Dict[str, Any]]) -> str:
     """
     创建飞书在线文档（使用原生格式）
@@ -420,13 +278,26 @@ def create_feishu_document(access_token: str, title: str, blocks: List[Dict[str,
 
         # 批量写入文档内容（每次最多 50 个块，飞书API限制）
         if blocks:
+            # 验证块数据结构
+            print(f"验证 {len(blocks)} 个块的数据结构...", file=sys.stderr)
+            for idx, block in enumerate(blocks[:5]):  # 检查前5个块
+                if not isinstance(block, dict):
+                    print(f"块 {idx+1} 不是字典类型: {type(block)}", file=sys.stderr)
+                if 'block_type' not in block:
+                    print(f"块 {idx+1} 缺少 block_type 字段", file=sys.stderr)
+
             for i in range(0, len(blocks), 50):
                 chunk = blocks[i:i+50]
+                print(f"准备写入块 {i+1}-{min(i+50, len(blocks))}，共 {len(chunk)} 个", file=sys.stderr)
+
                 update_url = f"{FEISHU_API_BASE}/docx/v1/documents/{document_id}/blocks/{page_block_id}/children"
+
+                # 根据飞书API文档，使用children数组，不使用index参数
                 update_payload = {
-                    "children": chunk,
-                    "index": -1  # 添加到末尾
+                    "children": chunk
                 }
+
+                print(f"请求数据: children 数量 = {len(chunk)}, 第一个块类型 = {chunk[0].get('block_type') if chunk else 'empty'}", file=sys.stderr)
 
                 print(f"写入块 {i+1}-{min(i+50, len(blocks))}", file=sys.stderr)
                 update_response = requests.post(update_url, headers=create_headers, json=update_payload, timeout=30)
@@ -754,16 +625,6 @@ def get_risk_level(score: float) -> str:
         return "🔴 高风险"
 
 
-def get_simple_risk_level(score: float) -> str:
-    """获取风险等级（简化版，不含emoji）"""
-    if score >= 80:
-        return "低风险"
-    elif score >= 60:
-        return "中等风险"
-    else:
-        return "高风险"
-
-
 def get_score_description(score: int) -> str:
     """
     获取评分描述
@@ -941,42 +802,18 @@ def generate_report_content(
     lines = []
     report_id = f"RPT-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
-    product_name = product_info.get('product_name', '未知产品')
-    company_name = product_info.get('insurance_company', '未知保险公司')
-
-    # ========== 标题 ==========
-    lines.append("保险产品精算审核报告")
-    lines.append("")
-    lines.append("────────────────────────────────────────")
-    lines.append("")
-
-    # 产品信息
-    lines.append(f"产品名称：{product_name}")
-    lines.append(f"保险公司：{company_name}")
-    lines.append(f"产品类型：{product_info.get('product_type', '未知')}")
-    lines.append(f"审核日期：{datetime.now().strftime('%Y年%m月%d日')}")
-    lines.append(f"报告编号：{report_id}")
-    lines.append("")
-    lines.append("────────────────────────────────────────")
-    lines.append("")
-
     # ========== 审核结论（始终显示） ==========
     lines.extend(_generate_conclusion_section(score, grade, summary))
-    lines.append("")
 
     # ========== 问题详情（有问题时显示） ==========
     if summary.get('has_issues', False):
-        lines.extend(_generate_details_section(violations, pricing_analysis, product_info, summary))
         lines.append("")
+        lines.extend(_generate_details_section(violations, pricing_analysis, product_info, summary))
 
     # ========== 修改建议（有问题时显示） ==========
     if summary.get('has_issues', False):
-        lines.extend(_generate_suggestions_section(violations, summary))
         lines.append("")
-
-    # ========== 报告信息（始终显示） ==========
-    lines.extend(_generate_info_section(report_id))
-    lines.append("")
+        lines.extend(_generate_suggestions_section(violations, summary))
 
     return '\n'.join(lines)
 
@@ -986,13 +823,11 @@ def _generate_conclusion_section(score: int, grade: str, summary: Dict[str, Any]
     lines = []
 
     lines.append("一、审核结论")
-    lines.append("")
 
     # 生成审核意见
     opinion, explanation = generate_conclusion_text(score, summary)
 
     lines.append(f"**审核意见**：{opinion}")
-    lines.append("")
     lines.append(f"**说明**：{explanation}")
     lines.append("")
 
@@ -1004,15 +839,12 @@ def _generate_conclusion_section(score: int, grade: str, summary: Dict[str, Any]
     pricing_issue_count = summary.get('pricing_issues', 0)
 
     lines.append("**表1-1：关键指标汇总表**")
-    lines.append("")
     lines.append("| 序号 | 指标项 | 结果 | 说明 |")
     lines.append("|:----:|:------|:-----|:-----|")
     lines.append(f"| 1 | 综合评分 | {score}分 | {get_score_description(score)} |")
     lines.append(f"| 2 | 合规评级 | {grade} | 基于违规数量和严重程度评定 |")
     lines.append(f"| 3 | 违规总数 | {total}项 | 严重{high_count}项，中等{medium_count}项，轻微{low_count}项 |")
     lines.append(f"| 4 | 定价评估 | {'合理' if pricing_issue_count == 0 else '需关注'} | {pricing_issue_count}项定价参数需关注 |")
-    lines.append("")
-    lines.append("────────────────────────────────────────")
 
     return lines
 
@@ -1027,16 +859,12 @@ def _generate_details_section(
     lines = []
 
     lines.append("二、问题详情及依据")
-    lines.append("")
 
     # 生成审核依据（动态）
     regulation_basis = generate_regulation_basis(violations, product_info)
     lines.append("**审核依据**")
-    lines.append("")
     for i, reg in enumerate(regulation_basis, 1):
         lines.append(f"{i}. {reg}")
-    lines.append("")
-    lines.append("────────────────────────────────────────")
     lines.append("")
 
     # 按严重程度分组
@@ -1067,33 +895,45 @@ def _generate_details_section(
     lines.append(f"| 2 | 中等 | {medium_count}项 | {medium_percent} |")
     lines.append(f"| 3 | 轻微 | {low_count}项 | {low_percent} |")
     lines.append(f"| **合计** | **总计** | **{total}项** | **100%** |")
-    lines.append("")
 
     # 严重违规明细表
     if high_violations:
+        lines.append("")
         lines.append("**表2-2：严重违规明细表**")
-        lines.append("")
-        lines.append("| 序号 | 规则编号 | 违规描述 | 涉及条款 | 整改建议 |")
-        lines.append("|:----:|:--------|:---------|:--------|:---------|")
+        lines.append("| 序号 | 条款内容 | 问题说明 | 法规依据 |")
+        lines.append("|:----:|:---------|:---------|:---------|")
         for i, v in enumerate(high_violations[:20], 1):
-            desc = v.get('description', '未知')[:25]
-            clause = f"第{v.get('clause_index', '?') + 1}条"
-            remediation = v.get('remediation', '无')[:20]
-            lines.append(f"| {i} | {v.get('rule', 'N/A')} | {desc}... | {clause} | {remediation}... |")
-        lines.append("")
+            clause_ref = v.get('clause_reference', '')
+            clause_text = v.get('clause_text', '')[:80]
+            description = v.get('description', '未知')
+            category = v.get('category', '')
+            # 根据类别生成法规依据
+            regulation = _get_regulation_basis(category)
+            # 合并条款引用和原文
+            if clause_ref and not clause_ref.startswith('段落'):
+                full_clause = f"{clause_ref}：{clause_text}"
+            else:
+                full_clause = clause_text
+            lines.append(f"| {i} | {full_clause}... | {description} | {regulation} |")
 
     # 中等违规明细表
     if medium_violations:
+        lines.append("")
         lines.append("**表2-3：中等违规明细表**")
-        lines.append("")
-        lines.append("| 序号 | 规则编号 | 违规描述 | 涉及条款 | 整改建议 |")
-        lines.append("|:----:|:--------|:---------|:--------|:---------|")
+        lines.append("| 序号 | 条款内容 | 问题说明 | 法规依据 |")
+        lines.append("|:----:|:---------|:---------|:---------|")
         for i, v in enumerate(medium_violations[:10], 1):
-            desc = v.get('description', '未知')[:25]
-            clause = f"第{v.get('clause_index', '?') + 1}条"
-            remediation = v.get('remediation', '无')[:20]
-            lines.append(f"| {i} | {v.get('rule', 'N/A')} | {desc}... | {clause} | {remediation}... |")
-        lines.append("")
+            clause_ref = v.get('clause_reference', '')
+            clause_text = v.get('clause_text', '')[:80]
+            description = v.get('description', '未知')
+            category = v.get('category', '')
+            regulation = _get_regulation_basis(category)
+            # 合并条款引用和原文
+            if clause_ref and not clause_ref.startswith('段落'):
+                full_clause = f"{clause_ref}：{clause_text}"
+            else:
+                full_clause = clause_text
+            lines.append(f"| {i} | {full_clause}... | {description} | {regulation} |")
 
     # 定价问题
     pricing = pricing_analysis.get('pricing', {})
@@ -1105,15 +945,12 @@ def _generate_details_section(
                 pricing_issues.append(f"{'预定利率' if category == 'interest' else '费用率'}：{analysis.get('note', '不符合监管要求')}")
 
         if pricing_issues:
-            lines.append("**表2-4：定价问题汇总表**")
             lines.append("")
+            lines.append("**表2-4：定价问题汇总表**")
             lines.append("| 序号 | 问题类型 | 问题描述 |")
             lines.append("|:----:|:---------|:---------|")
             for i, issue in enumerate(pricing_issues, 1):
                 lines.append(f"| {i} | {'预定利率' if '预定利率' in issue else '费用率'} | {issue.split('：')[1] if '：' in issue else issue} |")
-            lines.append("")
-
-    lines.append("────────────────────────────────────────")
 
     return lines
 
@@ -1123,7 +960,6 @@ def _generate_suggestions_section(violations: List[Dict[str, Any]], summary: Dic
     lines = []
 
     lines.append("三、修改建议")
-    lines.append("")
 
     # 按严重程度分组
     high_violations = [v for v in violations if v.get('severity') == 'high']
@@ -1131,48 +967,154 @@ def _generate_suggestions_section(violations: List[Dict[str, Any]], summary: Dic
 
     if high_violations:
         lines.append("**表3-1：P0级整改事项表（必须立即整改）**")
-        lines.append("")
-        lines.append("| 序号 | 整改事项 | 涉及条款 |")
-        lines.append("|:----:|:---------|:--------|")
+        lines.append("| 序号 | 条款原文 | 修改建议 |")
+        lines.append("|:----:|:---------|:---------|")
         for i, v in enumerate(high_violations[:10], 1):
-            desc = v.get('description', '未知')[:30]
-            clause = f"第{v.get('clause_index', '?') + 1}条"
-            lines.append(f"| {i} | {desc} | {clause} |")
-        lines.append("")
+            clause_text = v.get('clause_text', '')[:40]
+            remediation = _get_specific_remediation(v)
+            lines.append(f"| {i} | {clause_text}... | {remediation} |")
 
     if medium_violations:
+        lines.append("")
         lines.append("**表3-2：P1级整改事项表（建议尽快整改）**")
-        lines.append("")
-        lines.append("| 序号 | 整改事项 | 涉及条款 |")
-        lines.append("|:----:|:---------|:--------|")
+        lines.append("| 序号 | 条款原文 | 修改建议 |")
+        lines.append("|:----:|:---------|:---------|")
         for i, v in enumerate(medium_violations[:5], 1):
-            desc = v.get('description', '未知')[:30]
-            clause = f"第{v.get('clause_index', '?') + 1}条"
-            lines.append(f"| {i} | {desc} | {clause} |")
-        lines.append("")
-
-    lines.append("────────────────────────────────────────")
+            clause_text = v.get('clause_text', '')[:40]
+            remediation = _get_specific_remediation(v)
+            lines.append(f"| {i} | {clause_text}... | {remediation} |")
 
     return lines
 
 
-def _generate_info_section(report_id: str) -> List[str]:
-    """生成报告信息章节"""
-    lines = []
+def _get_specific_remediation(violation: Dict[str, Any]) -> str:
+    """生成具体的修改建议（基于实际违规描述动态生成）
 
-    lines.append("四、报告信息")
-    lines.append("")
-    lines.append(f"- 报告编号：{report_id}")
-    lines.append(f"- 生成时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}")
-    lines.append("- 审核系统：Actuary Sleuth v3.0")
-    lines.append("")
+    Args:
+        violation: 违规记录
 
-    lines.append("**免责声明**")
-    lines.append("")
-    lines.append("本报告由AI精算审核系统生成，仅供内部参考。最终决策应以产品委员会审议结果和监管部门审批意见为准。")
-    lines.append("")
+    Returns:
+        str: 具体的修改建议
+    """
+    # 获取数据库中的默认建议
+    default_remediation = violation.get('remediation', '')
+    description = violation.get('description', '')
 
-    return lines
+    # 如果默认建议是空或太模糊，则基于违规描述生成具体建议
+    vague_phrases = ['请根据具体情况', '确保符合', '无', '', '按照《保险法》规定', '建议']
+    if any(phrase in default_remediation for phrase in vague_phrases):
+        # 基于违规描述中的关键词生成具体建议
+        if '等待期' in description:
+            if '过长' in description or '超过' in description:
+                return '将等待期调整为90天以内'
+            elif '症状' in description or '体征' in description:
+                return '删除将等待期内症状或体征作为免责依据的表述'
+            elif '突出' in description:
+                return '在条款中以加粗或红色字体突出说明等待期'
+            else:
+                return '合理设置等待期长度，确保符合监管规定'
+        elif '免责条款' in description or '责任免除' in description:
+            if '不集中' in description:
+                return '将免责条款集中在合同显著位置'
+            elif '不清晰' in description or '表述不清' in description:
+                return '使用清晰明确的语言表述免责情形'
+            elif '加粗' in description or '标红' in description or '突出' in description:
+                return '使用加粗或红色字体突出显示免责条款'
+            elif '免除' in description and '不合理' in description:
+                return '删除不合理的免责条款，确保不违反保险法规定'
+            else:
+                return '完善免责条款的表述和展示方式'
+        elif '保险金额' in description:
+            if '不规范' in description or '不一致' in description:
+                return '使用规范的保险金额表述，确保与保险法一致'
+            else:
+                return '明确保险金额的确定方式和计算标准'
+        elif '保证收益' in description or '演示收益' in description:
+            return '删除保证收益相关表述，改为演示收益或说明利益不确定'
+        elif '费率' in description:
+            if '倒算' in description:
+                return '停止使用倒算方式确定费率，采用精算方法'
+            elif '偏离实际' in description:
+                return '根据实际费用水平重新核算附加费用率'
+            elif '不真实' in description or '不合理' in description:
+                return '重新进行费率厘定，确保符合审慎原则'
+            else:
+                return '规范费率厘定方法，确保符合监管要求'
+        elif '现金价值' in description:
+            if '超过' in description or '异化' in description:
+                return '调整现金价值计算方法，确保不超过已交保费'
+            else:
+                return '规范现金价值计算，确保符合监管规定'
+        elif '基因' in description:
+            return '删除根据基因检测结果调节费率的约定'
+        elif '犹豫期' in description:
+            if '过短' in description or '不足' in description:
+                return '将犹豫期调整为15天以上'
+            else:
+                return '规范犹豫期的起算和时长'
+        elif '利率' in description or '预定利率' in description:
+            if '超过' in description or '超标' in description:
+                return '将预定利率调整为监管上限以内'
+            else:
+                return '确保预定利率符合监管规定'
+        elif '备案' in description:
+            if '不达标' in description or '未报送' in description:
+                return '停止销售不达标产品，按规定报送停止使用报告'
+            else:
+                return '完善产品备案管理，确保符合监管要求'
+        elif '产品设计异化' in description or '异化' in description:
+            if '万能型' in description:
+                return '调整产品形态设计，避免异化为万能型产品'
+            elif '偏离' in description:
+                return '强化风险保障功能，确保符合保险本质'
+            else:
+                return '优化产品设计，确保符合保险保障属性'
+        elif '条款文字' in description or '冗长' in description or '不易懂' in description:
+            return '简化条款表述，使用通俗易懂的语言'
+        elif '职业' in description or '类别' in description:
+            return '明确职业类别要求和限制'
+        elif '年龄' in description:
+            return '明确投保年龄范围和要求'
+        elif '保险期间' in description or '保险期限' in description:
+            return '明确保险期间和保障期限'
+        else:
+            # 从违规描述中提取关键词，生成针对性建议
+            # 提取违规的核心问题
+            if '规定' in description or '违反' in description:
+                # 找出违反的是什么规定
+                words = description.split('，')
+                if len(words) > 1:
+                    issue_part = words[0][:30]
+                    return f"针对{issue_part}问题进行调整"
+                else:
+                    return '请根据违规描述进行相应调整，确保符合监管要求'
+            else:
+                # 如果无法识别具体问题，返回基于类别的一般建议
+                return '请根据问题描述进行相应调整，确保符合监管要求'
+
+    return default_remediation
+
+
+def _get_regulation_basis(category: str) -> str:
+    """根据违规类别返回法规依据（包含具体条款内容）
+
+    Args:
+        category: 违规类别
+
+    Returns:
+        str: 法规依据（法规名称+条款+内容）
+    """
+    regulation_map = {
+        '产品条款表述': '《保险法》第十七条：订立保险合同，采用保险人提供的格式条款的，保险人向投保人提供的投保单应当附格式条款，保险人应当向投保人说明合同的内容。',
+        '产品责任设计': '《人身保险公司保险条款和保险费率管理办法》第六条：保险条款应当符合下列要求：（一）结构清晰、文字准确、表述严谨、通俗易懂；（二）要素完整、内容完备',
+        '产品费率厘定及精算假设': '《人身保险公司保险条款和保险费率管理办法》第三十六条：保险公司应当按照审慎原则拟定保险费率，不得因费率厘定不真实、不合理而损害投保人、被保险人和受益人的合法权益。',
+        '产品报送管理': '《人身保险公司保险条款和保险费率管理办法》第十二条：保险公司报送审批或者备案的保险条款和保险费率，应当符合下列条件：（一）结构清晰、文字准确、表述严谨、通俗易懂',
+        '产品形态设计': '《健康保险管理办法》第十六条：健康保险产品应当根据被保险人的年龄、性别、健康状况等因素，合理确定保险费率和保险金额。',
+        '销售管理': '《保险销售行为监管办法》第十三条：保险销售人员应当向投保人说明保险合同的内容，特别是对投保人、被保险人、受益人的权利和义务、免除保险人责任的条款以及其他重要条款。',
+        '理赔管理': '《保险法》第二十二条：保险事故发生后，按照保险合同请求保险人赔偿或者给付保险金时，投保人、被保险人或者受益人应当向保险人提供其所能提供的与确认保险事故的性质、原因、损失程度等有关的证明和资料。',
+        '客户服务': '《保险公司服务管理办法》第八条：保险公司应当建立客户服务制度，明确服务标准和服务流程。'
+    }
+    return regulation_map.get(category, '《保险法》及相关监管规定')
 
 
 # ========== 报告块创建函数 ==========
@@ -1207,43 +1149,18 @@ def create_report(
     blocks = []
     report_id = f"RPT-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
-    # ========== 标题 ==========
-    blocks.append(create_heading_1("保险产品精算审核报告"))
-    blocks.append(create_text(""))
-    blocks.append(create_text("────────────────────────────────────────"))
-    blocks.append(create_text(""))
-
-    # 产品信息
-    product_name = product_info.get('product_name', '未知产品')
-    company_name = product_info.get('insurance_company', '未知保险公司')
-    product_type = product_info.get('product_type', '未知')
-
-    blocks.append(create_text(f"产品名称：{product_name}"))
-    blocks.append(create_text(f"保险公司：{company_name}"))
-    blocks.append(create_text(f"产品类型：{product_type}"))
-    blocks.append(create_text(f"审核日期：{datetime.now().strftime('%Y年%m月%d日')}"))
-    blocks.append(create_text(f"报告编号：{report_id}"))
-    blocks.append(create_text(""))
-    blocks.append(create_text("────────────────────────────────────────"))
-    blocks.append(create_text(""))
-
     # ========== 审核结论（始终显示） ==========
     blocks.extend(_create_conclusion_blocks(score, grade, summary))
-    blocks.append(create_text(""))
 
     # ========== 问题详情（有问题时显示） ==========
     if summary.get('has_issues', False):
-        blocks.extend(_create_details_blocks(violations, pricing_analysis, product_info, summary))
         blocks.append(create_text(""))
+        blocks.extend(_create_details_blocks(violations, pricing_analysis, product_info, summary))
 
     # ========== 修改建议（有问题时显示） ==========
     if summary.get('has_issues', False):
-        blocks.extend(_create_suggestions_blocks(violations, summary))
         blocks.append(create_text(""))
-
-    # ========== 报告信息（始终显示） ==========
-    blocks.extend(_create_info_blocks(report_id))
-    blocks.append(create_text(""))
+        blocks.extend(_create_suggestions_blocks(violations, summary))
 
     return blocks
 
@@ -1253,19 +1170,16 @@ def _create_conclusion_blocks(score: int, grade: str, summary: Dict[str, Any]) -
     blocks = []
 
     blocks.append(create_heading_2("一、审核结论"))
-    blocks.append(create_text(""))
 
     # 生成审核意见
     opinion, explanation = generate_conclusion_text(score, summary)
 
     blocks.append(create_bold_text(f"审核意见：{opinion}"))
-    blocks.append(create_text(""))
     blocks.append(create_text(f"说明：{explanation}"))
     blocks.append(create_text(""))
 
     # 关键指标表格
     blocks.append(create_text("表1-1：关键指标汇总表"))
-    blocks.append(create_text(""))
 
     high_count = summary['violation_severity']['high']
     medium_count = summary['violation_severity']['medium']
@@ -1281,8 +1195,6 @@ def _create_conclusion_blocks(score: int, grade: str, summary: Dict[str, Any]) -
         ["4", "定价评估", "合理" if pricing_issue_count == 0 else "需关注", f"{pricing_issue_count}项定价参数需关注"]
     ]
     blocks.extend(create_table_blocks(key_metrics_data))
-    blocks.append(create_text(""))
-    blocks.append(create_text("────────────────────────────────────────"))
 
     return blocks
 
@@ -1297,21 +1209,17 @@ def _create_details_blocks(
     blocks = []
 
     blocks.append(create_heading_2("二、问题详情及依据"))
-    blocks.append(create_text(""))
 
     # 生成审核依据（动态）
     regulation_basis = generate_regulation_basis(violations, product_info)
-    blocks.append(create_text("审核依据"))
-    blocks.append(create_text(""))
-    for reg in regulation_basis:
-        blocks.append(create_text(reg))
-    blocks.append(create_text(""))
-    blocks.append(create_text("────────────────────────────────────────"))
-    blocks.append(create_text(""))
+    if regulation_basis:  # 只在有依据时显示
+        blocks.append(create_text("审核依据"))
+        for reg in regulation_basis:
+            blocks.append(create_text(reg))
+        blocks.append(create_text(""))
 
     # 违规统计表
     blocks.append(create_text("表2-1：违规级别统计表"))
-    blocks.append(create_text(""))
 
     high_count = summary['violation_severity']['high']
     medium_count = summary['violation_severity']['medium']
@@ -1335,7 +1243,6 @@ def _create_details_blocks(
         ["合计", "总计", f"{total}项", "100%"]
     ]
     blocks.extend(create_table_blocks(violation_stats_data))
-    blocks.append(create_text(""))
 
     # 按严重程度分组
     high_violations = [v for v in violations if v.get('severity') == 'high']
@@ -1343,33 +1250,45 @@ def _create_details_blocks(
 
     # 严重违规明细表
     if high_violations:
-        blocks.append(create_text("表2-2：严重违规明细表"))
         blocks.append(create_text(""))
+        blocks.append(create_text("表2-2：严重违规明细表"))
 
-        high_violation_data = [["序号", "规则编号", "违规描述", "涉及条款", "整改建议"]]
+        high_violation_data = [["序号", "条款内容", "问题说明", "法规依据"]]
         for i, v in enumerate(high_violations[:20], 1):
-            desc = v.get('description', '未知')[:25]
-            clause = f"第{v.get('clause_index', '?') + 1}条"
-            remediation = v.get('remediation', '无')[:20]
-            high_violation_data.append([str(i), v.get('rule', 'N/A'), f"{desc}...", clause, f"{remediation}..."])
+            clause_ref = v.get('clause_reference', '')
+            clause_text = v.get('clause_text', '')[:80]
+            description = v.get('description', '未知')
+            category = v.get('category', '')
+            regulation = _get_regulation_basis(category)
+            # 合并条款引用和原文
+            if clause_ref and not clause_ref.startswith('段落'):
+                full_clause = f"{clause_ref}：{clause_text}"
+            else:
+                full_clause = clause_text
+            high_violation_data.append([str(i), f"{full_clause}...", description, regulation])
 
         blocks.extend(create_table_blocks(high_violation_data))
-        blocks.append(create_text(""))
 
     # 中等违规明细表
     if medium_violations:
-        blocks.append(create_text("表2-3：中等违规明细表"))
         blocks.append(create_text(""))
+        blocks.append(create_text("表2-3：中等违规明细表"))
 
-        medium_violation_data = [["序号", "规则编号", "违规描述", "涉及条款", "整改建议"]]
+        medium_violation_data = [["序号", "条款内容", "问题说明", "法规依据"]]
         for i, v in enumerate(medium_violations[:10], 1):
-            desc = v.get('description', '未知')[:25]
-            clause = f"第{v.get('clause_index', '?') + 1}条"
-            remediation = v.get('remediation', '无')[:20]
-            medium_violation_data.append([str(i), v.get('rule', 'N/A'), f"{desc}...", clause, f"{remediation}..."])
+            clause_ref = v.get('clause_reference', '')
+            clause_text = v.get('clause_text', '')[:80]
+            description = v.get('description', '未知')
+            category = v.get('category', '')
+            regulation = _get_regulation_basis(category)
+            # 合并条款引用和原文
+            if clause_ref and not clause_ref.startswith('段落'):
+                full_clause = f"{clause_ref}：{clause_text}"
+            else:
+                full_clause = clause_text
+            medium_violation_data.append([str(i), f"{full_clause}...", description, regulation])
 
         blocks.extend(create_table_blocks(medium_violation_data))
-        blocks.append(create_text(""))
 
     # 定价问题
     pricing = pricing_analysis.get('pricing', {})
@@ -1381,17 +1300,14 @@ def _create_details_blocks(
                 pricing_issues.append(f"{'预定利率' if category == 'interest' else '费用率'}：{analysis.get('note', '不符合监管要求')}")
 
         if pricing_issues:
-            blocks.append(create_text("表2-4：定价问题汇总表"))
             blocks.append(create_text(""))
+            blocks.append(create_text("表2-4：定价问题汇总表"))
 
             pricing_data = [["序号", "问题类型", "问题描述"]]
             for i, issue in enumerate(pricing_issues, 1):
                 pricing_data.append([str(i), '预定利率' if '预定利率' in issue else '费用率', issue.split('：')[1] if '：' in issue else issue])
 
             blocks.extend(create_table_blocks(pricing_data))
-            blocks.append(create_text(""))
-
-    blocks.append(create_text("────────────────────────────────────────"))
 
     return blocks
 
@@ -1401,7 +1317,6 @@ def _create_suggestions_blocks(violations: List[Dict[str, Any]], summary: Dict[s
     blocks = []
 
     blocks.append(create_heading_2("三、修改建议"))
-    blocks.append(create_text(""))
 
     # 按严重程度分组
     high_violations = [v for v in violations if v.get('severity') == 'high']
@@ -1409,51 +1324,37 @@ def _create_suggestions_blocks(violations: List[Dict[str, Any]], summary: Dict[s
 
     if high_violations:
         blocks.append(create_text("表3-1：P0级整改事项表（必须立即整改）"))
-        blocks.append(create_text(""))
 
-        p0_data = [["序号", "整改事项", "涉及条款"]]
+        p0_data = [["序号", "条款原文", "修改建议"]]
         for i, v in enumerate(high_violations[:10], 1):
-            desc = v.get('description', '未知')[:30]
-            clause = f"第{v.get('clause_index', '?') + 1}条"
-            p0_data.append([str(i), desc, clause])
+            clause_text = v.get('clause_text', '')[:40]
+            remediation = _get_specific_remediation(v)
+            p0_data.append([str(i), f"{clause_text}...", remediation])
 
         blocks.extend(create_table_blocks(p0_data))
-        blocks.append(create_text(""))
 
     if medium_violations:
-        blocks.append(create_text("表3-2：P1级整改事项表（建议尽快整改）"))
         blocks.append(create_text(""))
+        blocks.append(create_text("表3-2：P1级整改事项表（建议尽快整改）"))
 
-        p1_data = [["序号", "整改事项", "涉及条款"]]
+        p1_data = [["序号", "条款原文", "修改建议"]]
         for i, v in enumerate(medium_violations[:5], 1):
-            desc = v.get('description', '未知')[:30]
-            clause = f"第{v.get('clause_index', '?') + 1}条"
-            p1_data.append([str(i), desc, clause])
+            clause_text = v.get('clause_text', '')[:40]
+            remediation = _get_specific_remediation(v)
+            p1_data.append([str(i), f"{clause_text}...", remediation])
 
         blocks.extend(create_table_blocks(p1_data))
-        blocks.append(create_text(""))
-
-    blocks.append(create_text("────────────────────────────────────────"))
 
     return blocks
 
 
 def _create_info_blocks(report_id: str) -> List[Dict[str, Any]]:
-    """创建报告信息章节块"""
+    """创建报告信息章节块（简化版）"""
     blocks = []
 
-    blocks.append(create_heading_2("四、报告信息"))
+    # 只保留最基本的信息，去掉冗余内容
     blocks.append(create_text(""))
-    blocks.append(create_text(f"报告编号：{report_id}"))
-    blocks.append(create_text(f"生成时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}"))
-    blocks.append(create_text("审核系统：Actuary Sleuth v3.0"))
-    blocks.append(create_text(""))
-
-    blocks.append(create_text("免责声明"))
-    blocks.append(create_text(""))
-    blocks.append(create_text("本报告由AI精算审核系统生成，仅供内部参考。"))
-    blocks.append(create_text("最终决策应以产品委员会审议结果和监管部门审批意见为准。"))
-    blocks.append(create_text(""))
+    blocks.append(create_text(f"— 报告编号：{report_id} —"))
 
     return blocks
 
@@ -1564,20 +1465,6 @@ def create_table_blocks(table_data: List[List[str]]) -> List[Dict[str, Any]]:
         })
 
     return blocks
-
-
-def get_score_description(score: int) -> str:
-    """获取评分描述"""
-    if score >= 90:
-        return "产品优秀，建议快速通过"
-    elif score >= 80:
-        return "产品良好，可正常上会"
-    elif score >= 70:
-        return "产品合格，建议完成修改后上会"
-    elif score >= 60:
-        return "产品基本合格，需补充说明材料"
-    else:
-        return "产品不合格，不建议提交审核"
 
 
 if __name__ == '__main__':

@@ -167,6 +167,7 @@ def extract_product_info(content: str) -> Dict[str, Any]:
     # 产品名称模式
     patterns = {
         'product_name': [
+            r'^#\s*(.+?)(?:\s|条款|保险|产品|\n)',  # Markdown一级标题
             r'产品名称[：:]\s*(.+?)(?:\n|$)',
             r'保险产品名称[：:]\s*(.+?)(?:\n|$)',
             r'###\s*第[一二三四五六七八九十\d]+\s*条\s*产品名称\s*\n(.+?)(?:\n|$)',
@@ -218,30 +219,36 @@ def extract_product_info(content: str) -> Dict[str, Any]:
     return product_info
 
 
-def extract_clauses(content: str) -> List[str]:
+def extract_clauses(content: str) -> List[Dict[str, Any]]:
     """
-    提取条款列表
+    提取条款列表（包含章节信息）
 
     Args:
         content: 文档内容
 
     Returns:
-        list: 条款文本列表
+        list: 条款字典列表，每个包含 text 和 reference
     """
     clauses = []
 
     # 按章节分割
     lines = content.split('\n')
     current_clause = []
+    current_reference = ""
     in_clause = False
 
-    for line in lines:
+    for i, line in enumerate(lines):
         # 检测条款开始（常见条款标题，支持中文数字）
-        if re.match(r'^第[一二三四五六七八九十百千万\d]+[条章节]', line) or re.match(r'^\d+\.', line):
+        match = re.match(r'^(第[一二三四五六七八九十百千万\d]+[条章节])(.+)', line)
+        if match:
             if current_clause:
                 clause_text = '\n'.join(current_clause).strip()
                 if len(clause_text) > 10:  # 过滤太短的条款
-                    clauses.append(clause_text)
+                    clauses.append({
+                        'text': clause_text,
+                        'reference': current_reference
+                    })
+            current_reference = match.group(1)  # 保存条款编号，如"第一条"
             current_clause = [line]
             in_clause = True
         elif in_clause:
@@ -251,15 +258,21 @@ def extract_clauses(content: str) -> List[str]:
     if current_clause:
         clause_text = '\n'.join(current_clause).strip()
         if len(clause_text) > 10:
-            clauses.append(clause_text)
+            clauses.append({
+                'text': clause_text,
+                'reference': current_reference
+            })
 
     # 如果没有找到明确的条款，则按段落分割
     if not clauses:
         paragraphs = content.split('\n\n')
-        for para in paragraphs:
+        for i, para in enumerate(paragraphs):
             para = para.strip()
             if len(para) > 20:  # 只保留有意义的段落
-                clauses.append(para)
+                clauses.append({
+                    'text': para,
+                    'reference': f"段落{i+1}"
+                })
 
     return clauses
 
