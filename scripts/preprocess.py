@@ -16,11 +16,31 @@ from typing import Dict, List, Any, Optional
 sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
 
+# 配置文件路径（相对于脚本目录）
+CONFIG_PATH = Path(__file__).parent / 'config' / 'settings.json'
+
+
+def load_config() -> Dict[str, Any]:
+    """
+    加载配置文件
+
+    Returns:
+        dict: 配置字典，如果文件不存在则返回空字典
+    """
+    config = {}
+    if CONFIG_PATH.exists():
+        try:
+            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+        except Exception as e:
+            print(f"Warning: Failed to load config file: {e}", file=sys.stderr)
+    return config
+
+
 def main():
     """主入口函数"""
     parser = argparse.ArgumentParser(description='Actuary Sleuth - Document Preprocessing Script')
     parser.add_argument('--input', required=True, help='JSON input file')
-    parser.add_argument('--config', default='./config/settings.json', help='Config file')
     args = parser.parse_args()
 
     # 读取输入
@@ -235,8 +255,8 @@ def extract_clauses(content: str) -> List[str]:
     in_clause = False
 
     for line in lines:
-        # 检测条款开始（常见条款标题）
-        if re.match(r'^[第\d]+[条章节]', line) or re.match(r'^\d+\.', line):
+        # 检测条款开始（常见条款标题，支持中文数字）
+        if re.match(r'^第[一二三四五六七八九十百千万\d]+[条章节]', line) or re.match(r'^\d+\.', line):
             if current_clause:
                 clause_text = '\n'.join(current_clause).strip()
                 if len(clause_text) > 10:  # 过滤太短的条款

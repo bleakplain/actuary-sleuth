@@ -19,20 +19,43 @@ sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 from lib import db
 
 
+# 配置文件路径（相对于脚本目录）
+CONFIG_PATH = Path(__file__).parent / 'config' / 'settings.json'
+
+
+def load_config() -> Dict[str, Any]:
+    """
+    加载配置文件
+
+    Returns:
+        dict: 配置字典，如果文件不存在则返回空字典
+    """
+    config = {}
+    if CONFIG_PATH.exists():
+        try:
+            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+        except Exception as e:
+            print(f"Warning: Failed to load config file: {e}", file=sys.stderr)
+    return config
+
+
 def main():
     """主入口函数"""
     parser = argparse.ArgumentParser(description='Actuary Sleuth - Product Audit Script')
     parser.add_argument('--input', required=True, help='JSON input file')
-    parser.add_argument('--config', default='./config/settings.json', help='Config file')
     args = parser.parse_args()
 
     # 读取输入
     with open(args.input, 'r', encoding='utf-8') as f:
         params = json.load(f)
 
+    # 自动读取配置（固定路径）
+    config = load_config()
+
     # 执行业务逻辑
     try:
-        result = execute(params)
+        result = execute(params, config)
         # 输出结果（JSON格式）
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
@@ -47,7 +70,7 @@ def main():
         return 1
 
 
-def execute(params: Dict[str, Any]) -> Dict[str, Any]:
+def execute(params: Dict[str, Any], config: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     执行完整的产品审核流程
 
@@ -56,6 +79,7 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
             - documentContent: 文档内容
             - documentUrl: 文档URL（可选）
             - auditType: 审核类型（full/negative-only，默认full）
+        config: 配置字典（可选）
 
     Returns:
         dict: 包含完整审核结果的字典
@@ -118,6 +142,23 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
             report_result.get('score', 0)
         )
 
+        # Step 6: 导出飞书文档（如果配置启用）
+        feishu_export_result = None
+        if config and config.get('report', {}).get('export_feishu', False):
+            print(f"[{audit_id}] Step 6: Exporting to Feishu...", file=sys.stderr)
+            feishu_export_result = export_to_feishu_report(
+                report_result.get('content', ''),
+                preprocess_result.get('product_info', {}),
+                config
+            )
+
+            if feishu_export_result.get('success'):
+                print(f"[{audit_id}] ✅ Feishu document created: {feishu_export_result.get('document_url')}", file=sys.stderr)
+            else:
+                print(f"[{audit_id}] ⚠️ Feishu export failed: {feishu_export_result.get('error', 'Unknown error')}", file=sys.stderr)
+        else:
+            print(f"[{audit_id}] Step 6: Feishu export skipped (not configured)", file=sys.stderr)
+
         # 构建最终结果
         result = {
             'success': True,
@@ -137,6 +178,10 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
                 'product_info': preprocess_result.get('product_info', {})
             }
         }
+
+        # 添加飞书导出结果（如果有）
+        if feishu_export_result:
+            result['feishu_export'] = feishu_export_result
 
         print(f"[{audit_id}] Audit completed successfully!", file=sys.stderr)
         return result
@@ -294,6 +339,43 @@ def run_report_generation(
 
     try:
         return report.execute(input_params)
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'error_type': type(e).__name__
+        }
+
+
+def export_to_feishu_report(
+    report_content: str,
+    product_info: Dict[str, Any],
+    config: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    将审核报告导出为飞书在线文档
+
+    Args:
+        report_content: 报告内容（Markdown 格式）
+        product_info: 产品信息
+        config: 配置字典
+
+    Returns:
+        dict: 导出结果
+    """
+    # 导入 report 模块使用其导出功能
+    import report
+
+    # 构建文档标题
+    product_name = product_info.get('product_name', '未知产品')
+    title = f"审核报告-{product_name}"
+
+    try:
+        return report.export_to_feishu(
+            report_content,
+            title=title,
+            config=config
+        )
     except Exception as e:
         return {
             'success': False,

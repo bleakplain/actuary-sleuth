@@ -18,8 +18,13 @@
     "timeout": 120
   },
   "report": {
-    "default_format": "word",
-    "output_dir": "./reports"
+    "default_format": "feishu",
+    "output_dir": "./reports",
+    "export_feishu": true
+  },
+  "feishu": {
+    "app_id": "cli_a900c2ed51335ccd",
+    "app_secret": "xU3udM9Wax1HFwCXFdwwdgXPH0xjb1TT"
   },
   "audit": {
     "scoring_weights": {

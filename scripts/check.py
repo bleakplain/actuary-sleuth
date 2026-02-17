@@ -8,6 +8,7 @@ import json
 import argparse
 import sys
 from pathlib import Path
+from typing import Dict, List, Any
 
 # 添加 lib 目录到路径
 sys.path.insert(0, str(Path(__file__).parent / 'lib'))
@@ -15,11 +16,31 @@ sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 from lib import db
 
 
+# 配置文件路径（相对于脚本目录）
+CONFIG_PATH = Path(__file__).parent / 'config' / 'settings.json'
+
+
+def load_config() -> Dict[str, Any]:
+    """
+    加载配置文件
+
+    Returns:
+        dict: 配置字典，如果文件不存在则返回空字典
+    """
+    config = {}
+    if CONFIG_PATH.exists():
+        try:
+            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+        except Exception as e:
+            print(f"Warning: Failed to load config file: {e}", file=sys.stderr)
+    return config
+
+
 def main():
     """主入口函数"""
     parser = argparse.ArgumentParser(description='Actuary Sleuth - Negative List Check Script')
     parser.add_argument('--input', required=True, help='JSON input file')
-    parser.add_argument('--config', default='./config/settings.json', help='Config file')
     args = parser.parse_args()
 
     # 读取输入
