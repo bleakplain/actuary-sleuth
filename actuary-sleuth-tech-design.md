@@ -836,9 +836,593 @@ regulations_vectors = {
 
 ---
 
-## 八、核心流程
+## 八、数据处理流程
 
-### 8.1 审核流程
+### 8.1 完整数据流图
+
+```mermaid
+flowchart TD
+    subgraph INPUT["用户输入"]
+        DOC_IN["文档内容<br/>documentContent"]
+        URL_IN["文档URL<br/>documentUrl"]
+        TYPE_IN["审核类型<br/>auditType"]
+    end
+
+    subgraph STEP1["Step 1: 文档预处理<br/>preprocess.py"]
+        PARSE1["parse_document()<br/>解析文档结构"]
+        EXT_PROD["extract_product_info()<br/>提取产品信息"]
+        EXT_CLAUSE["extract_clauses()<br/>提取条款列表"]
+        EXT_PRICE["extract_pricing_params()<br/>提取定价参数"]
+    end
+
+    subgraph DATA1["中间数据 1"]
+        PROD_INFO["product_info<br/>{product_name, company,<br/>type, period, ...}"]
+        CLAUSES["clauses<br/>['第1条...', '第2条...', ...]"]
+        PRICE_PARAMS["pricing_params<br/>{mortality_rate,<br/>interest_rate,<br/>expense_rate, ...}"]
+    end
+
+    subgraph STEP2["Step 2: 负面清单检查<br/>check.py"]
+        GET_RULES["从数据库获取<br/>100条负面清单规则"]
+        MATCH["规则匹配<br/>关键词 + 正则"]
+        GROUP["按严重程度分组"]
+    end
+
+    subgraph DATA2["中间数据 2"]
+        VIOLATIONS["violations<br/>[{clause_index, rule,<br/>description, severity,<br/>category, remediation}, ...]"]
+        VIOL_SUM["summary<br/>{high: 2, medium: 5, low: 3}"]
+    end
+
+    subgraph STEP3["Step 3: 定价分析<br/>scoring.py"]
+        ANAL_MORT["analyze_mortality()<br/>死亡率分析"]
+        ANAL_INT["analyze_interest()<br/>利率分析"]
+        ANAL_EXP["analyze_expense()<br/>费用率分析"]
+        CALC_SCORE["calculate_overall_score()<br/>计算综合评分"]
+        GEN_REC["generate_recommendations()<br/>生成改进建议"]
+    end
+
+    subgraph DATA3["中间数据 3"]
+        PRICING["pricing<br/>{mortality: {value, benchmark,<br/>deviation, reasonable},<br/>interest: {...},<br/>expense: {...}}"]
+        OVERALL["overall_score: 95<br/>is_reasonable: true<br/>recommendations: [...]"]
+    end
+
+    subgraph STEP4["Step 4: 报告生成<br/>report.py"]
+        CALC_TOT["calculate_score()<br/>计算总分 100-违规-定价"]
+        CALC_GRADE["calculate_grade()<br/>计算评级 优秀/良好/合格/不合格"]
+        GEN_SUM["generate_summary()<br/>生成摘要统计"]
+        GEN_BASIS["generate_regulation_basis()<br/>动态生成审核依据"]
+        GEN_CONC["generate_conclusion_text()<br/>生成审核结论"]
+        GEN_RPT["generate_report_content()<br/>生成Markdown报告"]
+        GEN_BLK["create_report()<br/>生成报告块"]
+    end
+
+    subgraph DATA4["中间数据 4"]
+        SCORE["score: 75<br/>grade: '合格'"]
+        RPT_SUM["summary<br/>{total_violations: 10,<br/>violation_severity: {...},<br/>pricing_issues: 1,<br/>has_issues: true}"]
+        REG_BASIS["regulation_basis<br/>['保险法', '健康险管理办法', ...]"]
+        CONTENT["report_content<br/>Markdown格式报告"]
+        BLOCKS["blocks<br/>飞书文档块数组"]
+    end
+
+    subgraph STEP5["Step 5: 飞书导出"]
+        GET_TOKEN["get_feishu_access_token()<br/>获取访问令牌"]
+        CREATE_DOC["create_feishu_document()<br/>创建文档"]
+        WRITE_BLK["批量写入块<br/>每次50个"]
+    end
+
+    subgraph OUTPUT["最终输出"]
+        DOC_URL["文档URL<br/>https://feishu.cn/docx/xxx"]
+        RPT_ID["报告编号<br/>RPT-20260217-143020"]
+        RESULT["完整结果<br/>JSON格式"]
+    end
+
+    %% 连接关系
+    DOC_IN --> PARSE1
+    URL_IN --> EXT_PROD
+    TYPE_IN --> STEP3
+
+    PARSE1 --> EXT_PROD
+    EXT_PROD --> PROD_INFO
+    PARSE1 --> EXT_CLAUSE
+    EXT_CLAUSE --> CLAUSES
+    PARSE1 --> EXT_PRICE
+    EXT_PRICE --> PRICE_PARAMS
+
+    CLAUSES --> STEP2
+    GET_RULES --> MATCH
+    MATCH --> GROUP
+    GROUP --> VIOLATIONS
+    GROUP --> VIOL_SUM
+
+    PRICE_PARAMS --> STEP3
+    PROD_INFO --> STEP4
+    VIOLATIONS --> STEP4
+
+    PRICE_PARAMS --> ANAL_MORT
+    ANAL_MORT --> PRICING
+    PRICE_PARAMS --> ANAL_INT
+    ANAL_INT --> PRICING
+    PRICE_PARAMS --> ANAL_EXP
+    ANAL_EXP --> PRICING
+    PRICING --> CALC_SCORE
+    CALC_SCORE --> OVERALL
+    OVERALL --> GEN_REC
+    GEN_REC --> OVERALL
+
+    VIOLATIONS --> CALC_TOT
+    PRICING --> CALC_TOT
+    CALC_TOT --> SCORE
+    SCORE --> CALC_GRADE
+    VIOLATIONS --> GEN_SUM
+    PRICING --> GEN_SUM
+    GEN_SUM --> RPT_SUM
+
+    SCORE --> GEN_RPT
+    GRADE --> GEN_RPT
+    RPT_SUM --> GEN_RPT
+    PROD_INFO --> GEN_RPT
+    VIOLATIONS --> GEN_RPT
+    PRICING --> GEN_RPT
+    GEN_RPT --> CONTENT
+
+    SCORE --> GEN_BLK
+    GRADE --> GEN_BLK
+    RPT_SUM --> GEN_BLK
+    PROD_INFO --> GEN_BLK
+    VIOLATIONS --> GEN_BLK
+    PRICING --> GEN_BLK
+    GEN_BLK --> BLOCKS
+
+    BLOCKS --> STEP5
+    GET_TOKEN --> CREATE_DOC
+    CREATE_DOC --> WRITE_BLK
+    WRITE_BLK --> DOC_URL
+
+    CALC_TOT --> RESULT
+    GEN_BLK --> RESULT
+    RESULT --> RPT_ID
+
+    %% 样式
+    style INPUT fill:#e3f2fd
+    style DATA1 fill:#fff3e0
+    style DATA2 fill:#fff3e0
+    style DATA3 fill:#fff3e0
+    style DATA4 fill:#fff3e0
+    style OUTPUT fill:#e8f5e9
+    style STEP1 fill:#f3e5f5
+    style STEP2 fill:#f3e5f5
+    style STEP3 fill:#f3e5f5
+    style STEP4 fill:#f3e5f5
+    style STEP5 fill:#f3e5f5
+
+    classDef dataBox fill:#fff3e0,stroke:#ff9800,stroke-width:2px
+    class PROD_INFO,CLAUSES,PRICE_PARAMS,VIOLATIONS,VIOL_SUM,PRICING,OVERALL,SCORE,RPT_SUM,CONTENT,BLOCKS dataBox
+
+    classDef stepBox fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px
+    class PARSE1,EXT_PROD,EXT_CLAUSE,EXT_PRICE,GET_RULES,MATCH,GROUP,ANAL_MORT,ANAL_INT,ANAL_EXP,CALC_SCORE,GEN_REC,CALC_TOT,CALC_GRADE,GEN_SUM,GEN_BASIS,GEN_CONC,GEN_RPT,GEN_BLK,GET_TOKEN,CREATE_DOC,WRITE_BLK stepBox
+```
+
+### 8.2 数据结构详解
+
+#### 8.2.1 产品信息数据结构 (product_info)
+
+```json
+{
+  "product_name": "XX终身寿险",
+  "insurance_company": "XX人寿保险股份有限公司",
+  "product_type": "寿险",
+  "insurance_period": "终身",
+  "payment_method": "年交",
+  "age_range": "出生满28天至65周岁",
+  "occupation_class": "1-6类"
+}
+```
+
+#### 8.2.2 违规记录数据结构 (violations)
+
+```json
+[
+  {
+    "clause_index": 5,
+    "clause_text": "第6条 本产品保证年化收益率...",
+    "rule": "N001",
+    "description": "条款中包含'保证收益'字样，违反监管规定",
+    "severity": "high",
+    "category": "销售误导",
+    "remediation": "删除'保证收益'相关表述，改为'演示收益'"
+  }
+]
+```
+
+#### 8.2.3 定价分析数据结构 (pricing)
+
+```json
+{
+  "mortality": {
+    "value": 0.0005,
+    "benchmark": 0.0005,
+    "deviation": 0.0,
+    "reasonable": true,
+    "note": "死亡率/发生率符合行业标准"
+  },
+  "interest": {
+    "value": 0.035,
+    "benchmark": 0.035,
+    "deviation": 0.0,
+    "reasonable": true,
+    "note": "预定利率符合监管规定"
+  },
+  "expense": {
+    "value": 0.12,
+    "benchmark": 0.12,
+    "deviation": 0.0,
+    "reasonable": true,
+    "note": "费用率符合监管规定"
+  }
+}
+```
+
+#### 8.2.4 评分计算逻辑
+
+```python
+# 基础分 100
+score = 100
+
+# 违规扣分
+for violation in violations:
+    if severity == 'high':    score -= 20
+    elif severity == 'medium': score -= 10
+    elif severity == 'low':    score -= 5
+
+# 定价问题扣分
+for category in ['mortality', 'interest', 'expense']:
+    if not pricing[category]['reasonable']:
+        score -= 10
+
+# 最终分数范围 [0, 100]
+```
+
+#### 8.2.5 报告摘要数据结构 (summary)
+
+```json
+{
+  "total_violations": 10,
+  "violation_severity": {
+    "high": 2,
+    "medium": 5,
+    "low": 3
+  },
+  "pricing_issues": 1,
+  "has_critical_issues": true
+}
+```
+
+### 8.3 飞书块数据结构
+
+```json
+[
+  {
+    "block_type": 2,
+    "text": {
+      "elements": [{
+        "text_run": {
+          "content": "保险产品精算审核报告",
+          "style": {
+            "bold": true,
+            "text_size": "largest"
+          }
+        }
+      }]
+    }
+  },
+  {
+    "block_type": 2,
+    "text": {
+      "elements": [{
+        "text_run": {
+          "content": "表1-1：关键指标汇总表",
+          "style": {
+            "bold": true
+          }
+        }
+      }]
+    }
+  },
+  {
+    "block_type": 2,
+    "text": {
+      "elements": [{
+        "text_run": {
+          "content": "序号 | 指标项 | 结果 | 说明",
+          "style": {
+            "bold": true,
+            "font_family": "Courier New"
+          }
+        }
+      }]
+    }
+  }
+]
+```
+
+---
+
+## 九、报告生成
+
+### 9.1 报告生成原则
+
+| 原则 | 说明 | 示例 |
+|------|------|------|
+| **动态生成** | 所有内容基于实际审核结果 | 无违规则不显示违规表格 |
+| **结论先行** | 审核结论放在最前面 | 一、审核结论 |
+| **问题导向** | 有问题才展示对应章节 | 无定价问题则省略定价分析 |
+| **依据明确** | 每个问题都有法规依据 | 违规描述+法规条款+整改建议 |
+
+### 9.2 报告结构（动态）
+
+```
+保险产品精算审核报告
+├── 产品基本信息
+│   ├── 产品名称、保险公司
+│   ├── 产品类型、审核日期
+│   └── 报告编号
+│
+├── 一、审核结论（始终显示）
+│   ├── 审核意见（不推荐/条件推荐/需补充材料/推荐）
+│   ├── 核心问题摘要（1-2句话）
+│   └── 关键指标汇总表
+│       ├── 综合评分
+│       ├── 合规评级
+│       ├── 违规总数
+│       └── 定价评估
+│
+├── 二、问题详情及依据（有问题时显示）
+│   ├── 审核依据（动态生成）
+│   │   ├── 基础法规（保险法等）
+│   │   ├── 产品类型专项法规（健康险管理办法等）
+│   │   └── 违规相关法规引用
+│   ├── 违规统计表
+│   ├── 严重违规明细（如有）
+│   ├── 中等违规明细（如有）
+│   └── 定价问题分析（如有）
+│
+├── 三、修改建议（有问题时显示）
+│   ├── P0级整改事项（如有严重违规）
+│   └── P1级整改事项（如有中等违规）
+│
+└── 四、报告信息（始终显示）
+    ├── 报告编号/生成时间/系统版本
+    └── 免责声明
+```
+
+### 9.3 报告生成函数架构
+
+```mermaid
+flowchart TB
+    subgraph REPORT["报告生成模块 report.py"]
+        EXECUTE["execute()<br/>主入口函数"]
+
+        subgraph CALC["计算层"]
+            CALC_SCORE["calculate_score()<br/>计算总分"]
+            CALC_GRADE["calculate_grade()<br/>计算评级"]
+            GEN_SUM["generate_summary()<br/>生成摘要"]
+        end
+
+        subgraph GEN["生成层"]
+            GEN_BASIS["generate_regulation_basis()<br/>动态生成审核依据"]
+            GEN_CONC["generate_conclusion_text()<br/>生成审核结论"]
+
+            subgraph MD["Markdown生成"]
+                GEN_CONC_SEC["_generate_conclusion_section()<br/>结论章节"]
+                GEN_DET_SEC["_generate_details_section()<br/>详情章节"]
+                GEN_SUG_SEC["_generate_suggestions_section()<br/>建议章节"]
+                GEN_INFO_SEC["_generate_info_section()<br/>信息章节"]
+            end
+
+            subgraph BLOCKS["飞书块生成"]
+                CREATE_CONC["_create_conclusion_blocks()<br/>结论块"]
+                CREATE_DET["_create_details_blocks()<br/>详情块"]
+                CREATE_SUG["_create_suggestions_blocks()<br/>建议块"]
+                CREATE_INFO["_create_info_blocks()<br/>信息块"]
+            end
+        end
+
+        subgraph OUTPUT["输出层"]
+            GEN_RPT["generate_report_content()<br/>Markdown报告"]
+            CREATE_RPT["create_report()<br/>飞书块"]
+        end
+    end
+
+    EXECUTE --> CALC
+    CALC --> GEN
+    GEN_BASIS --> GEN_DET_SEC
+    GEN_BASIS --> CREATE_DET
+    GEN_CONC --> GEN_CONC_SEC
+    GEN_CONC --> CREATE_CONC
+
+    GEN_CONC_SEC --> GEN_RPT
+    GEN_DET_SEC --> GEN_RPT
+    GEN_SUG_SEC --> GEN_RPT
+    GEN_INFO_SEC --> GEN_RPT
+
+    CREATE_CONC --> CREATE_RPT
+    CREATE_DET --> CREATE_RPT
+    CREATE_SUG --> CREATE_RPT
+    CREATE_INFO --> CREATE_RPT
+
+    style REPORT fill:#e3f2fd
+    style CALC fill:#fff3e0
+    style GEN fill:#f3e5f5
+    style OUTPUT fill:#e8f5e9
+    style GEN_BASIS fill:#ffcc80
+    style GEN_CONC fill:#ffcc80
+```
+
+### 9.4 审核依据动态生成
+
+```python
+def generate_regulation_basis(violations, product_info):
+    """
+    动态生成审核依据
+
+    基于产品类型和违规情况，动态生成适用的法规依据列表
+    """
+    basis = []
+
+    # 1. 基础法规（始终适用）
+    basis.append("《中华人民共和国保险法》")
+
+    # 2. 根据产品类型添加专项法规
+    type_regulations = {
+        '寿险': '《人身保险公司保险条款和保险费率管理办法》',
+        '健康险': '《健康保险管理办法》',
+        '意外险': '《意外伤害保险管理办法》',
+        '万能险': '《万能型人身保险管理办法》',
+    }
+
+    product_type = product_info.get('product_type', '').lower()
+    for key, regulation in type_regulations.items():
+        if key in product_type:
+            basis.append(regulation)
+            break
+
+    # 3. 提取违规记录中引用的法规
+    for v in violations:
+        if v.get('regulation_citation'):
+            basis.append(v['regulation_citation'])
+
+    return basis
+```
+
+### 9.5 审核结论生成
+
+```python
+def generate_conclusion_text(score, summary):
+    """
+    生成审核结论文本
+
+    基于评分和违规情况，动态生成审核意见和说明
+    """
+    high_count = summary['violation_severity']['high']
+
+    if high_count > 0:
+        return "不推荐上会", f"存在{high_count}项严重违规，触及监管红线"
+    elif score >= 90:
+        return "推荐通过", "产品符合所有监管要求"
+    elif score >= 75:
+        return "条件推荐", "存在中等问题，建议整改后提交"
+    elif score >= 60:
+        return "需补充材料", "存在问题，需补充说明材料"
+    else:
+        return "不予推荐", "产品合规性不足"
+```
+
+### 9.6 条件渲染逻辑
+
+```python
+def generate_report_content(violations, pricing_analysis, product_info, score, grade, summary):
+    """
+    动态生成报告内容
+
+    只在有数据时显示对应章节
+    """
+    lines = []
+
+    # 审核结论（始终显示）
+    lines.extend(_generate_conclusion_section(score, grade, summary))
+
+    # 问题详情（有问题时显示）
+    if summary.get('has_issues', False):
+        lines.extend(_generate_details_section(violations, pricing_analysis, product_info, summary))
+
+    # 修改建议（有问题时显示）
+    if summary.get('has_issues', False):
+        lines.extend(_generate_suggestions_section(violations, summary))
+
+    # 报告信息（始终显示）
+    lines.extend(_generate_info_section(report_id))
+
+    return '\n'.join(lines)
+```
+
+### 9.7 报告模板示例
+
+#### 无问题报告模板
+
+```markdown
+# 保险产品精算审核报告
+
+产品名称：XX终身寿险
+保险公司：XX人寿保险股份有限公司
+审核日期：2026年02月17日
+报告编号：RPT-20260217-143020
+
+## 一、审核结论
+
+**审核意见**：推荐通过
+
+**说明**：产品符合所有监管要求，未发现违规问题。
+
+| 指标项 | 结果 | 说明 |
+|--------|------|------|
+| 综合评分 | 95分 | 产品优秀，建议快速通过 |
+| 合规评级 | 优秀 | 基于违规数量和严重程度评定 |
+| 违规总数 | 0项 | 无违规 |
+| 定价评估 | 合理 | 0项定价参数需关注 |
+
+## 四、报告信息
+
+报告编号：RPT-20260217-143020
+生成时间：2026年02月17日 14:30
+审核系统：Actuary Sleuth v3.0
+
+免责声明：本报告由AI精算审核系统生成，仅供内部参考...
+```
+
+#### 有问题报告模板
+
+```markdown
+## 一、审核结论
+
+**审核意见**：不推荐上会
+
+**说明**：存在2项严重违规，触及监管红线，需完成整改后重新审核。
+
+## 二、问题详情及依据
+
+**审核依据**：
+1. 《中华人民共和国保险法》
+2. 《健康保险管理办法》
+3. 保险法第十七条（免责条款）
+
+### 2.1 违规统计
+
+| 级别 | 数量 | 占比 |
+|------|------|------|
+| 严重 | 2项 | 20% |
+| 中等 | 5项 | 50% |
+
+### 2.2 严重违规明细
+
+| 规则 | 违规描述 | 涉及条款 | 法规依据 | 整改建议 |
+|------|----------|----------|----------|----------|
+| N001 | 包含保证收益表述 | 第6条 | 保险法第十七条 | 改为演示收益 |
+
+## 三、修改建议
+
+### 3.1 P0级整改事项（必须立即整改）
+
+1. 删除第6条中"保证收益"相关表述
+2. 补充第15条犹豫期起算日期
+
+## 四、报告信息
+...
+```
+
+---
+
+## 十、核心流程
+
+### 10.1 审核流程
 
 ```python
 def execute_audit(input_data):
@@ -873,7 +1457,7 @@ def execute_audit(input_data):
     })
 ```
 
-### 8.2 查询流程
+### 10.2 查询流程
 
 ```python
 def search_regulation(query, search_type='hybrid'):
@@ -900,9 +1484,9 @@ def search_regulation(query, search_type='hybrid'):
 
 ---
 
-## 九、初始化脚本
+## 十一、初始化脚本
 
-### 9.1 scripts/init_db.py
+### 11.1 scripts/init_db.py
 
 ```python
 #!/usr/bin/env python3
@@ -974,7 +1558,7 @@ if __name__ == '__main__':
     init_database()
 ```
 
-### 9.2 scripts/import_regs.py
+### 11.2 scripts/import_regs.py
 
 ```python
 #!/usr/bin/env python3
@@ -1067,7 +1651,7 @@ if __name__ == '__main__':
     import_all_references()
 ```
 
-### 9.3 scripts/build_vectors.py
+### 11.3 scripts/build_vectors.py
 
 ```python
 #!/usr/bin/env python3
@@ -1143,9 +1727,9 @@ if __name__ == '__main__':
 
 ---
 
-## 十、部署说明
+## 十二、部署说明
 
-### 10.1 环境要求
+### 12.1 环境要求
 
 | 组件 | 版本要求 |
 |------|----------|
@@ -1153,7 +1737,7 @@ if __name__ == '__main__':
 | Ollama | 最新版 |
 | SQLite | 系统自带 |
 
-### 10.2 Python 依赖
+### 12.2 Python 依赖
 
 ```
 # scripts/requirements.txt
@@ -1164,7 +1748,7 @@ paddleocr>=2.7.0
 feishu2md>=0.1.0
 ```
 
-### 10.3 安装步骤
+### 12.3 安装步骤
 
 ```bash
 # 1. 进入 Skill 目录
@@ -1198,9 +1782,9 @@ openclaw skills reload
 
 ---
 
-## 十一、交互示例
+## 十三、交互示例
 
-### 11.1 审核交互
+### 13.1 审核交互
 
 ```
 用户: @actuary 审核 https://xxx.feishu.cn/doc/xxxxx
@@ -1238,7 +1822,7 @@ openclaw skills reload
 审核编号: AUD-20260215-001
 ```
 
-### 11.2 查询交互
+### 13.2 查询交互
 
 ```
 用户: @actuary 查询 保险法第十六条
@@ -1257,9 +1841,9 @@ openclaw skills reload
 
 ---
 
-## 十二、总结
+## 十四、总结
 
-### 12.1 核心特点
+### 14.1 核心特点
 
 1. **工作流编排与实现分离**: SKILL.md 定义工作流，Python 脚本实现功能
 2. **无胶水层**: SKILL.md 直接声明脚本，被解析后直接调用
@@ -1267,7 +1851,7 @@ openclaw skills reload
 4. **标准化接口**: 统一的 Python 脚本接口规范
 5. **可扩展性**: 易于添加新的审核规则和法规数据
 
-### 12.2 技术优势
+### 14.2 技术优势
 
 | 优势 | 说明 |
 |------|------|
@@ -1277,7 +1861,7 @@ openclaw skills reload
 | 灵活 | 支持混合检索（精确+语义） |
 | 本地化 | 数据不出内网，安全可控 |
 
-### 12.3 后续优化方向
+### 14.3 后续优化方向
 
 1. 增加更多审核规则和法规数据
 2. 优化定价分析算法
