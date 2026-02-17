@@ -17,30 +17,11 @@ from typing import Dict, List, Any
 sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
 from lib import db
+from lib.config import get_config
 
 
 # 飞书 API 配置
 FEISHU_API_BASE = "https://open.feishu.cn/open-apis"
-
-# 配置文件路径（相对于脚本目录）
-CONFIG_PATH = Path(__file__).parent / 'config' / 'settings.json'
-
-
-def load_config() -> Dict[str, Any]:
-    """
-    加载配置文件
-
-    Returns:
-        dict: 配置字典，如果文件不存在则返回空字典
-    """
-    config = {}
-    if CONFIG_PATH.exists():
-        try:
-            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-        except Exception as e:
-            print(f"Warning: Failed to load config file: {e}", file=sys.stderr)
-    return config
 
 
 def convert_markdown_to_feishu_blocks(content: str) -> List[Dict[str, Any]]:
@@ -423,29 +404,26 @@ def create_feishu_document(access_token: str, title: str, content: str) -> str:
         raise Exception(f"创建飞书文档失败: {str(e)}")
 
 
-def export_to_feishu(content: str, title: str = None, config: Dict = None) -> Dict[str, Any]:
+def export_to_feishu(content: str, title: str = None) -> Dict[str, Any]:
     """
     将报告导出为飞书在线文档
 
     Args:
         content: 报告内容（Markdown 格式）
         title: 文档标题（可选）
-        config: 飞书配置 {app_id, app_secret}
 
     Returns:
         dict: 包含文档 URL 的结果
     """
-    # 从配置或环境变量获取飞书凭证
-    if config is None:
-        config = {}
+    config = get_config()
 
-    app_id = config.get('feishu', {}).get('app_id') or os.getenv('FEISHU_APP_ID')
-    app_secret = config.get('feishu', {}).get('app_secret') or os.getenv('FEISHU_APP_SECRET')
+    app_id = config.feishu.app_id
+    app_secret = config.feishu.app_secret
 
     if not app_id or not app_secret:
         return {
             'success': False,
-            'error': '缺少飞书配置，请设置 feishu_app_id 和 feishu_app_secret'
+            'error': '缺少飞书配置，请设置 feishu.app_id 和 feishu.app_secret'
         }
 
     # 设置默认标题
@@ -481,9 +459,6 @@ def main():
     parser.add_argument('--output', help='输出文件路径（可选）')
     args = parser.parse_args()
 
-    # 自动读取配置
-    config = load_config()
-
     # 读取输入
     with open(args.input, 'r', encoding='utf-8') as f:
         params = json.load(f)
@@ -493,13 +468,13 @@ def main():
         result = execute(params)
 
         # 导出飞书文档
-        export_feishu = args.export_feishu or config.get('report', {}).get('export_feishu', False)
+        config = get_config()
+        export_feishu = args.export_feishu or config.report.export_feishu
 
         if export_feishu:
             feishu_result = export_to_feishu(
                 result['content'],
-                title=f"审核报告-{params.get('product_info', {}).get('product_name', '未知产品')}",
-                config=config
+                title=f"审核报告-{params.get('product_info', {}).get('product_name', '未知产品')}"
             )
             result['feishu_export'] = feishu_result
 

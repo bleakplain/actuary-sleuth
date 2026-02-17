@@ -15,27 +15,7 @@ from typing import Dict, List, Any
 sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
 from lib import db
-
-
-# 配置文件路径（相对于脚本目录）
-CONFIG_PATH = Path(__file__).parent / 'config' / 'settings.json'
-
-
-def load_config() -> Dict[str, Any]:
-    """
-    加载配置文件
-
-    Returns:
-        dict: 配置字典，如果文件不存在则返回空字典
-    """
-    config = {}
-    if CONFIG_PATH.exists():
-        try:
-            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-        except Exception as e:
-            print(f"Warning: Failed to load config file: {e}", file=sys.stderr)
-    return config
+from lib.config import get_config
 
 
 def main():
