@@ -603,8 +603,8 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
         summary
     )
 
-    # 生成飞书专业格式块
-    blocks = create_feishu_pro_report(
+    # 生成报告块
+    blocks = create_report(
         violations,
         pricing_analysis,
         product_info,
@@ -822,8 +822,94 @@ def generate_summary(violations: List[Dict[str, Any]], pricing_analysis: Dict[st
         'total_violations': len(violations),
         'violation_severity': violation_summary,
         'pricing_issues': pricing_issues,
-        'has_critical_issues': violation_summary['high'] > 0 or pricing_issues > 1
+        'has_critical_issues': violation_summary['high'] > 0 or pricing_issues > 1,
+        'has_issues': len(violations) > 0 or pricing_issues > 0
     }
+
+
+def generate_regulation_basis(violations: List[Dict[str, Any]], product_info: Dict[str, Any]) -> List[str]:
+    """
+    动态生成审核依据
+
+    基于产品类型和违规情况，动态生成适用的法规依据列表
+
+    Args:
+        violations: 违规记录列表
+        product_info: 产品信息
+
+    Returns:
+        list: 法规依据列表
+    """
+    basis = []
+
+    # 基础法规（始终适用）
+    basis.append("《中华人民共和国保险法》")
+
+    # 根据产品类型添加专项法规
+    product_type = product_info.get('product_type', '').lower()
+    type_regulations = {
+        '寿险': '《人身保险公司保险条款和保险费率管理办法》',
+        '健康险': '《健康保险管理办法》',
+        '意外险': '《意外伤害保险管理办法》',
+        '万能险': '《万能型人身保险管理办法》',
+        '分红险': '《分红型人身保险管理办法》',
+    }
+
+    for key, regulation in type_regulations.items():
+        if key in product_type:
+            basis.append(regulation)
+            break
+
+    # 如果没有匹配到专项法规，添加通用规定
+    if len(basis) == 1:
+        basis.append('《保险公司管理规定》')
+
+    # 提取违规记录中引用的法规（如果有）
+    if violations:
+        cited_regs = set()
+        for v in violations:
+            if v.get('regulation_citation'):
+                cited_regs.add(v['regulation_citation'])
+
+        if cited_regs:
+            basis.extend(sorted(cited_regs))
+
+    return basis
+
+
+def generate_conclusion_text(score: int, summary: Dict[str, Any]) -> tuple:
+    """
+    生成审核结论文本
+
+    Args:
+        score: 综合评分
+        summary: 报告摘要
+
+    Returns:
+        tuple: (opinion, explanation)
+    """
+    high_count = summary['violation_severity']['high']
+    medium_count = summary['violation_severity']['medium']
+    total = summary['total_violations']
+
+    # 审核意见决策
+    if high_count > 0:
+        opinion = "不推荐上会"
+        explanation = f"产品存在{high_count}项严重违规，触及监管红线，需完成整改后重新审核"
+    elif score >= 90:
+        opinion = "推荐通过"
+        explanation = "产品符合所有监管要求，未发现违规问题"
+    elif score >= 75:
+        opinion = "条件推荐"
+        explanation = f"产品整体符合要求，存在{medium_count}项中等问题，建议完成修改后提交审核"
+    elif score >= 60:
+        opinion = "需补充材料"
+        explanation = f"产品存在{total}项问题，建议补充说明材料后复审"
+    else:
+        opinion = "不予推荐"
+        explanation = "产品合规性不足，不建议提交审核"
+
+    return opinion, explanation
 
 
 def generate_report_content(
@@ -838,12 +924,16 @@ def generate_report_content(
     """
     生成精算审核报告
 
-    结构：
-    1. 审核结论（先行）
-    2. 问题详情及依据
-    3. 修改建议
+    动态生成，基于实际审核情况：
+    - 有问题才显示问题章节
+    - 审核依据根据产品类型动态生成
+    - 表格只在有数据时显示
 
-    不重复内容，简洁明了
+    结构：
+    1. 审核结论（始终显示）
+    2. 问题详情及依据（有问题时显示）
+    3. 修改建议（有问题时显示）
+    4. 报告信息（始终显示）
     """
     if params is None:
         params = {}
@@ -870,39 +960,36 @@ def generate_report_content(
     lines.append("────────────────────────────────────────")
     lines.append("")
 
-    # ========== 审核结论（先行） ==========
+    # ========== 审核结论（始终显示） ==========
+    lines.extend(_generate_conclusion_section(score, grade, summary))
+    lines.append("")
+
+    # ========== 问题详情（有问题时显示） ==========
+    if summary.get('has_issues', False):
+        lines.extend(_generate_details_section(violations, pricing_analysis, product_info, summary))
+        lines.append("")
+
+    # ========== 修改建议（有问题时显示） ==========
+    if summary.get('has_issues', False):
+        lines.extend(_generate_suggestions_section(violations, summary))
+        lines.append("")
+
+    # ========== 报告信息（始终显示） ==========
+    lines.extend(_generate_info_section(report_id))
+    lines.append("")
+
+    return '\n'.join(lines)
+
+
+def _generate_conclusion_section(score: int, grade: str, summary: Dict[str, Any]) -> List[str]:
+    """生成审核结论章节"""
+    lines = []
+
     lines.append("一、审核结论")
     lines.append("")
 
-    # 统计数据
-    high_count = summary['violation_severity']['high']
-    medium_count = summary['violation_severity']['medium']
-    low_count = summary['violation_severity']['low']
-    total = summary['total_violations']
-
-    # 根据违规情况得出结论
-    if high_count > 0:
-        conclusion = f"不推荐上会。产品触及监管红线（{high_count}项严重违规），存在重大合规风险，需完成整改后重新审核。"
-    elif score >= 75:
-        conclusion = f"条件推荐。产品整体符合要求，存在{medium_count}项中等问题，建议完成修改后提交审核。"
-    elif score >= 60:
-        conclusion = f"需补充材料。产品存在{total}项问题，建议补充说明材料后复审。"
-    else:
-        conclusion = "不予推荐。产品合规性不足，不建议提交审核。"
-
-    # 根据违规情况得出结论
-    if high_count > 0:
-        opinion = "不推荐上会"
-        explanation = f"产品触及监管红线（{high_count}项严重违规），存在重大合规风险，需完成整改后重新审核。"
-    elif score >= 75:
-        opinion = "条件推荐"
-        explanation = f"产品整体符合要求，存在{medium_count}项中等问题，建议完成修改后提交审核。"
-    elif score >= 60:
-        opinion = "需补充材料"
-        explanation = f"产品存在{total}项问题，建议补充说明材料后复审。"
-    else:
-        opinion = "不予推荐"
-        explanation = "产品合规性不足，不建议提交审核。"
+    # 生成审核意见
+    opinion, explanation = generate_conclusion_text(score, summary)
 
     lines.append(f"**审核意见**：{opinion}")
     lines.append("")
@@ -910,6 +997,12 @@ def generate_report_content(
     lines.append("")
 
     # 关键数据表格
+    high_count = summary['violation_severity']['high']
+    medium_count = summary['violation_severity']['medium']
+    low_count = summary['violation_severity']['low']
+    total = summary['total_violations']
+    pricing_issue_count = summary.get('pricing_issues', 0)
+
     lines.append("**表1-1：关键指标汇总表**")
     lines.append("")
     lines.append("| 序号 | 指标项 | 结果 | 说明 |")
@@ -917,14 +1010,33 @@ def generate_report_content(
     lines.append(f"| 1 | 综合评分 | {score}分 | {get_score_description(score)} |")
     lines.append(f"| 2 | 合规评级 | {grade} | 基于违规数量和严重程度评定 |")
     lines.append(f"| 3 | 违规总数 | {total}项 | 严重{high_count}项，中等{medium_count}项，轻微{low_count}项 |")
-    pricing_issue_count = summary.get('pricing_issues', 0)
     lines.append(f"| 4 | 定价评估 | {'合理' if pricing_issue_count == 0 else '需关注'} | {pricing_issue_count}项定价参数需关注 |")
     lines.append("")
     lines.append("────────────────────────────────────────")
+
+    return lines
+
+
+def _generate_details_section(
+    violations: List[Dict[str, Any]],
+    pricing_analysis: Dict[str, Any],
+    product_info: Dict[str, Any],
+    summary: Dict[str, Any]
+) -> List[str]:
+    """生成问题详情章节"""
+    lines = []
+
+    lines.append("二、问题详情及依据")
     lines.append("")
 
-    # ========== 问题详情 ==========
-    lines.append("二、问题详情及依据")
+    # 生成审核依据（动态）
+    regulation_basis = generate_regulation_basis(violations, product_info)
+    lines.append("**审核依据**")
+    lines.append("")
+    for i, reg in enumerate(regulation_basis, 1):
+        lines.append(f"{i}. {reg}")
+    lines.append("")
+    lines.append("────────────────────────────────────────")
     lines.append("")
 
     # 按严重程度分组
@@ -937,11 +1049,15 @@ def generate_report_content(
     lines.append("| 序号 | 违规级别 | 数量 | 占比 |")
     lines.append("|:----:|:--------|:----:|:----:|")
 
-    total_violations = len(violations)
-    if total_violations > 0:
-        high_percent = f"{high_count/total_violations*100:.1f}%"
-        medium_percent = f"{medium_count/total_violations*100:.1f}%"
-        low_percent = f"{low_count/total_violations*100:.1f}%"
+    high_count = summary['violation_severity']['high']
+    medium_count = summary['violation_severity']['medium']
+    low_count = summary['violation_severity']['low']
+    total = summary['total_violations']
+
+    if total > 0:
+        high_percent = f"{high_count/total*100:.1f}%"
+        medium_percent = f"{medium_count/total*100:.1f}%"
+        low_percent = f"{low_count/total*100:.1f}%"
     else:
         high_percent = "0%"
         medium_percent = "0%"
@@ -950,7 +1066,7 @@ def generate_report_content(
     lines.append(f"| 1 | 严重 | {high_count}项 | {high_percent} |")
     lines.append(f"| 2 | 中等 | {medium_count}项 | {medium_percent} |")
     lines.append(f"| 3 | 轻微 | {low_count}项 | {low_percent} |")
-    lines.append(f"| **合计** | **总计** | **{total_violations}项** | **100%** |")
+    lines.append(f"| **合计** | **总计** | **{total}项** | **100%** |")
     lines.append("")
 
     # 严重违规明细表
@@ -998,11 +1114,20 @@ def generate_report_content(
             lines.append("")
 
     lines.append("────────────────────────────────────────")
-    lines.append("")
 
-    # ========== 修改建议 ==========
+    return lines
+
+
+def _generate_suggestions_section(violations: List[Dict[str, Any]], summary: Dict[str, Any]) -> List[str]:
+    """生成修改建议章节"""
+    lines = []
+
     lines.append("三、修改建议")
     lines.append("")
+
+    # 按严重程度分组
+    high_violations = [v for v in violations if v.get('severity') == 'high']
+    medium_violations = [v for v in violations if v.get('severity') == 'medium']
 
     if high_violations:
         lines.append("**表3-1：P0级整改事项表（必须立即整改）**")
@@ -1027,21 +1152,15 @@ def generate_report_content(
         lines.append("")
 
     lines.append("────────────────────────────────────────")
-    lines.append("")
 
-    # ========== 附录 ==========
-    lines.append("四、附录")
-    lines.append("")
+    return lines
 
-    lines.append("**审核依据**")
-    lines.append("")
-    lines.append("1. 《中华人民共和国保险法》")
-    lines.append("2. 《保险公司管理规定》")
-    lines.append("3. 《人身保险公司保险条款和保险费率管理办法》")
-    lines.append("4. 《健康保险管理办法》")
-    lines.append("")
 
-    lines.append("**报告信息**")
+def _generate_info_section(report_id: str) -> List[str]:
+    """生成报告信息章节"""
+    lines = []
+
+    lines.append("四、报告信息")
     lines.append("")
     lines.append(f"- 报告编号：{report_id}")
     lines.append(f"- 生成时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}")
@@ -1053,12 +1172,12 @@ def generate_report_content(
     lines.append("本报告由AI精算审核系统生成，仅供内部参考。最终决策应以产品委员会审议结果和监管部门审批意见为准。")
     lines.append("")
 
-    return '\n'.join(lines)
+    return lines
 
 
-# ========== 飞书专业块创建函数 ==========
+# ========== 报告块创建函数 ==========
 
-def create_feishu_pro_report(
+def create_report(
     violations: List[Dict[str, Any]],
     pricing_analysis: Dict[str, Any],
     product_info: Dict[str, Any],
@@ -1067,7 +1186,12 @@ def create_feishu_pro_report(
     summary: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
     """
-    直接生成飞书专业格式的报告块
+    生成报告块（飞书格式）
+
+    动态生成，基于实际审核情况：
+    - 有问题才显示问题章节
+    - 审核依据根据产品类型动态生成
+    - 表格只在有数据时显示
 
     Args:
         violations: 违规记录列表
@@ -1083,7 +1207,7 @@ def create_feishu_pro_report(
     blocks = []
     report_id = f"RPT-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
-    # ========== 封面 ==========
+    # ========== 标题 ==========
     blocks.append(create_heading_1("保险产品精算审核报告"))
     blocks.append(create_text(""))
     blocks.append(create_text("────────────────────────────────────────"))
@@ -1103,29 +1227,36 @@ def create_feishu_pro_report(
     blocks.append(create_text("────────────────────────────────────────"))
     blocks.append(create_text(""))
 
-    # ========== 审核结论（先行） ==========
+    # ========== 审核结论（始终显示） ==========
+    blocks.extend(_create_conclusion_blocks(score, grade, summary))
+    blocks.append(create_text(""))
+
+    # ========== 问题详情（有问题时显示） ==========
+    if summary.get('has_issues', False):
+        blocks.extend(_create_details_blocks(violations, pricing_analysis, product_info, summary))
+        blocks.append(create_text(""))
+
+    # ========== 修改建议（有问题时显示） ==========
+    if summary.get('has_issues', False):
+        blocks.extend(_create_suggestions_blocks(violations, summary))
+        blocks.append(create_text(""))
+
+    # ========== 报告信息（始终显示） ==========
+    blocks.extend(_create_info_blocks(report_id))
+    blocks.append(create_text(""))
+
+    return blocks
+
+
+def _create_conclusion_blocks(score: int, grade: str, summary: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """创建审核结论章节块"""
+    blocks = []
+
     blocks.append(create_heading_2("一、审核结论"))
     blocks.append(create_text(""))
 
-    # 统计数据
-    high_count = summary['violation_severity']['high']
-    medium_count = summary['violation_severity']['medium']
-    low_count = summary['violation_severity']['low']
-    total = summary['total_violations']
-
-    # 根据违规情况得出结论
-    if high_count > 0:
-        opinion = "不推荐上会"
-        explanation = f"产品触及监管红线（{high_count}项严重违规），存在重大合规风险，需完成整改后重新审核。"
-    elif score >= 75:
-        opinion = "条件推荐"
-        explanation = f"产品整体符合要求，存在{medium_count}项中等问题，建议完成修改后提交审核。"
-    elif score >= 60:
-        opinion = "需补充材料"
-        explanation = f"产品存在{total}项问题，建议补充说明材料后复审。"
-    else:
-        opinion = "不予推荐"
-        explanation = "产品合规性不足，不建议提交审核。"
+    # 生成审核意见
+    opinion, explanation = generate_conclusion_text(score, summary)
 
     blocks.append(create_bold_text(f"审核意见：{opinion}"))
     blocks.append(create_text(""))
@@ -1136,43 +1267,79 @@ def create_feishu_pro_report(
     blocks.append(create_text("表1-1：关键指标汇总表"))
     blocks.append(create_text(""))
 
+    high_count = summary['violation_severity']['high']
+    medium_count = summary['violation_severity']['medium']
+    low_count = summary['violation_severity']['low']
+    total = summary['total_violations']
+    pricing_issue_count = summary.get('pricing_issues', 0)
+
     key_metrics_data = [
         ["序号", "指标项", "结果", "说明"],
         ["1", "综合评分", f"{score}分", get_score_description(score)],
         ["2", "合规评级", grade, "基于违规数量和严重程度评定"],
         ["3", "违规总数", f"{total}项", f"严重{high_count}项，中等{medium_count}项，轻微{low_count}项"],
-        ["4", "定价评估", "合理" if summary.get('pricing_issues', 0) == 0 else "需关注", f"{summary.get('pricing_issues', 0)}项定价参数需关注"]
+        ["4", "定价评估", "合理" if pricing_issue_count == 0 else "需关注", f"{pricing_issue_count}项定价参数需关注"]
     ]
     blocks.extend(create_table_blocks(key_metrics_data))
     blocks.append(create_text(""))
     blocks.append(create_text("────────────────────────────────────────"))
-    blocks.append(create_text(""))
 
-    # ========== 问题详情 ==========
+    return blocks
+
+
+def _create_details_blocks(
+    violations: List[Dict[str, Any]],
+    pricing_analysis: Dict[str, Any],
+    product_info: Dict[str, Any],
+    summary: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """创建问题详情章节块"""
+    blocks = []
+
     blocks.append(create_heading_2("二、问题详情及依据"))
     blocks.append(create_text(""))
 
-    high_violations = [v for v in violations if v.get('severity') == 'high']
-    medium_violations = [v for v in violations if v.get('severity') == 'medium']
+    # 生成审核依据（动态）
+    regulation_basis = generate_regulation_basis(violations, product_info)
+    blocks.append(create_text("审核依据"))
+    blocks.append(create_text(""))
+    for reg in regulation_basis:
+        blocks.append(create_text(reg))
+    blocks.append(create_text(""))
+    blocks.append(create_text("────────────────────────────────────────"))
+    blocks.append(create_text(""))
 
     # 违规统计表
     blocks.append(create_text("表2-1：违规级别统计表"))
     blocks.append(create_text(""))
 
-    total_violations = len(violations)
-    high_percent = f"{high_count/total_violations*100:.1f}%" if total_violations > 0 else "0%"
-    medium_percent = f"{medium_count/total_violations*100:.1f}%" if total_violations > 0 else "0%"
-    low_percent = f"{low_count/total_violations*100:.1f}%" if total_violations > 0 else "0%"
+    high_count = summary['violation_severity']['high']
+    medium_count = summary['violation_severity']['medium']
+    low_count = summary['violation_severity']['low']
+    total = summary['total_violations']
+
+    if total > 0:
+        high_percent = f"{high_count/total*100:.1f}%"
+        medium_percent = f"{medium_count/total*100:.1f}%"
+        low_percent = f"{low_count/total*100:.1f}%"
+    else:
+        high_percent = "0%"
+        medium_percent = "0%"
+        low_percent = "0%"
 
     violation_stats_data = [
         ["序号", "违规级别", "数量", "占比"],
         ["1", "严重", f"{high_count}项", high_percent],
         ["2", "中等", f"{medium_count}项", medium_percent],
         ["3", "轻微", f"{low_count}项", low_percent],
-        ["合计", "总计", f"{total_violations}项", "100%"]
+        ["合计", "总计", f"{total}项", "100%"]
     ]
     blocks.extend(create_table_blocks(violation_stats_data))
     blocks.append(create_text(""))
+
+    # 按严重程度分组
+    high_violations = [v for v in violations if v.get('severity') == 'high']
+    medium_violations = [v for v in violations if v.get('severity') == 'medium']
 
     # 严重违规明细表
     if high_violations:
@@ -1225,11 +1392,20 @@ def create_feishu_pro_report(
             blocks.append(create_text(""))
 
     blocks.append(create_text("────────────────────────────────────────"))
-    blocks.append(create_text(""))
 
-    # ========== 修改建议 ==========
+    return blocks
+
+
+def _create_suggestions_blocks(violations: List[Dict[str, Any]], summary: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """创建修改建议章节块"""
+    blocks = []
+
     blocks.append(create_heading_2("三、修改建议"))
     blocks.append(create_text(""))
+
+    # 按严重程度分组
+    high_violations = [v for v in violations if v.get('severity') == 'high']
+    medium_violations = [v for v in violations if v.get('severity') == 'medium']
 
     if high_violations:
         blocks.append(create_text("表3-1：P0级整改事项表（必须立即整改）"))
@@ -1258,21 +1434,15 @@ def create_feishu_pro_report(
         blocks.append(create_text(""))
 
     blocks.append(create_text("────────────────────────────────────────"))
-    blocks.append(create_text(""))
 
-    # ========== 附录 ==========
-    blocks.append(create_heading_2("四、附录"))
-    blocks.append(create_text(""))
+    return blocks
 
-    blocks.append(create_text("审核依据"))
-    blocks.append(create_text(""))
-    blocks.append(create_text("1. 《中华人民共和国保险法》"))
-    blocks.append(create_text("2. 《保险公司管理规定》"))
-    blocks.append(create_text("3. 《人身保险公司保险条款和保险费率管理办法》"))
-    blocks.append(create_text("4. 《健康保险管理办法》"))
-    blocks.append(create_text(""))
 
-    blocks.append(create_text("报告信息"))
+def _create_info_blocks(report_id: str) -> List[Dict[str, Any]]:
+    """创建报告信息章节块"""
+    blocks = []
+
+    blocks.append(create_heading_2("四、报告信息"))
     blocks.append(create_text(""))
     blocks.append(create_text(f"报告编号：{report_id}"))
     blocks.append(create_text(f"生成时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}"))
