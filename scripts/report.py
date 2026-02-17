@@ -24,304 +24,357 @@ from lib.config import get_config
 FEISHU_API_BASE = "https://open.feishu.cn/open-apis"
 
 
-def convert_markdown_to_feishu_blocks(content: str) -> List[Dict[str, Any]]:
+def get_feishu_access_token(app_id: str, app_secret: str) -> str:
+    """获取飞书访问令牌"""
+    url = f"{FEISHU_API_BASE}/auth/v3/tenant_access_token/internal"
+    payload = {"app_id": app_id, "app_secret": app_secret}
+
+    response = requests.post(url, json=payload, timeout=10)
+    response.raise_for_status()
+    data = response.json()
+    if data.get("code") == 0:
+        return data.get("tenant_access_token")
+    else:
+        raise Exception(f"获取飞书令牌失败: {data.get('msg')}")
+
+
+def convert_markdown_to_feishu_blocks(markdown: str) -> List[Dict[str, Any]]:
     """
-    将 Markdown 内容转换为飞书原生格式块
+    将 Markdown 内容转换为飞书文档块（使用文本块模拟表格）
 
     Args:
-        content: Markdown 格式的文本内容
+        markdown: Markdown 格式的文本
 
     Returns:
-        list: 飞书块列表
+        List[Dict]: 飞书文档块列表
     """
-    lines = content.split('\n')
-    feishu_blocks = []
+    blocks = []
+    lines = markdown.split('\n')
+
     i = 0
-
     while i < len(lines):
-        line = lines[i].strip()
+        line = lines[i]
 
-        # 跳过空行
-        if not line:
+        # 空行
+        if not line.strip():
+            blocks.append(create_text_block(""))
             i += 1
             continue
 
-        # 处理分隔符
-        if line == '---':
-            # 创建分隔线块（使用空文本块模拟）
-            feishu_blocks.append({
-                "block_type": 2,  # Text
-                "text": {
-                    "elements": [{
-                        "text_run": {
-                            "content": "　",
-                            "style": {}
-                        }
-                    }]
-                }
-            })
-            i += 1
-            continue
-
-        # 处理一级标题 (# )
-        if line.startswith('# ') and not line.startswith('## '):
-            text_content = line[2:].strip()
-            feishu_blocks.append({
-                "block_type": 3,  # Heading 1
-                "heading1": {
-                    "elements": [{
-                        "text_run": {
-                            "content": text_content,
-                            "style": {}
-                        }
-                    }]
-                }
-            })
-            i += 1
-            continue
-
-        # 处理二级标题 (## )
-        if line.startswith('## ') and not line.startswith('### '):
-            text_content = line[3:].strip()
-            # 移除emoji前缀（如果有）
-            if text_content.startswith(('📋', '📊', '⚠️', '💰', '📝')):
-                text_content = text_content[1:].strip()
-            feishu_blocks.append({
-                "block_type": 4,  # Heading 2
-                "heading2": {
-                    "elements": [{
-                        "text_run": {
-                            "content": text_content,
-                            "style": {}
-                        }
-                    }]
-                }
-            })
-            i += 1
-            continue
-
-        # 处理三级标题 (### )
-        if line.startswith('### ') and not line.startswith('#### '):
-            text_content = line[4:].strip()
-            # 移除emoji前缀（如果有）
-            if text_content.startswith(('🔴', '🟡', '🟢', '📈', '💵', '💸', '🌟', '✅', '⚠️', '❌', '🚫')):
-                text_content = text_content[1:].strip()
-            feishu_blocks.append({
-                "block_type": 5,  # Heading 3
-                "heading3": {
-                    "elements": [{
-                        "text_run": {
-                            "content": text_content,
-                            "style": {}
-                        }
-                    }]
-                }
-            })
-            i += 1
-            continue
-
-        # 处理四级标题 (#### )
-        if line.startswith('#### '):
-            text_content = line[5:].strip()
-            # 移除数字前缀
-            if text_content and text_content[0].isdigit():
-                parts = text_content.split('.', 1)
-                if len(parts) == 2:
-                    text_content = parts[1].strip()
-            feishu_blocks.append({
-                "block_type": 2,  # Text
-                "text": {
-                    "elements": [{
-                        "text_run": {
-                            "content": text_content,
-                            "style": {"bold": True}
-                        }
-                    }]
-                }
-            })
-            i += 1
-            continue
-
-        # 处理引用 (> )
-        if line.startswith('>'):
-            text_content = line[1:].strip()
-            # 移除emoji前缀（如果有）
-            if text_content.startswith(('💡', '📌', '⚠️')):
-                text_content = text_content[1:].strip()
-            # 移除markdown加粗标记
-            text_content = text_content.replace('**', '').strip()
-            feishu_blocks.append({
-                "block_type": 2,  # Text
-                "text": {
-                    "elements": [{
-                        "text_run": {
-                            "content": f" {text_content}",
-                            "style": {}
-                        }
-                    }]
-                }
-            })
-            i += 1
-            continue
-
-        # 处理表格行 - 暂时简化为文本格式
-        if line.startswith('|'):
+        # 一级标题
+        if line.strip() == "保险产品精算审核报告":
+            blocks.append(create_heading_1_block(line.strip()))
+        # 二级标题（中文数字）
+        elif line.strip().startswith("一、") or line.strip().startswith("二、") or \
+             line.strip().startswith("三、") or line.strip().startswith("四、"):
+            blocks.append(create_heading_2_block(line.strip()))
+        # 表格标题（粗体文本）
+        elif line.strip().startswith("**表") and "表" in line:
+            blocks.append(create_bold_text_block(line.strip().replace("**", "")))
+        # 粗体文本
+        elif "**" in line.strip():
+            # 简单处理粗体
+            content = line.strip().replace("**", "")
+            if content:
+                blocks.append(create_bold_text_block(content))
+        # 分隔线
+        elif line.strip().startswith("────"):
+            blocks.append(create_divider_block())
+        # 表格行
+        elif line.strip().startswith("|"):
             # 收集整个表格
             table_lines = []
-            while i < len(lines) and lines[i].strip().startswith('|'):
+            while i < len(lines) and lines[i].strip().startswith("|"):
                 table_lines.append(lines[i].strip())
                 i += 1
 
-            # 解析表格并转换为格式化文本
-            if len(table_lines) > 2:  # 至少包含表头和分隔符
-                table_data = []
-                for table_line in table_lines:
-                    if table_line.startswith('|---'):
-                        continue  # 跳过分隔符行
-                    cells = [cell.strip().replace('**', '') for cell in table_line.split('|')[1:-1]]
-                    table_data.append(cells)
-
-                if table_data:
-                    # 为每个表格行创建格式化文本块
-                    for row_idx, row_data in enumerate(table_data):
-                        # 计算每列的最大宽度
-                        if row_idx == 0:
-                            # 表头行，添加强调
-                            row_text = " | ".join([f"【{cell}】" for cell in row_data])
-                            feishu_blocks.append({
-                                "block_type": 2,  # Text
-                                "text": {
-                                    "elements": [{
-                                        "text_run": {
-                                            "content": row_text,
-                                            "style": {"bold": True}
-                                        }
-                                    }]
-                                }
-                            })
-                        else:
-                            # 数据行
-                            row_text = " | ".join(row_data)
-                            feishu_blocks.append({
-                                "block_type": 2,  # Text
-                                "text": {
-                                    "elements": [{
-                                        "text_run": {
-                                            "content": row_text,
-                                            "style": {}
-                                        }
-                                    }]
-                                }
-                            })
-
-                    # 添加空行分隔
-                    feishu_blocks.append({
-                        "block_type": 2,  # Text
-                        "text": {
-                            "elements": [{
-                                "text_run": {
-                                    "content": "",
-                                    "style": {}
-                                }
-                            }]
-                        }
-                    })
+            # 解析表格并创建文本块
+            table_blocks = parse_table_to_text_blocks(table_lines)
+            blocks.extend(table_blocks)
             continue
-
-        # 处理普通文本
-        if line:
-            # 处理列表项
-            if line.startswith('-'):
-                text_content = line[1:].strip()
-                # 移除markdown加粗标记
-                text_content = text_content.replace('**', '').replace('`', '').strip()
-                feishu_blocks.append({
-                    "block_type": 2,  # Text
-                    "text": {
-                        "elements": [{
-                            "text_run": {
-                                "content": f"• {text_content}",
-                                "style": {}
-                            }
-                        }]
-                    }
-                })
-            elif line[0].isdigit() and '.' in line[:5]:
-                # 有序列表
-                text_content = line.split('.', 1)[1].strip() if '.' in line else line
-                text_content = text_content.replace('**', '').replace('`', '').strip()
-                feishu_blocks.append({
-                    "block_type": 2,  # Text
-                    "text": {
-                        "elements": [{
-                            "text_run": {
-                                "content": f"{line.split('.')[0]}. {text_content}",
-                                "style": {}
-                            }
-                        }]
-                    }
-                })
-            else:
-                # 普通段落
-                text_content = line.replace('**', '').replace('`', '').strip()
-                # 移除emoji前缀（如果有）
-                if text_content and text_content[0] in ('📌', '📋', '▸', '•', '💡'):
-                    text_content = text_content[1:].strip()
-
-                feishu_blocks.append({
-                    "block_type": 2,  # Text
-                    "text": {
-                        "elements": [{
-                            "text_run": {
-                                "content": text_content,
-                                "style": {}
-                            }
-                        }]
-                    }
-                })
+        # 列表项
+        elif line.strip().startswith("- ") or line.strip().startswith("1. "):
+            content = line.strip().replace("- ", "").replace("1. ", "")
+            blocks.append(create_text_block(f"  • {content}"))
+        # 普通文本
+        else:
+            content = line.strip()
+            if content:
+                blocks.append(create_text_block(content))
 
         i += 1
 
-    return feishu_blocks
+    return blocks
 
 
-def get_feishu_access_token(app_id: str, app_secret: str) -> str:
-    """
-    获取飞书访问令牌
-
-    Args:
-        app_id: 飞书应用 ID
-        app_secret: 飞书应用密钥
-
-    Returns:
-        str: 访问令牌
-    """
-    url = f"{FEISHU_API_BASE}/auth/v3/tenant_access_token/internal"
-    payload = {
-        "app_id": app_id,
-        "app_secret": app_secret
+def create_heading_1_block(text: str) -> Dict[str, Any]:
+    """创建一级标题块"""
+    return {
+        "block_type": 2,
+        "text": {
+            "elements": [{
+                "text_run": {
+                    "content": text,
+                    "style": {
+                        "bold": True,
+                        "text_size": "largest"
+                    }
+                }
+            }]
+        }
     }
 
-    try:
-        response = requests.post(url, json=payload, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if data.get("code") == 0:
-            return data.get("tenant_access_token")
-        else:
-            raise Exception(f"获取飞书令牌失败: {data.get('msg')}")
-    except Exception as e:
-        raise Exception(f"飞书 API 调用失败: {str(e)}")
+
+def create_heading_2_block(text: str) -> Dict[str, Any]:
+    """创建二级标题块"""
+    return {
+        "block_type": 2,
+        "text": {
+            "elements": [{
+                "text_run": {
+                    "content": text,
+                    "style": {
+                        "bold": True,
+                        "text_size": "large"
+                    }
+                }
+            }]
+        }
+    }
 
 
-def create_feishu_document(access_token: str, title: str, content: str) -> str:
+def create_bold_text_block(text: str) -> Dict[str, Any]:
+    """创建粗体文本块"""
+    return {
+        "block_type": 2,
+        "text": {
+            "elements": [{
+                "text_run": {
+                    "content": text,
+                    "style": {
+                        "bold": True
+                    }
+                }
+            }]
+        }
+    }
+
+
+def parse_table_to_text_blocks(table_lines: List[str]) -> List[Dict[str, Any]]:
+    """将 Markdown 表格解析为飞书文本块（使用等宽字体对齐）"""
+    if len(table_lines) < 2:
+        return []
+
+    blocks = []
+    data_rows = []
+
+    # 解析表格数据
+    for line in table_lines:
+        if line.startswith('|'):
+            cells = [cell.strip() for cell in line.split('|')[1:-1]]
+            # 跳过分隔行
+            if not all(cell.startswith('---') or cell == '' for cell in cells):
+                data_rows.append(cells)
+
+    if not data_rows:
+        return []
+
+    # 计算每列最大宽度
+    col_widths = []
+    if data_rows:
+        num_cols = len(data_rows[0])
+        for col_idx in range(num_cols):
+            max_width = 0
+            for row in data_rows:
+                if col_idx < len(row):
+                    max_width = max(max_width, len(row[col_idx]))
+            col_widths.append(min(max_width + 2, 30))
+
+    # 为每一行创建文本块
+    for row_idx, row in enumerate(data_rows):
+        is_header = (row_idx == 0)
+
+        # 对齐列
+        row_parts = []
+        for col_idx, cell in enumerate(row):
+            if col_idx < len(col_widths):
+                width = col_widths[col_idx]
+                if is_header or col_idx in [1, 2]:
+                    cell_text = f"{cell:<{width}}"
+                else:
+                    cell_text = f"{cell:>{width}}"
+                row_parts.append(cell_text)
+
+        row_text = " | ".join(row_parts)
+
+        blocks.append({
+            "block_type": 2,
+            "text": {
+                "elements": [{
+                    "text_run": {
+                        "content": row_text,
+                        "style": {
+                            "bold": is_header,
+                            "font_family": "Courier New"
+                        }
+                    }
+                }]
+            }
+        })
+
+    return blocks
+
+
+def create_heading_1_block(text: str) -> Dict[str, Any]:
+    """创建一级标题块"""
+    return {
+        "block_type": 2,  # heading1
+        "heading1": {
+            "elements": [
+                {
+                    "text_run": {
+                        "content": text,
+                        "text_element_style": {
+                            "bold": True
+                        }
+                    }
+                }
+            ]
+        }
+    }
+
+
+def create_heading_2_block(text: str) -> Dict[str, Any]:
+    """创建二级标题块"""
+    return {
+        "block_type": 3,  # heading2
+        "heading2": {
+            "elements": [
+                {
+                    "text_run": {
+                        "content": text,
+                        "text_element_style": {
+                            "bold": True
+                        }
+                    }
+                }
+            ]
+        }
+    }
+
+
+def create_heading_3_block(text: str) -> Dict[str, Any]:
+    """创建三级标题块"""
+    return {
+        "block_type": 4,  # heading3
+        "heading3": {
+            "elements": [
+                {
+                    "text_run": {
+                        "content": text,
+                        "text_element_style": {
+                            "bold": True
+                        }
+                    }
+                }
+            ]
+        }
+    }
+
+
+def create_text_block(text: str) -> Dict[str, Any]:
+    """创建文本块"""
+    # 处理粗体标记
+    content = text.replace('**', '').replace('*', '')
+    return {
+        "block_type": 2,  # text
+        "text": {
+            "elements": [
+                {
+                    "text_run": {
+                        "content": content
+                    }
+                }
+            ]
+        }
+    }
+
+
+def create_divider_block() -> Dict[str, Any]:
+    """创建分隔线块"""
+    return {
+        "block_type": 13  # divider
+    }
+
+
+def parse_table_to_blocks(table_lines: List[str]) -> List[Dict[str, Any]]:
+    """
+    将 Markdown 表格解析为飞书表格块
+
+    Args:
+        table_lines: 表格行列表
+
+    Returns:
+        List[Dict]: 飞书表格块
+    """
+    if len(table_lines) < 2:
+        return []
+
+    # 解析表格数据
+    rows = []
+    for line in table_lines:
+        if line.startswith('|'):
+            cells = [cell.strip() for cell in line.split('|')[1:-1]]
+            # 跳过分隔行
+            if not all(cell.startswith('---') or cell == '' for cell in cells):
+                rows.append(cells)
+
+    if not rows:
+        return []
+
+    # 创建表格块
+    table_block = {
+        "block_type": 3,  # table
+        "table": {
+            "table_block_id": f"table_{datetime.now().timestamp()}",
+            "column_size": len(rows[0]),
+            "row_size": len(rows),
+            "header": {
+                "cells": [
+                    {
+                        "column_id": str(i),
+                        "value": rows[0][i] if i < len(rows[0]) else ""
+                    }
+                    for i in range(min(5, len(rows[0])))  # 最多5列
+                ]
+            }
+        }
+    }
+
+    # 添加数据行
+    for row_idx, row in enumerate(rows[1:20], 1):  # 最多20行
+        for col_idx, cell_value in enumerate(row[:5]):  # 最多5列
+            table_block["table"][f"row_{row_idx}"] = {
+                "cells": [
+                    {
+                        "column_id": str(col_idx),
+                        "value": cell_value
+                    }
+                    for col_idx in range(min(5, len(row)))
+                ]
+            }
+
+    return [table_block]
+
+
+def create_feishu_document(access_token: str, title: str, blocks: List[Dict[str, Any]]) -> str:
     """
     创建飞书在线文档（使用原生格式）
 
     Args:
         access_token: 飞书访问令牌
         title: 文档标题
-        content: 文档内容（Markdown 格式）
+        blocks: 飞书文档块列表
 
     Returns:
         str: 文档 URL
@@ -363,23 +416,19 @@ def create_feishu_document(access_token: str, title: str, content: str) -> str:
         page_block_id = document_id
         print(f"📝 使用文档ID作为页面块 ID: {page_block_id}", file=sys.stderr)
 
-        # 将 Markdown 内容转换为飞书原生格式块
-        # 使用正确的块类型：heading1 (block_type 2), heading2 (block_type 3), heading3 (block_type 4)
-        feishu_blocks = convert_markdown_to_feishu_blocks(content)
-
-        print(f"准备写入 {len(feishu_blocks)} 个块", file=sys.stderr)
+        print(f"准备写入 {len(blocks)} 个块", file=sys.stderr)
 
         # 批量写入文档内容（每次最多 50 个块，飞书API限制）
-        if feishu_blocks:
-            for i in range(0, len(feishu_blocks), 50):
-                chunk = feishu_blocks[i:i+50]
+        if blocks:
+            for i in range(0, len(blocks), 50):
+                chunk = blocks[i:i+50]
                 update_url = f"{FEISHU_API_BASE}/docx/v1/documents/{document_id}/blocks/{page_block_id}/children"
                 update_payload = {
                     "children": chunk,
                     "index": -1  # 添加到末尾
                 }
 
-                print(f"写入块 {i+1}-{min(i+50, len(feishu_blocks))}", file=sys.stderr)
+                print(f"写入块 {i+1}-{min(i+50, len(blocks))}", file=sys.stderr)
                 update_response = requests.post(update_url, headers=create_headers, json=update_payload, timeout=30)
                 print(f"块写入响应: {update_response.status_code}", file=sys.stderr)
 
@@ -404,12 +453,12 @@ def create_feishu_document(access_token: str, title: str, content: str) -> str:
         raise Exception(f"创建飞书文档失败: {str(e)}")
 
 
-def export_to_feishu(content: str, title: str = None) -> Dict[str, Any]:
+def export_to_feishu(blocks: List[Dict[str, Any]], title: str = None) -> Dict[str, Any]:
     """
     将报告导出为飞书在线文档
 
     Args:
-        content: 报告内容（Markdown 格式）
+        blocks: 飞书文档块列表
         title: 文档标题（可选）
 
     Returns:
@@ -435,7 +484,7 @@ def export_to_feishu(content: str, title: str = None) -> Dict[str, Any]:
         access_token = get_feishu_access_token(app_id, app_secret)
 
         # 创建文档
-        doc_url = create_feishu_document(access_token, title, content)
+        doc_url = create_feishu_document(access_token, title, blocks)
 
         return {
             'success': True,
@@ -473,7 +522,7 @@ def main():
 
         if export_feishu:
             feishu_result = export_to_feishu(
-                result['content'],
+                result.get('blocks', []),
                 title=f"审核报告-{params.get('product_info', {}).get('product_name', '未知产品')}"
             )
             result['feishu_export'] = feishu_result
@@ -554,6 +603,16 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
         summary
     )
 
+    # 生成飞书专业格式块
+    blocks = create_feishu_pro_report(
+        violations,
+        pricing_analysis,
+        product_info,
+        score,
+        grade,
+        summary
+    )
+
     # 构建结果
     result = {
         'success': True,
@@ -562,6 +621,7 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
         'grade': grade,
         'summary': summary,
         'content': report_content,
+        'blocks': blocks,  # 添加飞书块
         'metadata': {
             'product_name': product_info.get('product_name', '未知产品'),
             'insurance_company': product_info.get('insurance_company', '未知'),
@@ -629,6 +689,103 @@ def calculate_grade(score: int) -> str:
         return '不合格'
 
 
+def calculate_risk_score(violations: List[Dict[str, Any]], pricing_analysis: Dict[str, Any]) -> float:
+    """
+    计算综合风险评分
+
+    Args:
+        violations: 违规记录列表
+        pricing_analysis: 定价分析结果
+
+    Returns:
+        float: 风险评分（0-100）
+    """
+    # 合规风险（40%权重）
+    high_count = sum(1 for v in violations if v.get('severity') == 'high')
+    medium_count = sum(1 for v in violations if v.get('severity') == 'medium')
+    low_count = sum(1 for v in violations if v.get('severity') == 'low')
+
+    compliance_score = max(0, 100 - high_count * 25 - medium_count * 10 - low_count * 5)
+
+    # 定价风险（30%权重）
+    pricing_issues = 0
+    pricing = pricing_analysis.get('pricing', {})
+    if isinstance(pricing, dict):
+        for category in ['mortality', 'interest', 'expense']:
+            analysis = pricing.get(category, {})
+            if isinstance(analysis, dict) and analysis.get('reasonable') is False:
+                pricing_issues += 1
+    pricing_score = max(0, 100 - pricing_issues * 20)
+
+    # 条款风险（20%权重）
+    clause_score = max(0, 100 - len(violations) * 3)
+
+    # 操作风险（10%权重）
+    operational_score = 85  # 基础分
+
+    # 综合风险评分
+    risk_score = (
+        compliance_score * 0.4 +
+        pricing_score * 0.3 +
+        clause_score * 0.2 +
+        operational_score * 0.1
+    )
+
+    return risk_score
+
+
+def get_risk_level(score: float) -> str:
+    """
+    获取风险等级
+
+    Args:
+        score: 分数
+
+    Returns:
+        str: 风险等级
+    """
+    if score >= 80:
+        return "🟢 低风险"
+    elif score >= 60:
+        return "🟡 中风险"
+    elif score >= 40:
+        return "🟠 中高风险"
+    else:
+        return "🔴 高风险"
+
+
+def get_simple_risk_level(score: float) -> str:
+    """获取风险等级（简化版，不含emoji）"""
+    if score >= 80:
+        return "低风险"
+    elif score >= 60:
+        return "中等风险"
+    else:
+        return "高风险"
+
+
+def get_score_description(score: int) -> str:
+    """
+    获取评分描述
+
+    Args:
+        score: 分数
+
+    Returns:
+        str: 评分描述
+    """
+    if score >= 90:
+        return "产品优秀，建议快速通过"
+    elif score >= 80:
+        return "产品良好，可正常上会"
+    elif score >= 70:
+        return "产品合格，建议完成修改后上会"
+    elif score >= 60:
+        return "产品基本合格，需补充说明材料"
+    else:
+        return "产品不合格，不建议提交审核"
+
+
 def generate_summary(violations: List[Dict[str, Any]], pricing_analysis: Dict[str, Any]) -> Dict[str, Any]:
     """
     生成报告摘要
@@ -675,10 +832,242 @@ def generate_report_content(
     product_info: Dict[str, Any],
     score: int,
     grade: str,
-    summary: Dict[str, Any]
+    summary: Dict[str, Any],
+    params: Dict[str, Any] = None
 ) -> str:
     """
-    生成报告文本内容（优化版 Markdown 格式，适配飞书文档）
+    生成精算审核报告
+
+    结构：
+    1. 审核结论（先行）
+    2. 问题详情及依据
+    3. 修改建议
+
+    不重复内容，简洁明了
+    """
+    if params is None:
+        params = {}
+
+    lines = []
+    report_id = f"RPT-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+    product_name = product_info.get('product_name', '未知产品')
+    company_name = product_info.get('insurance_company', '未知保险公司')
+
+    # ========== 标题 ==========
+    lines.append("保险产品精算审核报告")
+    lines.append("")
+    lines.append("────────────────────────────────────────")
+    lines.append("")
+
+    # 产品信息
+    lines.append(f"产品名称：{product_name}")
+    lines.append(f"保险公司：{company_name}")
+    lines.append(f"产品类型：{product_info.get('product_type', '未知')}")
+    lines.append(f"审核日期：{datetime.now().strftime('%Y年%m月%d日')}")
+    lines.append(f"报告编号：{report_id}")
+    lines.append("")
+    lines.append("────────────────────────────────────────")
+    lines.append("")
+
+    # ========== 审核结论（先行） ==========
+    lines.append("一、审核结论")
+    lines.append("")
+
+    # 统计数据
+    high_count = summary['violation_severity']['high']
+    medium_count = summary['violation_severity']['medium']
+    low_count = summary['violation_severity']['low']
+    total = summary['total_violations']
+
+    # 根据违规情况得出结论
+    if high_count > 0:
+        conclusion = f"不推荐上会。产品触及监管红线（{high_count}项严重违规），存在重大合规风险，需完成整改后重新审核。"
+    elif score >= 75:
+        conclusion = f"条件推荐。产品整体符合要求，存在{medium_count}项中等问题，建议完成修改后提交审核。"
+    elif score >= 60:
+        conclusion = f"需补充材料。产品存在{total}项问题，建议补充说明材料后复审。"
+    else:
+        conclusion = "不予推荐。产品合规性不足，不建议提交审核。"
+
+    # 根据违规情况得出结论
+    if high_count > 0:
+        opinion = "不推荐上会"
+        explanation = f"产品触及监管红线（{high_count}项严重违规），存在重大合规风险，需完成整改后重新审核。"
+    elif score >= 75:
+        opinion = "条件推荐"
+        explanation = f"产品整体符合要求，存在{medium_count}项中等问题，建议完成修改后提交审核。"
+    elif score >= 60:
+        opinion = "需补充材料"
+        explanation = f"产品存在{total}项问题，建议补充说明材料后复审。"
+    else:
+        opinion = "不予推荐"
+        explanation = "产品合规性不足，不建议提交审核。"
+
+    lines.append(f"**审核意见**：{opinion}")
+    lines.append("")
+    lines.append(f"**说明**：{explanation}")
+    lines.append("")
+
+    # 关键数据表格
+    lines.append("**表1-1：关键指标汇总表**")
+    lines.append("")
+    lines.append("| 序号 | 指标项 | 结果 | 说明 |")
+    lines.append("|:----:|:------|:-----|:-----|")
+    lines.append(f"| 1 | 综合评分 | {score}分 | {get_score_description(score)} |")
+    lines.append(f"| 2 | 合规评级 | {grade} | 基于违规数量和严重程度评定 |")
+    lines.append(f"| 3 | 违规总数 | {total}项 | 严重{high_count}项，中等{medium_count}项，轻微{low_count}项 |")
+    pricing_issue_count = summary.get('pricing_issues', 0)
+    lines.append(f"| 4 | 定价评估 | {'合理' if pricing_issue_count == 0 else '需关注'} | {pricing_issue_count}项定价参数需关注 |")
+    lines.append("")
+    lines.append("────────────────────────────────────────")
+    lines.append("")
+
+    # ========== 问题详情 ==========
+    lines.append("二、问题详情及依据")
+    lines.append("")
+
+    # 按严重程度分组
+    high_violations = [v for v in violations if v.get('severity') == 'high']
+    medium_violations = [v for v in violations if v.get('severity') == 'medium']
+
+    # 违规统计表
+    lines.append("**表2-1：违规级别统计表**")
+    lines.append("")
+    lines.append("| 序号 | 违规级别 | 数量 | 占比 |")
+    lines.append("|:----:|:--------|:----:|:----:|")
+
+    total_violations = len(violations)
+    if total_violations > 0:
+        high_percent = f"{high_count/total_violations*100:.1f}%"
+        medium_percent = f"{medium_count/total_violations*100:.1f}%"
+        low_percent = f"{low_count/total_violations*100:.1f}%"
+    else:
+        high_percent = "0%"
+        medium_percent = "0%"
+        low_percent = "0%"
+
+    lines.append(f"| 1 | 严重 | {high_count}项 | {high_percent} |")
+    lines.append(f"| 2 | 中等 | {medium_count}项 | {medium_percent} |")
+    lines.append(f"| 3 | 轻微 | {low_count}项 | {low_percent} |")
+    lines.append(f"| **合计** | **总计** | **{total_violations}项** | **100%** |")
+    lines.append("")
+
+    # 严重违规明细表
+    if high_violations:
+        lines.append("**表2-2：严重违规明细表**")
+        lines.append("")
+        lines.append("| 序号 | 规则编号 | 违规描述 | 涉及条款 | 整改建议 |")
+        lines.append("|:----:|:--------|:---------|:--------|:---------|")
+        for i, v in enumerate(high_violations[:20], 1):
+            desc = v.get('description', '未知')[:25]
+            clause = f"第{v.get('clause_index', '?') + 1}条"
+            remediation = v.get('remediation', '无')[:20]
+            lines.append(f"| {i} | {v.get('rule', 'N/A')} | {desc}... | {clause} | {remediation}... |")
+        lines.append("")
+
+    # 中等违规明细表
+    if medium_violations:
+        lines.append("**表2-3：中等违规明细表**")
+        lines.append("")
+        lines.append("| 序号 | 规则编号 | 违规描述 | 涉及条款 | 整改建议 |")
+        lines.append("|:----:|:--------|:---------|:--------|:---------|")
+        for i, v in enumerate(medium_violations[:10], 1):
+            desc = v.get('description', '未知')[:25]
+            clause = f"第{v.get('clause_index', '?') + 1}条"
+            remediation = v.get('remediation', '无')[:20]
+            lines.append(f"| {i} | {v.get('rule', 'N/A')} | {desc}... | {clause} | {remediation}... |")
+        lines.append("")
+
+    # 定价问题
+    pricing = pricing_analysis.get('pricing', {})
+    if isinstance(pricing, dict):
+        pricing_issues = []
+        for category in ['interest', 'expense']:
+            analysis = pricing.get(category)
+            if analysis and not analysis.get('reasonable', True):
+                pricing_issues.append(f"{'预定利率' if category == 'interest' else '费用率'}：{analysis.get('note', '不符合监管要求')}")
+
+        if pricing_issues:
+            lines.append("**表2-4：定价问题汇总表**")
+            lines.append("")
+            lines.append("| 序号 | 问题类型 | 问题描述 |")
+            lines.append("|:----:|:---------|:---------|")
+            for i, issue in enumerate(pricing_issues, 1):
+                lines.append(f"| {i} | {'预定利率' if '预定利率' in issue else '费用率'} | {issue.split('：')[1] if '：' in issue else issue} |")
+            lines.append("")
+
+    lines.append("────────────────────────────────────────")
+    lines.append("")
+
+    # ========== 修改建议 ==========
+    lines.append("三、修改建议")
+    lines.append("")
+
+    if high_violations:
+        lines.append("**表3-1：P0级整改事项表（必须立即整改）**")
+        lines.append("")
+        lines.append("| 序号 | 整改事项 | 涉及条款 |")
+        lines.append("|:----:|:---------|:--------|")
+        for i, v in enumerate(high_violations[:10], 1):
+            desc = v.get('description', '未知')[:30]
+            clause = f"第{v.get('clause_index', '?') + 1}条"
+            lines.append(f"| {i} | {desc} | {clause} |")
+        lines.append("")
+
+    if medium_violations:
+        lines.append("**表3-2：P1级整改事项表（建议尽快整改）**")
+        lines.append("")
+        lines.append("| 序号 | 整改事项 | 涉及条款 |")
+        lines.append("|:----:|:---------|:--------|")
+        for i, v in enumerate(medium_violations[:5], 1):
+            desc = v.get('description', '未知')[:30]
+            clause = f"第{v.get('clause_index', '?') + 1}条"
+            lines.append(f"| {i} | {desc} | {clause} |")
+        lines.append("")
+
+    lines.append("────────────────────────────────────────")
+    lines.append("")
+
+    # ========== 附录 ==========
+    lines.append("四、附录")
+    lines.append("")
+
+    lines.append("**审核依据**")
+    lines.append("")
+    lines.append("1. 《中华人民共和国保险法》")
+    lines.append("2. 《保险公司管理规定》")
+    lines.append("3. 《人身保险公司保险条款和保险费率管理办法》")
+    lines.append("4. 《健康保险管理办法》")
+    lines.append("")
+
+    lines.append("**报告信息**")
+    lines.append("")
+    lines.append(f"- 报告编号：{report_id}")
+    lines.append(f"- 生成时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}")
+    lines.append("- 审核系统：Actuary Sleuth v3.0")
+    lines.append("")
+
+    lines.append("**免责声明**")
+    lines.append("")
+    lines.append("本报告由AI精算审核系统生成，仅供内部参考。最终决策应以产品委员会审议结果和监管部门审批意见为准。")
+    lines.append("")
+
+    return '\n'.join(lines)
+
+
+# ========== 飞书专业块创建函数 ==========
+
+def create_feishu_pro_report(
+    violations: List[Dict[str, Any]],
+    pricing_analysis: Dict[str, Any],
+    product_info: Dict[str, Any],
+    score: int,
+    grade: str,
+    summary: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """
+    直接生成飞书专业格式的报告块
 
     Args:
         violations: 违规记录列表
@@ -689,204 +1078,336 @@ def generate_report_content(
         summary: 关键信息
 
     Returns:
-        str: 报告内容（Markdown 格式）
+        list: 飞书文档块列表
     """
-    lines = []
+    blocks = []
+    report_id = f"RPT-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
-    # 报告标题（居中大标题效果）
-    lines.append("# 保险产品合规性审核报告")
-    lines.append("")
-    lines.append("---")
-    lines.append("")
+    # ========== 封面 ==========
+    blocks.append(create_heading_1("保险产品精算审核报告"))
+    blocks.append(create_text(""))
+    blocks.append(create_text("────────────────────────────────────────"))
+    blocks.append(create_text(""))
 
-    # 基本信息区域（使用表格形式，更清晰）
-    lines.append("## 📋 产品基本信息")
-    lines.append("")
-    lines.append("| 项目 | 内容 |")
-    lines.append("|------|------|")
-    lines.append(f"| **产品名称** | {product_info.get('product_name', '未知产品')} |")
-    lines.append(f"| **保险公司** | {product_info.get('insurance_company', '未知')} |")
-    lines.append(f"| **产品类型** | {product_info.get('product_type', '未知')} |")
-    lines.append(f"| **审核时间** | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} |")
-    lines.append("")
+    # 产品信息
+    product_name = product_info.get('product_name', '未知产品')
+    company_name = product_info.get('insurance_company', '未知保险公司')
+    product_type = product_info.get('product_type', '未知')
 
-    # 审核结果概览（使用emoji图标和卡片式布局）
-    lines.append("## 📊 审核结果概览")
-    lines.append("")
+    blocks.append(create_text(f"产品名称：{product_name}"))
+    blocks.append(create_text(f"保险公司：{company_name}"))
+    blocks.append(create_text(f"产品类型：{product_type}"))
+    blocks.append(create_text(f"审核日期：{datetime.now().strftime('%Y年%m月%d日')}"))
+    blocks.append(create_text(f"报告编号：{report_id}"))
+    blocks.append(create_text(""))
+    blocks.append(create_text("────────────────────────────────────────"))
+    blocks.append(create_text(""))
 
-    # 评级emoji
-    grade_emoji = {
-        '优秀': '🟢',
-        '良好': '🟡',
-        '合格': '🟠',
-        '不合格': '🔴'
-    }.get(grade, '⚪')
+    # ========== 审核结论（先行） ==========
+    blocks.append(create_heading_2("一、审核结论"))
+    blocks.append(create_text(""))
 
-    lines.append(f"### {grade_emoji} 综合评级：{grade}")
-    lines.append("")
-    lines.append(f"> **综合评分**：{score} 分 / 100 分")
-    lines.append("")
-
-    # 违规统计（使用表格）
-    lines.append("| 违规级别 | 数量 | 占比 |")
-    lines.append("|----------|------|------|")
-
-    total = summary['total_violations']
+    # 统计数据
     high_count = summary['violation_severity']['high']
     medium_count = summary['violation_severity']['medium']
     low_count = summary['violation_severity']['low']
+    total = summary['total_violations']
 
-    high_percent = f"{high_count/total*100:.1f}%" if total > 0 else "0%"
-    medium_percent = f"{medium_count/total*100:.1f}%" if total > 0 else "0%"
-    low_percent = f"{low_count/total*100:.1f}%" if total > 0 else "0%"
-
-    lines.append(f"| 🔴 严重违规 | **{high_count}** 项 | {high_percent} |")
-    lines.append(f"| 🟡 中等违规 | **{medium_count}** 项 | {medium_percent} |")
-    lines.append(f"| 🟢 轻微违规 | **{low_count}** 项 | {low_percent} |")
-    lines.append(f"| 📊 违规总数 | **{total}** 项 | 100% |")
-    lines.append("")
-
-    # 违规详情
-    if violations:
-        lines.append("---")
-        lines.append("")
-        lines.append("## ⚠️ 违规详情")
-        lines.append("")
-
-        # 按严重程度分组
-        high_violations = [v for v in violations if v.get('severity') == 'high']
-        medium_violations = [v for v in violations if v.get('severity') == 'medium']
-        low_violations = [v for v in violations if v.get('severity') == 'low']
-
-        # 严重违规
-        if high_violations:
-            lines.append("### 🔴 严重违规")
-            lines.append("")
-            lines.append("> 需要立即整改的问题")
-            lines.append("")
-
-            for i, violation in enumerate(high_violations[:10], 1):
-                lines.append(f"#### {i}. {violation.get('description', '未知违规')}")
-                lines.append("")
-                lines.append(f"| 项目 | 内容 |")
-                lines.append("|------|------|")
-                lines.append(f"| **规则编号** | `{violation.get('rule', 'N/A')}` |")
-                lines.append(f"| **整改建议** | {violation.get('remediation', '无')} |")
-                lines.append("")
-
-        # 中等违规
-        if medium_violations:
-            lines.append("### 🟡 中等违规")
-            lines.append("")
-
-            for i, violation in enumerate(medium_violations[:5], 1):
-                lines.append(f"**{i}. {violation.get('description', '未知违规')}**")
-                lines.append("")
-                lines.append(f"> 规则：`{violation.get('rule', 'N/A')}` | 建议：{violation.get('remediation', '无')}")
-                lines.append("")
-
-        # 轻微违规
-        if low_violations:
-            lines.append("### 🟢 轻微违规")
-            lines.append("")
-
-            for i, violation in enumerate(low_violations[:5], 1):
-                lines.append(f"{i}. **{violation.get('description', '未知违规')}**")
-                lines.append(f"   - 规则编号：`{violation.get('rule', 'N/A')}`")
-                lines.append(f"   - 整改建议：{violation.get('remediation', '无')}")
-                lines.append("")
-
-    # 定价分析
-    if pricing_analysis:
-        lines.append("---")
-        lines.append("")
-        lines.append("## 💰 定价合理性分析")
-        lines.append("")
-
-        pricing = pricing_analysis.get('pricing', {})
-        if isinstance(pricing, dict):
-            for category in ['mortality', 'interest', 'expense']:
-                analysis = pricing.get(category)
-                if analysis:
-                    category_info = {
-                        'mortality': {'name': '死亡率/发生率', 'icon': '📈'},
-                        'interest': {'name': '预定利率', 'icon': '💵'},
-                        'expense': {'name': '费用率', 'icon': '💸'}
-                    }.get(category, {'name': category, 'icon': '📊'})
-
-                    icon = category_info['icon']
-                    name = category_info['name']
-                    is_reasonable = analysis.get('reasonable', True)
-                    status_icon = '✅' if is_reasonable else '❌'
-                    status_text = '合理' if is_reasonable else '不合理'
-
-                    lines.append(f"### {icon} {name}")
-                    lines.append("")
-                    lines.append(f"| 指标 | 数值 |")
-                    lines.append("|------|------|")
-                    lines.append(f"| **当前值** | {analysis.get('value', 'N/A')} |")
-                    lines.append(f"| **基准值** | {analysis.get('benchmark', 'N/A')} |")
-                    lines.append(f"| **偏差** | {analysis.get('deviation', 'N/A')}% |")
-                    lines.append(f"| **评估** | {status_icon} **{status_text}** |")
-                    lines.append("")
-
-                    if analysis.get('note'):
-                        lines.append(f"> 💡 **说明**：{analysis['note']}")
-                        lines.append("")
-
-    # 审核结论
-    lines.append("---")
-    lines.append("")
-    lines.append("## 📝 审核结论")
-    lines.append("")
-
-    # 根据评级生成结论
-    if summary['has_critical_issues']:
-        conclusion_icon = "🚫"
-        conclusion_text = "该产品存在严重合规问题，建议进行重大修改后再提交审核。"
-        conclusion_color = "🔴"
-    elif score >= 90:
-        conclusion_icon = "🌟"
-        conclusion_text = "该产品合规性优秀，符合监管要求，可以推向市场。"
-        conclusion_color = "🟢"
+    # 根据违规情况得出结论
+    if high_count > 0:
+        opinion = "不推荐上会"
+        explanation = f"产品触及监管红线（{high_count}项严重违规），存在重大合规风险，需完成整改后重新审核。"
     elif score >= 75:
-        conclusion_icon = "✅"
-        conclusion_text = "该产品整体合规性良好，建议对指出的问题进行修改后可以推向市场。"
-        conclusion_color = "🟢"
+        opinion = "条件推荐"
+        explanation = f"产品整体符合要求，存在{medium_count}项中等问题，建议完成修改后提交审核。"
     elif score >= 60:
-        conclusion_icon = "⚠️"
-        conclusion_text = "该产品基本合规，但存在一些需要改进的问题，建议修改后再推向市场。"
-        conclusion_color = "🟡"
+        opinion = "需补充材料"
+        explanation = f"产品存在{total}项问题，建议补充说明材料后复审。"
     else:
-        conclusion_icon = "❌"
-        conclusion_text = "该产品合规性不足，需要进行全面修改。"
-        conclusion_color = "🔴"
+        opinion = "不予推荐"
+        explanation = "产品合规性不足，不建议提交审核。"
 
-    lines.append(f"### {conclusion_icon} {conclusion_text}")
-    lines.append("")
+    blocks.append(create_bold_text(f"审核意见：{opinion}"))
+    blocks.append(create_text(""))
+    blocks.append(create_text(f"说明：{explanation}"))
+    blocks.append(create_text(""))
 
-    # 关键指标摘要
-    lines.append("**关键指标摘要**:")
-    lines.append("")
-    lines.append(f"- 综合评分：{score} 分")
-    lines.append(f"- 合规评级：{conclusion_color} {grade}")
-    lines.append(f"- 违规总数：{total} 项（严重：{high_count}，中等：{medium_count}，轻微：{low_count}）")
-    lines.append(f"- 定价问题：{summary.get('pricing_issues', 0)} 项")
-    lines.append("")
+    # 关键指标表格
+    blocks.append(create_text("表1-1：关键指标汇总表"))
+    blocks.append(create_text(""))
 
-    # 页脚
-    lines.append("---")
-    lines.append("")
-    lines.append("<details>")
-    lines.append("<summary>📄 报告信息</summary>")
-    lines.append("")
-    lines.append("- **生成工具**：Actuary Sleuth v3.0")
-    lines.append(f"- **生成时间**：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append("- **免责声明**：本报告由 AI 自动生成，仅供参考，最终决策应以监管部门官方解释为准。")
-    lines.append("")
-    lines.append("</details>")
+    key_metrics_data = [
+        ["序号", "指标项", "结果", "说明"],
+        ["1", "综合评分", f"{score}分", get_score_description(score)],
+        ["2", "合规评级", grade, "基于违规数量和严重程度评定"],
+        ["3", "违规总数", f"{total}项", f"严重{high_count}项，中等{medium_count}项，轻微{low_count}项"],
+        ["4", "定价评估", "合理" if summary.get('pricing_issues', 0) == 0 else "需关注", f"{summary.get('pricing_issues', 0)}项定价参数需关注"]
+    ]
+    blocks.extend(create_table_blocks(key_metrics_data))
+    blocks.append(create_text(""))
+    blocks.append(create_text("────────────────────────────────────────"))
+    blocks.append(create_text(""))
 
-    return '\n'.join(lines)
+    # ========== 问题详情 ==========
+    blocks.append(create_heading_2("二、问题详情及依据"))
+    blocks.append(create_text(""))
+
+    high_violations = [v for v in violations if v.get('severity') == 'high']
+    medium_violations = [v for v in violations if v.get('severity') == 'medium']
+
+    # 违规统计表
+    blocks.append(create_text("表2-1：违规级别统计表"))
+    blocks.append(create_text(""))
+
+    total_violations = len(violations)
+    high_percent = f"{high_count/total_violations*100:.1f}%" if total_violations > 0 else "0%"
+    medium_percent = f"{medium_count/total_violations*100:.1f}%" if total_violations > 0 else "0%"
+    low_percent = f"{low_count/total_violations*100:.1f}%" if total_violations > 0 else "0%"
+
+    violation_stats_data = [
+        ["序号", "违规级别", "数量", "占比"],
+        ["1", "严重", f"{high_count}项", high_percent],
+        ["2", "中等", f"{medium_count}项", medium_percent],
+        ["3", "轻微", f"{low_count}项", low_percent],
+        ["合计", "总计", f"{total_violations}项", "100%"]
+    ]
+    blocks.extend(create_table_blocks(violation_stats_data))
+    blocks.append(create_text(""))
+
+    # 严重违规明细表
+    if high_violations:
+        blocks.append(create_text("表2-2：严重违规明细表"))
+        blocks.append(create_text(""))
+
+        high_violation_data = [["序号", "规则编号", "违规描述", "涉及条款", "整改建议"]]
+        for i, v in enumerate(high_violations[:20], 1):
+            desc = v.get('description', '未知')[:25]
+            clause = f"第{v.get('clause_index', '?') + 1}条"
+            remediation = v.get('remediation', '无')[:20]
+            high_violation_data.append([str(i), v.get('rule', 'N/A'), f"{desc}...", clause, f"{remediation}..."])
+
+        blocks.extend(create_table_blocks(high_violation_data))
+        blocks.append(create_text(""))
+
+    # 中等违规明细表
+    if medium_violations:
+        blocks.append(create_text("表2-3：中等违规明细表"))
+        blocks.append(create_text(""))
+
+        medium_violation_data = [["序号", "规则编号", "违规描述", "涉及条款", "整改建议"]]
+        for i, v in enumerate(medium_violations[:10], 1):
+            desc = v.get('description', '未知')[:25]
+            clause = f"第{v.get('clause_index', '?') + 1}条"
+            remediation = v.get('remediation', '无')[:20]
+            medium_violation_data.append([str(i), v.get('rule', 'N/A'), f"{desc}...", clause, f"{remediation}..."])
+
+        blocks.extend(create_table_blocks(medium_violation_data))
+        blocks.append(create_text(""))
+
+    # 定价问题
+    pricing = pricing_analysis.get('pricing', {})
+    if isinstance(pricing, dict):
+        pricing_issues = []
+        for category in ['interest', 'expense']:
+            analysis = pricing.get(category)
+            if analysis and not analysis.get('reasonable', True):
+                pricing_issues.append(f"{'预定利率' if category == 'interest' else '费用率'}：{analysis.get('note', '不符合监管要求')}")
+
+        if pricing_issues:
+            blocks.append(create_text("表2-4：定价问题汇总表"))
+            blocks.append(create_text(""))
+
+            pricing_data = [["序号", "问题类型", "问题描述"]]
+            for i, issue in enumerate(pricing_issues, 1):
+                pricing_data.append([str(i), '预定利率' if '预定利率' in issue else '费用率', issue.split('：')[1] if '：' in issue else issue])
+
+            blocks.extend(create_table_blocks(pricing_data))
+            blocks.append(create_text(""))
+
+    blocks.append(create_text("────────────────────────────────────────"))
+    blocks.append(create_text(""))
+
+    # ========== 修改建议 ==========
+    blocks.append(create_heading_2("三、修改建议"))
+    blocks.append(create_text(""))
+
+    if high_violations:
+        blocks.append(create_text("表3-1：P0级整改事项表（必须立即整改）"))
+        blocks.append(create_text(""))
+
+        p0_data = [["序号", "整改事项", "涉及条款"]]
+        for i, v in enumerate(high_violations[:10], 1):
+            desc = v.get('description', '未知')[:30]
+            clause = f"第{v.get('clause_index', '?') + 1}条"
+            p0_data.append([str(i), desc, clause])
+
+        blocks.extend(create_table_blocks(p0_data))
+        blocks.append(create_text(""))
+
+    if medium_violations:
+        blocks.append(create_text("表3-2：P1级整改事项表（建议尽快整改）"))
+        blocks.append(create_text(""))
+
+        p1_data = [["序号", "整改事项", "涉及条款"]]
+        for i, v in enumerate(medium_violations[:5], 1):
+            desc = v.get('description', '未知')[:30]
+            clause = f"第{v.get('clause_index', '?') + 1}条"
+            p1_data.append([str(i), desc, clause])
+
+        blocks.extend(create_table_blocks(p1_data))
+        blocks.append(create_text(""))
+
+    blocks.append(create_text("────────────────────────────────────────"))
+    blocks.append(create_text(""))
+
+    # ========== 附录 ==========
+    blocks.append(create_heading_2("四、附录"))
+    blocks.append(create_text(""))
+
+    blocks.append(create_text("审核依据"))
+    blocks.append(create_text(""))
+    blocks.append(create_text("1. 《中华人民共和国保险法》"))
+    blocks.append(create_text("2. 《保险公司管理规定》"))
+    blocks.append(create_text("3. 《人身保险公司保险条款和保险费率管理办法》"))
+    blocks.append(create_text("4. 《健康保险管理办法》"))
+    blocks.append(create_text(""))
+
+    blocks.append(create_text("报告信息"))
+    blocks.append(create_text(""))
+    blocks.append(create_text(f"报告编号：{report_id}"))
+    blocks.append(create_text(f"生成时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}"))
+    blocks.append(create_text("审核系统：Actuary Sleuth v3.0"))
+    blocks.append(create_text(""))
+
+    blocks.append(create_text("免责声明"))
+    blocks.append(create_text(""))
+    blocks.append(create_text("本报告由AI精算审核系统生成，仅供内部参考。"))
+    blocks.append(create_text("最终决策应以产品委员会审议结果和监管部门审批意见为准。"))
+    blocks.append(create_text(""))
+
+    return blocks
+
+
+def create_heading_1(text: str) -> Dict[str, Any]:
+    """创建一级标题块"""
+    return {
+        "block_type": 2,
+        "text": {
+            "elements": [{
+                "text_run": {
+                    "content": text,
+                    "style": {
+                        "bold": True,
+                        "text_size": "largest"
+                    }
+                }
+            }]
+        }
+    }
+
+
+def create_heading_2(text: str) -> Dict[str, Any]:
+    """创建二级标题块"""
+    return {
+        "block_type": 2,
+        "text": {
+            "elements": [{
+                "text_run": {
+                    "content": text,
+                    "style": {
+                        "bold": True,
+                        "text_size": "large"
+                    }
+                }
+            }]
+        }
+    }
+
+
+def create_text(text: str) -> Dict[str, Any]:
+    """创建文本块"""
+    return {
+        "block_type": 2,
+        "text": {
+            "elements": [{
+                "text_run": {
+                    "content": text,
+                    "style": {}
+                }
+            }]
+        }
+    }
+
+
+def create_bold_text(text: str) -> Dict[str, Any]:
+    """创建粗体文本块"""
+    return {
+        "block_type": 2,
+        "text": {
+            "elements": [{
+                "text_run": {
+                    "content": text,
+                    "style": {
+                        "bold": True
+                    }
+                }
+            }]
+        }
+    }
+
+
+def create_table_blocks(table_data: List[List[str]]) -> List[Dict[str, Any]]:
+    """创建表格块（使用文本块模拟）"""
+    blocks = []
+
+    for row_idx, row in enumerate(table_data):
+        is_header = (row_idx == 0)
+
+        # 对齐列（使用固定宽度）
+        col_widths = [8, 20, 15, 15, 20]
+        row_parts = []
+        for col_idx, cell in enumerate(row):
+            if col_idx < len(col_widths):
+                width = col_widths[col_idx]
+                # 左对齐或右对齐
+                if is_header or col_idx in [0]:
+                    cell_text = f"{cell:<{width}}"
+                else:
+                    cell_text = f"{cell:>{width}}"
+                row_parts.append(cell_text)
+
+        row_text = " | ".join(row_parts)
+
+        blocks.append({
+            "block_type": 2,
+            "text": {
+                "elements": [{
+                    "text_run": {
+                        "content": row_text,
+                        "style": {
+                            "bold": is_header,
+                            "font_family": "Courier New"
+                        }
+                    }
+                }]
+            }
+        })
+
+    return blocks
+
+
+def get_score_description(score: int) -> str:
+    """获取评分描述"""
+    if score >= 90:
+        return "产品优秀，建议快速通过"
+    elif score >= 80:
+        return "产品良好，可正常上会"
+    elif score >= 70:
+        return "产品合格，建议完成修改后上会"
+    elif score >= 60:
+        return "产品基本合格，需补充说明材料"
+    else:
+        return "产品不合格，不建议提交审核"
 
 
 if __name__ == '__main__':

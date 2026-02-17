@@ -100,10 +100,13 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
 
         # Step 4: 生成报告
         print(f"[{audit_id}] Step 4: Generating report...", file=sys.stderr)
+        # 将 document_url 添加到 product_info 中，以便报告生成时可以引用原文
+        product_info = preprocess_result.get('product_info', {})
+        product_info['document_url'] = document_url
         report_result = run_report_generation(
             violations.get('violations', []),
             pricing_analysis,
-            preprocess_result.get('product_info', {})
+            product_info
         )
 
         if not report_result.get('success'):
