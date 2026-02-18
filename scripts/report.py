@@ -15,9 +15,121 @@ from typing import Dict, List, Any
 from infrastructure import database as db
 from infrastructure.config import get_config
 from infrastructure.id_generator import IDGenerator
+from typing import Optional
 
 # 导入飞书导出器
 from exporters import FeishuExporter
+
+
+# ========== 整改建议模式映射 ==========
+
+# 违规关键词到具体整改建议的映射
+REMEDIATION_PATTERNS = {
+    '等待期': {
+        '过长': '将等待期调整为90天以内',
+        '超过': '将等待期调整为90天以内',
+        '症状': '删除将等待期内症状或体征作为免责依据的表述',
+        '体征': '删除将等待期内症状或体征作为免责依据的表述',
+        '突出': '在条款中以加粗或红色字体突出说明等待期',
+        '_default': '合理设置等待期长度，确保符合监管规定'
+    },
+    '免责条款': {
+        '不集中': '将免责条款集中在合同显著位置',
+        '不清晰': '使用清晰明确的语言表述免责情形',
+        '表述不清': '使用清晰明确的语言表述免责情形',
+        '加粗': '使用加粗或红色字体突出显示免责条款',
+        '标红': '使用加粗或红色字体突出显示免责条款',
+        '突出': '使用加粗或红色字体突出显示免责条款',
+        '免除': '删除不合理的免责条款，确保不违反保险法规定',
+        '_default': '完善免责条款的表述和展示方式'
+    },
+    '责任免除': {
+        '_default': '完善免责条款的表述和展示方式'
+    },
+    '保险金额': {
+        '不规范': '使用规范的保险金额表述，确保与保险法一致',
+        '不一致': '使用规范的保险金额表述，确保与保险法一致',
+        '_default': '明确保险金额的确定方式和计算标准'
+    },
+    '保证收益': {
+        '_default': '删除保证收益相关表述，改为演示收益或说明利益不确定'
+    },
+    '演示收益': {
+        '_default': '删除保证收益相关表述，改为演示收益或说明利益不确定'
+    },
+    '费率': {
+        '倒算': '停止使用倒算方式确定费率，采用精算方法',
+        '偏离实际': '根据实际费用水平重新核算附加费用率',
+        '不真实': '重新进行费率厘定，确保符合审慎原则',
+        '不合理': '重新进行费率厘定，确保符合审慎原则',
+        '_default': '规范费率厘定方法，确保符合监管要求'
+    },
+    '现金价值': {
+        '超过': '调整现金价值计算方法，确保不超过已交保费',
+        '异化': '调整现金价值计算方法，确保不超过已交保费',
+        '_default': '规范现金价值计算，确保符合监管规定'
+    },
+    '基因': {
+        '_default': '删除根据基因检测结果调节费率的约定'
+    },
+    '犹豫期': {
+        '过短': '将犹豫期调整为15天以上',
+        '不足': '将犹豫期调整为15天以上',
+        '_default': '规范犹豫期的起算和时长'
+    },
+    '利率': {
+        '超过': '将预定利率调整为监管上限以内',
+        '超标': '将预定利率调整为监管上限以内',
+        '_default': '确保预定利率符合监管规定'
+    },
+    '预定利率': {
+        '超过': '将预定利率调整为监管上限以内',
+        '超标': '将预定利率调整为监管上限以内',
+        '_default': '确保预定利率符合监管规定'
+    },
+    '备案': {
+        '不达标': '停止销售不达标产品，按规定报送停止使用报告',
+        '未报送': '停止销售不达标产品，按规定报送停止使用报告',
+        '_default': '完善产品备案管理，确保符合监管要求'
+    },
+    '产品设计异化': {
+        '万能型': '调整产品形态设计，避免异化为万能型产品',
+        '偏离': '强化风险保障功能，确保符合保险本质',
+        '_default': '优化产品设计，确保符合保险保障属性'
+    },
+    '异化': {
+        '万能型': '调整产品形态设计，避免异化为万能型产品',
+        '偏离': '强化风险保障功能，确保符合保险本质',
+        '_default': '优化产品设计，确保符合保险保障属性'
+    },
+    '条款文字': {
+        '_default': '简化条款表述，使用通俗易懂的语言'
+    },
+    '冗长': {
+        '_default': '简化条款表述，使用通俗易懂的语言'
+    },
+    '不易懂': {
+        '_default': '简化条款表述，使用通俗易懂的语言'
+    },
+    '职业': {
+        '_default': '明确职业类别要求和限制'
+    },
+    '类别': {
+        '_default': '明确职业类别要求和限制'
+    },
+    '年龄': {
+        '_default': '明确投保年龄范围和要求'
+    },
+    '保险期间': {
+        '_default': '明确保险期间和保障期限'
+    },
+    '保险期限': {
+        '_default': '明确保险期间和保障期限'
+    },
+}
+
+# 模糊建议列表
+VAGUE_REMEDIATION_PHRASES = ['请根据具体情况', '确保符合', '无', '', '按照《保险法》规定', '建议']
 
 
 # ========== 飞书文档块创建辅助函数 ==========
@@ -709,6 +821,53 @@ def _generate_suggestions_section(violations: List[Dict[str, Any]], summary: Dic
     return lines
 
 
+def _find_remediation_by_pattern(description: str, category: str) -> Optional[str]:
+    """根据违规描述关键词查找具体整改建议
+
+    Args:
+        description: 违规描述
+        category: 违规类别
+
+    Returns:
+        具体整改建议，如果未找到返回 None
+    """
+    # 先尝试类别匹配
+    for category_key, pattern_dict in REMEDIATION_PATTERNS.items():
+        if category_key in description or category_key in category:
+            # 尝试关键词匹配
+            for keyword, remediation in pattern_dict.items():
+                if keyword == '_default':
+                    continue
+                if keyword in description:
+                    return remediation
+            # 使用默认建议
+            return pattern_dict.get('_default', '')
+
+    return None
+
+
+def _get_fallback_remediation(description: str) -> str:
+    """当没有匹配的模式时，生成后备建议
+
+    Args:
+        description: 违规描述
+
+    Returns:
+        后备建议
+    """
+    if '规定' in description or '违反' in description:
+        # 找出违反的是什么规定
+        words = description.split('，')
+        if len(words) > 1:
+            issue_part = words[0][:30]
+            return f"针对{issue_part}问题进行调整"
+        else:
+            return '请根据违规描述进行相应调整，确保符合监管要求'
+    else:
+        # 如果无法识别具体问题，返回基于类别的一般建议
+        return '请根据问题描述进行相应调整，确保符合监管要求'
+
+
 def _get_specific_remediation(violation: Dict[str, Any]) -> str:
     """生成具体的修改建议（基于实际违规描述动态生成）
 
@@ -721,98 +880,17 @@ def _get_specific_remediation(violation: Dict[str, Any]) -> str:
     # 获取数据库中的默认建议
     default_remediation = violation.get('remediation', '')
     description = violation.get('description', '')
+    category = violation.get('category', '')
 
     # 如果默认建议是空或太模糊，则基于违规描述生成具体建议
-    vague_phrases = ['请根据具体情况', '确保符合', '无', '', '按照《保险法》规定', '建议']
-    if any(phrase in default_remediation for phrase in vague_phrases):
-        # 基于违规描述中的关键词生成具体建议
-        if '等待期' in description:
-            if '过长' in description or '超过' in description:
-                return '将等待期调整为90天以内'
-            elif '症状' in description or '体征' in description:
-                return '删除将等待期内症状或体征作为免责依据的表述'
-            elif '突出' in description:
-                return '在条款中以加粗或红色字体突出说明等待期'
-            else:
-                return '合理设置等待期长度，确保符合监管规定'
-        elif '免责条款' in description or '责任免除' in description:
-            if '不集中' in description:
-                return '将免责条款集中在合同显著位置'
-            elif '不清晰' in description or '表述不清' in description:
-                return '使用清晰明确的语言表述免责情形'
-            elif '加粗' in description or '标红' in description or '突出' in description:
-                return '使用加粗或红色字体突出显示免责条款'
-            elif '免除' in description and '不合理' in description:
-                return '删除不合理的免责条款，确保不违反保险法规定'
-            else:
-                return '完善免责条款的表述和展示方式'
-        elif '保险金额' in description:
-            if '不规范' in description or '不一致' in description:
-                return '使用规范的保险金额表述，确保与保险法一致'
-            else:
-                return '明确保险金额的确定方式和计算标准'
-        elif '保证收益' in description or '演示收益' in description:
-            return '删除保证收益相关表述，改为演示收益或说明利益不确定'
-        elif '费率' in description:
-            if '倒算' in description:
-                return '停止使用倒算方式确定费率，采用精算方法'
-            elif '偏离实际' in description:
-                return '根据实际费用水平重新核算附加费用率'
-            elif '不真实' in description or '不合理' in description:
-                return '重新进行费率厘定，确保符合审慎原则'
-            else:
-                return '规范费率厘定方法，确保符合监管要求'
-        elif '现金价值' in description:
-            if '超过' in description or '异化' in description:
-                return '调整现金价值计算方法，确保不超过已交保费'
-            else:
-                return '规范现金价值计算，确保符合监管规定'
-        elif '基因' in description:
-            return '删除根据基因检测结果调节费率的约定'
-        elif '犹豫期' in description:
-            if '过短' in description or '不足' in description:
-                return '将犹豫期调整为15天以上'
-            else:
-                return '规范犹豫期的起算和时长'
-        elif '利率' in description or '预定利率' in description:
-            if '超过' in description or '超标' in description:
-                return '将预定利率调整为监管上限以内'
-            else:
-                return '确保预定利率符合监管规定'
-        elif '备案' in description:
-            if '不达标' in description or '未报送' in description:
-                return '停止销售不达标产品，按规定报送停止使用报告'
-            else:
-                return '完善产品备案管理，确保符合监管要求'
-        elif '产品设计异化' in description or '异化' in description:
-            if '万能型' in description:
-                return '调整产品形态设计，避免异化为万能型产品'
-            elif '偏离' in description:
-                return '强化风险保障功能，确保符合保险本质'
-            else:
-                return '优化产品设计，确保符合保险保障属性'
-        elif '条款文字' in description or '冗长' in description or '不易懂' in description:
-            return '简化条款表述，使用通俗易懂的语言'
-        elif '职业' in description or '类别' in description:
-            return '明确职业类别要求和限制'
-        elif '年龄' in description:
-            return '明确投保年龄范围和要求'
-        elif '保险期间' in description or '保险期限' in description:
-            return '明确保险期间和保障期限'
-        else:
-            # 从违规描述中提取关键词，生成针对性建议
-            # 提取违规的核心问题
-            if '规定' in description or '违反' in description:
-                # 找出违反的是什么规定
-                words = description.split('，')
-                if len(words) > 1:
-                    issue_part = words[0][:30]
-                    return f"针对{issue_part}问题进行调整"
-                else:
-                    return '请根据违规描述进行相应调整，确保符合监管要求'
-            else:
-                # 如果无法识别具体问题，返回基于类别的一般建议
-                return '请根据问题描述进行相应调整，确保符合监管要求'
+    if any(phrase in default_remediation for phrase in VAGUE_REMEDIATION_PHRASES):
+        # 尝试使用模式匹配
+        specific_remediation = _find_remediation_by_pattern(description, category)
+        if specific_remediation:
+            return specific_remediation
+
+        # 如果模式匹配失败，使用后备建议
+        return _get_fallback_remediation(description)
 
     return default_remediation
 
