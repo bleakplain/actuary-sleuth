@@ -118,23 +118,44 @@ def _run_audit_step(
         step_name: 步骤名称
         step_func: 步骤函数
         *args: 位置参数
-        **kwargs: 关键字参数
+        **kwargs: 关键字参数（可包含 audit_id，但不传递给步骤函数）
 
     Returns:
         步骤执行结果
 
     Raises:
-        AuditStepError: 对应步骤的错误类型
+        DocumentPreprocessError: 预处理步骤错误
+        NegativeListCheckError: 负面清单检查错误
+        PricingAnalysisError: 定价分析错误
+        ReportGenerationError: 报告生成错误
+        AuditStepError: 其他步骤错误
     """
-    step_logger = get_audit_logger(kwargs.get('audit_id', ''))
+    # 提取 audit_id 用于日志，但不传递给步骤函数
+    audit_id = kwargs.pop('audit_id', '')
+    document_url = kwargs.pop('document_url', '')
+
+    step_logger = get_audit_logger(audit_id)
     step_logger.step(step_name)
 
     result = step_func(*args, **kwargs)
 
     if not result.get('success'):
         error_msg = result.get('error', 'Unknown error')
-        error_type = step_name.replace(' ', '_').lower()
-        raise AuditStepError(f"{step_name} failed: {error_msg}")
+
+        # 根据步骤名称抛出对应的错误类型
+        if '预处理' in step_name:
+            raise DocumentPreprocessError(
+                error_msg,
+                details={'document_url': document_url}
+            )
+        elif '负面清单' in step_name:
+            raise NegativeListCheckError(error_msg)
+        elif '定价' in step_name:
+            raise PricingAnalysisError(error_msg)
+        elif '报告' in step_name:
+            raise ReportGenerationError(error_msg)
+        else:
+            raise AuditStepError(f"{step_name} failed: {error_msg}")
 
     return result
 
@@ -296,53 +317,46 @@ def execute(params: Dict[str, Any]) -> AuditResult:
 
     try:
         # Step 1: 文档预处理
-        step_logger.step("预处理文档")
-        preprocess_result = run_preprocess(document_content, document_url)
-
-        if not preprocess_result.get('success'):
-            raise DocumentPreprocessError(
-                preprocess_result.get('error', 'Unknown error'),
-                details={'document_url': document_url}
-            )
+        preprocess_result = _run_audit_step(
+            "预处理文档",
+            run_preprocess,
+            document_content,
+            document_url,
+            audit_id=audit_id,
+            document_url=document_url
+        )
 
         # Step 2: 负面清单检查
-        step_logger.step("负面清单检查")
-        violations = run_negative_list_check(preprocess_result.get('clauses', []))
-
-        if not violations.get('success'):
-            raise NegativeListCheckError(
-                violations.get('error', 'Unknown error')
-            )
+        violations = _run_audit_step(
+            "负面清单检查",
+            run_negative_list_check,
+            preprocess_result.get('clauses', []),
+            audit_id=audit_id
+        )
 
         # Step 3: 定价分析（仅full审核）
         pricing_analysis = None
         if audit_type == 'full':
-            step_logger.step("定价分析")
-            pricing_analysis = run_pricing_analysis(
+            pricing_analysis = _run_audit_step(
+                "定价分析",
+                run_pricing_analysis,
                 preprocess_result.get('pricing_params', {}),
-                preprocess_result.get('product_info', {}).get('product_type', 'unknown')
+                preprocess_result.get('product_info', {}).get('product_type', 'unknown'),
+                audit_id=audit_id
             )
 
-            if not pricing_analysis.get('success'):
-                raise PricingAnalysisError(
-                    pricing_analysis.get('error', 'Unknown error')
-                )
-
         # Step 4: 生成报告
-        step_logger.step("生成报告")
         # 将 document_url 添加到 product_info 中，以便报告生成时可以引用原文
         product_info = preprocess_result.get('product_info', {})
         product_info['document_url'] = document_url
-        report_result = run_report_generation(
+        report_result = _run_audit_step(
+            "生成报告",
+            run_report_generation,
             violations.get('violations', []),
             pricing_analysis,
-            product_info
+            product_info,
+            audit_id=audit_id
         )
-
-        if not report_result.get('success'):
-            raise ReportGenerationError(
-                report_result.get('error', 'Unknown error')
-            )
 
         # Step 5: 保存审核记录
         step_logger.step("保存审核记录")
