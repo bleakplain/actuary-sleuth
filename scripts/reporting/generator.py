@@ -84,12 +84,12 @@ class ReportGenerator:
     ) -> int:
         """计算综合评分"""
         # TODO: 从 report.py 迁移 calculate_score() 逻辑
-        pass
+        raise NotImplementedError("待实现")
 
     def _calculate_grade(self, score: int) -> str:
         """计算评级"""
         # TODO: 从 report.py 迁移 calculate_grade() 逻辑
-        pass
+        raise NotImplementedError("待实现")
 
     def _generate_summary(
         self,
@@ -98,7 +98,7 @@ class ReportGenerator:
     ) -> Dict[str, Any]:
         """生成报告摘要"""
         # TODO: 从 report.py 迁移 generate_summary() 逻辑
-        pass
+        raise NotImplementedError("待实现")
 
     def _generate_content(
         self,
@@ -111,7 +111,7 @@ class ReportGenerator:
     ) -> str:
         """生成报告文本内容"""
         # TODO: 从 report.py 迁移 generate_report_content() 逻辑
-        pass
+        raise NotImplementedError("待实现")
 
     def _generate_blocks(
         self,
@@ -124,7 +124,7 @@ class ReportGenerator:
     ) -> List[Dict[str, Any]]:
         """生成飞书报告块"""
         # TODO: 从 report.py 迁移 create_report() 逻辑
-        pass
+        raise NotImplementedError("待实现")
 
     def _generate_metadata(self, product_info: Dict[str, Any]) -> Dict[str, Any]:
         """生成元数据"""
