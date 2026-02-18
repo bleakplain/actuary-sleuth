@@ -8,6 +8,7 @@ import json
 import argparse
 import sys
 import os
+import random
 import requests
 from pathlib import Path
 from datetime import datetime
@@ -484,10 +485,15 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
         summary
     )
 
+    # 生成报告ID（优化并发支持：毫秒时间戳 + 随机数）
+    report_timestamp = int(datetime.now().timestamp() * 1000)
+    report_random = random.randint(1000, 9999)
+    report_id = f"RPT-{report_timestamp}-{report_random}"
+
     # 构建结果
     result = {
         'success': True,
-        'report_id': f"RPT-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+        'report_id': report_id,
         'score': score,
         'grade': grade,
         'summary': summary,
@@ -800,7 +806,10 @@ def generate_report_content(
         params = {}
 
     lines = []
-    report_id = f"RPT-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    # 生成报告ID（优化并发支持：毫秒时间戳 + 随机数）
+    report_timestamp = int(datetime.now().timestamp() * 1000)
+    report_random = random.randint(1000, 9999)
+    report_id = f"RPT-{report_timestamp}-{report_random}"
 
     # ========== 审核结论（始终显示） ==========
     lines.extend(_generate_conclusion_section(score, grade, summary))
@@ -1147,7 +1156,10 @@ def create_report(
         list: 飞书文档块列表
     """
     blocks = []
-    report_id = f"RPT-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    # 生成报告ID（优化并发支持：毫秒时间戳 + 随机数）
+    report_timestamp = int(datetime.now().timestamp() * 1000)
+    report_random = random.randint(1000, 9999)
+    report_id = f"RPT-{report_timestamp}-{report_random}"
 
     # ========== 审核结论（始终显示） ==========
     blocks.extend(_create_conclusion_blocks(score, grade, summary))

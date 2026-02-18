@@ -9,6 +9,7 @@ import argparse
 import sys
 import subprocess
 import tempfile
+import random
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any
@@ -68,8 +69,10 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
     document_url = params.get('documentUrl', '')
     audit_type = params.get('auditType', 'full')
 
-    # 生成审核ID
-    audit_id = f"AUD-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    # 生成审核ID（优化并发支持：毫秒时间戳 + 随机数）
+    audit_timestamp = int(datetime.now().timestamp() * 1000)
+    audit_random = random.randint(1000, 9999)
+    audit_id = f"AUD-{audit_timestamp}-{audit_random}"
 
     try:
         # Step 1: 文档预处理

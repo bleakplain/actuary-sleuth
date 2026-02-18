@@ -8,6 +8,7 @@ import json
 import argparse
 import sys
 import re
+import random
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, Optional
@@ -79,9 +80,14 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
     pricing_params = extract_pricing_params(document_content)
 
     # 构建结果
+    # 生成预处理ID（优化并发支持：毫秒时间戳 + 随机数）
+    preprocess_timestamp = int(datetime.now().timestamp() * 1000)
+    preprocess_random = random.randint(1000, 9999)
+    preprocess_id = f"PRE-{preprocess_timestamp}-{preprocess_random}"
+
     result = {
         'success': True,
-        'preprocess_id': f"PRE-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+        'preprocess_id': preprocess_id,
         'metadata': {
             'document_url': document_url,
             'document_type': document_type,

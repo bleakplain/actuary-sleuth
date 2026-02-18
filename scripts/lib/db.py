@@ -2,18 +2,41 @@
 # -*- coding: utf-8 -*-
 """
 数据库操作模块
+
+优化并发支持:
+- 启用 WAL 模式 (Write-Ahead Logging) 提升并发性能
+- 设置合理的超时时间避免锁等待失败
 """
 import sqlite3
 import json
+import time
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent.parent.parent / 'data' / 'actuary.db'
 
+# 并发优化配置
+DB_TIMEOUT = 30  # 30秒超时
+DB_WAL_MODE = True  # 启用WAL模式
+
 
 def get_connection():
-    """获取数据库连接"""
-    conn = sqlite3.connect(DB_PATH)
+    """获取数据库连接（优化并发支持）"""
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=DB_TIMEOUT,
+        check_same_thread=False  # 允许多线程使用
+    )
     conn.row_factory = sqlite3.Row
+
+    # 启用 WAL 模式以提升并发性能
+    if DB_WAL_MODE:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=30000")  # 30秒忙等待
+        except sqlite3.Error:
+            # 如果无法设置WAL模式（例如某些网络文件系统），静默失败
+            pass
+
     return conn
 
 
