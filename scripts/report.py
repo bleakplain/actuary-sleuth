@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-报告生成脚本（修复版）
+报告生成脚本
+
 生成结构化的审核报告，支持导出为飞书在线文档
 """
 import json
 import argparse
 import sys
-import os
-import random
-import requests
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any
@@ -19,97 +17,31 @@ sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
 from lib import db
 from lib.config import get_config
+from lib.id_generator import IDGenerator
+
+# 导入飞书导出器
+from exporters import FeishuExporter
 
 
-# 飞书 API 配置
-FEISHU_API_BASE = "https://open.feishu.cn/open-apis"
+# ========== 飞书文档块创建辅助函数 ==========
+
+def create_text_block(text: str) -> Dict[str, Any]:
+    """创建文本块"""
+    return {
+        "block_type": 2,
+        "text": {
+            "elements": [{
+                "text_run": {
+                    "content": text,
+                    "style": {}
+                }
+            }]
+        }
+    }
 
 
-def get_feishu_access_token(app_id: str, app_secret: str) -> str:
-    """获取飞书访问令牌"""
-    url = f"{FEISHU_API_BASE}/auth/v3/tenant_access_token/internal"
-    payload = {"app_id": app_id, "app_secret": app_secret}
-
-    response = requests.post(url, json=payload, timeout=10)
-    response.raise_for_status()
-    data = response.json()
-    if data.get("code") == 0:
-        return data.get("tenant_access_token")
-    else:
-        raise Exception(f"获取飞书令牌失败: {data.get('msg')}")
-
-
-def convert_markdown_to_feishu_blocks(markdown: str) -> List[Dict[str, Any]]:
-    """
-    将 Markdown 内容转换为飞书文档块（使用文本块模拟表格）
-
-    Args:
-        markdown: Markdown 格式的文本
-
-    Returns:
-        List[Dict]: 飞书文档块列表
-    """
-    blocks = []
-    lines = markdown.split('\n')
-
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-
-        # 空行
-        if not line.strip():
-            blocks.append(create_text_block(""))
-            i += 1
-            continue
-
-        # 一级标题
-        if line.strip() == "保险产品精算审核报告":
-            blocks.append(create_heading_1_block(line.strip()))
-        # 二级标题（中文数字）
-        elif line.strip().startswith("一、") or line.strip().startswith("二、") or \
-             line.strip().startswith("三、") or line.strip().startswith("四、"):
-            blocks.append(create_heading_2_block(line.strip()))
-        # 表格标题（粗体文本）
-        elif line.strip().startswith("**表") and "表" in line:
-            blocks.append(create_bold_text_block(line.strip().replace("**", "")))
-        # 粗体文本
-        elif "**" in line.strip():
-            # 简单处理粗体
-            content = line.strip().replace("**", "")
-            if content:
-                blocks.append(create_bold_text_block(content))
-        # 分隔线
-        elif line.strip().startswith("────"):
-            blocks.append(create_divider_block())
-        # 表格行
-        elif line.strip().startswith("|"):
-            # 收集整个表格
-            table_lines = []
-            while i < len(lines) and lines[i].strip().startswith("|"):
-                table_lines.append(lines[i].strip())
-                i += 1
-
-            # 解析表格并创建文本块
-            table_blocks = parse_table_to_text_blocks(table_lines)
-            blocks.extend(table_blocks)
-            continue
-        # 列表项
-        elif line.strip().startswith("- ") or line.strip().startswith("1. "):
-            content = line.strip().replace("- ", "").replace("1. ", "")
-            blocks.append(create_text_block(f"  • {content}"))
-        # 普通文本
-        else:
-            content = line.strip()
-            if content:
-                blocks.append(create_text_block(content))
-
-        i += 1
-
-    return blocks
-
-
-def create_heading_1_block(text: str) -> Dict[str, Any]:
-    """创建一级标题块"""
+def create_bold_text_block(text: str) -> Dict[str, Any]:
+    """创建粗体文本块"""
     return {
         "block_type": 2,
         "text": {
@@ -117,8 +49,7 @@ def create_heading_1_block(text: str) -> Dict[str, Any]:
                 "text_run": {
                     "content": text,
                     "style": {
-                        "bold": True,
-                        "text_size": "largest"
+                        "bold": True
                     }
                 }
             }]
@@ -144,186 +75,6 @@ def create_heading_2_block(text: str) -> Dict[str, Any]:
     }
 
 
-def create_bold_text_block(text: str) -> Dict[str, Any]:
-    """创建粗体文本块"""
-    return {
-        "block_type": 2,
-        "text": {
-            "elements": [{
-                "text_run": {
-                    "content": text,
-                    "style": {
-                        "bold": True
-                    }
-                }
-            }]
-        }
-    }
-
-
-def parse_table_to_text_blocks(table_lines: List[str]) -> List[Dict[str, Any]]:
-    """将 Markdown 表格解析为飞书文本块（使用等宽字体对齐）"""
-    if len(table_lines) < 2:
-        return []
-
-    blocks = []
-    data_rows = []
-
-    # 解析表格数据
-    for line in table_lines:
-        if line.startswith('|'):
-            cells = [cell.strip() for cell in line.split('|')[1:-1]]
-            # 跳过分隔行
-            if not all(cell.startswith('---') or cell == '' for cell in cells):
-                data_rows.append(cells)
-
-    if not data_rows:
-        return []
-
-    # 计算每列最大宽度
-    col_widths = []
-    if data_rows:
-        num_cols = len(data_rows[0])
-        for col_idx in range(num_cols):
-            max_width = 0
-            for row in data_rows:
-                if col_idx < len(row):
-                    max_width = max(max_width, len(row[col_idx]))
-            col_widths.append(min(max_width + 2, 30))
-
-    # 为每一行创建文本块
-    for row_idx, row in enumerate(data_rows):
-        is_header = (row_idx == 0)
-
-        # 对齐列
-        row_parts = []
-        for col_idx, cell in enumerate(row):
-            if col_idx < len(col_widths):
-                width = col_widths[col_idx]
-                if is_header or col_idx in [1, 2]:
-                    cell_text = f"{cell:<{width}}"
-                else:
-                    cell_text = f"{cell:>{width}}"
-                row_parts.append(cell_text)
-
-        row_text = " | ".join(row_parts)
-
-        blocks.append({
-            "block_type": 2,
-            "text": {
-                "elements": [{
-                    "text_run": {
-                        "content": row_text,
-                        "style": {
-                            "bold": is_header,
-                            "font_family": "Courier New"
-                        }
-                    }
-                }]
-            }
-        })
-
-    return blocks
-
-
-def create_feishu_document(access_token: str, title: str, blocks: List[Dict[str, Any]]) -> str:
-    """
-    创建飞书在线文档（使用原生格式）
-
-    Args:
-        access_token: 飞书访问令牌
-        title: 文档标题
-        blocks: 飞书文档块列表
-
-    Returns:
-        str: 文档 URL
-    """
-    # 创建文档（使用正确的 API 格式）
-    create_url = f"{FEISHU_API_BASE}/docx/v1/documents"
-    create_headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
-    }
-
-    try:
-        # 创建文档（需要提供 title）
-        create_payload = {
-            "title": title,
-            "folder_token": ""  # 空字符串表示根目录
-        }
-
-        create_response = requests.post(create_url, headers=create_headers, json=create_payload, timeout=10)
-
-        # 打印调试信息
-        print(f"飞书 API 响应状态: {create_response.status_code}", file=sys.stderr)
-        if create_response.status_code != 200:
-            print(f"飞书 API 响应内容: {create_response.text}", file=sys.stderr)
-
-        create_response.raise_for_status()
-        create_data = create_response.json()
-
-        if create_data.get("code") != 0:
-            raise Exception(f"创建文档失败: {create_data.get('msg')}")
-
-        document_id = create_data.get("data", {}).get("document", {}).get("document_id")
-
-        if not document_id:
-            raise Exception("未能获取文档 ID")
-
-        # 对于新创建的文档，直接使用 document_id 作为 page_block_id
-        # 根据飞书API文档，新文档的根块ID就是document_id
-        page_block_id = document_id
-        print(f"📝 使用文档ID作为页面块 ID: {page_block_id}", file=sys.stderr)
-
-        print(f"准备写入 {len(blocks)} 个块", file=sys.stderr)
-
-        # 批量写入文档内容（每次最多 50 个块，飞书API限制）
-        if blocks:
-            # 验证块数据结构
-            print(f"验证 {len(blocks)} 个块的数据结构...", file=sys.stderr)
-            for idx, block in enumerate(blocks[:5]):  # 检查前5个块
-                if not isinstance(block, dict):
-                    print(f"块 {idx+1} 不是字典类型: {type(block)}", file=sys.stderr)
-                if 'block_type' not in block:
-                    print(f"块 {idx+1} 缺少 block_type 字段", file=sys.stderr)
-
-            for i in range(0, len(blocks), 50):
-                chunk = blocks[i:i+50]
-                print(f"准备写入块 {i+1}-{min(i+50, len(blocks))}，共 {len(chunk)} 个", file=sys.stderr)
-
-                update_url = f"{FEISHU_API_BASE}/docx/v1/documents/{document_id}/blocks/{page_block_id}/children"
-
-                # 根据飞书API文档，使用children数组，不使用index参数
-                update_payload = {
-                    "children": chunk
-                }
-
-                print(f"请求数据: children 数量 = {len(chunk)}, 第一个块类型 = {chunk[0].get('block_type') if chunk else 'empty'}", file=sys.stderr)
-
-                print(f"写入块 {i+1}-{min(i+50, len(blocks))}", file=sys.stderr)
-                update_response = requests.post(update_url, headers=create_headers, json=update_payload, timeout=30)
-                print(f"块写入响应: {update_response.status_code}", file=sys.stderr)
-
-                if update_response.status_code != 200:
-                    print(f"更新文档失败: {update_response.text}", file=sys.stderr)
-                    raise Exception(f"写入内容失败: HTTP {update_response.status_code} - {update_response.text}")
-                else:
-                    update_data = update_response.json()
-                    code = update_data.get('code')
-                    print(f"块写入结果 code: {code}", file=sys.stderr)
-                    if code != 0:
-                        msg = update_data.get('msg', 'Unknown error')
-                        raise Exception(f"写入内容失败: {msg}")
-
-        # 返回文档链接
-        doc_url = f"https://feishu.cn/docx/{document_id}"
-        return doc_url
-
-    except requests.exceptions.HTTPError as e:
-        raise Exception(f"飞书 API 调用失败: {str(e)} - 响应: {e.response.text if e.response else 'No response'}")
-    except Exception as e:
-        raise Exception(f"创建飞书文档失败: {str(e)}")
-
 
 def export_to_feishu(blocks: List[Dict[str, Any]], title: str = None) -> Dict[str, Any]:
     """
@@ -336,40 +87,9 @@ def export_to_feishu(blocks: List[Dict[str, Any]], title: str = None) -> Dict[st
     Returns:
         dict: 包含文档 URL 的结果
     """
-    config = get_config()
-
-    app_id = config.feishu.app_id
-    app_secret = config.feishu.app_secret
-
-    if not app_id or not app_secret:
-        return {
-            'success': False,
-            'error': '缺少飞书配置，请设置 feishu.app_id 和 feishu.app_secret'
-        }
-
-    # 设置默认标题
-    if title is None:
-        title = f"审核报告-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-
-    try:
-        # 获取访问令牌
-        access_token = get_feishu_access_token(app_id, app_secret)
-
-        # 创建文档
-        doc_url = create_feishu_document(access_token, title, blocks)
-
-        return {
-            'success': True,
-            'document_url': doc_url,
-            'title': title,
-            'export_time': datetime.now().isoformat()
-        }
-
-    except Exception as e:
-        return {
-            'success': False,
-            'error': str(e)
-        }
+    # 使用统一的飞书导出器
+    exporter = FeishuExporter()
+    return exporter.export(blocks, title)
 
 
 def main():
@@ -485,10 +205,8 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
         summary
     )
 
-    # 生成报告ID（优化并发支持：毫秒时间戳 + 随机数）
-    report_timestamp = int(datetime.now().timestamp() * 1000)
-    report_random = random.randint(1000, 9999)
-    report_id = f"RPT-{report_timestamp}-{report_random}"
+    # 生成报告ID (使用统一ID生成器)
+    report_id = IDGenerator.generate_report()
 
     # 构建结果
     result = {
@@ -806,10 +524,8 @@ def generate_report_content(
         params = {}
 
     lines = []
-    # 生成报告ID（优化并发支持：毫秒时间戳 + 随机数）
-    report_timestamp = int(datetime.now().timestamp() * 1000)
-    report_random = random.randint(1000, 9999)
-    report_id = f"RPT-{report_timestamp}-{report_random}"
+    # 生成报告ID (使用统一ID生成器)
+    report_id = IDGenerator.generate_report()
 
     # ========== 审核结论（始终显示） ==========
     lines.extend(_generate_conclusion_section(score, grade, summary))
@@ -1156,10 +872,8 @@ def create_report(
         list: 飞书文档块列表
     """
     blocks = []
-    # 生成报告ID（优化并发支持：毫秒时间戳 + 随机数）
-    report_timestamp = int(datetime.now().timestamp() * 1000)
-    report_random = random.randint(1000, 9999)
-    report_id = f"RPT-{report_timestamp}-{report_random}"
+    # 生成报告ID (使用统一ID生成器)
+    report_id = IDGenerator.generate_report()
 
     # ========== 审核结论（始终显示） ==========
     blocks.extend(_create_conclusion_blocks(score, grade, summary))

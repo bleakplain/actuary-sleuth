@@ -8,7 +8,6 @@ import json
 import argparse
 import sys
 import re
-import random
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, Optional
@@ -17,6 +16,7 @@ from typing import Dict, List, Any, Optional
 sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
 from lib.config import get_config
+from lib.id_generator import IDGenerator
 
 
 def main():
@@ -80,10 +80,8 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
     pricing_params = extract_pricing_params(document_content)
 
     # 构建结果
-    # 生成预处理ID（优化并发支持：毫秒时间戳 + 随机数）
-    preprocess_timestamp = int(datetime.now().timestamp() * 1000)
-    preprocess_random = random.randint(1000, 9999)
-    preprocess_id = f"PRE-{preprocess_timestamp}-{preprocess_random}"
+    # 生成预处理ID (使用统一ID生成器)
+    preprocess_id = IDGenerator.generate_preprocess()
 
     result = {
         'success': True,

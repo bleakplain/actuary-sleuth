@@ -9,7 +9,6 @@ import argparse
 import sys
 import subprocess
 import tempfile
-import random
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any
@@ -19,6 +18,15 @@ sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
 from lib import db
 from lib.config import get_config
+from lib.id_generator import IDGenerator
+from lib.exceptions import (
+    MissingParameterError,
+    DocumentPreprocessError,
+    NegativeListCheckError,
+    PricingAnalysisError,
+    ReportGenerationError
+)
+from lib.logger import get_audit_logger
 
 
 def main():
@@ -38,13 +46,20 @@ def main():
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except Exception as e:
-        # 错误输出
+        # 统一错误处理
+        from lib.exceptions import ActuarySleuthError
+
         error_result = {
             "success": False,
             "error": str(e),
             "error_type": type(e).__name__
         }
-        print(json.dumps(error_result, ensure_ascii=False), file=sys.stderr)
+
+        # 如果是自定义异常，添加详细信息
+        if isinstance(e, ActuarySleuthError):
+            error_result["details"] = e.details
+
+        print(json.dumps(error_result, ensure_ascii=False, indent=2), file=sys.stderr)
         return 1
 
 
@@ -63,46 +78,52 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
     """
     # 验证输入参数
     if 'documentContent' not in params:
-        raise ValueError("Missing required parameter: 'documentContent'")
+        raise MissingParameterError('documentContent')
 
     document_content = params['documentContent']
     document_url = params.get('documentUrl', '')
     audit_type = params.get('auditType', 'full')
 
-    # 生成审核ID（优化并发支持：毫秒时间戳 + 随机数）
-    audit_timestamp = int(datetime.now().timestamp() * 1000)
-    audit_random = random.randint(1000, 9999)
-    audit_id = f"AUD-{audit_timestamp}-{audit_random}"
+    # 生成审核ID (使用统一ID生成器)
+    audit_id = IDGenerator.generate_audit()
+    step_logger = get_audit_logger(audit_id)
 
     try:
         # Step 1: 文档预处理
-        print(f"[{audit_id}] Step 1: Preprocessing document...", file=sys.stderr)
+        step_logger.step("预处理文档")
         preprocess_result = run_preprocess(document_content, document_url)
 
         if not preprocess_result.get('success'):
-            raise Exception("Preprocessing failed: " + preprocess_result.get('error', 'Unknown error'))
+            raise DocumentPreprocessError(
+                preprocess_result.get('error', 'Unknown error'),
+                details={'document_url': document_url}
+            )
 
         # Step 2: 负面清单检查
-        print(f"[{audit_id}] Step 2: Checking negative list...", file=sys.stderr)
+        step_logger.step("负面清单检查")
         violations = run_negative_list_check(preprocess_result.get('clauses', []))
 
         if not violations.get('success'):
-            raise Exception("Negative list check failed: " + violations.get('error', 'Unknown error'))
+            raise NegativeListCheckError(
+                violations.get('error', 'Unknown error')
+            )
 
         # Step 3: 定价分析（仅full审核）
         pricing_analysis = None
         if audit_type == 'full':
-            print(f"[{audit_id}] Step 3: Analyzing pricing...", file=sys.stderr)
+            step_logger.step("定价分析")
             pricing_analysis = run_pricing_analysis(
                 preprocess_result.get('pricing_params', {}),
                 preprocess_result.get('product_info', {}).get('product_type', 'unknown')
             )
 
             if not pricing_analysis.get('success'):
-                raise Exception("Pricing analysis failed: " + pricing_analysis.get('error', 'Unknown error'))
+                raise PricingAnalysisError(
+                    pricing_analysis.get('error', 'Unknown error')
+                )
 
         # Step 4: 生成报告
-        print(f"[{audit_id}] Step 4: Generating report...", file=sys.stderr)
+        step_logger.step("生成报告")
         # 将 document_url 添加到 product_info 中，以便报告生成时可以引用原文
         product_info = preprocess_result.get('product_info', {})
         product_info['document_url'] = document_url
@@ -113,10 +134,12 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
         )
 
         if not report_result.get('success'):
-            raise Exception("Report generation failed: " + report_result.get('error', 'Unknown error'))
+            raise ReportGenerationError(
+                report_result.get('error', 'Unknown error')
+            )
 
         # Step 5: 保存审核记录
-        print(f"[{audit_id}] Step 5: Saving audit record...", file=sys.stderr)
+        step_logger.step("保存审核记录")
         save_audit_record(
             audit_id,
             document_url,
