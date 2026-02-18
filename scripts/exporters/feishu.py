@@ -14,7 +14,7 @@ from typing import Dict, List, Any, Optional
 # 添加 lib 目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent / 'lib'))
 
-from lib.config import get_config
+from infrastructure.config import get_config
 
 
 # 飞书 API 配置

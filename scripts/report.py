@@ -16,8 +16,8 @@ from typing import Dict, List, Any
 sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
 from lib import db
-from lib.config import get_config
-from lib.id_generator import IDGenerator
+from infrastructure.config import get_config
+from infrastructure.id_generator import IDGenerator
 
 # 导入飞书导出器
 from exporters import FeishuExporter

@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Optional, Any
 from pathlib import Path
 
-from lib.exceptions import ActuarySleuthError
+from .exceptions import ActuarySleuthError
 
 
 class AuditLogger:

@@ -15,7 +15,7 @@ from typing import Dict, List, Any
 sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
 from lib import db
-from lib.config import get_config
+from infrastructure.config import get_config
 
 
 def main():
