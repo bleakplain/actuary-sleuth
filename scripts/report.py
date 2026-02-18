@@ -254,7 +254,7 @@ def main():
 
 def execute(params: Dict[str, Any]) -> Dict[str, Any]:
     """
-    生成审核报告
+    生成审核报告（使用 ReportGenerator）
 
     Args:
         params: 包含审核数据的字典
@@ -284,55 +284,27 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
 
     score = params.get('score')
 
-    # 如果没有提供分数，则计算分数
-    if score is None:
-        score = calculate_score(violations, pricing_analysis)
+    # 使用 ReportGenerator 生成报告
+    try:
+        # 尝试相对导入（作为模块使用时）
+        from reporting import ReportGenerator
+    except ImportError:
+        # 失败则尝试绝对导入（作为脚本运行时）
+        import sys
+        from pathlib import Path
+        # 添加 scripts 目录到 Python 路径
+        scripts_dir = Path(__file__).parent
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+        from reporting import ReportGenerator
 
-    # 生成评级
-    grade = calculate_grade(score)
-
-    # 生成报告摘要
-    summary = generate_summary(violations, pricing_analysis)
-
-    # 生成报告内容
-    report_content = generate_report_content(
-        violations,
-        pricing_analysis,
-        product_info,
-        score,
-        grade,
-        summary
+    generator = ReportGenerator()
+    result = generator.generate(
+        violations=violations,
+        pricing_analysis=pricing_analysis,
+        product_info=product_info,
+        score=score
     )
-
-    # 生成报告块
-    blocks = create_report(
-        violations,
-        pricing_analysis,
-        product_info,
-        score,
-        grade,
-        summary
-    )
-
-    # 生成报告ID (使用统一ID生成器)
-    report_id = IDGenerator.generate_report()
-
-    # 构建结果
-    result = {
-        'success': True,
-        'report_id': report_id,
-        'score': score,
-        'grade': grade,
-        'summary': summary,
-        'content': report_content,
-        'blocks': blocks,  # 添加飞书块
-        'metadata': {
-            'product_name': product_info.get('product_name', '未知产品'),
-            'insurance_company': product_info.get('insurance_company', '未知'),
-            'product_type': product_info.get('product_type', '未知'),
-            'timestamp': datetime.now().isoformat()
-        }
-    }
 
     return result
 
