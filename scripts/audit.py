@@ -11,22 +11,95 @@ import subprocess
 import tempfile
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Dict, List, Any, TypedDict
 
-# 添加 lib 目录到路径
-sys.path.insert(0, str(Path(__file__).parent / 'lib'))
+# 添加 infrastructure 目录到路径
+sys.path.insert(0, str(Path(__file__).parent / 'infrastructure'))
 
-from lib import db
-from lib.config import get_config
-from lib.id_generator import IDGenerator
-from lib.exceptions import (
+from infrastructure.database import get_connection as db_get_connection
+from infrastructure.config import get_config
+from infrastructure.id_generator import IDGenerator
+from infrastructure.exceptions import (
     MissingParameterError,
     DocumentPreprocessError,
     NegativeListCheckError,
     PricingAnalysisError,
-    ReportGenerationError
+    ReportGenerationError,
+    ActuarySleuthError
 )
-from lib.logger import get_audit_logger
+from infrastructure.logger import get_audit_logger
+
+
+# ========== 类型定义 ==========
+
+class AuditParams(TypedDict):
+    """审核参数类型"""
+    documentContent: str
+    documentUrl: str
+    auditType: str  # 'full' or 'negative-only'
+
+
+class PreprocessResult(TypedDict, total=False):
+    """预处理结果类型"""
+    success: bool
+    preprocess_id: str
+    metadata: Dict[str, Any]
+    product_info: Dict[str, Any]
+    structure: Dict[str, Any]
+    clauses: List[Dict[str, Any]]
+    pricing_params: Dict[str, Any]
+    error: str
+    error_type: str
+
+
+class CheckResult(TypedDict, total=False):
+    """负面清单检查结果类型"""
+    success: bool
+    violations: List[Dict[str, Any]]
+    count: int
+    summary: Dict[str, int]
+    error: str
+    error_type: str
+
+
+class PricingAnalysisResult(TypedDict, total=False):
+    """定价分析结果类型"""
+    success: bool
+    pricing: Dict[str, Any]
+    error: str
+    error_type: str
+
+
+class ReportResult(TypedDict, total=False):
+    """报告生成结果类型"""
+    success: bool
+    report_id: str
+    score: int
+    grade: str
+    summary: Dict[str, Any]
+    content: str
+    blocks: List[Dict[str, Any]]
+    error: str
+    error_type: str
+
+
+class AuditResult(TypedDict, total=False):
+    """审核结果类型"""
+    success: bool
+    audit_id: str
+    violations: List[Dict[str, Any]]
+    violation_count: int
+    violation_summary: Dict[str, int]
+    pricing: Dict[str, Any]
+    score: int
+    grade: str
+    summary: Dict[str, Any]
+    report: str
+    metadata: Dict[str, Any]
+    report_export: Dict[str, Any]
+    error: str
+    error_type: str
+    details: Dict[str, Any]
 
 
 def main():
@@ -47,7 +120,7 @@ def main():
         return 0
     except Exception as e:
         # 统一错误处理
-        from lib.exceptions import ActuarySleuthError
+        from infrastructure.exceptions import ActuarySleuthError
 
         error_result = {
             "success": False,
@@ -63,7 +136,7 @@ def main():
         return 1
 
 
-def execute(params: Dict[str, Any]) -> Dict[str, Any]:
+def execute(params: Dict[str, Any]) -> AuditResult:
     """
     执行完整的产品审核流程
 
@@ -198,7 +271,7 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-def run_preprocess(document_content: str, document_url: str) -> Dict[str, Any]:
+def run_preprocess(document_content: str, document_url: str) -> PreprocessResult:
     """
     运行预处理脚本
 
@@ -244,7 +317,7 @@ def run_preprocess(document_content: str, document_url: str) -> Dict[str, Any]:
         Path(input_file).unlink(missing_ok=True)
 
 
-def run_negative_list_check(clauses: List[str]) -> Dict[str, Any]:
+def run_negative_list_check(clauses: List[Dict[str, Any]]) -> CheckResult:
     """
     运行负面清单检查
 
@@ -290,7 +363,7 @@ def run_negative_list_check(clauses: List[str]) -> Dict[str, Any]:
         Path(input_file).unlink(missing_ok=True)
 
 
-def run_pricing_analysis(pricing_params: Dict[str, Any], product_type: str) -> Dict[str, Any]:
+def run_pricing_analysis(pricing_params: Dict[str, Any], product_type: str) -> PricingAnalysisResult:
     """
     运行定价分析
 
@@ -321,9 +394,9 @@ def run_pricing_analysis(pricing_params: Dict[str, Any], product_type: str) -> D
 
 def run_report_generation(
     violations: List[Dict[str, Any]],
-    pricing_analysis: Dict[str, Any],
+    pricing_analysis: PricingAnalysisResult,
     product_info: Dict[str, Any]
-) -> Dict[str, Any]:
+) -> ReportResult:
     """
     生成审核报告
 
@@ -436,7 +509,39 @@ def save_audit_record(
             'violations': violations,
             'score': score
         }
-        return db.save_audit_record(record)
+        # 直接保存，不再通过db模块
+        import sqlite3
+        import json
+        from pathlib import Path
+
+        DB_PATH = Path(__file__).parent.parent / 'data' / 'actuary.db'
+
+        try:
+            conn = sqlite3.connect(
+                str(DB_PATH),
+                timeout=30,
+                check_same_thread=False
+            )
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=30000")
+
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO audit_history (id, user_id, document_url, violations, score)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (
+                record['id'],
+                record.get('user_id', ''),
+                record.get('document_url', ''),
+                json.dumps(record.get('violations', []), ensure_ascii=False),
+                record.get('score', 0)
+            ))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Warning: Failed to save audit record: {e}", file=sys.stderr)
+            return False
     except Exception as e:
         print(f"Warning: Failed to save audit record: {e}", file=sys.stderr)
         return False
