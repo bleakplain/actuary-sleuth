@@ -121,6 +121,13 @@ class ReportGenerationError(ProcessingError):
         super().__init__(message, step="report_generation", details=details)
 
 
+class AuditStepError(ProcessingError):
+    """审核步骤失败"""
+
+    def __init__(self, message: str, step: str = "", details: Optional[dict] = None):
+        super().__init__(message, step=step, details=details)
+
+
 # ========== 数据访问异常 ==========
 
 class DatabaseError(ActuarySleuthError):

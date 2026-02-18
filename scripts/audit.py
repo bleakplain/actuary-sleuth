@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Any, TypedDict
+from typing import Dict, List, Any, TypedDict, Callable, Optional
 
 # 添加 infrastructure 目录到路径
 sys.path.insert(0, str(Path(__file__).parent / 'infrastructure'))
@@ -25,6 +25,7 @@ from infrastructure.exceptions import (
     NegativeListCheckError,
     PricingAnalysisError,
     ReportGenerationError,
+    AuditStepError,
     ActuarySleuthError
 )
 from infrastructure.logger import get_audit_logger
@@ -100,6 +101,138 @@ class AuditResult(TypedDict, total=False):
     error: str
     error_type: str
     details: Dict[str, Any]
+
+
+# ========== 辅助函数 ==========
+
+def _run_audit_step(
+    step_name: str,
+    step_func: Callable,
+    *args,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    执行单个审核步骤
+
+    Args:
+        step_name: 步骤名称
+        step_func: 步骤函数
+        *args: 位置参数
+        **kwargs: 关键字参数
+
+    Returns:
+        步骤执行结果
+
+    Raises:
+        AuditStepError: 对应步骤的错误类型
+    """
+    step_logger = get_audit_logger(kwargs.get('audit_id', ''))
+    step_logger.step(step_name)
+
+    result = step_func(*args, **kwargs)
+
+    if not result.get('success'):
+        error_msg = result.get('error', 'Unknown error')
+        error_type = step_name.replace(' ', '_').lower()
+        raise AuditStepError(f"{step_name} failed: {error_msg}")
+
+    return result
+
+
+def _build_audit_result(
+    audit_id: str,
+    violations: Dict[str, Any],
+    pricing_analysis: Optional[Dict[str, Any]],
+    report_result: Dict[str, Any],
+    preprocess_result: Dict[str, Any],
+    export_result: Optional[Dict[str, Any]] = None,
+    audit_type: str = 'full',
+    document_url: str = ''
+) -> AuditResult:
+    """
+    构建审核结果
+
+    Args:
+        audit_id: 审核ID
+        violations: 违规检查结果
+        pricing_analysis: 定价分析结果
+        report_result: 报告生成结果
+        preprocess_result: 预处理结果
+        export_result: 导出结果（可选）
+        audit_type: 审核类型
+        document_url: 文档URL
+
+    Returns:
+        完整的审核结果字典
+    """
+    product_info = preprocess_result.get('product_info', {})
+
+    result = {
+        'success': True,
+        'audit_id': audit_id,
+        'violations': violations.get('violations', []),
+        'violation_count': violations.get('count', 0),
+        'violation_summary': violations.get('summary', {}),
+        'pricing': pricing_analysis.get('pricing', {}) if pricing_analysis else {},
+        'score': report_result.get('score', 0),
+        'grade': report_result.get('grade', ''),
+        'summary': report_result.get('summary', {}),
+        'report': report_result.get('content', ''),
+        'metadata': {
+            'audit_type': audit_type,
+            'document_url': document_url,
+            'timestamp': datetime.now().isoformat(),
+            'product_info': product_info
+        },
+        'details': {
+            'preprocess_id': preprocess_result.get('preprocess_id'),
+            'product_info': product_info,
+            'document_url': product_info.get('document_url', '')
+        }
+    }
+
+    if export_result:
+        result['report_export'] = export_result
+
+    return result
+
+
+def _handle_report_export(
+    audit_id: str,
+    report_result: Dict[str, Any],
+    preprocess_result: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """
+    处理报告导出
+
+    Args:
+        audit_id: 审核ID
+        report_result: 报告生成结果
+        preprocess_result: 预处理结果
+
+    Returns:
+        导出结果，如果未配置导出则返回 None
+    """
+    config = get_config()
+
+    if not config.report.export_feishu:
+        print(f"[{audit_id}] Step 6: Report export skipped (not configured)", file=sys.stderr)
+        return None
+
+    print(f"[{audit_id}] Step 6: Exporting report...", file=sys.stderr)
+
+    export_result = export_report(
+        report_result.get('content', ''),
+        preprocess_result.get('product_info', {}),
+        report_result.get('blocks')
+    )
+
+    if export_result.get('success'):
+        print(f"[{audit_id}] ✅ Report exported: {export_result.get('document_url')}", file=sys.stderr)
+    else:
+        print(f"[{audit_id}] ⚠️ Report export failed: {export_result.get('error', 'Unknown error')}", file=sys.stderr)
+
+    return export_result
 
 
 def main():
@@ -221,47 +354,19 @@ def execute(params: Dict[str, Any]) -> AuditResult:
         )
 
         # Step 6: 导出报告（如果配置启用）
-        export_result = None
-        config = get_config()
-
-        if config.report.export_feishu:
-            print(f"[{audit_id}] Step 6: Exporting report...", file=sys.stderr)
-            export_result = export_report(
-                report_result.get('content', ''),
-                preprocess_result.get('product_info', {}),
-                report_result.get('blocks')  # 传递 blocks 参数
-            )
-
-            if export_result.get('success'):
-                print(f"[{audit_id}] ✅ Report exported: {export_result.get('document_url')}", file=sys.stderr)
-            else:
-                print(f"[{audit_id}] ⚠️ Report export failed: {export_result.get('error', 'Unknown error')}", file=sys.stderr)
-        else:
-            print(f"[{audit_id}] Step 6: Report export skipped (not configured)", file=sys.stderr)
+        export_result = _handle_report_export(audit_id, report_result, preprocess_result)
 
         # 构建最终结果
-        result = {
-            'success': True,
-            'audit_id': audit_id,
-            'violations': violations.get('violations', []),
-            'violation_count': violations.get('count', 0),
-            'violation_summary': violations.get('summary', {}),
-            'pricing': pricing_analysis.get('pricing', {}) if pricing_analysis else {},
-            'score': report_result.get('score', 0),
-            'grade': report_result.get('grade', ''),
-            'summary': report_result.get('summary', {}),
-            'report': report_result.get('content', ''),
-            'metadata': {
-                'audit_type': audit_type,
-                'document_url': document_url,
-                'timestamp': datetime.now().isoformat(),
-                'product_info': preprocess_result.get('product_info', {})
-            }
-        }
-
-        # 添加报告导出结果（如果有）
-        if export_result:
-            result['report_export'] = export_result
+        result = _build_audit_result(
+            audit_id=audit_id,
+            violations=violations,
+            pricing_analysis=pricing_analysis,
+            report_result=report_result,
+            preprocess_result=preprocess_result,
+            export_result=export_result,
+            audit_type=audit_type,
+            document_url=document_url
+        )
 
         print(f"[{audit_id}] Audit completed successfully!", file=sys.stderr)
         return result
