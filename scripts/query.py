@@ -10,10 +10,10 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Any
 
-# 添加 lib 目录到路径
-sys.path.insert(0, str(Path(__file__).parent / 'lib'))
-
 from infrastructure.config import get_config
+from infrastructure import database as db
+from infrastructure import vector_store
+from infrastructure import ollama
 
 
 def main():
@@ -43,14 +43,6 @@ def main():
 
 def execute(params):
     """执行法规查询"""
-    try:
-        from lib import db, vector_store, ollama
-    except ImportError as e:
-        return {
-            "success": False,
-            "error": f"Failed to import modules: {str(e)}"
-        }
-
     query_text = params.get('query', '')
     search_type = params.get('searchType', 'hybrid')
 

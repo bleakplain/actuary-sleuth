@@ -10,9 +10,6 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Any
 
-# 添加 lib 目录到路径
-sys.path.insert(0, str(Path(__file__).parent / 'lib'))
-
 from infrastructure.config import get_config
 
 

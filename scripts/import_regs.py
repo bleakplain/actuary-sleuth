@@ -10,11 +10,7 @@ import json
 from pathlib import Path
 import sys
 
-# 添加 scripts/lib 到路径
-script_dir = Path(__file__).parent
-sys.path.insert(0, str(script_dir / 'lib'))
-
-from db import get_connection, add_regulation
+from infrastructure.database import get_connection, add_regulation
 
 
 class RegulationImporter:
@@ -34,7 +30,7 @@ class RegulationImporter:
 
         if self.use_vectors:
             try:
-                from ollama import get_client
+                from infrastructure.ollama import get_client
                 self.client = get_client()
                 if not self.client.health_check():
                     print("Warning: Ollama service not available, disabling vector imports")
