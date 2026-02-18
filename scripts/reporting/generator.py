@@ -12,6 +12,7 @@ from datetime import datetime
 try:
     from ..infrastructure.config import get_config
     from ..infrastructure.id_generator import IDGenerator
+    from .strategies import RemediationStrategyHandler
 except ImportError:
     # 当作为脚本运行或直接导入时使用绝对导入
     import sys
@@ -21,6 +22,7 @@ except ImportError:
         sys.path.insert(0, str(scripts_dir))
     from infrastructure.config import get_config
     from infrastructure.id_generator import IDGenerator
+    from reporting.strategies import RemediationStrategyHandler
 
 
 # ========== 整改建议模式映射 ==========
@@ -146,6 +148,7 @@ class ReportGenerator:
         """
         self.config = config or get_config()
         self.report_id = None
+        self.remediation_handler = RemediationStrategyHandler()
 
     def generate(
         self,
@@ -908,7 +911,9 @@ class ReportGenerator:
             return '请根据问题描述进行相应调整，确保符合监管要求'
 
     def _get_specific_remediation(self, violation: Dict[str, Any]) -> str:
-        """生成具体的修改建议（基于实际违规描述动态生成）
+        """获取具体整改建议（使用策略模式）
+
+        优先使用策略处理器，如果策略无法处理则回退到原有的模式匹配逻辑
 
         Args:
             violation: 违规记录
@@ -916,6 +921,17 @@ class ReportGenerator:
         Returns:
             str: 具体的修改建议
         """
+        # 首先尝试使用策略处理器
+        try:
+            remediation = self.remediation_handler.get_remediation(violation)
+            # 如果策略返回了有效建议（不是默认的模糊建议），则使用它
+            if not any(phrase in remediation for phrase in VAGUE_REMEDIATION_PHRASES):
+                return remediation
+        except Exception:
+            # 如果策略处理器出错，回退到原有逻辑
+            pass
+
+        # 回退到原有的模式匹配逻辑
         # 获取数据库中的默认建议
         default_remediation = violation.get('remediation', '')
         description = violation.get('description', '')
