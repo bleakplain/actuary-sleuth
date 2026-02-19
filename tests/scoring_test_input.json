@@ -1,0 +1,8 @@
+{
+  "pricing_params": {
+    "mortality_rate": 0.0005,
+    "interest_rate": 0.035,
+    "expense_rate": 0.15
+  },
+  "product_type": "life"
+}

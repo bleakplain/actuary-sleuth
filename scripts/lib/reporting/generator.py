@@ -3,26 +3,18 @@
 """
 报告生成器模块
 
-提供面向对象的报告生成接口
+提供面向对象的报告生成接口，包括：
+- 综合评分计算
+- 评级生成
+- 违规摘要统计
+- 报告内容和块生成
 """
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-# 兼容相对导入和绝对导入
-try:
-    from ..infrastructure.config import get_config
-    from ..infrastructure.id_generator import IDGenerator
-    from .strategies import RemediationStrategyHandler
-except ImportError:
-    # 当作为脚本运行或直接导入时使用绝对导入
-    import sys
-    from pathlib import Path
-    scripts_dir = Path(__file__).parent.parent
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
-    from infrastructure.config import get_config
-    from infrastructure.id_generator import IDGenerator
-    from reporting.strategies import RemediationStrategyHandler
+from lib.config import get_config
+from lib.id_generator import IDGenerator
+from lib.reporting.strategies import RemediationStrategyHandler
 
 
 # ========== 整改建议模式映射 ==========

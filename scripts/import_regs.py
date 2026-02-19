@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 import sys
 
-from infrastructure.database import get_connection, add_regulation
+from lib.database import get_connection, add_regulation
 
 
 class RegulationImporter:
@@ -30,7 +30,7 @@ class RegulationImporter:
 
         if self.use_vectors:
             try:
-                from infrastructure.ollama import get_client
+                from lib.ollama import get_client
                 self.client = get_client()
                 if not self.client.health_check():
                     print("Warning: Ollama service not available, disabling vector imports")

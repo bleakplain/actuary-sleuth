@@ -13,13 +13,13 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, TypedDict, Callable, Optional
 
-# 添加 infrastructure 目录到路径
-sys.path.insert(0, str(Path(__file__).parent / 'infrastructure'))
+# 添加 lib 目录到路径
+sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
-from infrastructure.database import get_connection as db_get_connection
-from infrastructure.config import get_config
-from infrastructure.id_generator import IDGenerator
-from infrastructure.exceptions import (
+from lib.database import get_connection as db_get_connection
+from lib.config import get_config
+from lib.id_generator import IDGenerator
+from lib.exceptions import (
     MissingParameterError,
     DocumentPreprocessError,
     NegativeListCheckError,
@@ -28,7 +28,7 @@ from infrastructure.exceptions import (
     AuditStepError,
     ActuarySleuthError
 )
-from infrastructure.logger import get_audit_logger
+from lib.logger import get_audit_logger
 
 
 # ========== 类型定义 ==========
@@ -274,7 +274,7 @@ def main():
         return 0
     except Exception as e:
         # 统一错误处理
-        from infrastructure.exceptions import ActuarySleuthError
+        from lib.exceptions import ActuarySleuthError
 
         error_result = {
             "success": False,

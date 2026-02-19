@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Any
 
-from infrastructure.config import get_config
+from lib.config import get_config
 
 
 def main():

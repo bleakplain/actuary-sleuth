@@ -10,10 +10,10 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Any
 
-from infrastructure.config import get_config
-from infrastructure import database as db
-from infrastructure import vector_store
-from infrastructure import ollama
+from lib.config import get_config
+from lib import database as db
+from lib import vector_store
+from lib import ollama
 
 
 def main():

@@ -12,8 +12,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
-from infrastructure.config import get_config
-from infrastructure.id_generator import IDGenerator
+from lib.config import get_config
+from lib.id_generator import IDGenerator
 
 
 def main():

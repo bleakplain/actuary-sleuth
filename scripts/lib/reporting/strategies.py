@@ -1,36 +1,53 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-违规处理策略模块
+违规整改策略模块
 
-使用策略模式处理不同类型的违规
+使用策略模式为不同类型的违规提供针对性的整改建议。
 """
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List
 
 
 class ViolationRemediationStrategy(ABC):
-    """违规整改策略基类"""
+    """违规整改策略基类，定义策略接口"""
 
     @abstractmethod
     def can_handle(self, violation: Dict[str, Any]) -> bool:
-        """判断是否可以处理该违规"""
+        """
+        判断是否可以处理该类型的违规
+
+        Args:
+            violation: 违规记录字典
+
+        Returns:
+            bool: 如果该策略可以处理此违规返回 True
+        """
         pass
 
     @abstractmethod
     def get_remediation(self, violation: Dict[str, Any]) -> str:
-        """获取整改建议"""
+        """
+        获取具体的整改建议
+
+        Args:
+            violation: 违规记录字典
+
+        Returns:
+            str: 整改建议文本
+        """
         pass
 
 
 class WaitingPeriodStrategy(ViolationRemediationStrategy):
-    """等待期违规策略"""
+    """等待期违规整改策略"""
 
     def can_handle(self, violation: Dict[str, Any]) -> bool:
         description = violation.get('description', '')
         return '等待期' in description
 
     def get_remediation(self, violation: Dict[str, Any]) -> str:
+        """根据等待期违规的具体问题返回整改建议"""
         description = violation.get('description', '')
 
         if '过长' in description or '超过' in description:
@@ -43,13 +60,14 @@ class WaitingPeriodStrategy(ViolationRemediationStrategy):
 
 
 class ExemptionClauseStrategy(ViolationRemediationStrategy):
-    """免责条款违规策略"""
+    """免责条款违规整改策略"""
 
     def can_handle(self, violation: Dict[str, Any]) -> bool:
         description = violation.get('description', '')
         return '免责条款' in description or '责任免除' in description
 
     def get_remediation(self, violation: Dict[str, Any]) -> str:
+        """根据免责条款违规的具体问题返回整改建议"""
         description = violation.get('description', '')
 
         if '不集中' in description:
@@ -70,23 +88,22 @@ class RemediationStrategyHandler:
         self.strategies: List[ViolationRemediationStrategy] = [
             WaitingPeriodStrategy(),
             ExemptionClauseStrategy(),
-            # 添加更多策略
         ]
 
     def get_remediation(self, violation: Dict[str, Any]) -> str:
         """
         获取违规的整改建议
 
+        根据违规类型选择相应的策略，返回针对性的整改建议。
+
         Args:
-            violation: 违规记录
+            violation: 违规记录，包含 description 和 remediation 字段
 
         Returns:
-            整改建议
+            str: 整改建议文本
         """
-        # 首先尝试使用策略
         for strategy in self.strategies:
             if strategy.can_handle(violation):
                 return strategy.get_remediation(violation)
 
-        # 回退到默认建议
         return violation.get('remediation', '请根据具体情况进行整改')

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-配置模块 - 嵌套结构版本
-提供统一的配置管理接口，支持按需读取配置项
+配置模块 - 提供统一的配置管理接口
 
 使用示例：
+    from lib.config import get_config
+
     config = get_config()
     app_id = config.feishu.app_id
     export_enabled = config.report.export_feishu
@@ -13,10 +14,10 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 
 
-# 配置文件路径（相对于脚本目录）
+# 配置文件路径
 CONFIG_PATH = Path(__file__).parent.parent / 'config' / 'settings.json'
 
 
@@ -118,8 +119,8 @@ class OllamaConfig:
         return self._config.get('timeout', 120)
 
 
-class DataPathsConfig:
-    """数据路径配置"""
+class DatabaseConfig:
+    """数据库路径配置"""
 
     def __init__(self, config_dict: Dict[str, Any]):
         self._config = config_dict.get('data_paths', {})
@@ -171,7 +172,7 @@ class RegulationSearchConfig:
 
 class Config:
     """
-    配置管理类（嵌套结构版本）
+    配置管理类
 
     提供类型安全的嵌套配置访问接口，支持：
     - 按需读取配置项
@@ -190,7 +191,7 @@ class Config:
         初始化配置
 
         Args:
-            config_path: 配置文件路径，默认使用 scripts/config/settings.json
+            config_path: 配置文件路径，默认使用 lib/config/settings.json
         """
         self._config_path = config_path or CONFIG_PATH
         self._config: Dict[str, Any] = {}
@@ -215,7 +216,7 @@ class Config:
         self._report = ReportConfig(self._config)
         self._audit = AuditConfig(self._config)
         self._ollama = OllamaConfig(self._config)
-        self._data_paths = DataPathsConfig(self._config)
+        self._data_paths = DatabaseConfig(self._config)
         self._regulation_search = RegulationSearchConfig(self._config)
 
     # ===== 嵌套配置属性 =====
@@ -241,8 +242,8 @@ class Config:
         return self._ollama
 
     @property
-    def data_paths(self) -> DataPathsConfig:
-        """数据路径配置"""
+    def data_paths(self) -> DatabaseConfig:
+        """数据库路径配置"""
         return self._data_paths
 
     @property
@@ -318,16 +319,14 @@ def reset_config() -> None:
     _global_config = None
 
 
-# ===== 兼容旧代码的函数 =====
-
 def load_config() -> Dict[str, Any]:
     """
-    加载配置文件（兼容函数，返回原始字典）
+    加载配置文件并返回原始字典
 
-    Deprecated: 建议使用 Config 类或 get_config() 函数
+    提供对底层配置数据的直接访问，用于需要字典格式的场景。
 
     Returns:
-        dict: 配置字典
+        dict: 配置字典，包含所有配置项的原始数据
     """
     config = get_config()
     return config._config

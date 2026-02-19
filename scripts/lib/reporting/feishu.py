@@ -11,7 +11,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
-from infrastructure.config import get_config
+from lib.config import get_config
 
 
 # 飞书 API 配置
