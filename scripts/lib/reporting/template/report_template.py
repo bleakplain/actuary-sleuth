@@ -36,6 +36,36 @@ class ReportGenerationTemplate:
     子类可以重写各步骤方法来定制报告生成行为。
     """
 
+    # ========== 常量定义 ==========
+
+    # 违规严重程度扣分值
+    SEVERITY_PENALTY = {
+        'high': 20,
+        'medium': 10,
+        'low': 5
+    }
+
+    # 评级阈值
+    GRADE_THRESHOLDS = [
+        (90, '优秀'),
+        (75, '良好'),
+        (60, '合格')
+    ]
+    GRADE_DEFAULT = '不合格'
+
+    # 分数范围
+    SCORE_MIN = 0
+    SCORE_MAX = 100
+    SCORE_BASE = 100
+
+    # 定价问题扣分值
+    PRICING_ISSUE_PENALTY = 10
+
+    # 严重违规数量限制
+    HIGH_VIOLATIONS_LIMIT = 20
+    MEDIUM_VIOLATIONS_LIMIT = 10
+    P1_REMEDIATION_MEDIUM_LIMIT = 5  # P1级整改事项表中的中危违规数量限制
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
         初始化报告生成模板
@@ -122,24 +152,19 @@ class ReportGenerationTemplate:
             int: 评分 (0-100)
         """
         # 基础分
-        score = 100
+        score = self.SCORE_BASE
 
         # 根据违规严重程度扣分
         for violation in violations:
             severity = violation.get('severity', 'low')
-            if severity == 'high':
-                score -= 20
-            elif severity == 'medium':
-                score -= 10
-            elif severity == 'low':
-                score -= 5
+            score -= self.SEVERITY_PENALTY.get(severity, 0)
 
         # 根据定价分析扣分
         pricing_issues = self._count_pricing_issues(pricing_analysis)
-        score -= pricing_issues * 10
+        score -= pricing_issues * self.PRICING_ISSUE_PENALTY
 
-        # 确保分数在 0-100 范围内
-        return max(0, min(100, score))
+        # 确保分数在范围内
+        return max(self.SCORE_MIN, min(self.SCORE_MAX, score))
 
     def _calculate_grade(self, score: int) -> str:
         """
@@ -151,14 +176,10 @@ class ReportGenerationTemplate:
         Returns:
             str: 评级
         """
-        if score >= 90:
-            return '优秀'
-        elif score >= 75:
-            return '良好'
-        elif score >= 60:
-            return '合格'
-        else:
-            return '不合格'
+        for threshold, grade in self.GRADE_THRESHOLDS:
+            if score >= threshold:
+                return grade
+        return self.GRADE_DEFAULT
 
     def _generate_summary(
         self,
@@ -385,7 +406,7 @@ class ReportGenerationTemplate:
             lines.append("**表2-2:严重违规明细表**")
             lines.append("| 序号 | 条款内容 | 问题说明 | 法规依据 |")
             lines.append("|:----:|:---------|:---------|:---------|")
-            for i, v in enumerate(high_violations[:20], 1):
+            for i, v in enumerate(high_violations[:self.HIGH_VIOLATIONS_LIMIT], 1):
                 clause_ref = v.get('clause_reference', '')
                 clause_text = v.get('clause_text', '')[:80]
                 description = v.get('description', '未知')
@@ -405,7 +426,7 @@ class ReportGenerationTemplate:
             lines.append("**表2-3:中等违规明细表**")
             lines.append("| 序号 | 条款内容 | 问题说明 | 法规依据 |")
             lines.append("|:----:|:---------|:---------|:---------|")
-            for i, v in enumerate(medium_violations[:10], 1):
+            for i, v in enumerate(medium_violations[:self.MEDIUM_VIOLATIONS_LIMIT], 1):
                 clause_ref = v.get('clause_reference', '')
                 clause_text = v.get('clause_text', '')[:80]
                 description = v.get('description', '未知')
@@ -451,7 +472,7 @@ class ReportGenerationTemplate:
             lines.append("**表3-1:P0级整改事项表(必须立即整改)**")
             lines.append("| 序号 | 条款原文 | 修改建议 |")
             lines.append("|:----:|:---------|:---------|")
-            for i, v in enumerate(high_violations[:10], 1):
+            for i, v in enumerate(high_violations[:self.MEDIUM_VIOLATIONS_LIMIT], 1):
                 clause_text = v.get('clause_text', '')[:40]
                 remediation = self._get_specific_remediation(v)
                 lines.append(f"| {i} | {clause_text}... | {remediation} |")
@@ -461,7 +482,7 @@ class ReportGenerationTemplate:
             lines.append("**表3-2:P1级整改事项表(建议尽快整改)**")
             lines.append("| 序号 | 条款原文 | 修改建议 |")
             lines.append("|:----:|:---------|:---------|")
-            for i, v in enumerate(medium_violations[:5], 1):
+            for i, v in enumerate(medium_violations[:self.P1_REMEDIATION_MEDIUM_LIMIT], 1):
                 clause_text = v.get('clause_text', '')[:40]
                 remediation = self._get_specific_remediation(v)
                 lines.append(f"| {i} | {clause_text}... | {remediation} |")
@@ -559,7 +580,7 @@ class ReportGenerationTemplate:
             blocks.append(self._create_text("表2-2:严重违规明细表"))
 
             high_violation_data = [["序号", "条款内容", "问题说明", "法规依据"]]
-            for i, v in enumerate(high_violations[:20], 1):
+            for i, v in enumerate(high_violations[:self.HIGH_VIOLATIONS_LIMIT], 1):
                 clause_ref = v.get('clause_reference', '')
                 clause_text = v.get('clause_text', '')[:80]
                 description = v.get('description', '未知')
@@ -580,7 +601,7 @@ class ReportGenerationTemplate:
             blocks.append(self._create_text("表2-3:中等违规明细表"))
 
             medium_violation_data = [["序号", "条款内容", "问题说明", "法规依据"]]
-            for i, v in enumerate(medium_violations[:10], 1):
+            for i, v in enumerate(medium_violations[:self.MEDIUM_VIOLATIONS_LIMIT], 1):
                 clause_ref = v.get('clause_reference', '')
                 clause_text = v.get('clause_text', '')[:80]
                 description = v.get('description', '未知')
@@ -630,7 +651,7 @@ class ReportGenerationTemplate:
             blocks.append(self._create_text("表3-1:P0级整改事项表(必须立即整改)"))
 
             p0_data = [["序号", "条款原文", "修改建议"]]
-            for i, v in enumerate(high_violations[:10], 1):
+            for i, v in enumerate(high_violations[:self.MEDIUM_VIOLATIONS_LIMIT], 1):
                 clause_text = v.get('clause_text', '')[:40]
                 remediation = self._get_specific_remediation(v)
                 p0_data.append([str(i), f"{clause_text}...", remediation])
@@ -642,7 +663,7 @@ class ReportGenerationTemplate:
             blocks.append(self._create_text("表3-2:P1级整改事项表(建议尽快整改)"))
 
             p1_data = [["序号", "条款原文", "修改建议"]]
-            for i, v in enumerate(medium_violations[:5], 1):
+            for i, v in enumerate(medium_violations[:self.P1_REMEDIATION_MEDIUM_LIMIT], 1):
                 clause_text = v.get('clause_text', '')[:40]
                 remediation = self._get_specific_remediation(v)
                 p1_data.append([str(i), f"{clause_text}...", remediation])
