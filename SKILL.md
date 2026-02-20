@@ -3,6 +3,13 @@ name: actuary-sleuth
 description: Use when reviewing insurance product clauses for compliance, checking against regulatory negative lists, calculating pricing reasonableness, or querying insurance regulations and laws. Use for精算师日常评审工作 including新产品条款审核、法规查询、负面清单检查、定价合理性计算和评审报告生成.
 version: 3.0.0
 author: OpenClaw
+metadata:
+  openclaw:
+    emoji: "📊"
+    requires:
+      bins: ["python3"]
+      env: ["FEISHU_APP_ID", "FEISHU_APP_SECRET"]
+    primaryEnv: "FEISHU_APP_ID"
 ---
 
 # Actuary Sleuth Skill
@@ -28,10 +35,15 @@ Audits an insurance product document for compliance issues.
 
 **Script:** `scripts/audit.py`
 
+**Usage:**
+```bash
+python3 scripts/audit.py --documentUrl <飞书文档URL>
+```
+
 **Parameters:**
-- `documentContent` (string, required): The document content in Markdown format
-- `documentUrl` (string, optional): The URL of the source document
-- `auditType` (string, optional): Type of audit - "full" or "negative-only" (default: "full")
+- `--documentUrl` (string, required): 飞书文档URL，系统会自动获取文档内容并执行完整审核
+
+**Note:** 系统会自动从飞书URL获取文档内容，执行完整的审核流程（包括负面清单检查、定价分析、报告生成和飞书文档导出）
 
 **Returns:**
 ```json
@@ -46,14 +58,7 @@ Audits an insurance product document for compliance issues.
       "description": "免责条款未加粗标红",
       "severity": "high",
       "category": "格式违规",
-      "remediation": "请将免责条款加粗并使用红色字体",
-      "regulations": [
-        {
-          "law_name": "保险法",
-          "article_number": "第十七条",
-          "content": "..."
-        }
-      ]
+      "remediation": "请将免责条款加粗并使用红色字体"
     }
   ],
   "pricing": {
@@ -88,8 +93,9 @@ Audits an insurance product document for compliance issues.
     "document_url": "...",
     "timestamp": "2026-02-15T14:30:00"
   },
-  "feishu_export": {
+  "report_export": {
     "success": true,
+    "format": "feishu",
     "document_url": "https://xxx.feishu.cn/docx/...",
     "document_id": "..."
   }
@@ -103,7 +109,7 @@ Audits an insurance product document for compliance issues.
   - 🚨 严重违规概览
   - 📝 飞书报告文档链接
 - 用户无需额外指定，报告会自动生成并推送到飞书
-- 如果导出失败，会在 `feishu_export` 字段中返回错误信息
+- 如果导出失败，会在 `report_export` 字段中返回错误信息
 
 ### query_regulation
 
@@ -111,9 +117,14 @@ Queries insurance regulations and laws.
 
 **Script:** `scripts/query.py`
 
+**Usage:**
+```bash
+python3 scripts/query.py --query <查询内容> [--searchType <类型>]
+```
+
 **Parameters:**
-- `query` (string, required): The query text - can be article number (e.g., "保险法第十六条") or keywords
-- `searchType` (string, optional): Type of search - "exact", "semantic", or "hybrid" (default: "hybrid")
+- `--query` (string, required): 查询内容，可以是条款编号（如"保险法第十六条"）或关键词
+- `--searchType` (string, optional): 搜索类型 - `exact`(精确)、`semantic`(语义)、`hybrid`(混合，默认)
 
 **Returns:**
 ```json
@@ -141,8 +152,24 @@ Checks product clauses against the negative list.
 
 **Script:** `scripts/check.py`
 
+**Usage:**
+```bash
+python3 scripts/check.py --clauses <条款文本>
+```
+
 **Parameters:**
-- `clauses` (array, required): Array of clause texts to check
+- `--clauses` (string, required): 条款文本，多行输入每行一个条款
+
+**Example:**
+```bash
+# 单个条款
+python3 scripts/check.py --clauses "本产品条款解释权归保险公司所有"
+
+# 多个条款
+python3 scripts/check.py --clauses "条款1内容
+条款2内容
+条款3内容"
+```
 
 **Returns:**
 ```json

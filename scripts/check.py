@@ -16,13 +16,28 @@ from lib.config import get_config
 
 def main():
     """主入口函数"""
-    parser = argparse.ArgumentParser(description='Actuary Sleuth - Negative List Check Script')
-    parser.add_argument('--input', required=True, help='JSON input file')
+    parser = argparse.ArgumentParser(
+        description='Actuary Sleuth - Negative List Check Script',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='示例:\n  python3 scripts/check.py --clauses "条款1内容"\n  python3 scripts/check.py --clauses "条款1\n条款2\n条款3"'
+    )
+    parser.add_argument('--clauses', help='条款文本，多行输入每行一个条款')
     args = parser.parse_args()
 
-    # 读取输入
-    with open(args.input, 'r', encoding='utf-8') as f:
-        params = json.load(f)
+    # 验证必填参数
+    if not args.clauses:
+        parser.error("--clauses is required")
+
+    # 将多行文本分割为条款数组
+    clauses_list = [line.strip() for line in args.clauses.split('\n') if line.strip()]
+
+    if not clauses_list:
+        parser.error("--clauses must contain at least one clause")
+
+    # 构建参数
+    params = {
+        'clauses': clauses_list
+    }
 
     # 执行业务逻辑
     try:

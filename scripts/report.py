@@ -5,9 +5,9 @@
 
 生成结构化的审核报告，支持导出为飞书在线文档
 
-使用 ReportGenerator 类进行报告生成，本脚本作为入口层负责：
+使用 ReportGenerationTemplate 类进行报告生成，本脚本作为入口层负责：
 - 参数解析和验证
-- 调用 ReportGenerator
+- 调用 ReportGenerationTemplate
 - 飞书文档导出
 - 结果输出
 """
@@ -18,7 +18,8 @@ from pathlib import Path
 from typing import Dict, Any
 
 from lib.config import get_config
-from lib.reporting import ReportGenerator, FeishuExporter
+from lib.reporting.template import ReportGenerationTemplate
+from lib.reporting.export import FeishuExporter
 
 
 def main():
@@ -46,7 +47,7 @@ def main():
                 result.get('blocks', []),
                 title=f"审核报告-{params.get('product_info', {}).get('product_name', '未知产品')}"
             )
-            result['feishu_export'] = feishu_result
+            result['report_export'] = feishu_result
 
             if feishu_result.get('success'):
                 print(f"✅ 飞书文档已创建: {feishu_result['document_url']}", file=sys.stderr)
@@ -74,7 +75,7 @@ def main():
 
 def execute(params: Dict[str, Any]) -> Dict[str, Any]:
     """
-    生成审核报告（使用 ReportGenerator）
+    生成审核报告（使用 ReportGenerationTemplate）
 
     Args:
         params: 包含审核数据的字典
@@ -104,8 +105,8 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
 
     score = params.get('score')
 
-    # 使用 ReportGenerator 生成报告
-    generator = ReportGenerator()
+    # 使用 ReportGenerationTemplate 生成报告
+    generator = ReportGenerationTemplate()
     result = generator.generate(
         violations=violations,
         pricing_analysis=pricing_analysis,

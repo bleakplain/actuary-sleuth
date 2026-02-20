@@ -20,13 +20,13 @@ from lib.database import get_connection as db_get_connection
 from lib.config import get_config
 from lib.id_generator import IDGenerator
 from lib.exceptions import (
-    MissingParameterError,
-    DocumentPreprocessError,
-    NegativeListCheckError,
-    PricingAnalysisError,
-    ReportGenerationError,
-    AuditStepError,
-    ActuarySleuthError
+    MissingParameterException,
+    DocumentPreprocessException,
+    NegativeListCheckException,
+    PricingAnalysisException,
+    ReportGenerationException,
+    AuditStepException,
+    ActuarySleuthException
 )
 from lib.logger import get_audit_logger
 
@@ -35,9 +35,7 @@ from lib.logger import get_audit_logger
 
 class AuditParams(TypedDict):
     """审核参数类型"""
-    documentContent: str
     documentUrl: str
-    auditType: str  # 'full' or 'negative-only'
 
 
 class PreprocessResult(TypedDict, total=False):
@@ -124,11 +122,11 @@ def _run_audit_step(
         步骤执行结果
 
     Raises:
-        DocumentPreprocessError: 预处理步骤错误
-        NegativeListCheckError: 负面清单检查错误
-        PricingAnalysisError: 定价分析错误
-        ReportGenerationError: 报告生成错误
-        AuditStepError: 其他步骤错误
+        DocumentPreprocessException: 预处理步骤错误
+        NegativeListCheckException: 负面清单检查错误
+        PricingAnalysisException: 定价分析错误
+        ReportGenerationException: 报告生成错误
+        AuditStepException: 其他步骤错误
     """
     # 提取 audit_id 用于日志，但不传递给步骤函数
     audit_id = kwargs.pop('audit_id', '')
@@ -144,18 +142,18 @@ def _run_audit_step(
 
         # 根据步骤名称抛出对应的错误类型
         if '预处理' in step_name:
-            raise DocumentPreprocessError(
+            raise DocumentPreprocessException(
                 error_msg,
                 details={'document_url': document_url}
             )
         elif '负面清单' in step_name:
-            raise NegativeListCheckError(error_msg)
+            raise NegativeListCheckException(error_msg)
         elif '定价' in step_name:
-            raise PricingAnalysisError(error_msg)
+            raise PricingAnalysisException(error_msg)
         elif '报告' in step_name:
-            raise ReportGenerationError(error_msg)
+            raise ReportGenerationException(error_msg)
         else:
-            raise AuditStepError(f"{step_name} failed: {error_msg}")
+            raise AuditStepException(f"{step_name} failed: {error_msg}")
 
     return result
 
@@ -167,7 +165,6 @@ def _build_audit_result(
     report_result: Dict[str, Any],
     preprocess_result: Dict[str, Any],
     export_result: Optional[Dict[str, Any]] = None,
-    audit_type: str = 'full',
     document_url: str = ''
 ) -> AuditResult:
     """
@@ -180,7 +177,6 @@ def _build_audit_result(
         report_result: 报告生成结果
         preprocess_result: 预处理结果
         export_result: 导出结果（可选）
-        audit_type: 审核类型
         document_url: 文档URL
 
     Returns:
@@ -200,7 +196,7 @@ def _build_audit_result(
         'summary': report_result.get('summary', {}),
         'report': report_result.get('content', ''),
         'metadata': {
-            'audit_type': audit_type,
+            'audit_type': 'full',
             'document_url': document_url,
             'timestamp': datetime.now().isoformat(),
             'product_info': product_info
@@ -259,12 +255,13 @@ def _handle_report_export(
 def main():
     """主入口函数"""
     parser = argparse.ArgumentParser(description='Actuary Sleuth - Product Audit Script')
-    parser.add_argument('--input', required=True, help='JSON input file')
+    parser.add_argument('--documentUrl', required=True, help='Feishu document URL')
     args = parser.parse_args()
 
-    # 读取输入
-    with open(args.input, 'r', encoding='utf-8') as f:
-        params = json.load(f)
+    # 构建参数
+    params = {
+        'documentUrl': args.documentUrl
+    }
 
     # 执行业务逻辑
     try:
@@ -274,7 +271,7 @@ def main():
         return 0
     except Exception as e:
         # 统一错误处理
-        from lib.exceptions import ActuarySleuthError
+        from lib.exceptions import ActuarySleuthException
 
         error_result = {
             "success": False,
@@ -283,11 +280,43 @@ def main():
         }
 
         # 如果是自定义异常，添加详细信息
-        if isinstance(e, ActuarySleuthError):
+        if isinstance(e, ActuarySleuthException):
             error_result["details"] = e.details
 
         print(json.dumps(error_result, ensure_ascii=False, indent=2), file=sys.stderr)
         return 1
+
+
+def _fetch_feishu_content(document_url: str) -> str:
+    """
+    从飞书URL获取文档内容
+
+    Args:
+        document_url: 飞书文档URL
+
+    Returns:
+        str: 文档内容（Markdown格式）
+
+    Raises:
+        Exception: 获取文档内容失败
+    """
+    # 提取文档token
+    import re
+    match = re.search(r'/docx/([a-zA-Z0-9]+)', document_url)
+    if not match:
+        raise Exception(f"Invalid Feishu document URL: {document_url}")
+
+    doc_token = match.group(1)
+
+    # 调用飞书API获取文档内容
+    try:
+        from lib.reporting.feishu import FeishuExporter
+        exporter = FeishuExporter()
+        # 这里需要实现获取文档内容的逻辑
+        # 暂时返回占位符，实际需要调用飞书API
+        return f"# 飞书文档内容\n\n文档Token: {doc_token}\n\n[此处应从飞书API获取完整文档内容]"
+    except Exception as e:
+        raise Exception(f"Failed to fetch Feishu document content: {e}")
 
 
 def execute(params: Dict[str, Any]) -> AuditResult:
@@ -295,21 +324,20 @@ def execute(params: Dict[str, Any]) -> AuditResult:
     执行完整的产品审核流程
 
     Args:
-        params: 包含文档内容的字典
-            - documentContent: 文档内容
-            - documentUrl: 文档URL（可选）
-            - auditType: 审核类型（full/negative-only，默认full）
+        params: 包含文档URL的字典
+            - documentUrl: 飞书文档URL（必填）
 
     Returns:
         dict: 包含完整审核结果的字典
     """
     # 验证输入参数
-    if 'documentContent' not in params:
-        raise MissingParameterError('documentContent')
+    if 'documentUrl' not in params:
+        raise MissingParameterException('documentUrl')
 
-    document_content = params['documentContent']
-    document_url = params.get('documentUrl', '')
-    audit_type = params.get('auditType', 'full')
+    document_url = params['documentUrl']
+
+    # 从飞书URL获取文档内容
+    document_content = _fetch_feishu_content(document_url)
 
     # 生成审核ID (使用统一ID生成器)
     audit_id = IDGenerator.generate_audit()
@@ -334,16 +362,14 @@ def execute(params: Dict[str, Any]) -> AuditResult:
             audit_id=audit_id
         )
 
-        # Step 3: 定价分析（仅full审核）
-        pricing_analysis = None
-        if audit_type == 'full':
-            pricing_analysis = _run_audit_step(
-                "定价分析",
-                run_pricing_analysis,
-                preprocess_result.get('pricing_params', {}),
-                preprocess_result.get('product_info', {}).get('product_type', 'unknown'),
-                audit_id=audit_id
-            )
+        # Step 3: 定价分析（默认执行）
+        pricing_analysis = _run_audit_step(
+            "定价分析",
+            run_pricing_analysis,
+            preprocess_result.get('pricing_params', {}),
+            preprocess_result.get('product_info', {}).get('product_type', 'unknown'),
+            audit_id=audit_id
+        )
 
         # Step 4: 生成报告
         # 将 document_url 添加到 product_info 中，以便报告生成时可以引用原文
@@ -378,7 +404,6 @@ def execute(params: Dict[str, Any]) -> AuditResult:
             report_result=report_result,
             preprocess_result=preprocess_result,
             export_result=export_result,
-            audit_type=audit_type,
             document_url=document_url
         )
 
@@ -446,40 +471,21 @@ def run_negative_list_check(clauses: List[Dict[str, Any]]) -> CheckResult:
     Returns:
         dict: 检查结果
     """
-    # 导入check模块直接调用
-    script_path = Path(__file__).parent / 'check.py'
+    # 直接导入check模块调用execute函数
+    import check
 
-    # 构建输入参数
     input_params = {
         'clauses': clauses
     }
 
-    # 使用临时文件传递参数
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
-        json.dump(input_params, f, ensure_ascii=False)
-        input_file = f.name
-
     try:
-        # 调用检查脚本
-        result = subprocess.run(
-            [sys.executable, str(script_path), '--input', input_file],
-            capture_output=True,
-            text=True,
-            check=False
-        )
-
-        if result.returncode != 0:
-            return {
-                'success': False,
-                'error': result.stderr,
-                'error_type': 'SubprocessError'
-            }
-
-        return json.loads(result.stdout)
-
-    finally:
-        # 清理临时文件
-        Path(input_file).unlink(missing_ok=True)
+        return check.execute(input_params)
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'error_type': type(e).__name__
+        }
 
 
 def run_pricing_analysis(pricing_params: Dict[str, Any], product_type: str) -> PricingAnalysisResult:

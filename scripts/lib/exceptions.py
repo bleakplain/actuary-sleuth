@@ -9,7 +9,7 @@
 from typing import Optional, Any
 
 
-class ActuarySleuthError(Exception):
+class ActuarySleuthException(Exception):
     """
     Actuary Sleuth 基础异常类
 
@@ -44,12 +44,12 @@ class ActuarySleuthError(Exception):
 
 # ========== 输入验证异常 ==========
 
-class ValidationError(ActuarySleuthError):
+class ValidationException(ActuarySleuthException):
     """输入验证失败异常"""
     pass
 
 
-class MissingParameterError(ValidationError):
+class MissingParameterException(ValidationException):
     """缺少必需参数异常"""
 
     def __init__(self, parameter_name: str):
@@ -60,7 +60,7 @@ class MissingParameterError(ValidationError):
         self.parameter_name = parameter_name
 
 
-class InvalidParameterError(ValidationError):
+class InvalidParameterException(ValidationException):
     """无效参数异常"""
 
     def __init__(self, parameter_name: str, expected_type: str, actual_value: Any = None):
@@ -81,7 +81,7 @@ class InvalidParameterError(ValidationError):
 
 # ========== 业务逻辑异常 ==========
 
-class ProcessingError(ActuarySleuthError):
+class ProcessingException(ActuarySleuthException):
     """处理过程异常基类"""
 
     def __init__(self, message: str, step: str = "", details: Optional[dict] = None):
@@ -93,35 +93,35 @@ class ProcessingError(ActuarySleuthError):
         self.step = step
 
 
-class DocumentPreprocessError(ProcessingError):
+class DocumentPreprocessException(ProcessingException):
     """文档预处理失败"""
 
     def __init__(self, message: str, details: Optional[dict] = None):
         super().__init__(message, step="preprocessing", details=details)
 
 
-class NegativeListCheckError(ProcessingError):
+class NegativeListCheckException(ProcessingException):
     """负面清单检查失败"""
 
     def __init__(self, message: str, details: Optional[dict] = None):
         super().__init__(message, step="negative_list_check", details=details)
 
 
-class PricingAnalysisError(ProcessingError):
+class PricingAnalysisException(ProcessingException):
     """定价分析失败"""
 
     def __init__(self, message: str, details: Optional[dict] = None):
         super().__init__(message, step="pricing_analysis", details=details)
 
 
-class ReportGenerationError(ProcessingError):
+class ReportGenerationException(ProcessingException):
     """报告生成失败"""
 
     def __init__(self, message: str, details: Optional[dict] = None):
         super().__init__(message, step="report_generation", details=details)
 
 
-class AuditStepError(ProcessingError):
+class AuditStepException(ProcessingException):
     """审核步骤失败"""
 
     def __init__(self, message: str, step: str = "", details: Optional[dict] = None):
@@ -130,7 +130,7 @@ class AuditStepError(ProcessingError):
 
 # ========== 数据访问异常 ==========
 
-class DatabaseError(ActuarySleuthError):
+class DatabaseException(ActuarySleuthException):
     """数据库操作异常"""
 
     def __init__(self, message: str, operation: str = "", details: Optional[dict] = None):
@@ -142,7 +142,7 @@ class DatabaseError(ActuarySleuthError):
         self.operation = operation
 
 
-class DataNotFoundError(DatabaseError):
+class DataNotFoundException(DatabaseException):
     """数据未找到异常"""
 
     def __init__(self, resource_type: str, resource_id: str = ""):
@@ -159,7 +159,7 @@ class DataNotFoundError(DatabaseError):
 
 # ========== 外部服务异常 ==========
 
-class ExternalServiceError(ActuarySleuthError):
+class ExternalServiceException(ActuarySleuthException):
     """外部服务调用异常"""
 
     def __init__(self, service_name: str, message: str, details: Optional[dict] = None):
@@ -171,14 +171,14 @@ class ExternalServiceError(ActuarySleuthError):
         self.service_name = service_name
 
 
-class FeishuAPIError(ExternalServiceError):
+class FeishuAPIException(ExternalServiceException):
     """飞书API调用异常"""
 
     def __init__(self, message: str, details: Optional[dict] = None):
         super().__init__("飞书", message, details)
 
 
-class OllamaError(ExternalServiceError):
+class OllamaException(ExternalServiceException):
     """Ollama服务异常"""
 
     def __init__(self, message: str, details: Optional[dict] = None):
@@ -187,7 +187,7 @@ class OllamaError(ExternalServiceError):
 
 # ========== 配置异常 ==========
 
-class ConfigurationError(ActuarySleuthError):
+class ConfigurationException(ActuarySleuthException):
     """配置错误异常"""
 
     def __init__(self, config_key: str, message: str = ""):
@@ -201,7 +201,7 @@ class ConfigurationError(ActuarySleuthError):
         self.config_key = config_key
 
 
-class MissingConfigurationError(ConfigurationError):
+class MissingConfigurationException(ConfigurationException):
     """缺少必需配置"""
 
     def __init__(self, config_key: str):

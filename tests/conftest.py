@@ -52,9 +52,28 @@ def sample_document_content():
 def sample_audit_params():
     """示例审核参数"""
     return {
-        "documentContent": "# 测试保险产品\n\n简单测试内容。",
-        "documentUrl": "https://test.example.com/policy",
-        "auditType": "negative-only"
+        "documentUrl": "https://hcnhqpzu5f0a.feishu.cn/docx/Ma5Qdy8q6oGjjpxgCYVcYE5MnGd"
+    }
+
+
+@pytest.fixture
+def sample_query_params():
+    """示例查询参数"""
+    return {
+        "query": "保险法第十六条",
+        "searchType": "hybrid"
+    }
+
+
+@pytest.fixture
+def sample_check_params():
+    """示例负面清单检查参数"""
+    return {
+        "clauses": [
+            "本产品条款解释权归保险公司所有",
+            "等待期为180天",
+            "免责条款未加粗标红"
+        ]
     }
 
 

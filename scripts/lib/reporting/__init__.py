@@ -3,11 +3,17 @@
 """
 报告生成模块
 
-提供面向对象的报告生成功能，包括：
-- ReportGenerator: 审核报告生成器类，支持生成包含违规记录、定价分析、评分和评级的完整报告
-- FeishuExporter: 飞书文档导出器
-"""
-from .generator import ReportGenerator
-from .feishu import FeishuExporter
+提供面向对象的报告生成功能，按功能模块化组织：
 
-__all__ = ['ReportGenerator', 'FeishuExporter']
+- template/   : ReportGenerationTemplate类，使用模板方法模式生成报告
+- export/     : 各种格式的报告导出（飞书、PDF、Word等）
+- strategies/ : 策略模式实现，包含整改策略等
+"""
+# 从子模块导出主要类
+from .template import ReportGenerationTemplate
+from .export import FeishuExporter
+
+__all__ = [
+    'ReportGenerationTemplate',
+    'FeishuExporter',
+]

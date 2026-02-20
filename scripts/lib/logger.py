@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Optional, Any
 from pathlib import Path
 
-from .exceptions import ActuarySleuthError
+from .exceptions import ActuarySleuthException
 
 
 class AuditLogger:
@@ -65,7 +65,7 @@ class AuditLogger:
             kwargs['exception_type'] = type(exception).__name__
             kwargs['exception_message'] = str(exception)
 
-            if isinstance(exception, ActuarySleuthError):
+            if isinstance(exception, ActuarySleuthException):
                 kwargs.update(exception.details)
 
         self._log(logging.ERROR, message, **kwargs)
@@ -76,7 +76,7 @@ class AuditLogger:
             kwargs['exception_type'] = type(exception).__name__
             kwargs['exception_message'] = str(exception)
 
-            if isinstance(exception, ActuarySleuthError):
+            if isinstance(exception, ActuarySleuthException):
                 kwargs.update(exception.details)
 
         self._log(logging.CRITICAL, message, **kwargs)

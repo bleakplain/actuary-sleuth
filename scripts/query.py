@@ -18,12 +18,21 @@ from lib import ollama
 
 def main():
     parser = argparse.ArgumentParser(description='法规查询脚本')
-    parser.add_argument('--input', required=True, help='JSON input file')
+    parser.add_argument('--query', help='查询内容（条款编号或关键词）')
+    parser.add_argument('--searchType', default='hybrid',
+                       choices=['exact', 'semantic', 'hybrid'],
+                       help='搜索类型：exact(精确)、semantic(语义)、hybrid(混合)，默认hybrid')
     args = parser.parse_args()
 
-    # 读取输入
-    with open(args.input, 'r', encoding='utf-8') as f:
-        params = json.load(f)
+    # 验证必填参数
+    if not args.query:
+        parser.error("--query is required")
+
+    # 构建参数
+    params = {
+        'query': args.query,
+        'searchType': args.searchType
+    }
 
     # 执行业务逻辑
     try:
