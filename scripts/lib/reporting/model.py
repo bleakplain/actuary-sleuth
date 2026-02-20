@@ -8,9 +8,11 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional
 
+__all__ = ['EvaluationContext']
+
 
 @dataclass
-class InsuranceProduct:
+class _InsuranceProduct:
     """
     保险产品信息
 
@@ -46,7 +48,7 @@ class EvaluationContext:
 
     violations: List[Dict[str, Any]] = field(default_factory=list)
     pricing_analysis: Dict[str, Any] = field(default_factory=dict)
-    product: InsuranceProduct = field(default_factory=InsuranceProduct)
+    product: _InsuranceProduct = field(default_factory=_InsuranceProduct)
 
     # ========== 计算结果 ==========
 
