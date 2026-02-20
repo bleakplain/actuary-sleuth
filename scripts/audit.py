@@ -310,7 +310,7 @@ def _fetch_feishu_content(document_url: str) -> str:
 
     # 调用飞书API获取文档内容
     try:
-        from lib.reporting.feishu import FeishuExporter
+        from lib.reporting.export import FeishuExporter
         exporter = FeishuExporter()
         # 这里需要实现获取文档内容的逻辑
         # 暂时返回占位符，实际需要调用飞书API

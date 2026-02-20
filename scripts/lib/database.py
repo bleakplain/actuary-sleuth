@@ -9,7 +9,6 @@
 """
 import sqlite3
 import json
-import time
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent.parent.parent / 'data' / 'actuary.db'

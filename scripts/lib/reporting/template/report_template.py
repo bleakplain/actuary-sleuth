@@ -18,6 +18,7 @@ from datetime import datetime
 from lib.config import get_config
 from lib.id_generator import IDGenerator
 from lib.reporting.strategies import RemediationStrategies
+from lib.reporting.model import EvaluationContext, InsuranceProduct
 
 
 class ReportGenerationTemplate:
@@ -85,14 +86,15 @@ class ReportGenerationTemplate:
         score: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        模板方法:按固定流程生成报告
+        模板方法：按固定流程生成报告
 
         Steps:
-            1. 计算综合评分
-            2. 确定合规评级
-            3. 统计违规摘要
-            4. 生成报告内容
-            5. 转换为块格式
+            1. 构建评估上下文
+            2. 计算综合评分
+            3. 确定合规评级
+            4. 统计违规摘要（含分组）
+            5. 生成报告内容
+            6. 转换为块格式
 
         Args:
             violations: 违规记录列表
@@ -103,98 +105,91 @@ class ReportGenerationTemplate:
         Returns:
             dict: 包含 report_id, score, grade, summary, content, blocks
         """
+        # 步骤1: 构建评估上下文
+        product = InsuranceProduct(
+            name=product_info.get('product_name', '未知产品'),
+            type=product_info.get('product_type', ''),
+            company=product_info.get('insurance_company', ''),
+            document_url=product_info.get('document_url', ''),
+            version=product_info.get('version', '')
+        )
+
+        context = EvaluationContext(
+            violations=violations,
+            pricing_analysis=pricing_analysis,
+            product=product
+        )
+
         # 生成报告ID
         self.report_id = IDGenerator.generate_report()
 
-        # 计算分数和评级
-        if score is None:
-            score = self._calculate_score(violations, pricing_analysis)
+        # 步骤2-4: 计算分数、评级、统计摘要（含分组）
+        if score is not None:
+            # 使用自定义分数
+            context.score = max(self.SCORE_MIN, min(self.SCORE_MAX, score))
+        else:
+            # 计算分数
+            self._calculate_score(context)
 
-        grade = self._calculate_grade(score)
-        summary = self._generate_summary(violations, pricing_analysis)
+        self._calculate_grade(context)
+        self._summarize_violations(context)
 
-        # 生成报告内容
-        content = self._generate_content(
-            violations, pricing_analysis, product_info,
-            score, grade, summary
-        )
-
-        # 生成报告块
-        blocks = self._generate_blocks(
-            violations, pricing_analysis, product_info,
-            score, grade, summary
-        )
+        # 步骤5-6: 生成内容
+        content = self._generate_content(context)
+        blocks = self._generate_blocks(context)
 
         return {
             'success': True,
             'report_id': self.report_id,
-            'score': score,
-            'grade': grade,
-            'summary': summary,
+            'score': context.score,
+            'grade': context.grade,
+            'summary': context.summary,
             'content': content,
             'blocks': blocks,
-            'metadata': self._generate_metadata(product_info)
+            'metadata': self._generate_metadata(context)
         }
 
-    def _calculate_score(
-        self,
-        violations: List[Dict[str, Any]],
-        pricing_analysis: Dict[str, Any]
-    ) -> int:
+    def _calculate_score(self, context: EvaluationContext) -> None:
         """
         计算综合评分
 
         Args:
-            violations: 违规记录列表
-            pricing_analysis: 定价分析结果
-
-        Returns:
-            int: 评分 (0-100)
+            context: 评估上下文，结果存储到 context.score
         """
         # 基础分
         score = self.SCORE_BASE
 
         # 根据违规严重程度扣分
-        for violation in violations:
+        for violation in context.violations:
             severity = violation.get('severity', 'low')
             score -= self.SEVERITY_PENALTY.get(severity, 0)
 
         # 根据定价分析扣分
-        pricing_issues = self._count_pricing_issues(pricing_analysis)
+        pricing_issues = self._count_pricing_issues(context.pricing_analysis)
         score -= pricing_issues * self.PRICING_ISSUE_PENALTY
 
         # 确保分数在范围内
-        return max(self.SCORE_MIN, min(self.SCORE_MAX, score))
+        context.score = max(self.SCORE_MIN, min(self.SCORE_MAX, score))
 
-    def _calculate_grade(self, score: int) -> str:
+    def _calculate_grade(self, context: EvaluationContext) -> None:
         """
         计算评级
 
         Args:
-            score: 分数
-
-        Returns:
-            str: 评级
+            context: 评估上下文，结果存储到 context.grade
         """
         for threshold, grade in self.GRADE_THRESHOLDS:
-            if score >= threshold:
-                return grade
-        return self.GRADE_DEFAULT
+            if context.score >= threshold:
+                context.grade = grade
+                return
+        context.grade = self.GRADE_DEFAULT
 
-    def _generate_summary(
-        self,
-        violations: List[Dict[str, Any]],
-        pricing_analysis: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def _summarize_violations(self, context: EvaluationContext) -> None:
         """
-        生成报告摘要
+        统计违规摘要并分组
 
         Args:
-            violations: 违规记录列表
-            pricing_analysis: 定价分析结果
-
-        Returns:
-            dict: 关键信息
+            context: 评估上下文，结果存储到 context.summary 和 context.context.high_violations 等
         """
         # 统计违规数量
         violation_summary = {
@@ -203,20 +198,29 @@ class ReportGenerationTemplate:
             'low': 0
         }
 
-        for violation in violations:
+        for violation in context.violations:
             severity = violation.get('severity', 'low')
             if severity in violation_summary:
                 violation_summary[severity] += 1
 
-        # 统计定价问题（使用提取的方法）
-        pricing_issues = self._count_pricing_issues(pricing_analysis)
+        # 统计定价问题
+        pricing_issues = self._count_pricing_issues(context.pricing_analysis)
 
-        return {
-            'total_violations': len(violations),
+        # 分组违规项（只做一次，提高性能）
+        context.high_violations = [v for v in context.violations if v.get('severity') == 'high']
+        context.medium_violations = [v for v in context.violations if v.get('severity') == 'medium']
+        context.low_violations = [v for v in context.violations if v.get('severity') == 'low']
+
+        # 生成审核依据
+        context.regulation_basis = self._generate_regulation_basis(context)
+
+        # 存储摘要
+        context.summary = {
+            'total_violations': len(context.violations),
             'violation_severity': violation_summary,
             'pricing_issues': pricing_issues,
             'has_critical_issues': violation_summary['high'] > 0 or pricing_issues > 1,
-            'has_issues': len(violations) > 0 or pricing_issues > 0
+            'has_issues': len(context.violations) > 0 or pricing_issues > 0
         }
 
     def _count_pricing_issues(self, pricing_analysis: Dict[str, Any]) -> int:
@@ -238,15 +242,7 @@ class ReportGenerationTemplate:
                     pricing_issues += 1
         return pricing_issues
 
-    def _generate_content(
-        self,
-        violations: List[Dict[str, Any]],
-        pricing_analysis: Dict[str, Any],
-        product_info: Dict[str, Any],
-        score: int,
-        grade: str,
-        summary: Dict[str, Any]
-    ) -> str:
+    def _generate_content(self, context: EvaluationContext) -> str:
         """
         生成精算审核报告
 
@@ -263,29 +259,21 @@ class ReportGenerationTemplate:
         lines = []
 
         # ========== 审核结论(始终显示) ==========
-        lines.extend(self._generate_conclusion_section(score, grade, summary))
+        lines.extend(self._generate_conclusion_section(context))
 
         # ========== 问题详情(有问题时显示) ==========
-        if summary.get('has_issues', False):
+        if context.summary.get('has_issues', False):
             lines.append("")
-            lines.extend(self._generate_details_section(violations, pricing_analysis, product_info, summary))
+            lines.extend(self._generate_details_section(context))
 
         # ========== 修改建议(有问题时显示) ==========
-        if summary.get('has_issues', False):
+        if context.summary.get('has_issues', False):
             lines.append("")
-            lines.extend(self._generate_suggestions_section(violations, summary))
+            lines.extend(self._generate_suggestions_section(context))
 
         return '\n'.join(lines)
 
-    def _generate_blocks(
-        self,
-        violations: List[Dict[str, Any]],
-        pricing_analysis: Dict[str, Any],
-        product_info: Dict[str, Any],
-        score: int,
-        grade: str,
-        summary: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
+    def _generate_blocks(self, context: EvaluationContext) -> List[Dict[str, Any]]:
         """
         生成报告块(飞书格式)
 
@@ -297,83 +285,72 @@ class ReportGenerationTemplate:
         blocks = []
 
         # ========== 审核结论(始终显示) ==========
-        blocks.extend(self._create_conclusion_blocks(score, grade, summary))
+        blocks.extend(self._create_conclusion_blocks(context))
 
         # ========== 问题详情(有问题时显示) ==========
-        if summary.get('has_issues', False):
+        if context.summary.get('has_issues', False):
             blocks.append(self._create_text(""))
-            blocks.extend(self._create_details_blocks(violations, pricing_analysis, product_info, summary))
+            blocks.extend(self._create_details_blocks(context))
 
         # ========== 修改建议(有问题时显示) ==========
-        if summary.get('has_issues', False):
+        if context.summary.get('has_issues', False):
             blocks.append(self._create_text(""))
-            blocks.extend(self._create_suggestions_blocks(violations, summary))
+            blocks.extend(self._create_suggestions_blocks(context))
 
         return blocks
 
-    def _generate_metadata(self, product_info: Dict[str, Any]) -> Dict[str, Any]:
+    def _generate_metadata(self, context: EvaluationContext) -> Dict[str, Any]:
         """生成元数据"""
         return {
-            'product_name': product_info.get('product_name', '未知产品'),
-            'insurance_company': product_info.get('insurance_company', '未知'),
-            'product_type': product_info.get('product_type', '未知'),
+            'product_name': context.product.name,
+            'insurance_company': context.product.company,
+            'product_type': context.product.type,
             'timestamp': datetime.now().isoformat()
         }
 
     # ========== 文本内容生成辅助方法 ==========
 
-    def _generate_conclusion_section(self, score: int, grade: str, summary: Dict[str, Any]) -> List[str]:
+    def _generate_conclusion_section(self, context: EvaluationContext) -> List[str]:
         """生成审核结论章节"""
         lines = []
 
         lines.append("一、审核结论")
 
         # 生成审核意见
-        opinion, explanation = self._generate_conclusion_text(score, summary)
+        opinion, explanation = self._generate_conclusion_text(context.score, context.summary)
 
         lines.append(f"**审核意见**:{opinion}")
         lines.append(f"**说明**:{explanation}")
         lines.append("")
 
         # 关键数据表格
-        high_count = summary['violation_severity']['high']
-        medium_count = summary['violation_severity']['medium']
-        low_count = summary['violation_severity']['low']
-        total = summary['total_violations']
-        pricing_issue_count = summary.get('pricing_issues', 0)
+        high_count = context.summary['violation_severity']['high']
+        medium_count = context.summary['violation_severity']['medium']
+        low_count = context.summary['violation_severity']['low']
+        total = context.summary['total_violations']
+        pricing_issue_count = context.summary.get('pricing_issues', 0)
 
         lines.append("**表1-1:关键指标汇总表**")
         lines.append("| 序号 | 指标项 | 结果 | 说明 |")
         lines.append("|:----:|:------|:-----|:-----|")
-        lines.append(f"| 1 | 综合评分 | {score}分 | {self._get_score_description(score)} |")
-        lines.append(f"| 2 | 合规评级 | {grade} | 基于违规数量和严重程度评定 |")
+        lines.append(f"| 1 | 综合评分 | {context.score}分 | {self._get_score_description(context.score)} |")
+        lines.append(f"| 2 | 合规评级 | {context.grade} | 基于违规数量和严重程度评定 |")
         lines.append(f"| 3 | 违规总数 | {total}项 | 严重{high_count}项,中等{medium_count}项,轻微{low_count}项 |")
         lines.append(f"| 4 | 定价评估 | {'合理' if pricing_issue_count == 0 else '需关注'} | {pricing_issue_count}项定价参数需关注 |")
 
         return lines
 
-    def _generate_details_section(
-        self,
-        violations: List[Dict[str, Any]],
-        pricing_analysis: Dict[str, Any],
-        product_info: Dict[str, Any],
-        summary: Dict[str, Any]
-    ) -> List[str]:
+    def _generate_details_section(self, context: EvaluationContext) -> List[str]:
         """生成问题详情章节"""
         lines = []
 
         lines.append("二、问题详情及依据")
 
         # 生成审核依据(动态)
-        regulation_basis = self._generate_regulation_basis(violations, product_info)
         lines.append("**审核依据**")
-        for i, reg in enumerate(regulation_basis, 1):
+        for i, reg in enumerate(context.regulation_basis, 1):
             lines.append(f"{i}. {reg}")
         lines.append("")
-
-        # 按严重程度分组
-        high_violations = [v for v in violations if v.get('severity') == 'high']
-        medium_violations = [v for v in violations if v.get('severity') == 'medium']
 
         # 违规统计表
         lines.append("**表2-1:违规级别统计表**")
@@ -381,10 +358,10 @@ class ReportGenerationTemplate:
         lines.append("| 序号 | 违规级别 | 数量 | 占比 |")
         lines.append("|:----:|:--------|:----:|:----:|")
 
-        high_count = summary['violation_severity']['high']
-        medium_count = summary['violation_severity']['medium']
-        low_count = summary['violation_severity']['low']
-        total = summary['total_violations']
+        high_count = context.summary['violation_severity']['high']
+        medium_count = context.summary['violation_severity']['medium']
+        low_count = context.summary['violation_severity']['low']
+        total = context.summary['total_violations']
 
         if total > 0:
             high_percent = f"{high_count/total*100:.1f}%"
@@ -401,12 +378,12 @@ class ReportGenerationTemplate:
         lines.append(f"| **合计** | **总计** | **{total}项** | **100%** |")
 
         # 严重违规明细表
-        if high_violations:
+        if context.high_violations:
             lines.append("")
             lines.append("**表2-2:严重违规明细表**")
             lines.append("| 序号 | 条款内容 | 问题说明 | 法规依据 |")
             lines.append("|:----:|:---------|:---------|:---------|")
-            for i, v in enumerate(high_violations[:self.HIGH_VIOLATIONS_LIMIT], 1):
+            for i, v in enumerate(context.high_violations[:self.HIGH_VIOLATIONS_LIMIT], 1):
                 clause_ref = v.get('clause_reference', '')
                 clause_text = v.get('clause_text', '')[:80]
                 description = v.get('description', '未知')
@@ -421,12 +398,12 @@ class ReportGenerationTemplate:
                 lines.append(f"| {i} | {full_clause}... | {description} | {regulation} |")
 
         # 中等违规明细表
-        if medium_violations:
+        if context.medium_violations:
             lines.append("")
             lines.append("**表2-3:中等违规明细表**")
             lines.append("| 序号 | 条款内容 | 问题说明 | 法规依据 |")
             lines.append("|:----:|:---------|:---------|:---------|")
-            for i, v in enumerate(medium_violations[:self.MEDIUM_VIOLATIONS_LIMIT], 1):
+            for i, v in enumerate(context.medium_violations[:self.MEDIUM_VIOLATIONS_LIMIT], 1):
                 clause_ref = v.get('clause_reference', '')
                 clause_text = v.get('clause_text', '')[:80]
                 description = v.get('description', '未知')
@@ -440,7 +417,7 @@ class ReportGenerationTemplate:
                 lines.append(f"| {i} | {full_clause}... | {description} | {regulation} |")
 
         # 定价问题
-        pricing = pricing_analysis.get('pricing', {})
+        pricing = context.pricing_analysis.get('pricing', {})
         if isinstance(pricing, dict):
             pricing_issues = []
             for category in ['interest', 'expense']:
@@ -458,31 +435,27 @@ class ReportGenerationTemplate:
 
         return lines
 
-    def _generate_suggestions_section(self, violations: List[Dict[str, Any]], summary: Dict[str, Any]) -> List[str]:
+    def _generate_suggestions_section(self, context: EvaluationContext) -> List[str]:
         """生成修改建议章节"""
         lines = []
 
         lines.append("三、修改建议")
 
-        # 按严重程度分组
-        high_violations = [v for v in violations if v.get('severity') == 'high']
-        medium_violations = [v for v in violations if v.get('severity') == 'medium']
-
-        if high_violations:
+        if context.high_violations:
             lines.append("**表3-1:P0级整改事项表(必须立即整改)**")
             lines.append("| 序号 | 条款原文 | 修改建议 |")
             lines.append("|:----:|:---------|:---------|")
-            for i, v in enumerate(high_violations[:self.MEDIUM_VIOLATIONS_LIMIT], 1):
+            for i, v in enumerate(context.high_violations[:self.MEDIUM_VIOLATIONS_LIMIT], 1):
                 clause_text = v.get('clause_text', '')[:40]
                 remediation = self._get_specific_remediation(v)
                 lines.append(f"| {i} | {clause_text}... | {remediation} |")
 
-        if medium_violations:
+        if context.medium_violations:
             lines.append("")
             lines.append("**表3-2:P1级整改事项表(建议尽快整改)**")
             lines.append("| 序号 | 条款原文 | 修改建议 |")
             lines.append("|:----:|:---------|:---------|")
-            for i, v in enumerate(medium_violations[:self.P1_REMEDIATION_MEDIUM_LIMIT], 1):
+            for i, v in enumerate(context.medium_violations[:self.P1_REMEDIATION_MEDIUM_LIMIT], 1):
                 clause_text = v.get('clause_text', '')[:40]
                 remediation = self._get_specific_remediation(v)
                 lines.append(f"| {i} | {clause_text}... | {remediation} |")
@@ -491,14 +464,14 @@ class ReportGenerationTemplate:
 
     # ========== 飞书块生成辅助方法 ==========
 
-    def _create_conclusion_blocks(self, score: int, grade: str, summary: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _create_conclusion_blocks(self, context: EvaluationContext) -> List[Dict[str, Any]]:
         """创建审核结论章节块"""
         blocks = []
 
         blocks.append(self._create_heading_2("一、审核结论"))
 
         # 生成审核意见
-        opinion, explanation = self._generate_conclusion_text(score, summary)
+        opinion, explanation = self._generate_conclusion_text(context.score, context.summary)
 
         blocks.append(self._create_bold_text(f"审核意见:{opinion}"))
         blocks.append(self._create_text(f"说明:{explanation}"))
@@ -507,16 +480,16 @@ class ReportGenerationTemplate:
         # 关键指标表格
         blocks.append(self._create_text("表1-1:关键指标汇总表"))
 
-        high_count = summary['violation_severity']['high']
-        medium_count = summary['violation_severity']['medium']
-        low_count = summary['violation_severity']['low']
-        total = summary['total_violations']
-        pricing_issue_count = summary.get('pricing_issues', 0)
+        high_count = context.summary['violation_severity']['high']
+        medium_count = context.summary['violation_severity']['medium']
+        low_count = context.summary['violation_severity']['low']
+        total = context.summary['total_violations']
+        pricing_issue_count = context.summary.get('pricing_issues', 0)
 
         key_metrics_data = [
             ["序号", "指标项", "结果", "说明"],
-            ["1", "综合评分", f"{score}分", self._get_score_description(score)],
-            ["2", "合规评级", grade, "基于违规数量和严重程度评定"],
+            ["1", "综合评分", f"{context.score}分", self._get_score_description(context.score)],
+            ["2", "合规评级", context.grade, "基于违规数量和严重程度评定"],
             ["3", "违规总数", f"{total}项", f"严重{high_count}项,中等{medium_count}项,轻微{low_count}项"],
             ["4", "定价评估", "合理" if pricing_issue_count == 0 else "需关注", f"{pricing_issue_count}项定价参数需关注"]
         ]
@@ -524,33 +497,26 @@ class ReportGenerationTemplate:
 
         return blocks
 
-    def _create_details_blocks(
-        self,
-        violations: List[Dict[str, Any]],
-        pricing_analysis: Dict[str, Any],
-        product_info: Dict[str, Any],
-        summary: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
+    def _create_details_blocks(self, context: EvaluationContext) -> List[Dict[str, Any]]:
         """创建问题详情章节块"""
         blocks = []
 
         blocks.append(self._create_heading_2("二、问题详情及依据"))
 
         # 生成审核依据(动态)
-        regulation_basis = self._generate_regulation_basis(violations, product_info)
-        if regulation_basis:  # 只在有依据时显示
+        if context.regulation_basis:  # 只在有依据时显示
             blocks.append(self._create_text("审核依据"))
-            for reg in regulation_basis:
+            for reg in context.regulation_basis:
                 blocks.append(self._create_text(reg))
             blocks.append(self._create_text(""))
 
         # 违规统计表
         blocks.append(self._create_text("表2-1:违规级别统计表"))
 
-        high_count = summary['violation_severity']['high']
-        medium_count = summary['violation_severity']['medium']
-        low_count = summary['violation_severity']['low']
-        total = summary['total_violations']
+        high_count = context.summary['violation_severity']['high']
+        medium_count = context.summary['violation_severity']['medium']
+        low_count = context.summary['violation_severity']['low']
+        total = context.summary['total_violations']
 
         if total > 0:
             high_percent = f"{high_count/total*100:.1f}%"
@@ -570,17 +536,13 @@ class ReportGenerationTemplate:
         ]
         blocks.extend(self._create_table_blocks(violation_stats_data))
 
-        # 按严重程度分组
-        high_violations = [v for v in violations if v.get('severity') == 'high']
-        medium_violations = [v for v in violations if v.get('severity') == 'medium']
-
         # 严重违规明细表
-        if high_violations:
+        if context.high_violations:
             blocks.append(self._create_text(""))
             blocks.append(self._create_text("表2-2:严重违规明细表"))
 
             high_violation_data = [["序号", "条款内容", "问题说明", "法规依据"]]
-            for i, v in enumerate(high_violations[:self.HIGH_VIOLATIONS_LIMIT], 1):
+            for i, v in enumerate(context.high_violations[:self.HIGH_VIOLATIONS_LIMIT], 1):
                 clause_ref = v.get('clause_reference', '')
                 clause_text = v.get('clause_text', '')[:80]
                 description = v.get('description', '未知')
@@ -596,12 +558,12 @@ class ReportGenerationTemplate:
             blocks.extend(self._create_table_blocks(high_violation_data))
 
         # 中等违规明细表
-        if medium_violations:
+        if context.medium_violations:
             blocks.append(self._create_text(""))
             blocks.append(self._create_text("表2-3:中等违规明细表"))
 
             medium_violation_data = [["序号", "条款内容", "问题说明", "法规依据"]]
-            for i, v in enumerate(medium_violations[:self.MEDIUM_VIOLATIONS_LIMIT], 1):
+            for i, v in enumerate(context.medium_violations[:self.MEDIUM_VIOLATIONS_LIMIT], 1):
                 clause_ref = v.get('clause_reference', '')
                 clause_text = v.get('clause_text', '')[:80]
                 description = v.get('description', '未知')
@@ -617,7 +579,7 @@ class ReportGenerationTemplate:
             blocks.extend(self._create_table_blocks(medium_violation_data))
 
         # 定价问题
-        pricing = pricing_analysis.get('pricing', {})
+        pricing = context.pricing_analysis.get('pricing', {})
         if isinstance(pricing, dict):
             pricing_issues = []
             for category in ['interest', 'expense']:
@@ -637,33 +599,29 @@ class ReportGenerationTemplate:
 
         return blocks
 
-    def _create_suggestions_blocks(self, violations: List[Dict[str, Any]], summary: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _create_suggestions_blocks(self, context: EvaluationContext) -> List[Dict[str, Any]]:
         """创建修改建议章节块"""
         blocks = []
 
         blocks.append(self._create_heading_2("三、修改建议"))
 
-        # 按严重程度分组
-        high_violations = [v for v in violations if v.get('severity') == 'high']
-        medium_violations = [v for v in violations if v.get('severity') == 'medium']
-
-        if high_violations:
+        if context.high_violations:
             blocks.append(self._create_text("表3-1:P0级整改事项表(必须立即整改)"))
 
             p0_data = [["序号", "条款原文", "修改建议"]]
-            for i, v in enumerate(high_violations[:self.MEDIUM_VIOLATIONS_LIMIT], 1):
+            for i, v in enumerate(context.high_violations[:self.MEDIUM_VIOLATIONS_LIMIT], 1):
                 clause_text = v.get('clause_text', '')[:40]
                 remediation = self._get_specific_remediation(v)
                 p0_data.append([str(i), f"{clause_text}...", remediation])
 
             blocks.extend(self._create_table_blocks(p0_data))
 
-        if medium_violations:
+        if context.medium_violations:
             blocks.append(self._create_text(""))
             blocks.append(self._create_text("表3-2:P1级整改事项表(建议尽快整改)"))
 
             p1_data = [["序号", "条款原文", "修改建议"]]
-            for i, v in enumerate(medium_violations[:self.P1_REMEDIATION_MEDIUM_LIMIT], 1):
+            for i, v in enumerate(context.medium_violations[:self.P1_REMEDIATION_MEDIUM_LIMIT], 1):
                 clause_text = v.get('clause_text', '')[:40]
                 remediation = self._get_specific_remediation(v)
                 p1_data.append([str(i), f"{clause_text}...", remediation])
@@ -708,15 +666,14 @@ class ReportGenerationTemplate:
 
         return opinion, explanation
 
-    def _generate_regulation_basis(self, violations: List[Dict[str, Any]], product_info: Dict[str, Any]) -> List[str]:
+    def _generate_regulation_basis(self, context: EvaluationContext) -> List[str]:
         """
         动态生成审核依据
 
         基于产品类型和违规情况,动态生成适用的法规依据列表
 
         Args:
-            violations: 违规记录列表
-            product_info: 产品信息
+            context: 评估上下文
 
         Returns:
             list: 法规依据列表
@@ -727,7 +684,7 @@ class ReportGenerationTemplate:
         basis.append("《中华人民共和国保险法》")
 
         # 根据产品类型添加专项法规
-        product_type = product_info.get('product_type', '').lower()
+        product_type = context.product.type.lower()
         type_regulations = {
             '寿险': '《人身保险公司保险条款和保险费率管理办法》',
             '健康险': '《健康保险管理办法》',
@@ -746,9 +703,9 @@ class ReportGenerationTemplate:
             basis.append('《保险公司管理规定》')
 
         # 提取违规记录中引用的法规(如果有)
-        if violations:
+        if context.violations:
             cited_regs = set()
-            for v in violations:
+            for v in context.violations:
                 if v.get('regulation_citation'):
                     cited_regs.add(v['regulation_citation'])
 

@@ -6,7 +6,6 @@ ID 生成器模块
 提供统一的ID生成功能，消除代码重复，确保ID唯一性和一致性
 """
 import random
-import time
 from datetime import datetime
 from typing import Optional
 from enum import Enum

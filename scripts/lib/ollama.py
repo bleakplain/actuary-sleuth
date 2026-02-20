@@ -5,9 +5,7 @@ Ollama LLM 接口模块
 提供文本嵌入和生成功能
 """
 import requests
-import json
 from typing import List, Dict, Optional, Any
-from pathlib import Path
 
 
 class OllamaClient:

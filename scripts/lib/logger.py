@@ -7,9 +7,7 @@
 """
 import sys
 import logging
-from datetime import datetime
 from typing import Optional, Any
-from pathlib import Path
 
 from .exceptions import ActuarySleuthException
 
