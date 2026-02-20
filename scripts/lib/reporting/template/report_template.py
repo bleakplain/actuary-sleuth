@@ -15,7 +15,7 @@ ReportGenerationTemplate类：使用模板方法模式生成审核报告
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from lib.config import get_config
+from lib.config import get_config, Config
 from lib.id_generator import IDGenerator
 from lib.reporting.strategies import RemediationStrategies
 from lib.reporting.model import EvaluationContext
@@ -68,12 +68,12 @@ class ReportGenerationTemplate:
     MEDIUM_VIOLATIONS_LIMIT = 10
     P1_REMEDIATION_MEDIUM_LIMIT = 5  # P1级整改事项表中的中危违规数量限制
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Config] = None):
         """
         初始化报告生成模板
 
         Args:
-            config: 配置字典(可选)
+            config: 配置对象(可选)
         """
         self.config = config or get_config()
         self.report_id = None

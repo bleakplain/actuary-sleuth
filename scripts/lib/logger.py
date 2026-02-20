@@ -138,7 +138,12 @@ class AuditStepLogger:
             message = f"{message} ({status})"
 
         # 输出到 stderr 确保与 JSON 输出分离
-        print(f"{status_symbol} {message}", file=sys.stderr, flush=True)
+        # 容器环境中 stderr 可能被重定向到已关闭的管道
+        try:
+            print(f"{status_symbol} {message}", file=sys.stderr, flush=True)
+        except (OSError, ValueError):
+            # stderr 可能不可用，静默忽略
+            pass
 
         if kwargs:
             self.logger.info(f"Step {self.step_number}: {step_name}", **kwargs)

@@ -20,6 +20,7 @@ from typing import Dict, Any
 from lib.config import get_config
 from lib.reporting.template import ReportGenerationTemplate
 from lib.reporting.export import FeishuExporter
+from lib.exceptions import InvalidParameterException
 
 
 def main():
@@ -30,8 +31,13 @@ def main():
     parser.add_argument('--output', help='输出文件路径（可选）')
     args = parser.parse_args()
 
+    # 验证输入文件路径
+    input_path = Path(args.input).resolve()
+    if not input_path.exists() or not input_path.is_file():
+        raise InvalidParameterException('input', str(input_path), f'File does not exist or is not a file')
+
     # 读取输入
-    with open(args.input, 'r', encoding='utf-8') as f:
+    with open(input_path, 'r', encoding='utf-8') as f:
         params = json.load(f)
 
     # 执行业务逻辑

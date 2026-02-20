@@ -213,14 +213,14 @@ class FeishuExporter:
 
             if update_response.status_code != 200:
                 print(f"更新文档失败: {update_response.text}", file=sys.stderr)
-                raise Exception(f"写入内容失败: HTTP {update_response.status_code} - {update_response.text}")
+                raise FeishuAPIException(f"写入内容失败: HTTP {update_response.status_code} - {update_response.text}")
             else:
                 update_data = update_response.json()
                 code = update_data.get('code')
                 print(f"块写入结果 code: {code}", file=sys.stderr)
                 if code != 0:
                     msg = update_data.get('msg', 'Unknown error')
-                    raise Exception(f"写入内容失败: {msg}")
+                    raise FeishuAPIException(f"写入内容失败: {msg}")
 
     def export(
         self,

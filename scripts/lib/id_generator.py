@@ -33,9 +33,9 @@ class IDGenerator:
         RPT-1771382413137-1996
     """
 
-    # 随机数范围
-    RANDOM_MIN = 1000
-    RANDOM_MAX = 9999
+    # 随机数范围 - 扩大范围以减少高并发下冲突概率
+    RANDOM_MIN = 10000
+    RANDOM_MAX = 99999
 
     @classmethod
     def generate(cls, prefix: IDPrefix, random_range: tuple = (RANDOM_MIN, RANDOM_MAX)) -> str:
