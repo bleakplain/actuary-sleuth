@@ -19,7 +19,8 @@ from typing import Dict, Any
 
 from lib.config import get_config
 from lib.reporting.template import ReportGenerationTemplate
-from lib.reporting.export import FeishuExporter
+# FeishuExporter has been replaced by DocxExporter for Word export
+# from lib.reporting.export import FeishuExporter
 from lib.exceptions import InvalidParameterException
 
 
@@ -134,8 +135,11 @@ def export_to_feishu(blocks: list, title: str = None) -> Dict[str, Any]:
     Returns:
         dict: 包含文档 URL 的结果
     """
-    exporter = FeishuExporter()
-    return exporter.export(blocks, title)
+    return {
+        'success': False,
+        'error': 'export_to_feishu is not implemented. Use DocxExporter instead.',
+        'error_type': 'NotImplemented'
+    }
 
 
 if __name__ == '__main__':

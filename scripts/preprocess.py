@@ -266,13 +266,43 @@ def extract_clauses(content: str) -> List[Dict[str, Any]]:
 
     # 如果没有找到明确的条款，则按段落分割
     if not clauses:
+        # 首先按双换行分割段落
         paragraphs = content.split('\n\n')
         for i, para in enumerate(paragraphs):
             para = para.strip()
-            if len(para) > 20:  # 只保留有意义的段落
+            if len(para) > 10:  # 降低阈值，保留更多有意义的段落
                 clauses.append({
                     'text': para,
                     'reference': f"段落{i+1}"
+                })
+
+        # 如果段落数量仍然太少，尝试按单换行分割（针对Markdown文档）
+        if len(clauses) < 3:
+            clauses = []
+            lines = content.split('\n')
+            current_section = []
+            section_title = ""
+
+            for line in lines:
+                line = line.strip()
+                # 检测Markdown标题
+                if line.startswith('##'):
+                    # 保存之前的section
+                    if current_section and any(len(l) > 5 for l in current_section):
+                        clauses.append({
+                            'text': '\n'.join(current_section),
+                            'reference': section_title or "未命名段落"
+                        })
+                    section_title = line
+                    current_section = [line]
+                elif line:  # 非空行
+                    current_section.append(line)
+
+            # 保存最后一个section
+            if current_section and any(len(l) > 5 for l in current_section):
+                clauses.append({
+                    'text': '\n'.join(current_section),
+                    'reference': section_title or "未命名段落"
                 })
 
     return clauses

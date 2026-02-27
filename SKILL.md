@@ -36,11 +36,14 @@ Audits an insurance product document for compliance issues.
 
 **Usage:**
 ```bash
+python3 scripts/audit.py --documentContent <文档内容>
+# 或
 python3 scripts/audit.py --documentUrl <飞书文档URL>
 ```
 
 **Parameters:**
-- `--documentUrl` (string, required): 飞书文档URL
+- `--documentContent` (string): 文档内容（Markdown格式），推荐使用此参数
+- `----documentUrl` (string): 飞书文档URL（可选，需要工具获取内容）
 
 **Workflow:**
 ```

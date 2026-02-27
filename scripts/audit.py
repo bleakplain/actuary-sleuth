@@ -12,11 +12,14 @@ import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, TypedDict, Callable, Optional
+from dataclasses import replace
 
 # 添加 lib 目录到路径
 sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
 from lib.database import get_connection as db_get_connection
+from lib.evaluation import calculate_evaluation
+from lib.audit_data import AuditData, EvaluationResult
 from lib.config import get_config
 from lib.id_generator import IDGenerator
 from lib.exceptions import (
@@ -29,7 +32,6 @@ from lib.exceptions import (
     ActuarySleuthException
 )
 from lib.logger import get_audit_logger
-from lib.audit_context import AuditContext
 
 
 # ========== 类型定义 ==========
@@ -159,12 +161,12 @@ def _run_audit_step(
     return result
 
 
-def _handle_report_export(context: AuditContext) -> Optional[Dict[str, Any]]:
+def _export_report(evaluation: EvaluationResult) -> Optional[Dict[str, Any]]:
     """
-    处理报告导出 - 生成Word文档并推送到飞书
+    导出报告 - 生成Word文档并推送到飞书
 
     Args:
-        context: 审核上下文（包含所有需要的数据）
+        evaluation: 评估结果 (EvaluationResult)
 
     Returns:
         导出结果，包含docx_export和feishu_push信息
@@ -173,37 +175,35 @@ def _handle_report_export(context: AuditContext) -> Optional[Dict[str, Any]]:
 
     # 检查是否启用报告导出
     if not config.report.export_feishu:
-        print(f"[{context.audit_id}] Step 6: Report export skipped (not configured)", file=sys.stderr)
+        print(f"[{evaluation.product.name}] Step 6: Report export skipped (not configured)", file=sys.stderr)
         return None
 
-    print(f"[{context.audit_id}] Step 6: Generating Word report and pushing to Feishu...", file=sys.stderr)
+    print(f"[{evaluation.product.name}] Step 6: Generating Word report and pushing to Feishu...", file=sys.stderr)
 
     try:
         # 导入新的Word导出模块
         from lib.reporting.export import DocxExporter
-        from lib.reporting.model import _InsuranceProduct
 
-        # 构建产品对象
-        product = _InsuranceProduct(
-            name=context.product_info.get('product_name', '未知产品'),
-            type=context.product_info.get('product_type', '未知'),
-            company=context.product_info.get('insurance_company', ''),
-            version=context.product_info.get('version', ''),
-            document_url=context.product_info.get('document_url', '')
-        )
-
-        # 更新 evaluation 中的 product
-        context.evaluation.product = product
-        context.evaluation.violations = context.violations
-        context.evaluation.pricing_analysis = context.pricing_analysis.get('pricing', {})
-
-        # 使用DocxExporter生成并推送Word文档
         exporter = DocxExporter(
             validate=False,
             auto_push=True
         )
 
-        export_result = exporter.export(context.evaluation)
+        # 将 EvaluationResult 转换为 DocxExporter 期望的格式
+        from lib.reporting.model import EvaluationContext
+        context = EvaluationContext(
+            violations=evaluation.violations,
+            pricing_analysis=evaluation.pricing_analysis,
+            product=evaluation.product,
+            score=evaluation.score,
+            grade=evaluation.grade,
+            summary=evaluation.summary,
+            high_violations=evaluation.high_violations,
+            medium_violations=evaluation.medium_violations,
+            low_violations=evaluation.low_violations
+        )
+
+        export_result = exporter.export(context)
 
         # 构建返回结果
         result = {
@@ -226,19 +226,19 @@ def _handle_report_export(context: AuditContext) -> Optional[Dict[str, Any]]:
             }
 
         if export_result.get('success'):
-            print(f"[{context.audit_id}] ✅ Word report generated: {export_result.get('title')}", file=sys.stderr)
+            print(f"[{evaluation.product.name}] ✅ Word report generated: {export_result.get('title')}", file=sys.stderr)
             if push_result and push_result.get('success'):
-                print(f"[{context.audit_id}] ✅ Pushed to Feishu: {push_result.get('message_id')}", file=sys.stderr)
+                print(f"[{evaluation.product.name}] ✅ Pushed to Feishu: {push_result.get('message_id')}", file=sys.stderr)
         else:
             error = export_result.get('error', 'Unknown error')
-            print(f"[{context.audit_id}] ⚠️ Export failed: {error}", file=sys.stderr)
+            print(f"[{evaluation.product.name}] ⚠️ Export failed: {error}", file=sys.stderr)
             result['error'] = error
 
         return result
 
     except Exception as e:
         error_msg = str(e)
-        print(f"[{context.audit_id}] ⚠️ Report export error: {error_msg}", file=sys.stderr)
+        print(f"[{evaluation.product.name}] ⚠️ Report export error: {error_msg}", file=sys.stderr)
         return {
             'success': False,
             'error': error_msg,
@@ -373,61 +373,60 @@ def execute(params: Dict[str, Any]) -> AuditResult:
     Returns:
         dict: 包含完整审核结果的字典
     """
-    # 创建审核上下文
-    context = AuditContext()
-    context.audit_id = IDGenerator.generate_audit()
-    context.document_url = params.get('documentUrl', '')
+    # 创建审核数据
+    audit_id = IDGenerator.generate_audit()
+    document_url = params.get('documentUrl', '')
 
     # 获取文档内容
     document_content = params.get('documentContent', '')
-    if context.document_url and not document_content:
-        document_content = _fetch_feishu_content(context.document_url)
+    if document_url and not document_content:
+        document_content = _fetch_feishu_content(document_url)
 
     if not document_content:
         raise MissingParameterException('documentContent or documentUrl')
 
-    step_logger = get_audit_logger(context.audit_id)
+    step_logger = get_audit_logger(audit_id)
 
     try:
-        # Step 1: 文档预处理
-        _preprocess(context, document_content)
+        # Step 1-3: 收集原始数据 (AuditData)
+        data = AuditData.create(audit_id, document_url)
+        data = _preprocess(data, document_content)
+        data = _check_violations(data)
+        data = _analyze_pricing(data)
 
-        # Step 2: 负面清单检查
-        _check_violations(context)
-
-        # Step 3: 定价分析
-        _analyze_pricing(context)
-
-        # Step 4: 生成报告
-        _generate_report(context)
+        # Step 4: 计算评估结果 (EvaluationResult)
+        evaluation = _calculate_evaluation(data)
 
         # Step 5: 保存审核记录
         step_logger.step("保存审核记录")
         save_audit_record(
-            context.audit_id,
-            context.document_url,
-            context.violations,
-            context.evaluation.score or 0
+            audit_id,
+            document_url,
+            data.violations,
+            evaluation.score
         )
 
         # Step 6: 导出报告（如果配置启用）
-        _export_report(context)
+        export_result = _export_report(evaluation)
 
-        print(f"[{context.audit_id}] Audit completed successfully!", file=sys.stderr)
-        return context.to_result()
+        print(f"[{audit_id}] Audit completed successfully!", file=sys.stderr)
+        return _build_result(audit_id, data, evaluation, export_result, document_url)
 
     except Exception as e:
-        print(f"[{context.audit_id}] Audit failed: {str(e)}", file=sys.stderr)
+        print(f"[{audit_id}] Audit failed: {str(e)}", file=sys.stderr)
         raise
 
 
-def _preprocess(context: AuditContext, document_content: str) -> None:
+def _preprocess(data: AuditData, document_content: str) -> AuditData:
     """
     执行文档预处理步骤
 
     Args:
-        context: 审核上下文
+        data: 审核数据
         document_content: 文档内容
+
+    Returns:
+        AuditData: 更新后的审核数据
 
     Raises:
         DocumentPreprocessException: 预处理失败
@@ -436,23 +435,29 @@ def _preprocess(context: AuditContext, document_content: str) -> None:
         "预处理文档",
         run_preprocess,
         document_content,
-        context.document_url,
-        audit_id=context.audit_id,
-        document_url=context.document_url
+        data.document_url,
+        audit_id=data.audit_id,
+        document_url=data.document_url
     )
 
-    # 将结果写入上下文
-    context.product_info = result.get('product_info', {})
-    context.clauses = result.get('clauses', [])
-    context.pricing_params = result.get('pricing_params', {})
+    # 返回新的 AuditData (使用 dataclass.replace 创建新对象)
+    return replace(
+        data,
+        product_info=result.get('product_info', {}),
+        clauses=result.get('clauses', []),
+        pricing_params=result.get('pricing_params', {})
+    )
 
 
-def _check_violations(context: AuditContext) -> None:
+def _check_violations(data: AuditData) -> AuditData:
     """
     执行负面清单检查步骤
 
     Args:
-        context: 审核上下文
+        data: 审核数据
+
+    Returns:
+        AuditData: 更新后的审核数据
 
     Raises:
         NegativeListCheckException: 检查失败
@@ -460,98 +465,101 @@ def _check_violations(context: AuditContext) -> None:
     result = _run_audit_step(
         "负面清单检查",
         run_negative_list_check,
-        context.clauses,
-        audit_id=context.audit_id
+        data.clauses,
+        audit_id=data.audit_id
     )
 
-    # 将结果写入上下文
-    context.violations = result.get('violations', [])
+    # 返回新的 AuditData
+    return replace(data, violations=result.get('violations', []))
 
 
-def _analyze_pricing(context: AuditContext) -> None:
+def _analyze_pricing(data: AuditData) -> AuditData:
     """
     执行定价分析步骤
 
     Args:
-        context: 审核上下文
+        data: 审核数据
+
+    Returns:
+        AuditData: 更新后的审核数据
 
     Raises:
         PricingAnalysisException: 分析失败
     """
-    product_type = context.product_info.get('product_type', 'unknown')
+    product_type = data.product_info.get('product_type', 'unknown')
     result = _run_audit_step(
         "定价分析",
         run_pricing_analysis,
-        context.pricing_params,
+        data.pricing_params,
         product_type,
-        audit_id=context.audit_id
+        audit_id=data.audit_id
     )
 
-    # 将结果写入上下文
-    context.pricing_analysis = result
+    # 返回新的 AuditData
+    return replace(data, pricing_analysis=result)
 
 
-def _generate_report(context: AuditContext) -> None:
+def _calculate_evaluation(data: AuditData) -> EvaluationResult:
     """
-    执行报告生成步骤
+    计算评估结果
 
     Args:
-        context: 审核上下文
+        data: 审核数据
 
-    Raises:
-        ReportGenerationException: 生成失败
+    Returns:
+        EvaluationResult: 评估结果
     """
-    # 将 document_url 添加到 product_info 中
-    product_info = context.product_info.copy()
-    product_info['document_url'] = context.document_url
+    return calculate_evaluation(data)
 
-    result = _run_audit_step(
-        "生成报告",
-        run_report_generation,
-        context.violations,
-        context.pricing_analysis,
-        product_info,
-        audit_id=context.audit_id
-    )
 
-    # 将评估结果写入上下文的 evaluation 对象
-    from lib.reporting.model import _InsuranceProduct
-    product = _InsuranceProduct(
-        name=product_info.get('product_name', '未知产品'),
-        type=product_info.get('product_type', '未知'),
-        company=product_info.get('insurance_company', ''),
-        version=product_info.get('version', ''),
-        document_url=product_info.get('document_url', '')
-    )
+def _build_result(
+    audit_id: str,
+    data: AuditData,
+    evaluation: EvaluationResult,
+    export_result: Optional[Dict[str, Any]],
+    document_url: str
+) -> AuditResult:
+    """
+    构建最终审核结果
 
-    # 构建 EvaluationContext
-    context.evaluation.product = product
-    context.evaluation.violations = context.violations
-    context.evaluation.pricing_analysis = result.get('pricing_analysis', {}).get('pricing', {})
-    context.evaluation.score = result.get('score', 0)
-    context.evaluation.grade = result.get('grade', '')
+    Args:
+        audit_id: 审核ID
+        data: 审核数据
+        evaluation: 评估结果
+        export_result: 导出结果
+        document_url: 文档URL
 
-    # 转换 summary 格式为扁平结构
-    raw_summary = result.get('summary', {})
-    violation_severity = raw_summary.get('violation_severity', {})
-    context.evaluation.summary = {
-        'high': violation_severity.get('high', 0),
-        'medium': violation_severity.get('medium', 0),
-        'low': violation_severity.get('low', 0),
-        'total_violations': raw_summary.get('total_violations', 0),
-        'has_issues': raw_summary.get('has_issues', False)
+    Returns:
+        AuditResult: 审核结果
+    """
+    return {
+        'success': True,
+        'audit_id': audit_id,
+        'violations': data.violations,
+        'violation_count': len(data.violations),
+        'violation_summary': {
+            'high': len(evaluation.high_violations),
+            'medium': len(evaluation.medium_violations),
+            'low': len(evaluation.low_violations)
+        },
+        'pricing': evaluation.pricing_analysis,
+        'score': evaluation.score,
+        'grade': evaluation.grade,
+        'summary': evaluation.summary,
+        'report': '',
+        'metadata': {
+            'audit_type': 'full',
+            'document_url': document_url,
+            'timestamp': data.timestamp.isoformat(),
+            'product_info': data.product_info
+        },
+        'details': {
+            'preprocess_id': f"PRE-{audit_id.split('-')[1]}",
+            'product_info': data.product_info,
+            'document_url': document_url
+        },
+        'report_export': export_result or {}
     }
-
-
-def _export_report(context: AuditContext) -> None:
-    """
-    执行报告导出步骤
-
-    Args:
-        context: 审核上下文
-    """
-    result = _handle_report_export(context)
-    context.export_result = result
 
 
 def run_preprocess(document_content: str, document_url: str) -> PreprocessResult:

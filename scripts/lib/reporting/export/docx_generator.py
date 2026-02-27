@@ -242,10 +242,12 @@ async function createAuditReport() {
         parts.append(self._generate_conclusion_section(score, grade, summary, violations, pricing_analysis))
 
         # 添加问题详情章节
+        logger.debug(f"生成问题详情章节: violations count={len(violations) if violations else 0}")
         if violations:
             parts.append(self._generate_details_section(violations, summary, pricing_analysis))
 
         # 添加修改建议章节
+        logger.debug(f"生成修改建议章节: violations count={len(violations) if violations else 0}")
         if violations:
             parts.append(self._generate_suggestions_section(violations))
 
@@ -510,7 +512,6 @@ createAuditReport()
         sections.append(self._generate_text_paragraph(""))
         sections.append(self._generate_heading_paragraph("三、修改建议", 2))
 
-        # 按严重程度分组
         high_violations = [v for v in violations if v.get('severity') == 'high']
         medium_violations = [v for v in violations if v.get('severity') == 'medium']
 
