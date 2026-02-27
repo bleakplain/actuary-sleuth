@@ -28,6 +28,7 @@ actuary-sleuth/
 │   ├── check.py          # 负面清单检查
 │   ├── scoring.py        # 定价分析
 │   ├── query.py          # 法规查询
+│   ├── report.py         # 报告生成
 │   ├── audit.py          # 综合审核（主流程）
 │   └── lib/              # 核心库
 │       ├── config.py              # 配置管理
@@ -35,6 +36,8 @@ actuary-sleuth/
 │       ├── exceptions.py          # 异常定义
 │       ├── id_generator.py        # ID 生成器
 │       ├── logger.py              # 日志记录
+│       ├── audit_data.py          # 审核数据模型（不可变）
+│       ├── evaluation.py          # 评估计算（纯函数）
 │       ├── ollama.py              # LLM 接口
 │       ├── reporting/             # 报告生成模块
 │       │   ├── model.py           # 数据模型
@@ -55,9 +58,137 @@ actuary-sleuth/
 │   └── lancedb/          # 向量数据库
 ├── references/           # 法规文档
 ├── tests/                # 测试目录
+│   ├── fixtures/         # 测试数据
 │   ├── unit/             # 单元测试
 │   └── integration/      # 集成测试
 └── skill.json            # 技能配置
+```
+
+## 业务流程
+
+```
+用户请求（飞书文档URL）
+   ↓
+┌─────────────────────────────────────────────────────┐
+│  Actuary Sleuth 审核流程                              │
+├─────────────────────────────────────────────────────┤
+│  Step 1: 文档预处理 (preprocess.py)                   │
+│  - 从飞书URL获取文档内容 (feishu2md)                   │
+│  - 解析文档结构，提取产品信息                          │
+│  - 提取条款列表                                       │
+│  - 提取定价参数                                       │
+│  输出: AuditData (原始数据)                           │
+├─────────────────────────────────────────────────────┤
+│  Step 2: 负面清单检查 (check.py)                      │
+│  - 对照100条监管规则检查条款                          │
+│  - 匹配违规关键词和正则表达式                         │
+│  - 记录违规项、严重程度、整改建议                      │
+│  输出: AuditData.violations (违规列表)                 │
+├─────────────────────────────────────────────────────┤
+│  Step 3: 定价分析 (scoring.py)                        │
+│  - 分析死亡率、利率、费用率                           │
+│  - 与行业基准对比                                     │
+│  - 评估定价合理性                                     │
+│  输出: AuditData.pricing_analysis (定价分析)           │
+├─────────────────────────────────────────────────────┤
+│  Step 4: 评估计算 (evaluation.py)                     │
+│  - 计算综合评分 (100分制)                              │
+│  - 确定合规等级 (优秀/良好/合格/不合格)                │
+│  - 分组违规项 (高/中/低)                              │
+│  - 生成汇总统计                                       │
+│  输出: EvaluationResult (评估结果)                     │
+├─────────────────────────────────────────────────────┤
+│  Step 5: 保存记录                                     │
+│  - 保存到 SQLite 数据库                               │
+│  - 记录审核ID、文档URL、违规项、评分                   │
+├─────────────────────────────────────────────────────┤
+│  Step 6: 导出报告 (docx_exporter.py)                  │
+│  - 生成Word文档 (7个表格)                             │
+│  - 推送到飞书群组                                     │
+│  输出: Word文件 + 飞书消息                            │
+└─────────────────────────────────────────────────────┘
+   ↓
+审核结果返回
+```
+
+## 数据流
+
+### 阶段1: 原始数据收集 (AuditData)
+
+```python
+# 输入: 飞书文档URL
+document_url = "https://feishu.cn/docx/..."
+
+# Step 1: 预处理
+data = AuditData.create(audit_id, document_url)
+data = _preprocess(data, document_content)
+# → product_info, clauses, pricing_params
+
+# Step 2: 负面清单检查
+data = _check_violations(data)
+# → violations (clause_index, clause_text, rule, severity...)
+
+# Step 3: 定价分析
+data = _analyze_pricing(data)
+# → pricing_analysis (mortality, interest, expense)
+```
+
+### 阶段2: 评估计算 (EvaluationResult)
+
+```python
+# Step 4: 计算评估结果
+evaluation = calculate_evaluation(data)
+# → score, grade, summary
+# → high_violations, medium_violations, low_violations
+# → product (_InsuranceProduct)
+```
+
+### 阶段3: 导出报告
+
+```python
+# Step 5: 保存记录
+save_audit_record(audit_id, document_url, violations, score)
+
+# Step 6: 导出报告
+export_result = _export_report(evaluation)
+# → DocxExporter.generate() → Word文档 (7个表格)
+# → FeishuPusher.push() → 飞书群组
+```
+
+### 核心设计原则
+
+1. **单向数据流**: AuditData → EvaluationResult → Export
+2. **不可变性**: 使用 frozen dataclass，每次操作返回新对象
+3. **纯函数**: 计算逻辑与数据存储分离
+4. **显式依赖**: 所有输入通过函数参数传递
+
+### 关键数据结构
+
+```python
+@dataclass(frozen=True)
+class AuditData:
+    """审核原始数据（不可变）"""
+    audit_id: str
+    document_url: str
+    timestamp: datetime
+    product_info: Dict[str, Any]
+    clauses: List[Dict[str, Any]]
+    pricing_params: Dict[str, Any]
+    violations: List[Dict[str, Any]]
+    pricing_analysis: Dict[str, Any]
+
+@dataclass(frozen=True)
+class EvaluationResult:
+    """评估计算结果（不可变）"""
+    violations: List[Dict[str, Any]]
+    pricing_analysis: Dict[str, Any]
+    score: int
+    grade: str
+    summary: Dict[str, Any]
+    product: _InsuranceProduct
+    high_violations: List[Dict[str, Any]]
+    medium_violations: List[Dict[str, Any]]
+    low_violations: List[Dict[str, Any]]
 ```
 
 ## 安装说明
@@ -274,18 +405,59 @@ python scripts/scoring.py --input input.json
 
 ```bash
 # 执行完整审核（需要飞书文档 URL）
-python scripts/audit.py --documentUrl "https://example.feishu.cn/docx/xxx"
+python scripts/audit.py --documentUrl "https://feishu.cn/docx/..."
 ```
 
-审核流程：
-1. 从飞书获取文档内容
-2. 文档预处理
-3. 负面清单检查
-4. 定价合理性分析
-5. 生成审核报告
-6. 导出 Word 文档
-7. 推送到飞书群组
-8. 保存审核记录
+**审核流程**：
+1. 从飞书URL获取文档内容 (feishu2md)
+2. 文档预处理 → AuditData
+3. 负面清单检查 → violations
+4. 定价合理性分析 → pricing_analysis
+5. 评估计算 → EvaluationResult
+6. 保存审核记录 → SQLite
+7. 生成Word文档 (7个表格)
+8. 推送到飞书群组
+
+**输出结果**：
+```json
+{
+  "success": true,
+  "audit_id": "AUD-20260227-001",
+  "violations": [...],
+  "violation_count": 15,
+  "violation_summary": {
+    "high": 5,
+    "medium": 7,
+    "low": 3
+  },
+  "score": 65,
+  "grade": "合格",
+  "report_export": {
+    "docx_export": {
+      "success": true,
+      "file_path": "/tmp/产品名_审核报告.docx"
+    },
+    "feishu_push": {
+      "success": true,
+      "message_id": "om_xxx"
+    }
+  }
+}
+```
+
+### 8. Word 报告结构
+
+生成的 Word 文档包含 **7 个表格**：
+
+| 表格 | 名称 | 内容 |
+|------|------|------|
+| 表1-1 | 关键指标汇总表 | 综合评分、合规等级、违规总数、定价评估 |
+| 表2-1 | 违规级别统计表 | 严重/中等/轻微违规数量和占比 |
+| 表2-2 | 严重违规明细表 | 序号、条款内容、问题说明、法规依据 |
+| 表2-3 | 中等违规明细表 | 序号、条款内容、问题说明、法规依据 |
+| 表3-1 | P0级整改事项表 | 序号、条款原文、修改建议 |
+| 表3-2 | P1级整改事项表 | 序号、条款原文、修改建议 |
+| 产品信息表 | 产品基本信息 | 产品名称、类型、保险公司、版本号 |
 
 ## Word 文档导出
 
@@ -358,14 +530,28 @@ result = exporter.push_only("/path/to/docx.docx", "标题", "消息")
 
 1. **文档标题** - 居中显示的报告标题
 2. **产品信息** - 产品名称、类型、保险公司、版本号等
-3. **审核评分** - 综合评分、合规评级、违规统计
-4. **定价分析** - 各项定价参数的合理性分析
-5. **违规详情** - 按严重程度分组的违规列表
-   - 高危违规
-   - 中危违规
-   - 低危违规
-6. **审核依据** - 相关法规条款列表
-7. **报告生成时间** - 页脚显示生成时间
+3. **审核结论** - 综合评分、合规评级、审核意见
+4. **问题详情及依据** - 违规级别统计、违规明细表（按严重程度分组）
+5. **修改建议** - P0/P1级整改事项表
+6. **报告生成时间** - 页脚显示生成时间
+
+### 评分规则
+
+| 评分区间 | 评级 | 审核意见 |
+|----------|------|----------|
+| 90-100 | 优秀 | 产品优秀，建议快速通过 |
+| 75-89 | 良好 | 产品良好，可正常上会 |
+| 60-74 | 合格 | 产品合格，建议完成修改后上会 |
+| 0-59 | 不合格 | 产品不合格，不建议提交审核 |
+
+### 扣分规则
+
+| 违规严重程度 | 扣分值 |
+|--------------|--------|
+| high (严重) | 20 分/项 |
+| medium (中等) | 10 分/项 |
+| low (轻微) | 5 分/项 |
+| 定价问题 | 根据偏差程度 |
 
 ### 内部实现
 
@@ -445,23 +631,87 @@ result = template.generate(
 # - metadata: 元数据
 ```
 
-### 评分规则
+## 配置说明
 
-| 评分区间 | 评级 | 说明 |
-|----------|------|------|
-| 90-100 | 优秀 | 产品优秀，建议快速通过 |
-| 75-89 | 良好 | 产品良好，可正常上会 |
-| 60-74 | 合格 | 产品合格，建议完成修改后上会 |
-| 0-59 | 不合格 | 产品不合格，不建议提交审核 |
+### config/settings.json 配置
 
-### 扣分规则
+```json
+{
+  "version": "3.0.0",
+  "data_paths": {
+    "sqlite_db": "../../data/actuary.db",
+    "lancedb_uri": "../../data/lancedb",
+    "negative_list": "data/negative_list.json",
+    "industry_standards": "data/industry_standards.json",
+    "audit_logs": "data/audit_logs.json"
+  },
+  "regulation_search": {
+    "data_dir": "../../references",
+    "default_top_k": 5
+  },
+  "ollama": {
+    "host": "http://localhost:11434",
+    "chat_model": "qwen2:7b",
+    "embed_model": "nomic-embed-text",
+    "timeout": 120
+  },
+  "report": {
+    "default_format": "docx",
+    "output_dir": "./reports",
+    "export_feishu": true
+  },
+  "feishu": {
+    "app_id": "your_app_id",
+    "app_secret": "your_app_secret",
+    "target_group_id": "oc_xxxxxxxxxxxxxxx"
+  },
+  "openclaw": {
+    "bin": "/usr/bin/openclaw"
+  },
+  "audit": {
+    "scoring_weights": {
+      "high": 20,
+      "medium": 10,
+      "low": 5
+    },
+    "thresholds": {
+      "excellent": 90,
+      "good": 75,
+      "pass": 60
+    }
+  }
+}
+```
 
-| 违规严重程度 | 扣分值 |
-|--------------|--------|
-| high (严重) | 10 分/项 |
-| medium (中等) | 5 分/项 |
-| low (轻微) | 2 分/项 |
-| 定价问题 | 根据偏差程度 |
+### 飞书推送配置
+
+在 `config/settings.json` 中配置：
+
+```json
+{
+  "feishu": {
+    "app_id": "your_app_id",
+    "app_secret": "your_app_secret",
+    "target_group_id": "oc_xxxxxxxxxxxxxxx"
+  }
+}
+```
+
+或通过环境变量：
+```bash
+export FEISHU_APP_ID="your_app_id"
+export FEISHU_APP_SECRET="your_app_secret"
+export FEISHU_TARGET_GROUP_ID="oc_xxxxxxxxxxxxxxx"
+```
+
+### 数据库路径
+
+- SQLite: `/root/.openclaw/workspace/skills/actuary-sleuth/data/actuary.db`
+- LanceDB: `/root/.openclaw/workspace/skills/actuary-sleuth/data/lancedb`
+
+### 法规文档目录
+
+`/root/.openclaw/workspace/skills/actuary-sleuth/references/`
 
 ## 配置说明
 
@@ -502,9 +752,9 @@ result = template.generate(
   },
   "audit": {
     "scoring_weights": {
-      "high": 10,
-      "medium": 5,
-      "low": 2
+      "high": 20,
+      "medium": 10,
+      "low": 5
     },
     "thresholds": {
       "excellent": 90,
