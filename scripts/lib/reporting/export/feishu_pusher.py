@@ -13,6 +13,7 @@ _FeishuPusher类：通过OpenClaw推送Docx文档到飞书群组
 注意：此模块为内部实现，不直接对外暴露
 """
 import subprocess
+import re
 from typing import Dict, Any, Optional
 
 from lib.exceptions import ExportException
@@ -35,10 +36,18 @@ class _FeishuPusher:
     # OpenClaw配置（从配置读取）
     DEFAULT_OPENCLAW_BIN = "/usr/bin/openclaw"
 
+    # 默认超时时间（秒）
+    DEFAULT_PUSH_TIMEOUT = 30
+
+    # 消息长度限制
+    MAX_MESSAGE_LENGTH = 100
+    MAX_TITLE_LENGTH = 40
+
     def __init__(
         self,
         openclaw_bin: Optional[str] = None,
-        target_group_id: Optional[str] = None
+        target_group_id: Optional[str] = None,
+        timeout: Optional[int] = None
     ):
         """
         初始化飞书导出器
@@ -46,10 +55,12 @@ class _FeishuPusher:
         Args:
             openclaw_bin: OpenClaw二进制文件路径（默认从配置读取）
             target_group_id: 飞书目标群组ID（默认从配置读取）
+            timeout: 推送超时时间（秒），默认30秒
         """
         config = get_config()
         self._openclaw_bin = openclaw_bin or config.get('openclaw.bin', self.DEFAULT_OPENCLAW_BIN)
         self._target_group_id = target_group_id or config.feishu.target_group_id
+        self._timeout = timeout or self.DEFAULT_PUSH_TIMEOUT
 
         if not self._target_group_id:
             raise ExportException(
@@ -58,7 +69,77 @@ class _FeishuPusher:
                 "或通过环境变量 FEISHU_TARGET_GROUP_ID 指定"
             )
 
-        logger.debug(f"初始化推送器: group={self._target_group_id}, openclaw={self._openclaw_bin}")
+        logger.debug(f"初始化推送器: group={self._target_group_id}, openclaw={self._openclaw_bin}, timeout={self._timeout}")
+
+    def _execute_openclaw_command(self, command_args: list) -> Dict[str, Any]:
+        """
+        执行OpenClaw命令的通用方法
+
+        Args:
+            command_args: 命令参数列表
+
+        Returns:
+            dict: 执行结果
+        """
+        try:
+            result = subprocess.run(
+                command_args,
+                capture_output=True,
+                text=True,
+                timeout=self._timeout,
+                check=True
+            )
+
+            output = result.stdout
+            message_id = self._extract_message_id(output)
+
+            return {
+                'success': True,
+                'message_id': message_id,
+                'group_id': self._target_group_id,
+                'output': output
+            }
+
+        except subprocess.CalledProcessError as e:
+            error_msg = self._parse_error_message(e.stderr)
+            logger.error(f"推送失败: {error_msg}")
+            return {
+                'success': False,
+                'error': error_msg
+            }
+        except subprocess.TimeoutExpired:
+            logger.error(f"推送超时（超过{self._timeout}秒）")
+            return {
+                'success': False,
+                'error': f'推送超时（超过{self._timeout}秒）'
+            }
+        except Exception as e:
+            logger.error("推送异常", exc_info=True)
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def _parse_error_message(self, stderr: str) -> str:
+        """
+        解析错误消息，提供更友好的错误描述
+
+        Args:
+            stderr: 标准错误输出
+
+        Returns:
+            str: 解析后的错误消息
+        """
+        if "No such file" in stderr or "cannot find" in stderr.lower():
+            return "文件不存在或无法访问"
+        elif "Permission denied" in stderr:
+            return "权限不足，无法推送文件"
+        elif "Network" in stderr or "connection" in stderr.lower():
+            return "网络连接失败"
+        elif "target" in stderr.lower() or "group" in stderr.lower():
+            return "目标群组ID无效或无权限"
+        else:
+            return f"推送失败: {stderr}"
 
     def push(
         self,
@@ -77,59 +158,24 @@ class _FeishuPusher:
         Returns:
             dict: 包含推送结果的字典
         """
-        try:
-            # 验证输入
-            validate_file_path(file_path)
+        # 验证输入
+        validate_file_path(file_path)
 
-            logger.info(f"推送文档到飞书", file=file_path, group=self._target_group_id)
+        logger.info(f"推送文档到飞书", file=file_path, group=self._target_group_id)
 
-            if message is None:
-                message = self._build_message(title)
+        if message is None:
+            message = self._build_message(title)
 
-            result = subprocess.run(
-                [
-                    self._openclaw_bin,
-                    'message', 'send',
-                    '--channel', 'feishu',
-                    '--target', self._target_group_id,
-                    '--media', file_path,
-                    '--message', message
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=True
-            )
+        command_args = [
+            self._openclaw_bin,
+            'message', 'send',
+            '--channel', 'feishu',
+            '--target', self._target_group_id,
+            '--media', file_path,
+            '--message', message
+        ]
 
-            output = result.stdout
-            message_id = self._extract_message_id(output)
-
-            logger.info(f"推送成功", message_id=message_id)
-            return {
-                'success': True,
-                'message_id': message_id,
-                'group_id': self._target_group_id,
-                'output': output
-            }
-
-        except subprocess.CalledProcessError as e:
-            logger.error(f"推送失败: {e.stderr}")
-            return {
-                'success': False,
-                'error': e.stderr
-            }
-        except subprocess.TimeoutExpired:
-            logger.error("推送超时")
-            return {
-                'success': False,
-                'error': '推送超时'
-            }
-        except Exception as e:
-            logger.error("推送异常", exception=e)
-            return {
-                'success': False,
-                'error': str(e)
-            }
+        return self._execute_openclaw_command(command_args)
 
     def push_text(
         self,
@@ -144,60 +190,42 @@ class _FeishuPusher:
         Returns:
             dict: 推送结果
         """
-        try:
-            logger.debug(f"推送文本消息")
-            result = subprocess.run(
-                [
-                    self._openclaw_bin,
-                    'message', 'send',
-                    '--channel', 'feishu',
-                    '--target', self._target_group_id,
-                    '--message', message
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=True
-            )
+        logger.debug(f"推送文本消息")
 
-            output = result.stdout
-            message_id = self._extract_message_id(output)
+        command_args = [
+            self._openclaw_bin,
+            'message', 'send',
+            '--channel', 'feishu',
+            '--target', self._target_group_id,
+            '--message', message
+        ]
 
-            return {
-                'success': True,
-                'message_id': message_id,
-                'group_id': self._target_group_id,
-                'output': output
-            }
-
-        except subprocess.CalledProcessError as e:
-            return {
-                'success': False,
-                'error': e.stderr
-            }
-        except Exception as e:
-            return {
-                'success': False,
-                'error': str(e)
-            }
+        return self._execute_openclaw_command(command_args)
 
     def _build_message(self, title: str) -> str:
         """构建推送消息"""
-        message = f"📊 {title}"
-        if len(message) > 100:
-            message = f"📊 {title[:40]}..."
-        return message
+        prefix = "📊 "
+        # 检查总长度是否超过限制
+        if len(prefix) + len(title) > self.MAX_MESSAGE_LENGTH:
+            # 计算可保留的标题长度（预留prefix和"..."的空间）
+            max_title_len = self.MAX_TITLE_LENGTH - len(prefix) - 3
+            return f"{prefix}{title[:max_title_len]}..."
+        return f"{prefix}{title}"
 
     def _extract_message_id(self, output: str) -> Optional[str]:
-        """从输出中提取消息ID"""
-        if 'Message ID:' in output:
-            for line in output.split('\n'):
-                if 'Message ID:' in line:
-                    try:
-                        return line.split('Message ID:')[1].strip()
-                    except (IndexError, AttributeError):
-                        continue
-        return None
+        """
+        从输出中提取消息ID（使用正则表达式验证）
+
+        Args:
+            output: OpenClaw命令输出
+
+        Returns:
+            Optional[str]: 提取的消息ID，如果未找到则返回None
+        """
+        # 匹配 "Message ID: xxx" 格式，ID应包含字母数字、下划线、连字符
+        pattern = r'Message ID:\s*([a-zA-Z0-9_-]{10,})'
+        match = re.search(pattern, output)
+        return match.group(1) if match else None
 
 
 # 便捷函数
@@ -217,5 +245,5 @@ def export_to_feishu(
     Returns:
         dict: 推送结果
     """
-    exporter = FeishuExporter()
-    return exporter.push(file_path, title, message)
+    pusher = _FeishuPusher()
+    return pusher.push(file_path, title, message)
