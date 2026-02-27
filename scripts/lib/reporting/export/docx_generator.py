@@ -39,10 +39,16 @@ class _DocxGenerator:
     # docx skill路径（用于验证）
     DOCX_SKILL_PATH = "/root/.agents/skills/docx"
 
+    # 默认超时时间（秒）
+    DEFAULT_EXECUTION_TIMEOUT = 30
+    DEFAULT_VALIDATION_TIMEOUT = 30
+
     def __init__(
         self,
         output_dir: Optional[str] = None,
-        validate: bool = False
+        validate: bool = False,
+        execution_timeout: Optional[int] = None,
+        validation_timeout: Optional[int] = None
     ):
         """
         初始化Word文档生成器
@@ -50,10 +56,14 @@ class _DocxGenerator:
         Args:
             output_dir: 输出目录，默认为系统临时目录
             validate: 是否验证生成的文档（使用docx skill）
+            execution_timeout: Node.js执行超时时间（秒），默认30秒
+            validation_timeout: 验证超时时间（秒），默认30秒
         """
         self._output_dir = output_dir or tempfile.gettempdir()
         self._validate = validate
         self._docx_skill_path = Path(self.DOCX_SKILL_PATH)
+        self._execution_timeout = execution_timeout or self.DEFAULT_EXECUTION_TIMEOUT
+        self._validation_timeout = validation_timeout or self.DEFAULT_VALIDATION_TIMEOUT
 
     def generate(
         self,
@@ -120,6 +130,7 @@ class _DocxGenerator:
             }
 
         except Exception as e:
+            logger.error(f"文档生成失败: {str(e)}", exc_info=True)
             return {
                 'success': False,
                 'error': str(e)
@@ -161,6 +172,8 @@ class _DocxGenerator:
         font_size_normal = C.Units.FONT_SIZE_NORMAL
         font_size_h1 = C.Units.FONT_SIZE_HEADING1
         font_size_h2 = C.Units.FONT_SIZE_HEADING2
+        font_size_small = C.Units.FONT_SIZE_SMALL
+        color_gray = C.Style.COLOR_GRAY
         spacing_h1_before = C.Spacing.SPACING_BEFORE_HEADING1
         spacing_h1_after = C.Spacing.SPACING_AFTER_HEADING1
         spacing_h2_before = C.Spacing.SPACING_BEFORE_HEADING2
@@ -247,8 +260,8 @@ async function createAuditReport() {
                     children: [
                         new TextRun({
                             text: "报告生成时间: ''' + timestamp + '''",
-                            size: 18,
-                            color: "999999"
+                            size: ''' + str(font_size_small) + ''',
+                            color: "''' + color_gray + '''"
                         })
                     ],
                     alignment: AlignmentType.RIGHT,
@@ -274,13 +287,44 @@ createAuditReport()
         ])
 
         return ''.join(parts)
+
+    def _generate_heading_paragraph(self, text: str, level: int = 2) -> str:
+        """生成标准化的标题段落"""
+        escaped_text = self._escape_js(text)
+        return f'''                new Paragraph({{
+                    text: "{escaped_text}",
+                    heading: HeadingLevel.HEADING_{level},
+                }}),'''
+
+    def _generate_text_paragraph(self, text: str) -> str:
+        """生成标准化的文本段落"""
+        escaped_text = self._escape_js(text)
+        return f'''                new Paragraph({{
+                    text: "{escaped_text}",
+                }}),'''
+
+    def _generate_bold_text_paragraph(self, text: str, size: int = 28) -> str:
+        """生成带粗体文本的段落"""
+        escaped_text = self._escape_js(text)
+        return f'''                new Paragraph({{
+                    children: [new TextRun({{ text: "{escaped_text}", bold: true, size: {size} }})]
+                }}),'''
+
+    def _generate_field_paragraph(self, label: str, value: str) -> str:
+        """生成字段段落（标签+值）"""
+        escaped_label = self._escape_js(label)
+        escaped_value = self._escape_js(value)
+        return f'''                new Paragraph({{
+                    children: [
+                        new TextRun({{ text: "{escaped_label}: ", bold: true }}),
+                        new TextRun({{ text: "{escaped_value}" }})
+                    ]
+                }}),'''
+
     def _generate_product_info_section(self, product: '_InsuranceProduct') -> str:
         """生成产品信息部分"""
         sections = []
-        sections.append('                new Paragraph({')
-        sections.append('                    text: "产品信息",')
-        sections.append('                    heading: HeadingLevel.HEADING_2,')
-        sections.append('                }),')
+        sections.append(self._generate_heading_paragraph("产品信息", 2))
 
         # 产品信息表格
         rows = [
@@ -305,10 +349,7 @@ createAuditReport()
     ) -> str:
         """生成评分概览部分"""
         sections = []
-        sections.append('                new Paragraph({')
-        sections.append('                    text: "审核评分",')
-        sections.append('                    heading: HeadingLevel.HEADING_2,')
-        sections.append('                }),')
+        sections.append(self._generate_heading_paragraph("审核评分", 2))
 
         # 评分表格
         rows = [
@@ -336,10 +377,7 @@ createAuditReport()
             return ''
 
         sections = []
-        sections.append('                new Paragraph({')
-        sections.append('                    text: "定价分析",')
-        sections.append('                    heading: HeadingLevel.HEADING_2,')
-        sections.append('                }),')
+        sections.append(self._generate_heading_paragraph("定价分析", 2))
 
         rows = []
         for key, value in pricing.items():
@@ -366,10 +404,7 @@ createAuditReport()
             return '                new Paragraph({ text: "未发现违规问题", heading: HeadingLevel.HEADING_2 }),\n'
 
         sections = []
-        sections.append('                new Paragraph({')
-        sections.append('                    text: "违规详情",')
-        sections.append('                    heading: HeadingLevel.HEADING_2,')
-        sections.append('                }),')
+        sections.append(self._generate_heading_paragraph("违规详情", 2))
 
         # 按严重程度分组
         high = [v for v in violations if v.get('severity') == 'high']
@@ -378,25 +413,19 @@ createAuditReport()
 
         # 高危违规
         if high:
-            sections.append('                new Paragraph({')
-            sections.append('                    children: [new TextRun({ text: "高危违规", bold: true, size: 28 })]')
-            sections.append('                }),')
+            sections.append(self._generate_bold_text_paragraph("高危违规", 28))
             for idx, v in enumerate(high, 1):
                 sections.append(self._generate_violation_item(idx, v))
 
         # 中危违规
         if medium:
-            sections.append('                new Paragraph({')
-            sections.append('                    children: [new TextRun({ text: "中危违规", bold: true, size: 28 })]')
-            sections.append('                }),')
+            sections.append(self._generate_bold_text_paragraph("中危违规", 28))
             for idx, v in enumerate(medium, 1):
                 sections.append(self._generate_violation_item(idx, v))
 
         # 低危违规
         if low:
-            sections.append('                new Paragraph({')
-            sections.append('                    children: [new TextRun({ text: "低危违规", bold: true, size: 28 })]')
-            sections.append('                }),')
+            sections.append(self._generate_bold_text_paragraph("低危违规", 28))
             for idx, v in enumerate(low, 1):
                 sections.append(self._generate_violation_item(idx, v))
 
@@ -422,30 +451,15 @@ createAuditReport()
 
         # 规则编号
         if rule:
-            lines.append('                new Paragraph({')
-            lines.append('                    children: [')
-            lines.append(f'                        new TextRun({{ text: "规则编号: ", bold: true }}),')
-            lines.append(f'                        new TextRun({{ text: "{self._escape_js(rule)}" }}),')
-            lines.append('                    ]')
-            lines.append('                }),')
+            lines.append(self._generate_field_paragraph("规则编号", rule))
 
         # 类别
         if category:
-            lines.append('                new Paragraph({')
-            lines.append('                    children: [')
-            lines.append(f'                        new TextRun({{ text: "类别: ", bold: true }}),')
-            lines.append(f'                        new TextRun({{ text: "{self._escape_js(category)}" }}),')
-            lines.append('                    ]')
-            lines.append('                }),')
+            lines.append(self._generate_field_paragraph("类别", category))
 
         # 整改建议
         if remediation:
-            lines.append('                new Paragraph({')
-            lines.append('                    children: [')
-            lines.append(f'                        new TextRun({{ text: "整改建议: ", bold: true }}),')
-            lines.append(f'                        new TextRun({{ text: "{self._escape_js(remediation)}" }}),')
-            lines.append('                    ]')
-            lines.append('                }),')
+            lines.append(self._generate_field_paragraph("整改建议", remediation))
 
         return '\n'.join(lines)
 
@@ -455,15 +469,10 @@ createAuditReport()
             return ''
 
         sections = []
-        sections.append('                new Paragraph({')
-        sections.append('                    text: "审核依据",')
-        sections.append('                    heading: HeadingLevel.HEADING_2,')
-        sections.append('                }),')
+        sections.append(self._generate_heading_paragraph("审核依据", 2))
 
         for reg in regulations:
-            sections.append('                new Paragraph({')
-            sections.append(f'                    text: "{self._escape_js(reg)}",')
-            sections.append('                }),')
+            sections.append(self._generate_text_paragraph(reg))
 
         return '\n'.join(sections) + '\n'
 
@@ -480,12 +489,13 @@ createAuditReport()
         content_width = C.Table.DEFAULT_CONTENT_WIDTH
         col_width = content_width // num_cols
         col_widths = [col_width] * num_cols
-        col_width = 9360 // num_cols
-        col_widths = [col_width] * num_cols
+
+        # 表格总宽度
+        table_width = content_width
 
         lines = [
             '                new Table({',
-            f'                    width: {{ size: 9360, type: WidthType.DXA }},',
+            f'                    width: {{ size: {table_width}, type: WidthType.DXA }},',
             f'                    columnWidths: {col_widths},',
             '                    rows: [',
         ]
@@ -513,12 +523,18 @@ createAuditReport()
         return '\n'.join(lines)
 
     def _write_temp_js(self, js_code: str, title: str) -> str:
-        """写入临时JavaScript文件"""
+        """写入临时JavaScript文件，失败时自动清理"""
         js_file = os.path.join(self._output_dir, f"{title}.js")
         logger.debug(f"写入临时JavaScript文件: {js_file}")
-        with open(js_file, 'w', encoding='utf-8') as f:
-            f.write(js_code)
-        return js_file
+        try:
+            with open(js_file, 'w', encoding='utf-8') as f:
+                f.write(js_code)
+            return js_file
+        except Exception:
+            # 清理可能创建的不完整文件
+            if os.path.exists(js_file):
+                os.remove(js_file)
+            raise
 
     def _execute_docx_generation(self, js_file: str, title: str) -> str:
         """执行Node.js生成docx文件"""
@@ -534,7 +550,7 @@ createAuditReport()
                 ['node', js_file],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=self._execution_timeout,
                 check=True,
                 env=env
             )
@@ -550,7 +566,7 @@ createAuditReport()
         except subprocess.CalledProcessError as e:
             raise ExportException(f"Node.js执行失败: {e.stderr}")
         except subprocess.TimeoutExpired:
-            raise ExportException("文档生成超时")
+            raise ExportException(f"文档生成超时（超过{self._execution_timeout}秒）")
         except Exception as e:
             raise ExportException(f"文档生成异常: {str(e)}")
 
@@ -568,7 +584,7 @@ createAuditReport()
                 ],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=self._validation_timeout,
                 env={
                     'PYTHONPATH': str(self._docx_skill_path / "scripts/office")
                 }
@@ -581,6 +597,7 @@ createAuditReport()
             }
 
         except Exception as e:
+            logger.error(f"文档验证失败: {str(e)}", exc_info=True)
             return {
                 'success': False,
                 'error': str(e)
