@@ -3,11 +3,15 @@
 """
 报告导出模块
 
-提供各种格式的报告导出功能：
+提供Docx文档导出功能：
 
-- feishu.py: FeishuExporter类，负责飞书在线文档导出
-- 未来可扩展：PDF导出、Word导出、本地文件导出等
+- DocxExporter: 完整的导出流程（生成 + 推送）
+- export_docx: 便捷导出函数
+
+内部实现：
+- _DocxGenerator: 文档生成器
+- _FeishuPusher: 飞书推送器
 """
-from .feishu import FeishuExporter
+from .docx_exporter import DocxExporter, export_docx
 
-__all__ = ['FeishuExporter']
+__all__ = ['DocxExporter', 'export_docx']

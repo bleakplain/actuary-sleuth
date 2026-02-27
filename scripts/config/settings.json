@@ -24,7 +24,8 @@
   },
   "feishu": {
     "app_id": "cli_a900c2ed51335ccd",
-    "app_secret": "xU3udM9Wax1HFwCXFdwwdgXPH0xjb1TT"
+    "app_secret": "xU3udM9Wax1HFwCXFdwwdgXPH0xjb1TT",
+    "target_group_id": "oc_d7b83e1f9eb58c6797b061dcc33d212f"
   },
   "audit": {
     "scoring_weights": {

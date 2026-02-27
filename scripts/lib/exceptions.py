@@ -209,3 +209,12 @@ class MissingConfigurationException(ConfigurationException):
             config_key=config_key,
             message=f"缺少必需配置: {config_key}"
         )
+
+
+# ========== 导出异常 ==========
+
+class ExportException(ActuarySleuthException):
+    """文档导出异常"""
+
+    def __init__(self, message: str, details: Optional[dict] = None):
+        super().__init__(message, details)

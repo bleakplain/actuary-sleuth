@@ -44,6 +44,11 @@ class FeishuConfig:
         """检查飞书配置是否完整"""
         return bool(self.app_id and self.app_secret)
 
+    @property
+    def target_group_id(self) -> Optional[str]:
+        """获取飞书目标群组ID"""
+        return self._config.get('target_group_id') or os.getenv('FEISHU_TARGET_GROUP_ID')
+
 
 class ReportConfig:
     """报告配置"""
