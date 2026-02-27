@@ -7,8 +7,8 @@ metadata:
   openclaw:
     emoji: "📊"
     requires:
-      bins: ["python3"]
-      env: ["FEISHU_APP_ID", "FEISHU_APP_SECRET"]
+      bins: ["python3", "node", "openclaw"]
+      env: ["FEISHU_APP_ID", "FEISHU_APP_SECRET", "FEISHU_TARGET_GROUP_ID"]
     primaryEnv: "FEISHU_APP_ID"
 ---
 
@@ -20,11 +20,10 @@ Actuary Sleuth is an insurance product compliance audit system that helps actuar
 
 面向精算师的专业产品评审辅助系统，帮助精算师更高效地评审保险产品条款。通过自动化检查和智能检索提升评审质量和效率，减少人工翻阅法规文件和负面清单的时间。
 
-**🎯 核心特性：自动化审核 + 主动推送**
+**🎯 核心特性：自动化审核 + Word 文档导出 + 飞书推送**
 - 自动执行完整的合规性审核流程
-- 自动生成结构化审核报告
-- **自动创建飞书在线文档**
-- **主动推送消息卡片到飞书**（包含审核摘要和报告链接）
+- 自动生成专业 Word 审核报告
+- 自动推送报告到飞书群组
 - 用户无需额外操作，系统主动交付完整审核结果
 
 ## Tools
@@ -41,75 +40,47 @@ python3 scripts/audit.py --documentUrl <飞书文档URL>
 ```
 
 **Parameters:**
-- `--documentUrl` (string, required): 飞书文档URL，系统会自动获取文档内容并执行完整审核
+- `--documentUrl` (string, required): 飞书文档URL
 
-**Note:** 系统会自动从飞书URL获取文档内容，执行完整的审核流程（包括负面清单检查、定价分析、报告生成和飞书文档导出）
+**Workflow:**
+```
+1. 从飞书获取文档内容
+2. 文档预处理和结构化提取
+3. 负面清单检查
+4. 定价合理性分析（死亡率、利率、费用率）
+5. 综合评分和合规评级
+6. 生成 Word 审核报告
+7. 推送报告到飞书群组
+8. 保存审核记录
+```
 
 **Returns:**
 ```json
 {
   "success": true,
   "audit_id": "AUD-20260215-001",
-  "violations": [
-    {
-      "clause_index": 0,
-      "clause_text": "...",
-      "rule": "NL-001",
-      "description": "免责条款未加粗标红",
-      "severity": "high",
-      "category": "格式违规",
-      "remediation": "请将免责条款加粗并使用红色字体"
-    }
-  ],
+  "violations": [...],
   "pricing": {
-    "mortality": {
-      "value": 0.0005,
-      "benchmark": 0.00048,
-      "deviation": 4.2,
-      "reasonable": true
-    },
-    "interest": {
-      "value": 0.035,
-      "benchmark": 0.035,
-      "deviation": 0.0,
-      "reasonable": true
-    },
-    "expense": {
-      "value": 0.15,
-      "benchmark": 0.12,
-      "deviation": 25.0,
-      "reasonable": false
-    }
+    "mortality": {"value": 0.0005, "benchmark": 0.00048, "deviation": 4.2, "reasonable": true},
+    "interest": {"value": 0.035, "benchmark": 0.035, "deviation": 0.0, "reasonable": true},
+    "expense": {"value": 0.15, "benchmark": 0.12, "deviation": 25.0, "reasonable": false}
   },
   "score": 75,
   "grade": "合格",
-  "summary": {
-    "high": 2,
-    "medium": 1,
-    "low": 0
-  },
-  "metadata": {
-    "audit_type": "full",
-    "document_url": "...",
-    "timestamp": "2026-02-15T14:30:00"
-  },
-  "report_export": {
+  "summary": {"high": 2, "medium": 1, "low": 0},
+  "docx_export": {
     "success": true,
-    "format": "feishu",
-    "document_url": "https://xxx.feishu.cn/docx/...",
-    "document_id": "..."
+    "file_path": "/tmp/审核报告.docx",
+    "file_size": 12345,
+    "title": "产品名称_审核报告_20260227-143000"
+  },
+  "feishu_push": {
+    "success": true,
+    "message_id": "oc_xxx",
+    "group_id": "oc_xxx"
   }
 }
 ```
-
-**🎯 重要特性：自动飞书导出 + 主动推送**
-- 审核完成后，**系统会自动创建飞书在线文档**并导出完整审核报告
-- **通过 Feishu Channel 主动推送消息卡片**给用户，包含：
-  - 📊 审核摘要（评分、评级、违规统计）
-  - 🚨 严重违规概览
-  - 📝 飞书报告文档链接
-- 用户无需额外指定，报告会自动生成并推送到飞书
-- 如果导出失败，会在 `report_export` 字段中返回错误信息
 
 ### query_regulation
 
@@ -123,8 +94,8 @@ python3 scripts/query.py --query <查询内容> [--searchType <类型>]
 ```
 
 **Parameters:**
-- `--query` (string, required): 查询内容，可以是条款编号（如"保险法第十六条"）或关键词
-- `--searchType` (string, optional): 搜索类型 - `exact`(精确)、`semantic`(语义)、`hybrid`(混合，默认)
+- `--query` (string, required): 查询内容
+- `--searchType` (string, optional): `exact`(精确)、`semantic`(语义)、`hybrid`(混合，默认)
 
 **Returns:**
 ```json
@@ -160,38 +131,50 @@ python3 scripts/check.py --clauses <条款文本>
 **Parameters:**
 - `--clauses` (string, required): 条款文本，多行输入每行一个条款
 
-**Example:**
-```bash
-# 单个条款
-python3 scripts/check.py --clauses "本产品条款解释权归保险公司所有"
+**Returns:**
+```json
+{
+  "success": true,
+  "violations": [...],
+  "count": 1,
+  "summary": {"high": 1, "medium": 0, "low": 0}
+}
+```
 
-# 多个条款
-python3 scripts/check.py --clauses "条款1内容
-条款2内容
-条款3内容"
+### pricing_analysis
+
+Analyzes pricing reasonableness for insurance products.
+
+**Script:** `scripts/scoring.py`
+
+**Usage:**
+```bash
+python3 scripts/scoring.py --input <JSON参数>
+```
+
+**Input Format:**
+```json
+{
+  "pricing_params": {
+    "mortality_rate": 0.0005,
+    "interest_rate": 0.035,
+    "expense_rate": 0.12
+  },
+  "product_type": "life"
+}
 ```
 
 **Returns:**
 ```json
 {
   "success": true,
-  "violations": [
-    {
-      "clause_index": 0,
-      "clause_text": "...",
-      "rule": "NL-001",
-      "description": "免责条款未加粗标红",
-      "severity": "high",
-      "category": "格式违规",
-      "remediation": "请将免责条款加粗并使用红色字体"
-    }
-  ],
-  "count": 1,
-  "summary": {
-    "high": 1,
-    "medium": 0,
-    "low": 0
-  }
+  "pricing": {
+    "mortality": {"value": 0.0005, "benchmark": 0.0005, "reasonable": true},
+    "interest": {"value": 0.035, "benchmark": 0.035, "reasonable": true},
+    "expense": {"value": 0.12, "benchmark": 0.12, "reasonable": true}
+  },
+  "overall_score": 100,
+  "is_reasonable": true
 }
 ```
 
@@ -232,48 +215,64 @@ Model name for text embeddings.
 - **Default:** `nomic-embed-text`
 - **Type:** string
 
+### openclawBin
+OpenClaw binary path for Feishu integration.
+- **Default:** `/usr/bin/openclaw`
+- **Type:** string
+
+### feishuTargetGroupId
+Feishu group ID for report pushing.
+- **Required:** Yes
+- **Type:** string
+- **Environment Variable:** `FEISHU_TARGET_GROUP_ID`
+
 ## Requirements
 
 ### Network
-- **feishu**: Access to Feishu API for document conversion
+- **feishu**: Access to Feishu API for document operations
+- **ollama**: (Optional) For semantic search and embeddings
 
 ### File Permissions
 - **read**: Read access to document files and reference materials
 - **write**: Write access to data directory for database operations
 
 ### Dependencies
-- **python3**: Python 3.10 or higher
+- **python3**: Python 3.8 or higher
 - **sqlite3**: SQLite database (usually bundled with Python)
 - **lancedb**: Vector database for semantic search
-- **ollama**: Local LLM service for embeddings and generation
+- **ollama**: (Optional) Local LLM service for embeddings
+- **node**: Node.js for Word document generation
+- **docx**: npm package for Word document generation (global install required)
+- **openclaw**: For Feishu integration
+
+### Installation
+
+```bash
+# Python dependencies
+pip install lancedb pyarrow requests
+
+# Node.js dependencies (global)
+npm install -g docx
+
+# Initialize database
+python3 scripts/init_db.py
+
+# Import regulations
+python3 scripts/import_regs.py --refs-dir ../references --no-vectors
+```
 
 ## When to Use
-
-```dot
-digraph use_flowchart {
-    "Need to review insurance product?" [shape=diamond];
-    "Checking regulatory compliance?" [shape=diamond];
-    "Querying insurance regulations?" [shape=diamond];
-    "Generate review report" [shape=box];
-    "Use Actuary Sleuth" [shape=box];
-
-    "Need to review insurance product?" -> "Checking regulatory compliance?" [label="yes"];
-    "Checking regulatory compliance?" -> "Use Actuary Sleuth" [label="yes"];
-    "Querying insurance regulations?" -> "Use Actuary Sleuth" [label="yes"];
-    "Need to review insurance product?" -> "Generate review report" [label="no"];
-}
-```
 
 **Use when:**
 - 审核新产品保险条款（需要检查负面清单、法规合规性）
 - 查询保险监管法规（保险法、条款费率管理办法等）
-- 检查产品是否违反负面清单（100+违规点）
+- 检查产品是否违反负面清单（22个违规点）
 - 计算定价合理性（死亡率、利率、费用率对比行业标准）
+- 生成 Word 审核报告并推送飞书
 
-**💡 默认行为：自动审核 + 主动推送**
+**💡 默认行为：完整审核流程**
 - 提供产品文档后，系统自动执行完整审核流程
-- 审核完成后自动在飞书创建报告文档
-- **主动推送消息卡片到飞书**（包含审核摘要和报告链接）
+- 生成 Word 审核报告并推送到飞书群组
 - 用户无需额外说明，系统默认执行完整交付流程
 
 **NOT for:**
@@ -285,11 +284,11 @@ digraph use_flowchart {
 
 | 场景 | 输入 | 输出 | 优先级 |
 |------|------|------|--------|
-| 产品文档审核 | 飞书文档URL/Markdown | 结构化产品数据 + 违规检查结果 + **飞书报告文档链接** + **主动推送消息卡片** | P0 |
-| 负面清单检查 | 产品条款 | 100+违规点检查结果 + 整改建议 | P0 |
+| 产品文档审核 | 飞书文档URL | 结构化产品数据 + 违规检查结果 + **Word报告** + **飞书推送** | P0 |
+| 负面清单检查 | 产品条款 | 22个违规点检查结果 + 整改建议 | P0 |
 | 法规快速查询 | 条款编号/关键词 | 完整条款内容 + 标准引用格式 | P0 |
 | 定价合理性计算 | 定价参数 | 偏差分析 + 合理性判断 | P0 |
-| 评审报告生成 | 审核结果 | 飞书在线文档 + 消息卡片推送 | P0 |
+| Word报告生成 | 审核结果 | Word文档(.docx) + 飞书群组推送 | P0 |
 | 智能检索 | 自然语言描述 | 相关法规条款 | P1 |
 
 ## Core Workflow
@@ -297,11 +296,11 @@ digraph use_flowchart {
 ### 完整评审流程
 
 ```
-1. 接收产品文档（飞书URL或Markdown内容）
+1. 接收产品文档（飞书URL）
    ↓
 2. 自动解析文档（提取结构、识别类型）
    ↓
-3. 负面清单检查（100+违规点规则匹配）
+3. 负面清单检查（22个违规点规则匹配）
    ↓
 4. 定价合理性分析（对比行业标准）
    ↓
@@ -309,32 +308,12 @@ digraph use_flowchart {
    ↓
 6. 计算综合评分和合规评级
    ↓
-7. 生成结构化审核报告
+7. 生成 Word 审核报告
    ↓
-8. 🎯 自动创建飞书在线文档并导出报告
+8. 📄 推送 Word 报告到飞书群组
    ↓
-9. 📢 通过 Feishu Channel 主动推送消息卡片
-   ↓
-10. 用户在飞书中收到审核结果通知
+9. ✅ 用户在飞书中收到审核结果
 ```
-
-**📋 自动化输出说明**
-
-**步骤8：飞书文档创建**
-- 在飞书中创建新的审核报告文档
-- 包含完整的审核结论、违规详情、整改建议等所有章节
-- 支持在飞书中直接查看、分享或进一步编辑
-
-**步骤9：主动推送消息卡片**
-- 通过 Feishu Channel 向用户主动发送富文本消息卡片
-- 卡片包含：
-  - 🎯 **审核摘要**：评分、评级、违规总数
-  - ⚠️ **严重违规预警**：高风险问题概览
-  - 📊 **关键指标**：定价分析结果
-  - 🔗 **报告链接**：完整的飞书在线文档URL
-- 用户无需询问，系统主动推送审核结果
-
-**用户无需额外说明"生成报告到飞书"，系统默认执行完整流程**
 
 ### 快速查询流程
 
@@ -348,7 +327,7 @@ digraph use_flowchart {
 
 ## Knowledge Base (references/)
 
-本技能内置完整的精算审计法规知识库：
+本技能内置完整的精算审计法规知识库（16份法规文档）：
 
 ### 基础法规 (P0)
 - `01_保险法相关监管规定.md` - 保险法核心条款
@@ -369,18 +348,29 @@ digraph use_flowchart {
 - `14_综合监管规定.md` - 综合监管要求
 
 ### 参考手册
-- `产品开发相关法律法规手册2025.12.md` - 完整法规手册（661KB）
+- `产品开发相关法律法规手册2025.12.md` - 完整法规手册
 
-## Implementation Notes
+## Scoring System
 
-### 技术架构（建议）
+### 评分规则
 
-**核心模块:**
-1. **知识库管理器** - 文档解析、索引构建、查询接口
-2. **自动化评审引擎** - 负面清单规则引擎、定价合理性计算
-3. **报告生成器** - Word/PDF生成、数据可视化
+| 评分区间 | 评级 | 说明 |
+|----------|------|------|
+| 90-100 | 优秀 | 产品优秀，建议快速通过 |
+| 75-89 | 良好 | 产品良好，可正常上会 |
+| 60-74 | 合格 | 产品合格，建议完成修改后上会 |
+| 0-59 | 不合格 | 产品不合格，不建议提交审核 |
 
-### 负面清单检查要点
+### 扣分规则
+
+| 违规严重程度 | 扣分值 |
+|--------------|--------|
+| high (严重) | 10 分/项 |
+| medium (中等) | 5 分/项 |
+| low (轻微) | 2 分/项 |
+| 定价问题 | 根据偏差程度 |
+
+## Negative List Rules
 
 22个违规点涵盖：
 - 条款表述（冗长、不统一、不集中）
@@ -388,13 +378,6 @@ digraph use_flowchart {
 - 保险责任（模糊表述、范围不明）
 - 理赔条件（设置不合理障碍）
 - 定价合理性（死亡率、利率、费用率异常）
-
-### 定价合理性判断标准
-
-- **死亡率**: 对比中国生命表（2025）
-- **利率**: 符合监管预定利率上限
-- **费用率**: 不超过条款费率管理办法规定
-- **准备金**: 符合精算规定要求
 
 ## Common Mistakes
 
@@ -404,13 +387,6 @@ digraph use_flowchart {
 | 忽略法规版本 | 使用过时规定 | 定期检查references/目录更新情况 |
 | 过度依赖评分系统 | 误判风险 | 评分仅作参考，需结合专业判断 |
 | 未记录审计过程 | 无法追溯 | 保存完整审计日志 |
-
-## Real-World Impact
-
-**质量保障**：
-- 标准化评分体系，确保评审一致性
-- 完整追溯记录，支持审计和合规检查
-- 多维度评估（精算合理性、风险控制、合规性）
 
 ## Limitations
 
@@ -422,88 +398,6 @@ digraph use_flowchart {
 
 ## Related Documentation
 
-- 需求文档: `精算审核需求梳理.md`
-- 法规手册: `references/产品开发相关法律法规手册2025.12.md`
-
----
-
-## Usage Examples
-
-### 示例1：基本审核流程（默认主动推送）
-
-**用户输入：**
-```
-请审核这个保险产品：https://xxx.feishu.cn/docx/xxxxx
-```
-
-**系统执行：**
-1. 自动获取飞书文档内容
-2. 执行完整合规性审核
-3. 生成结构化报告
-4. 创建飞书报告文档
-5. **主动推送消息卡片到飞书**
-
-**用户收到（飞书消息卡片）：**
-```
-📊 保险产品审核报告
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【综合评分】75 分 - 合格
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🔴 高危违规 (2项)
-  1. 条款中对于保险人向投保人、被保险人和受益人应尽义务表述不严谨
-  2. 免责条款未加粗标红
-
-🟡 中危违规 (1项)
-  1. 条款文字冗长，重点不突出
-
-✅ 定价分析合理
-
-📝 完整报告：https://xxx.feishu.cn/docx/xxxxx
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-审核时间: 2026-02-17 14:30
-```
-
-### 示例2：查询法规
-
-**用户输入：**
-```
-查询保险法关于如实告知的规定
-```
-
-**系统返回：**
-```
-📖 保险法 第十六条
-
-订立保险合同，保险人就保险标的或者被保险人的有关情况提出询问的，投保人应当如实告知。
-
-投保人故意或者因重大过失未履行前款规定的如实告知义务，足以影响保险人决定是否同意承保或者提高保险费率的，保险人有权解除合同。
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-分类: 如实告知义务 | 生效日期: 2009-10-01
-```
-
-### 示例3：负面清单检查
-
-**用户输入：**
-```
-检查这些条款是否违规：
-"本产品条款解释权归保险公司所有"
-```
-
-**系统返回：**
-```
-⚠️ 违规检测结果
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-发现 1 项违规：
-
-🔴 严重违规
-1. 条款中包含"解释权归保险公司所有"表述
-   - 规则编号: NL-0XX
-   - 类别: 产品条款表述
-   - 建议: 删除该表述，违反《合同法》相关规定
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
+- README.md: 项目说明和详细文档
+- CHANGELOG.md: 版本更新记录
+- references/: 法规文档知识库
