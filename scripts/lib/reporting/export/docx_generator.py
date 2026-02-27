@@ -238,18 +238,16 @@ async function createAuditReport() {
         # 添加产品基本信息
         parts.append(self._generate_product_info_section(product_info))
 
-        # 添加评分概览
-        parts.append(self._generate_score_section(score, grade, summary))
+        # 添加审核结论章节
+        parts.append(self._generate_conclusion_section(score, grade, summary, violations, pricing_analysis))
 
-        # 添加定价分析
-        parts.append(self._generate_pricing_section(pricing_analysis))
+        # 添加问题详情章节
+        if violations:
+            parts.append(self._generate_details_section(violations, summary, pricing_analysis))
 
-        # 添加违规详情
-        parts.append(self._generate_violations_section(violations))
-
-        # 添加审核依据
-        if context.regulation_basis:
-            parts.append(self._generate_regulation_section(context.regulation_basis))
+        # 添加修改建议章节
+        if violations:
+            parts.append(self._generate_suggestions_section(violations))
 
         # 添加页脚
         parts.extend([
@@ -341,157 +339,221 @@ createAuditReport()
 
         return '\n'.join(sections) + '\n'
 
-    def _generate_score_section(
+    def _generate_conclusion_section(
         self,
         score: int,
         grade: str,
-        summary: Dict[str, Any]
+        summary: Dict[str, Any],
+        violations: List[Dict[str, Any]],
+        pricing_analysis: Dict[str, Any]
     ) -> str:
-        """生成评分概览部分"""
+        """生成审核结论章节"""
         sections = []
-        sections.append(self._generate_heading_paragraph("审核评分", 2))
+        sections.append(self._generate_heading_paragraph("一、审核结论", 2))
 
-        # 评分表格
+        # 生成审核意见
+        opinion, explanation = self._generate_conclusion_text(score, summary, violations)
+
+        sections.append(self._generate_field_paragraph("审核意见", opinion))
+        sections.append(self._generate_field_paragraph("说明", explanation))
+        sections.append(self._generate_text_paragraph(""))
+
+        # 关键数据表格（表1-1）
+        sections.append(self._generate_bold_text_paragraph("表1-1：关键指标汇总表", 26))
+        sections.append(self._generate_text_paragraph(""))
+
+        high_count = summary.get('high', 0)
+        medium_count = summary.get('medium', 0)
+        low_count = summary.get('low', 0)
+        total = len(violations)
+
+        # 计算定价问题数
+        pricing_issue_count = 0
+        if pricing_analysis:
+            for key, value in pricing_analysis.items():
+                if isinstance(value, dict) and not value.get('reasonable', True):
+                    pricing_issue_count += 1
+
+        score_desc = self._get_score_description(score)
+        violation_detail = f"严重{high_count}项，中等{medium_count}项，轻微{low_count}项"
+
         rows = [
-            ["综合评分", f"{score} 分"],
-            ["合规评级", grade],
+            ["序号", "指标项", "结果", "说明"],
+            ["1", "综合评分", f"{score}分", score_desc],
+            ["2", "合规评级", grade, "基于违规数量和严重程度评定"],
+            ["3", "违规总数", f"{total}项", violation_detail],
+            ["4", "定价评估", "合理" if pricing_issue_count == 0 else "需关注", f"{pricing_issue_count}项定价参数需关注"]
         ]
-
-        if summary:
-            high_count = summary.get('high', 0)
-            medium_count = summary.get('medium', 0)
-            low_count = summary.get('low', 0)
-            rows.extend([
-                ["高危违规", str(high_count)],
-                ["中危违规", str(medium_count)],
-                ["低危违规", str(low_count)],
-            ])
-
-        sections.append(self._generate_simple_table(rows))
+        sections.append(self._generate_data_table(rows))
 
         return '\n'.join(sections) + '\n'
 
-    def _generate_pricing_section(self, pricing: Dict[str, Any]) -> str:
-        """生成定价分析部分"""
-        if not pricing:
-            return ''
-
+    def _generate_details_section(
+        self,
+        violations: List[Dict[str, Any]],
+        summary: Dict[str, Any],
+        pricing_analysis: Dict[str, Any]
+    ) -> str:
+        """生成问题详情章节"""
         sections = []
-        sections.append(self._generate_heading_paragraph("定价分析", 2))
+        sections.append(self._generate_text_paragraph(""))
+        sections.append(self._generate_heading_paragraph("二、问题详情及依据", 2))
 
-        rows = []
-        for key, value in pricing.items():
-            if isinstance(value, dict):
-                item_value = value.get('value', '')
-                item_benchmark = value.get('benchmark', '')
-                item_deviation = value.get('deviation', 0)
-                item_reasonable = value.get('reasonable', True)
+        # 审核依据
+        sections.append(self._generate_bold_text_paragraph("审核依据", 26))
+        regulations = self._generate_regulation_basis(violations)
+        for i, reg in enumerate(regulations, 1):
+            sections.append(self._generate_text_paragraph(f"{i}. {reg}"))
+        sections.append(self._generate_text_paragraph(""))
 
-                status = "✓ 合理" if item_reasonable else "✗ 不合理"
-                rows.append([
-                    self._get_pricing_label(key),
-                    f"{item_value} (基准: {item_benchmark}, 偏差: {item_deviation:.1f}%) {status}"
-                ])
+        # 违规统计表（表2-1）
+        sections.append(self._generate_bold_text_paragraph("表2-1：违规级别统计表", 26))
+        sections.append(self._generate_text_paragraph(""))
 
-        if rows:
-            sections.append(self._generate_simple_table(rows))
+        high_count = summary.get('high', 0)
+        medium_count = summary.get('medium', 0)
+        low_count = summary.get('low', 0)
+        total = len(violations)
+
+        if total > 0:
+            high_percent = f"{high_count/total*100:.1f}%"
+            medium_percent = f"{medium_count/total*100:.1f}%"
+            low_percent = f"{low_count/total*100:.1f}%"
+        else:
+            high_percent = "0%"
+            medium_percent = "0%"
+            low_percent = "0%"
+
+        rows = [
+            ["序号", "违规级别", "数量", "占比"],
+            ["1", "严重", f"{high_count}项", high_percent],
+            ["2", "中等", f"{medium_count}项", medium_percent],
+            ["3", "轻微", f"{low_count}项", low_percent],
+            ["合计", "总计", f"{total}项", "100%"]
+        ]
+        sections.append(self._generate_data_table(rows))
+
+        # 严重违规明细表（表2-2）
+        high_violations = [v for v in violations if v.get('severity') == 'high']
+        if high_violations:
+            sections.append(self._generate_text_paragraph(""))
+            sections.append(self._generate_bold_text_paragraph("表2-2：严重违规明细表", 26))
+            sections.append(self._generate_text_paragraph(""))
+
+            rows = [["序号", "条款内容", "问题说明", "法规依据"]]
+            for i, v in enumerate(high_violations[:20], 1):
+                clause_ref = v.get('clause_reference', '')
+                clause_text = v.get('clause_text', '')[:80]
+                description = v.get('description', '未知')
+                category = v.get('category', '')
+                regulation = self._get_regulation_basis(category)
+
+                # 合并条款引用和原文
+                if clause_ref and not clause_ref.startswith('段落'):
+                    full_clause = f"{clause_ref}：{clause_text}"
+                else:
+                    full_clause = clause_text
+
+                rows.append([str(i), full_clause + "...", description, regulation])
+
+            sections.append(self._generate_data_table(rows))
+
+        # 中等违规明细表（表2-3）
+        medium_violations = [v for v in violations if v.get('severity') == 'medium']
+        if medium_violations:
+            sections.append(self._generate_text_paragraph(""))
+            sections.append(self._generate_bold_text_paragraph("表2-3：中等违规明细表", 26))
+            sections.append(self._generate_text_paragraph(""))
+
+            rows = [["序号", "条款内容", "问题说明", "法规依据"]]
+            for i, v in enumerate(medium_violations[:10], 1):
+                clause_ref = v.get('clause_reference', '')
+                clause_text = v.get('clause_text', '')[:80]
+                description = v.get('description', '未知')
+                category = v.get('category', '')
+                regulation = self._get_regulation_basis(category)
+
+                if clause_ref and not clause_ref.startswith('段落'):
+                    full_clause = f"{clause_ref}：{clause_text}"
+                else:
+                    full_clause = clause_text
+
+                rows.append([str(i), full_clause + "...", description, regulation])
+
+            sections.append(self._generate_data_table(rows))
+
+        # 定价问题汇总表（表2-4）
+        pricing_issues = []
+        if pricing_analysis:
+            for category in ['interest', 'expense']:
+                value = pricing_analysis.get(category)
+                if isinstance(value, dict) and not value.get('reasonable', True):
+                    note = value.get('note', '不符合监管要求')
+                    pricing_issues.append(('预定利率' if category == 'interest' else '费用率', note))
+
+        if pricing_issues:
+            sections.append(self._generate_text_paragraph(""))
+            sections.append(self._generate_bold_text_paragraph("表2-4：定价问题汇总表", 26))
+            sections.append(self._generate_text_paragraph(""))
+
+            rows = [["序号", "问题类型", "问题描述"]]
+            for i, (issue_type, issue_desc) in enumerate(pricing_issues, 1):
+                rows.append([str(i), issue_type, issue_desc])
+
+            sections.append(self._generate_data_table(rows))
 
         return '\n'.join(sections) + '\n'
 
-    def _generate_violations_section(self, violations: List[Dict[str, Any]]) -> str:
-        """生成违规详情部分"""
-        if not violations:
-            return '                new Paragraph({ text: "未发现违规问题", heading: HeadingLevel.HEADING_2 }),\n'
-
+    def _generate_suggestions_section(self, violations: List[Dict[str, Any]]) -> str:
+        """生成修改建议章节"""
         sections = []
-        sections.append(self._generate_heading_paragraph("违规详情", 2))
+        sections.append(self._generate_text_paragraph(""))
+        sections.append(self._generate_heading_paragraph("三、修改建议", 2))
 
         # 按严重程度分组
-        high = [v for v in violations if v.get('severity') == 'high']
-        medium = [v for v in violations if v.get('severity') == 'medium']
-        low = [v for v in violations if v.get('severity') == 'low']
+        high_violations = [v for v in violations if v.get('severity') == 'high']
+        medium_violations = [v for v in violations if v.get('severity') == 'medium']
 
-        # 高危违规
-        if high:
-            sections.append(self._generate_bold_text_paragraph("高危违规", 28))
-            for idx, v in enumerate(high, 1):
-                sections.append(self._generate_violation_item(idx, v))
+        # P0级整改事项表（表3-1）
+        if high_violations:
+            sections.append(self._generate_bold_text_paragraph("表3-1：P0级整改事项表（必须立即整改）", 26))
+            sections.append(self._generate_text_paragraph(""))
 
-        # 中危违规
-        if medium:
-            sections.append(self._generate_bold_text_paragraph("中危违规", 28))
-            for idx, v in enumerate(medium, 1):
-                sections.append(self._generate_violation_item(idx, v))
+            rows = [["序号", "条款原文", "修改建议"]]
+            for i, v in enumerate(high_violations[:10], 1):
+                clause_text = v.get('clause_text', '')[:40]
+                remediation = self._get_specific_remediation(v)
+                rows.append([str(i), clause_text + "...", remediation])
 
-        # 低危违规
-        if low:
-            sections.append(self._generate_bold_text_paragraph("低危违规", 28))
-            for idx, v in enumerate(low, 1):
-                sections.append(self._generate_violation_item(idx, v))
+            sections.append(self._generate_data_table(rows))
 
-        return '\n'.join(sections) + '\n'
+        # P1级整改事项表（表3-2）
+        if medium_violations:
+            sections.append(self._generate_text_paragraph(""))
+            sections.append(self._generate_bold_text_paragraph("表3-2：P1级整改事项表（建议尽快整改）", 26))
+            sections.append(self._generate_text_paragraph(""))
 
-    def _generate_violation_item(self, index: int, violation: Dict[str, Any]) -> str:
-        """生成单个违规项"""
-        rule = violation.get('rule', '')
-        description = violation.get('description', '')
-        category = violation.get('category', '')
-        remediation = violation.get('remediation', '')
+            rows = [["序号", "条款原文", "修改建议"]]
+            for i, v in enumerate(medium_violations[:5], 1):
+                clause_text = v.get('clause_text', '')[:40]
+                remediation = self._get_specific_remediation(v)
+                rows.append([str(i), clause_text + "...", remediation])
 
-        lines = [
-            '                new Paragraph({',
-            '                    children: [',
-        ]
-
-        # 序号和描述
-        lines.append(f'                        new TextRun({{ text: "{index}. ", bold: true }}),')
-        lines.append(f'                        new TextRun({{ text: "{self._escape_js(description)}" }}),')
-        lines.append('                    ],')
-        lines.append('                }),')
-
-        # 规则编号
-        if rule:
-            lines.append(self._generate_field_paragraph("规则编号", rule))
-
-        # 类别
-        if category:
-            lines.append(self._generate_field_paragraph("类别", category))
-
-        # 整改建议
-        if remediation:
-            lines.append(self._generate_field_paragraph("整改建议", remediation))
-
-        return '\n'.join(lines)
-
-    def _generate_regulation_section(self, regulations: List[str]) -> str:
-        """生成审核依据部分"""
-        if not regulations:
-            return ''
-
-        sections = []
-        sections.append(self._generate_heading_paragraph("审核依据", 2))
-
-        for reg in regulations:
-            sections.append(self._generate_text_paragraph(reg))
+            sections.append(self._generate_data_table(rows))
 
         return '\n'.join(sections) + '\n'
 
     def _generate_simple_table(self, rows: List[List[str]]) -> str:
-        """生成简单表格代码"""
+        """生成简单2列表格（用于产品信息等）"""
         if not rows:
             return ''
 
         # 使用常量
         C = DocxConstants
 
-        # 计算列宽（内容宽度）
-        num_cols = len(rows[0])
-        content_width = C.Table.DEFAULT_CONTENT_WIDTH
-        col_width = content_width // num_cols
-        col_widths = [col_width] * num_cols
-
-        # 表格总宽度
-        table_width = content_width
+        # 2列表格，列宽比例 1:2
+        col_widths = [C.Table.DEFAULT_CONTENT_WIDTH // 3, (C.Table.DEFAULT_CONTENT_WIDTH // 3) * 2]
+        table_width = C.Table.DEFAULT_CONTENT_WIDTH
 
         lines = [
             '                new Table({',
@@ -500,10 +562,11 @@ createAuditReport()
             '                    rows: [',
         ]
 
-        for row_idx, row in enumerate(rows):
+        for row in rows:
             cells = []
-            for cell in row:
+            for idx, cell in enumerate(row):
                 escaped_cell = self._escape_js(cell)
+                col_width = col_widths[idx]
                 cells.append(f'''                            new TableCell({{
                                 width: {{ size: {col_width}, type: WidthType.DXA }},
                                 children: [new Paragraph({{ text: "{escaped_cell}" }})]
@@ -521,6 +584,194 @@ createAuditReport()
         ])
 
         return '\n'.join(lines)
+
+    def _generate_data_table(self, rows: List[List[str]]) -> str:
+        """生成数据表格（多列，用于报告核心表格）"""
+        if not rows:
+            return ''
+
+        # 使用常量
+        C = DocxConstants
+
+        # 根据列数计算列宽
+        num_cols = len(rows[0])
+        content_width = C.Table.DEFAULT_CONTENT_WIDTH
+
+        # 计算各列宽度（根据列数分配）
+        if num_cols == 2:
+            col_widths = [content_width // 3, (content_width // 3) * 2]
+        elif num_cols == 3:
+            col_widths = [content_width // 6, content_width // 3, content_width // 2]
+        elif num_cols == 4:
+            col_widths = [content_width // 8, content_width // 4, content_width // 3, (content_width // 3) - (content_width // 24)]
+        else:
+            col_width = content_width // num_cols
+            col_widths = [col_width] * num_cols
+
+        table_width = content_width
+
+        lines = [
+            '                new Table({',
+            f'                    width: {{ size: {table_width}, type: WidthType.DXA }},',
+            f'                    columnWidths: {col_widths},',
+            '                    rows: [',
+        ]
+
+        for row_idx, row in enumerate(rows):
+            cells = []
+            for col_idx, cell in enumerate(row):
+                escaped_cell = self._escape_js(cell)
+                col_width = col_widths[col_idx]
+                # 第一行是表头，使用粗体
+                is_header = (row_idx == 0)
+                if is_header:
+                    cells.append(f'''                            new TableCell({{
+                                width: {{ size: {col_width}, type: WidthType.DXA }},
+                                children: [new Paragraph({{ children: [new TextRun({{ text: "{escaped_cell}", bold: true }})] }})]
+                            }})''')
+                else:
+                    cells.append(f'''                            new TableCell({{
+                                width: {{ size: {col_width}, type: WidthType.DXA }},
+                                children: [new Paragraph({{ text: "{escaped_cell}" }})]
+                            }})''')
+
+            lines.append(f'                        new TableRow({{')
+            lines.append(f'                            children: [')
+            lines.append(',\n'.join(cells))
+            lines.append('                            ]')
+            lines.append('                        }),')
+
+        lines.extend([
+            '                    ]',
+            '                }),',
+        ])
+
+        return '\n'.join(lines)
+
+    def _generate_conclusion_text(
+        self,
+        score: int,
+        summary: Dict[str, Any],
+        violations: List[Dict[str, Any]]
+    ) -> tuple:
+        """生成审核结论文本"""
+        high_count = summary.get('high', 0)
+        medium_count = summary.get('medium', 0)
+        total = len(violations)
+
+        if high_count > 0:
+            opinion = "不推荐上会"
+            explanation = f"产品存在{high_count}项严重违规，触及监管红线，需完成整改后重新审核"
+        elif score >= 90:
+            opinion = "推荐通过"
+            explanation = "产品符合所有监管要求，未发现违规问题"
+        elif score >= 75:
+            opinion = "条件推荐"
+            explanation = f"产品整体符合要求，存在{medium_count}项中等问题，建议完成修改后提交审核"
+        elif score >= 60:
+            opinion = "需补充材料"
+            explanation = f"产品存在{total}项问题，建议补充说明材料后复审"
+        else:
+            opinion = "不予推荐"
+            explanation = "产品合规性不足，不建议提交审核"
+
+        return opinion, explanation
+
+    def _get_score_description(self, score: int) -> str:
+        """获取评分描述"""
+        if score >= 90:
+            return "产品优秀，建议快速通过"
+        elif score >= 80:
+            return "产品良好，可正常上会"
+        elif score >= 70:
+            return "产品合格，建议完成修改后上会"
+        elif score >= 60:
+            return "产品基本合格，需补充说明材料"
+        else:
+            return "产品不合格，不建议提交审核"
+
+    def _generate_regulation_basis(self, violations: List[Dict[str, Any]]) -> List[str]:
+        """动态生成审核依据"""
+        basis = ["《中华人民共和国保险法》"]
+        basis.append("《人身保险公司保险条款和保险费率管理办法》")
+        return basis
+
+    def _get_regulation_basis(self, category: str) -> str:
+        """根据违规类别返回法规依据"""
+        regulation_map = {
+            '产品条款表述': '《保险法》第十七条',
+            '产品责任设计': '《条款费率管理办法》第六条',
+            '产品费率厘定及精算假设': '《条款费率管理办法》第三十六条',
+            '产品报送管理': '《条款费率管理办法》第十二条',
+            '产品形态设计': '《健康保险管理办法》第十六条',
+            '销售管理': '《保险销售行为监管办法》第十三条',
+            '理赔管理': '《保险法》第二十二条',
+            '客户服务': '《保险公司服务管理办法》第八条'
+        }
+        return regulation_map.get(category, '《保险法》及相关监管规定')
+
+    def _get_specific_remediation(self, violation: Dict[str, Any]) -> str:
+        """生成具体的修改建议"""
+        default_remediation = violation.get('remediation', '')
+        description = violation.get('description', '')
+
+        # 如果默认建议模糊，则基于违规描述生成具体建议
+        vague_phrases = ['请根据具体情况', '确保符合', '无', '', '按照《保险法》规定', '建议']
+        if any(phrase in default_remediation for phrase in vague_phrases):
+            if '等待期' in description:
+                if '过长' in description or '超过' in description:
+                    return '将等待期调整为90天以内'
+                elif '症状' in description or '体征' in description:
+                    return '删除将等待期内症状或体征作为免责依据的表述'
+                elif '突出' in description:
+                    return '在条款中以加粗或红色字体突出说明等待期'
+                else:
+                    return '合理设置等待期长度，确保符合监管规定'
+            elif '免责条款' in description or '责任免除' in description:
+                if '不集中' in description:
+                    return '将免责条款集中在合同显著位置'
+                elif '不清晰' in description or '表述不清' in description:
+                    return '使用清晰明确的语言表述免责情形'
+                elif '加粗' in description or '标红' in description or '突出' in description:
+                    return '使用加粗或红色字体突出显示免责条款'
+                elif '免除' in description and '不合理' in description:
+                    return '删除不合理的免责条款，确保不违反保险法规定'
+                else:
+                    return '完善免责条款的表述和展示方式'
+            elif '保证收益' in description or '演示收益' in description:
+                return '删除保证收益相关表述，改为演示收益或说明利益不确定'
+            elif '费率' in description:
+                if '倒算' in description:
+                    return '停止使用倒算方式确定费率，采用精算方法'
+                elif '偏离实际' in description:
+                    return '根据实际费用水平重新核算附加费用率'
+                elif '不真实' in description or '不合理' in description:
+                    return '重新进行费率厘定，确保符合审慎原则'
+                else:
+                    return '规范费率厘定方法，确保符合监管要求'
+            elif '现金价值' in description:
+                if '超过' in description or '异化' in description:
+                    return '调整现金价值计算方法，确保不超过已交保费'
+                else:
+                    return '规范现金价值计算，确保符合监管规定'
+            elif '基因' in description:
+                return '删除根据基因检测结果调节费率的约定'
+            elif '犹豫期' in description:
+                if '过短' in description or '不足' in description:
+                    return '将犹豫期调整为15天以上'
+                else:
+                    return '规范犹豫期的起算和时长'
+            elif '利率' in description or '预定利率' in description:
+                if '超过' in description or '超标' in description:
+                    return '将预定利率调整为监管上限以内'
+                else:
+                    return '确保预定利率符合监管规定'
+            elif '条款文字' in description or '冗长' in description or '不易懂' in description:
+                return '简化条款表述，使用通俗易懂的语言'
+            else:
+                return '请根据违规描述进行相应调整，确保符合监管要求'
+
+        return default_remediation
 
     def _write_temp_js(self, js_code: str, title: str) -> str:
         """写入临时JavaScript文件，失败时自动清理"""
