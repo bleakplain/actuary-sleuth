@@ -48,3 +48,7 @@ tests/htmlcov/
 tests/coverage.xml
 tests/.coverage
 .pytest_cache/
+
+# Node.js
+node_modules/
+package-lock.json
