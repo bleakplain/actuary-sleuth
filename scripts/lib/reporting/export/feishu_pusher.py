@@ -17,6 +17,12 @@ from typing import Dict, Any, Optional
 
 from lib.exceptions import ExportException
 from lib.config import get_config
+from lib.logger import get_logger
+from .result import PushResult
+from .validation import validate_file_path
+
+
+logger = get_logger('feishu_pusher')
 
 
 class _FeishuPusher:
@@ -26,8 +32,8 @@ class _FeishuPusher:
     负责通过OpenClaw推送文档到飞书群组
     """
 
-    # OpenClaw配置
-    OPENCLAW_BIN = "/usr/bin/openclaw"
+    # OpenClaw配置（从配置读取）
+    DEFAULT_OPENCLAW_BIN = "/usr/bin/openclaw"
 
     def __init__(
         self,
@@ -38,25 +44,21 @@ class _FeishuPusher:
         初始化飞书导出器
 
         Args:
-            openclaw_bin: OpenClaw二进制文件路径
+            openclaw_bin: OpenClaw二进制文件路径（默认从配置读取）
             target_group_id: 飞书目标群组ID（默认从配置读取）
         """
-        self._openclaw_bin = openclaw_bin or self.OPENCLAW_BIN
-        self._target_group_id = target_group_id or self._get_default_target_group()
-
-    def _get_default_target_group(self) -> str:
-        """从配置获取默认目标群组"""
         config = get_config()
-        group_id = config.feishu.target_group_id
+        self._openclaw_bin = openclaw_bin or config.get('openclaw.bin', self.DEFAULT_OPENCLAW_BIN)
+        self._target_group_id = target_group_id or config.feishu.target_group_id
 
-        if not group_id:
+        if not self._target_group_id:
             raise ExportException(
                 "未配置飞书目标群组ID。"
                 "请在配置文件中设置 feishu.target_group_id "
                 "或通过环境变量 FEISHU_TARGET_GROUP_ID 指定"
             )
 
-        return group_id
+        logger.debug(f"初始化推送器: group={self._target_group_id}, openclaw={self._openclaw_bin}")
 
     def push(
         self,
@@ -74,13 +76,13 @@ class _FeishuPusher:
 
         Returns:
             dict: 包含推送结果的字典
-                - success: 是否成功
-                - message_id: 消息ID（成功时）
-                - group_id: 群组ID
-                - output: 命令输出
-                - error: 错误信息（失败时）
         """
         try:
+            # 验证输入
+            validate_file_path(file_path)
+
+            logger.info(f"推送文档到飞书", file=file_path, group=self._target_group_id)
+
             if message is None:
                 message = self._build_message(title)
 
@@ -102,6 +104,7 @@ class _FeishuPusher:
             output = result.stdout
             message_id = self._extract_message_id(output)
 
+            logger.info(f"推送成功", message_id=message_id)
             return {
                 'success': True,
                 'message_id': message_id,
@@ -110,16 +113,19 @@ class _FeishuPusher:
             }
 
         except subprocess.CalledProcessError as e:
+            logger.error(f"推送失败: {e.stderr}")
             return {
                 'success': False,
                 'error': e.stderr
             }
         except subprocess.TimeoutExpired:
+            logger.error("推送超时")
             return {
                 'success': False,
                 'error': '推送超时'
             }
         except Exception as e:
+            logger.error("推送异常", exception=e)
             return {
                 'success': False,
                 'error': str(e)
@@ -139,6 +145,7 @@ class _FeishuPusher:
             dict: 推送结果
         """
         try:
+            logger.debug(f"推送文本消息")
             result = subprocess.run(
                 [
                     self._openclaw_bin,

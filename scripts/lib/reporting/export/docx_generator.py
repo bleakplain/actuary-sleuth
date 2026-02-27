@@ -20,6 +20,13 @@ from typing import Dict, List, Any, Optional
 from pathlib import Path
 
 from lib.exceptions import ExportException
+from lib.logger import get_logger
+from .constants import DocxConstants
+from .result import GenerationResult
+from .validation import validate_evaluation_context, validate_title
+
+
+logger = get_logger('docx_generator')
 
 
 class _DocxGenerator:
@@ -70,24 +77,35 @@ class _DocxGenerator:
                 - error: 错误信息（失败时）
         """
         try:
+            # 输入验证
+            validate_evaluation_context(context)
+
+            logger.info(f"开始生成文档", product=context.product.name)
+
             # 1. 生成默认标题
             if title is None:
                 timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
                 product_name = context.product.name or "未命名产品"
                 title = f"{product_name}_审核报告_{timestamp}"
 
+            # 标题验证
+            title = validate_title(title)
+
             # 2. 生成docx-js代码
+            logger.debug("生成 docx-js 代码")
             js_code = self._generate_docx_js_code(context, title)
 
             # 3. 写入临时JavaScript文件
             js_file = self._write_temp_js(js_code, title)
 
             # 4. 执行生成docx文件
+            logger.debug("执行 Node.js 生成文档")
             docx_file = self._execute_docx_generation(js_file, title)
 
             # 5. 可选：验证文档
             validation_result = None
             if self._validate:
+                logger.debug("验证文档")
                 validation_result = self._validate_docx(docx_file)
 
             # 6. 返回结果
@@ -122,6 +140,9 @@ class _DocxGenerator:
         Returns:
             str: JavaScript代码
         """
+        # 使用常量
+        C = DocxConstants
+
         # 提取数据
         product_info = context.product
         violations = context.violations
@@ -135,6 +156,19 @@ class _DocxGenerator:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         output_path = f"{self._output_dir}/{title}.docx"
 
+        # 预先提取常量值，避免f-string嵌套
+        font = C.Style.DEFAULT_FONT
+        font_size_normal = C.Units.FONT_SIZE_NORMAL
+        font_size_h1 = C.Units.FONT_SIZE_HEADING1
+        font_size_h2 = C.Units.FONT_SIZE_HEADING2
+        spacing_h1_before = C.Spacing.SPACING_BEFORE_HEADING1
+        spacing_h1_after = C.Spacing.SPACING_AFTER_HEADING1
+        spacing_h2_before = C.Spacing.SPACING_BEFORE_HEADING2
+        spacing_h2_after = C.Spacing.SPACING_AFTER_HEADING2
+        page_width = C.Page.US_LETTER_WIDTH
+        page_height = C.Page.US_LETTER_HEIGHT
+        margin = C.Page.DEFAULT_MARGIN
+
         parts = [
             '''const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
         WidthType, AlignmentType, HeadingLevel, BorderStyle } = require('docx');
@@ -145,7 +179,7 @@ async function createAuditReport() {
         styles: {
             default: {
                 document: {
-                    run: { font: "Arial", size: 24 }
+                    run: { font: "''' + font + '''", size: ''' + str(font_size_normal) + ''' }
                 }
             },
             paragraphStyles: [
@@ -155,8 +189,8 @@ async function createAuditReport() {
                     basedOn: "Normal",
                     next: "Normal",
                     quickFormat: true,
-                    run: { size: 32, bold: true, font: "Arial" },
-                    paragraph: { spacing: { before: 240, after: 240 }, outlineLevel: 0 }
+                    run: { size: ''' + str(font_size_h1) + ''', bold: true, font: "''' + font + '''" },
+                    paragraph: { spacing: { before: ''' + str(spacing_h1_before) + ''', after: ''' + str(spacing_h1_after) + ''' }, outlineLevel: 0 }
                 },
                 {
                     id: "Heading2",
@@ -164,8 +198,8 @@ async function createAuditReport() {
                     basedOn: "Normal",
                     next: "Normal",
                     quickFormat: true,
-                    run: { size: 28, bold: true, font: "Arial" },
-                    paragraph: { spacing: { before: 180, after: 180 }, outlineLevel: 1 }
+                    run: { size: ''' + str(font_size_h2) + ''', bold: true, font: "''' + font + '''" },
+                    paragraph: { spacing: { before: ''' + str(spacing_h2_before) + ''', after: ''' + str(spacing_h2_after) + ''' }, outlineLevel: 1 }
                 }
             ]
         },
@@ -173,17 +207,15 @@ async function createAuditReport() {
             properties: {
                 page: {
                     size: {
-                        width: 12240,
-                        height: 15840
+                        width: ''' + str(page_width) + ''',
+                        height: ''' + str(page_height) + '''
                     },
-                    margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
+                    margin: { top: ''' + str(margin) + ''', right: ''' + str(margin) + ''', bottom: ''' + str(margin) + ''', left: ''' + str(margin) + ''' }
                 }
             },
             children: [
                 new Paragraph({
-                    text: "''',
-            escaped_title,
-            '''",
+                    text: "''' + escaped_title + '''",
                     heading: HeadingLevel.HEADING_1,
                     alignment: AlignmentType.CENTER,
                 }),
@@ -214,9 +246,7 @@ async function createAuditReport() {
                 new Paragraph({
                     children: [
                         new TextRun({
-                            text: "报告生成时间: ''',
-            timestamp,
-            '''",
+                            text: "报告生成时间: ''' + timestamp + '''",
                             size: 18,
                             color: "999999"
                         })
@@ -228,9 +258,7 @@ async function createAuditReport() {
     });
 
     const buffer = await Packer.toBuffer(doc);
-    const outputPath = "''',
-            output_path.replace('\\', '\\\\'),
-            '''";
+    const outputPath = "''' + output_path.replace('\\', '\\\\') + '''";
     fs.writeFileSync(outputPath, buffer);
     console.log(outputPath);
     return outputPath;
@@ -444,8 +472,14 @@ createAuditReport()
         if not rows:
             return ''
 
-        # 计算列宽（内容宽度9360 DXA）
+        # 使用常量
+        C = DocxConstants
+
+        # 计算列宽（内容宽度）
         num_cols = len(rows[0])
+        content_width = C.Table.DEFAULT_CONTENT_WIDTH
+        col_width = content_width // num_cols
+        col_widths = [col_width] * num_cols
         col_width = 9360 // num_cols
         col_widths = [col_width] * num_cols
 
@@ -481,6 +515,7 @@ createAuditReport()
     def _write_temp_js(self, js_code: str, title: str) -> str:
         """写入临时JavaScript文件"""
         js_file = os.path.join(self._output_dir, f"{title}.js")
+        logger.debug(f"写入临时JavaScript文件: {js_file}")
         with open(js_file, 'w', encoding='utf-8') as f:
             f.write(js_code)
         return js_file
@@ -494,6 +529,7 @@ createAuditReport()
             env = os.environ.copy()
             env['NODE_PATH'] = '/usr/lib/node_modules'
 
+            logger.debug(f"执行 Node.js 生成文档: {js_file}")
             result = subprocess.run(
                 ['node', js_file],
                 capture_output=True,
@@ -502,6 +538,8 @@ createAuditReport()
                 check=True,
                 env=env
             )
+
+            logger.debug(f"Node.js 输出: {result.stdout.strip()}")
 
             # 检查文件是否生成
             if not os.path.exists(docx_file):

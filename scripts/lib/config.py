@@ -173,6 +173,18 @@ class RegulationSearchConfig:
         return self._config.get('default_top_k', 5)
 
 
+class OpenClawConfig:
+    """OpenClaw配置"""
+
+    def __init__(self, config_dict: Dict[str, Any]):
+        self._config = config_dict.get('openclaw', {})
+
+    @property
+    def bin(self) -> str:
+        """OpenClaw二进制文件路径"""
+        return self._config.get('bin', '/usr/bin/openclaw') or os.getenv('OPENCLAW_BIN', '/usr/bin/openclaw')
+
+
 # ===== 主配置类 =====
 
 class Config:
@@ -223,6 +235,7 @@ class Config:
         self._ollama = OllamaConfig(self._config)
         self._data_paths = DatabaseConfig(self._config)
         self._regulation_search = RegulationSearchConfig(self._config)
+        self._openclaw = OpenClawConfig(self._config)
 
     # ===== 嵌套配置属性 =====
 
@@ -255,6 +268,11 @@ class Config:
     def regulation_search(self) -> RegulationSearchConfig:
         """法规搜索配置"""
         return self._regulation_search
+
+    @property
+    def openclaw(self) -> 'OpenClawConfig':
+        """OpenClaw配置"""
+        return self._openclaw
 
     # ===== 通用方法 =====
 
