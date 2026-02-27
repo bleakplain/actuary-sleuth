@@ -48,7 +48,7 @@ class EvaluationContext:
 
     violations: List[Dict[str, Any]] = field(default_factory=list)
     pricing_analysis: Dict[str, Any] = field(default_factory=dict)
-    product: _InsuranceProduct = field(default_factory=_InsuranceProduct)
+    product: _InsuranceProduct = field(default_factory=lambda: _InsuranceProduct(name=""))
 
     # ========== 计算结果 ==========
 
