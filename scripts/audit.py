@@ -249,24 +249,13 @@ def _export_report(evaluation: EvaluationResult) -> Optional[Dict[str, Any]]:
 def main():
     """主入口函数"""
     parser = argparse.ArgumentParser(description='Actuary Sleuth - Product Audit Script')
-    parser.add_argument('--documentUrl', required=False, help='Feishu document URL')
-    parser.add_argument('--documentContent', required=False, help='Document content (Markdown format)')
+    parser.add_argument('--documentUrl', required=True, help='Feishu document URL')
     args = parser.parse_args()
 
-    # 验证参数：至少提供一个
-    if not args.documentUrl and not args.documentContent:
-        print(json.dumps({
-            "success": False,
-            "error": "Either --documentUrl or --documentContent must be provided"
-        }, ensure_ascii=False), file=sys.stderr)
-        return 1
-
     # 构建参数
-    params = {}
-    if args.documentUrl:
-        params['documentUrl'] = args.documentUrl
-    if args.documentContent:
-        params['documentContent'] = args.documentContent
+    params = {
+        'documentUrl': args.documentUrl
+    }
 
     # 执行业务逻辑
     try:
