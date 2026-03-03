@@ -84,6 +84,7 @@ class EvaluationResult:
     # 输入数据引用 (用于验证和追溯)
     violations: List[Dict[str, Any]]
     pricing_analysis: Dict[str, Any]
+    clauses: List[Dict[str, Any]]  # 结构化条款数据，供报告生成使用
 
     # 计算结果
     score: int

@@ -34,7 +34,7 @@ class EvaluationContext:
     在模板编排的各个步骤之间传递
 
     职责：
-    - 存储输入数据（violations, pricing_analysis, product）
+    - 存储输入数据（violations, pricing_analysis, product, clauses）
     - 存储计算结果（score, grade, summary）
     - 存储分组后的违规项（避免重复计算）
     - 存储审核依据
@@ -49,6 +49,7 @@ class EvaluationContext:
     violations: List[Dict[str, Any]] = field(default_factory=list)
     pricing_analysis: Dict[str, Any] = field(default_factory=dict)
     product: _InsuranceProduct = field(default_factory=lambda: _InsuranceProduct(name=""))
+    clauses: List[Dict[str, Any]] = field(default_factory=list)
 
     # ========== 计算结果 ==========
 

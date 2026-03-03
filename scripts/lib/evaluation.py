@@ -55,6 +55,7 @@ def calculate_evaluation(data: AuditData) -> EvaluationResult:
     return EvaluationResult(
         violations=data.violations,
         pricing_analysis=data.pricing_analysis,
+        clauses=data.clauses,
         product=product,
         score=score,
         grade=grade,

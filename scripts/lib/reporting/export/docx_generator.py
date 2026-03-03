@@ -238,6 +238,10 @@ async function createAuditReport() {
         # 添加产品基本信息
         parts.append(self._generate_product_info_section(product_info))
 
+        # 添加条款内容章节
+        if context.clauses:
+            parts.append(self._generate_clauses_section(context.clauses))
+
         # 添加审核结论章节
         parts.append(self._generate_conclusion_section(score, grade, summary, violations, pricing_analysis))
 
@@ -338,6 +342,33 @@ createAuditReport()
             rows.append(["文档链接", product.document_url])
 
         sections.append(self._generate_simple_table(rows))
+
+        return '\n'.join(sections) + '\n'
+
+    def _generate_clauses_section(self, clauses: List[Dict[str, Any]]) -> str:
+        """生成条款内容部分"""
+        sections = []
+        sections.append(self._generate_heading_paragraph("条款内容", 2))
+
+        # 条款数量说明
+        sections.append(self._generate_text_paragraph(f"本次审核共分析 {len(clauses)} 条核心条款内容。"))
+
+        # 生成条款列表（前20条）
+        display_clauses = clauses[:20]
+        for i, clause in enumerate(display_clauses, 1):
+            reference = clause.get('reference', '未知')
+            text = clause.get('text', '')
+
+            # 条款标题
+            sections.append(self._generate_bold_text_paragraph(f"条款{i}：{reference}", 24))
+
+            # 条款内容（截断到500字符以避免过长）
+            display_text = text[:500] + "..." if len(text) > 500 else text
+            sections.append(self._generate_text_paragraph(display_text))
+            sections.append(self._generate_text_paragraph(""))
+
+        if len(clauses) > 20:
+            sections.append(self._generate_text_paragraph(f"（注：完整条款共 {len(clauses)} 条，此处仅显示前20条）"))
 
         return '\n'.join(sections) + '\n'
 

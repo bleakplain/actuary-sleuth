@@ -200,7 +200,8 @@ def _export_report(evaluation: EvaluationResult) -> Optional[Dict[str, Any]]:
             summary=evaluation.summary,
             high_violations=evaluation.high_violations,
             medium_violations=evaluation.medium_violations,
-            low_violations=evaluation.low_violations
+            low_violations=evaluation.low_violations,
+            clauses=evaluation.clauses
         )
 
         export_result = exporter.export(context)
@@ -545,6 +546,7 @@ def _build_result(
         'details': {
             'preprocess_id': f"PRE-{audit_id.split('-')[1]}",
             'product_info': data.product_info,
+            'clauses': data.clauses,
             'document_url': document_url
         },
         'report_export': export_result or {}

@@ -98,7 +98,7 @@ class AuditConfig:
 
 
 class OllamaConfig:
-    """Ollama 配置"""
+    """Ollama 配置（向后兼容）"""
 
     def __init__(self, config_dict: Dict[str, Any]):
         self._config = config_dict.get('ollama', {})
@@ -122,6 +122,87 @@ class OllamaConfig:
     def timeout(self) -> int:
         """Ollama 超时时间（秒）"""
         return self._config.get('timeout', 120)
+
+
+class LLMConfig:
+    """LLM 配置（支持多种提供商）"""
+
+    def __init__(self, config_dict: Dict[str, Any]):
+        self._config = config_dict.get('llm', {})
+
+    @property
+    def provider(self) -> str:
+        """LLM 提供商：zhipu, ollama"""
+        return self._config.get('provider', 'zhipu')
+
+    @property
+    def model(self) -> str:
+        """模型名称"""
+        return self._config.get('model', 'glm-4-flash')
+
+    @property
+    def api_key(self) -> Optional[str]:
+        """API 密钥"""
+        # 优先级：配置文件 > 环境变量 > Claude配置文件
+        if self._config.get('api_key'):
+            return self._config.get('api_key')
+
+        if os.getenv('ZHIPU_API_KEY'):
+            return os.getenv('ZHIPU_API_KEY')
+
+        # 尝试从 Claude 配置文件读取
+        try:
+            claude_config_path = Path.home() / '.claude' / 'settings.json'
+            if claude_config_path.exists():
+                with open(claude_config_path, 'r', encoding='utf-8') as f:
+                    claude_config = json.load(f)
+                    # Claude 使用 ANTHROPIC_API_KEY 存储 API 密钥
+                    if 'env' in claude_config and 'ANTHROPIC_API_KEY' in claude_config['env']:
+                        api_key = claude_config['env']['ANTHROPIC_API_KEY']
+                        if api_key and '.' in api_key:  # 智谱API密钥格式检查
+                            return api_key
+        except Exception as e:
+            if os.getenv('DEBUG'):
+                print(f"Warning: Failed to read Claude config: {e}")
+
+        return None
+
+    @property
+    def base_url(self) -> str:
+        """API 基础URL"""
+        return self._config.get('base_url', 'https://open.bigmodel.cn/api/paas/v4/')
+
+    @property
+    def timeout(self) -> int:
+        """请求超时时间（秒）"""
+        return self._config.get('timeout', 30)
+
+    @property
+    def temperature(self) -> float:
+        """生成温度参数"""
+        return self._config.get('temperature', 0.1)
+
+    @property
+    def max_tokens(self) -> int:
+        """最大生成token数"""
+        return self._config.get('max_tokens', 20000)
+
+    def to_client_config(self) -> Dict[str, Any]:
+        """转换为客户端配置字典"""
+        config = {
+            'provider': self.provider,
+            'model': self.model,
+            'timeout': self.timeout,
+            'max_tokens': self.max_tokens
+        }
+
+        if self.provider == 'zhipu':
+            config['api_key'] = self.api_key
+            config['base_url'] = self.base_url
+        elif self.provider == 'ollama':
+            config['host'] = self._config.get('host', 'http://localhost:11434')
+
+        return config
 
 
 class DatabaseConfig:
@@ -233,6 +314,7 @@ class Config:
         self._report = ReportConfig(self._config)
         self._audit = AuditConfig(self._config)
         self._ollama = OllamaConfig(self._config)
+        self._llm = LLMConfig(self._config)
         self._data_paths = DatabaseConfig(self._config)
         self._regulation_search = RegulationSearchConfig(self._config)
         self._openclaw = OpenClawConfig(self._config)
@@ -258,6 +340,11 @@ class Config:
     def ollama(self) -> OllamaConfig:
         """Ollama 配置"""
         return self._ollama
+
+    @property
+    def llm(self) -> LLMConfig:
+        """LLM 配置"""
+        return self._llm
 
     @property
     def data_paths(self) -> DatabaseConfig:
