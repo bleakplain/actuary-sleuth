@@ -393,8 +393,49 @@ class LLMEnhancer:
 
 只返回JSON，不要其他内容。"""
 
+    def _smart_truncate_document(self, document: str, max_length: int = 12000) -> str:
+        """智能截断文档，优先保留条款正文部分
+
+        策略：
+        1. 如果文档长度小于max_length，直接返回
+        2. 否则，跳过阅读指引等前置内容，从条款正文开始截取
+        """
+        if len(document) <= max_length:
+            return document
+
+        # 查找条款正文开始位置（通常在"**人保健康xxx保险条款**"之后）
+        import re
+
+        # 模式1: 查找条款标题
+        patterns = [
+            r'#\*?\*?\*?[\u4e00-\u9fa5]+保险条款\*?\*?\*?',  # ###**xxx保险条款**
+            r'#\*?\*?\*?[\u4e00-\u9fa5]+保险\*?\*?\*?',      # ###**xxx保险**
+            r'第[一二三四五六七八九十]条',                     # 第一条
+            r'1\.[1-9]',                                     # 1.1
+        ]
+
+        best_start = 0
+        for pattern in patterns:
+            match = re.search(pattern, document)
+            if match:
+                start_pos = match.start()
+                # 确保不会太靠后，最多保留前面的3000字符
+                if start_pos < 3000:
+                    best_start = start_pos
+                break
+
+        # 从找到的位置开始截取
+        truncated = document[best_start:best_start + max_length]
+
+        logger.debug(f"文档智能截断: 原长度={len(document)}, 截断后={len(truncated)}, 起始位置={best_start}")
+
+        return truncated
+
     def _build_full_extract_prompt(self, document: str) -> str:
         """构建完整提取提示"""
+        # 智能截断：优先保留条款正文部分
+        document_to_process = self._smart_truncate_document(document, max_length=12000)
+
         return f"""你是保险产品文档解析专家。请分析以下保险产品文档，提取结构化信息。
 
 **重要要求**:
@@ -405,11 +446,18 @@ class LLMEnhancer:
 
 文档内容:
 ```
-{document[:8000]}
+{document_to_process}
 ```
 
-请返回JSON格式:
-```json
+**输出要求**:
+- 必须且只能返回JSON格式
+- 不要包含任何解释、分析或说明文字
+- 直接返回JSON，不要使用markdown代码块
+- 不要输出分析过程或思考步骤
+
+任务: 提取上述文档的结构化信息，直接返回JSON对象。
+
+返回JSON:
 {{
     "product_info": {{
         "product_name": "产品名称",
@@ -423,26 +471,27 @@ class LLMEnhancer:
     }},
     "clauses": [
         {{"text": "第一条的完整条款内容", "reference": "第一条"}},
-        {{"text": "第二条的完整条款内容", "reference": "第二条"}},
-        {{"text": "第三条的完整条款内容", "reference": "第三条"}}
+        {{"text": "第二条的完整条款内容", "reference": "第二条"}}
     ],
     "pricing_params": {{
         "interest_rate": "预定利率",
         "expense_rate": "费用率",
         "premium_rate": "保费"
     }}
-}}
-```
-
-只返回JSON，不要其他内容。"""
+}}"""
 
     def _call_llm(self, prompt: str) -> str:
         """调用LLM"""
         try:
             # 使用配置的max_tokens，确保LLM有足够空间返回完整JSON响应
             # 结构化数据通常需要更多tokens来包含完整的条款内容
-            response = self.client.generate(prompt, max_tokens=self.max_tokens)
-            logger.info(f"LLM调用完成，max_tokens={self.max_tokens}, 响应长度={len(response)}")
+            # 设置temperature=0以确保输出的确定性，减少分析步骤
+            response = self.client.generate(
+                prompt,
+                max_tokens=self.max_tokens,
+                temperature=0  # 使用确定性输出，减少分析性文字
+            )
+            logger.info(f"LLM调用完成，max_tokens={self.max_tokens}, temperature=0, 响应长度={len(response)}")
             return response
         except Exception as e:
             import traceback
@@ -460,18 +509,42 @@ class LLMEnhancer:
             if json_match:
                 return json.loads(json_match.group(1))
 
-            # 方法2: 查找JSON对象模式
-            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response, re.DOTALL)
-            if json_match:
+            # 方法2: 尝试直接解析整个响应（最常见的情况）
+            cleaned = response.strip()
+            if cleaned.startswith('{') and cleaned.endswith('}'):
                 try:
-                    return json.loads(json_match.group(0))
+                    return json.loads(cleaned)
                 except json.JSONDecodeError:
                     pass
 
-            # 方法3: 尝试直接解析整个响应
-            cleaned = response.strip()
-            if cleaned.startswith('{') and cleaned.endswith('}'):
-                return json.loads(cleaned)
+            # 方法3: 查找从第一个 { 到最后一个 } 的内容
+            # 处理响应前后可能有额外文字的情况
+            first_brace = cleaned.find('{')
+            last_brace = cleaned.rfind('}')
+            if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                json_str = cleaned[first_brace:last_brace + 1]
+                try:
+                    return json.loads(json_str)
+                except json.JSONDecodeError:
+                    pass
+
+            # 方法4: 尝试提取第一个完整的JSON对象（向后兼容）
+            # 使用更宽松的匹配，支持多层嵌套
+            brace_count = 0
+            start_idx = -1
+            for i, char in enumerate(cleaned):
+                if char == '{':
+                    if brace_count == 0:
+                        start_idx = i
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0 and start_idx != -1:
+                        json_str = cleaned[start_idx:i + 1]
+                        try:
+                            return json.loads(json_str)
+                        except json.JSONDecodeError:
+                            break
 
             logger.warning(f"LLM响应JSON解析失败: {response[:200]}")
             return {}
@@ -619,9 +692,10 @@ class HybridExtractor:
         self.quality_assessor = QualityAssessor()
         self.llm_client = LLMClientFactory.create_client(config)
 
-        # 从配置中获取max_tokens，如果没有则使用默认值8192
+        # 从配置中获取max_tokens，如果没有则使用默认值
         # GLM-4.7-Flash支持最高128k输出，设置较大值确保完整提取
-        self.max_tokens = config.get('max_tokens', 8192)
+        # 增加到16384以确保能够返回完整的条款内容
+        self.max_tokens = config.get('max_tokens', 16384)
 
         self.llm_enhancer = LLMEnhancer(self.llm_client, max_tokens=self.max_tokens)
         self.fusion = ResultFusion()
