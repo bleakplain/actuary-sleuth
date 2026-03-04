@@ -400,7 +400,7 @@ def execute(params: Dict[str, Any]) -> AuditResult:
         export_result = _export_report(evaluation)
 
         print(f"[{audit_id}] Audit completed successfully!", file=sys.stderr)
-        return _build_result(audit_id, data, evaluation, export_result, document_url)
+        return _build_result(evaluation, export_result)
 
     except Exception as e:
         print(f"[{audit_id}] Audit failed: {str(e)}", file=sys.stderr)
@@ -503,30 +503,30 @@ def _calculate_evaluation(data: AuditData) -> EvaluationResult:
 
 
 def _build_result(
-    audit_id: str,
-    data: AuditData,
     evaluation: EvaluationResult,
-    export_result: Optional[Dict[str, Any]],
-    document_url: str
+    export_result: Optional[Dict[str, Any]]
 ) -> AuditResult:
     """
     构建最终审核结果
 
+    重构版本：仅从 EvaluationResult 获取数据，实现真正的单向数据流。
+
+    数据流：AuditData → EvaluationResult → AuditResult (API响应)
+                           ↓
+                    Export (报告生成)
+
     Args:
-        audit_id: 审核ID
-        data: 审核数据
-        evaluation: 评估结果
+        evaluation: 评估结果（包含所有导出数据）
         export_result: 导出结果
-        document_url: 文档URL
 
     Returns:
-        AuditResult: 审核结果
+        AuditResult: 审核结果（API响应格式）
     """
     return {
         'success': True,
-        'audit_id': audit_id,
-        'violations': data.violations,
-        'violation_count': len(data.violations),
+        'audit_id': evaluation.audit_id,
+        'violations': evaluation.violations,
+        'violation_count': evaluation.total_violations,
         'violation_summary': {
             'high': len(evaluation.high_violations),
             'medium': len(evaluation.medium_violations),
@@ -539,15 +539,15 @@ def _build_result(
         'report': '',
         'metadata': {
             'audit_type': 'full',
-            'document_url': document_url,
-            'timestamp': data.timestamp.isoformat(),
-            'product_info': data.product_info
+            'document_url': evaluation.document_url,
+            'timestamp': evaluation.timestamp.isoformat(),
+            'product_info': evaluation.product_info
         },
         'details': {
-            'preprocess_id': f"PRE-{audit_id.split('-')[1]}",
-            'product_info': data.product_info,
-            'clauses': data.clauses,
-            'document_url': document_url
+            'preprocess_id': evaluation.preprocess_id,
+            'product_info': evaluation.product_info,
+            'clauses': evaluation.clauses,
+            'document_url': evaluation.document_url
         },
         'report_export': export_result or {}
     }

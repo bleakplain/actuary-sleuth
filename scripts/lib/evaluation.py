@@ -23,13 +23,16 @@ def calculate_evaluation(data: AuditData) -> EvaluationResult:
     """
     从 AuditData 计算评估结果
 
-    这是主入口函数，协调所有计算步骤
+    这是主入口函数，协调所有计算步骤。
+
+    此函数将 AuditData 转换为 EvaluationResult，后者是审核流程的完整输出，
+    包含所有导出和 API 响应需要的数据。
 
     Args:
         data: 审核原始数据
 
     Returns:
-        EvaluationResult: 评估计算结果
+        EvaluationResult: 评估计算结果（包含所有导出数据）
     """
     # 构建产品对象
     product = _InsuranceProduct(
@@ -53,16 +56,29 @@ def calculate_evaluation(data: AuditData) -> EvaluationResult:
     summary = calculate_summary(data.violations, data.pricing_analysis, score)
 
     return EvaluationResult(
-        violations=data.violations,
-        pricing_analysis=data.pricing_analysis,
-        clauses=data.clauses,
-        product=product,
+        # === 计算结果 ===
         score=score,
         grade=grade,
         summary=summary,
+
+        # === 违规数据 ===
+        violations=data.violations,
         high_violations=high_violations,
         medium_violations=medium_violations,
-        low_violations=low_violations
+        low_violations=low_violations,
+        pricing_analysis=data.pricing_analysis,
+
+        # === 条款数据 ===
+        clauses=data.clauses,
+
+        # === 产品信息 ===
+        product=product,
+        product_info=data.product_info,
+
+        # === 元数据 ===
+        audit_id=data.audit_id,
+        document_url=data.document_url,
+        timestamp=data.timestamp
     )
 
 

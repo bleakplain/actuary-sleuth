@@ -69,48 +69,85 @@ class EvaluationResult:
     """
     评估计算结果 (Immutable)
 
-    存储从 AuditData 计算得出的所有结果。
+    存储从 AuditData 计算得出的所有结果，是审核流程的完整输出。
 
     职责：
     - 存储计算结果（分数、评级、摘要）
     - 存储结构化数据（产品对象、分组违规项）
-    - 作为导出模块的数据源
+    - 存储所有导出需要的数据（clauses、product_info、metadata）
+    - 作为唯一的导出数据源，API 响应和报告生成都应从此获取数据
 
     设计原则：
     - frozen=True 确保创建后不可修改
     - 从 AuditData 计算得出，计算逻辑在 calculate_evaluation()
-    - 包含所有导出需要的数据，避免后续再计算
-    """
-    # 输入数据引用 (用于验证和追溯)
-    violations: List[Dict[str, Any]]
-    pricing_analysis: Dict[str, Any]
-    clauses: List[Dict[str, Any]]  # 结构化条款数据，供报告生成使用
+    - 包含所有导出需要的数据，实现真正的单向数据流
+    - 不应再依赖 AuditData 获取任何信息
 
-    # 计算结果
+    数据流：AuditData → EvaluationResult → Export/API
+    """
+    # === 计算结果 ===
     score: int
     grade: str
     summary: Dict[str, Any]
 
-    # 结构化数据
-    product: '_InsuranceProduct'
-
-    # 衍生数据 (预分组，避免重复计算)
+    # === 违规数据 ===
+    violations: List[Dict[str, Any]]
     high_violations: List[Dict[str, Any]]
     medium_violations: List[Dict[str, Any]]
     low_violations: List[Dict[str, Any]]
+    pricing_analysis: Dict[str, Any]
+
+    # === 条款数据 ===
+    clauses: List[Dict[str, Any]]
+
+    # === 产品信息 ===
+    product: '_InsuranceProduct'
+    product_info: Dict[str, Any]  # 原始产品信息，用于 details 字段
+
+    # === 元数据 ===
+    audit_id: str
+    document_url: str
+    timestamp: datetime
 
     def to_dict(self) -> Dict[str, Any]:
-        """转换为字典格式（用于向后兼容）"""
+        """
+        转换为 API 响应格式
+
+        这是构建 API 响应的唯一数据源，不应再从 AuditData 获取任何数据。
+        """
         return {
             'violations': self.violations,
-            'pricing_analysis': self.pricing_analysis,
-            'product_info': {
-                'product_name': self.product.name,
-                'product_type': self.product.type,
-                'insurance_company': self.product.company,
-                'version': self.product.version,
-                'document_url': self.product.document_url
+            'violation_count': len(self.violations),
+            'violation_summary': {
+                'high': len(self.high_violations),
+                'medium': len(self.medium_violations),
+                'low': len(self.low_violations)
             },
+            'pricing_analysis': self.pricing_analysis,
+            'score': self.score,
+            'grade': self.grade,
+            'summary': self.summary,
+            'clauses': self.clauses,
+            'product_info': self.product_info,
+            'audit_id': self.audit_id,
+            'document_url': self.document_url,
+            'timestamp': self.timestamp.isoformat(),
+        }
+
+    def to_export_dict(self) -> Dict[str, Any]:
+        """
+        转换为导出格式
+
+        包含报告生成所需的所有数据。
+        """
+        return {
+            'violations': self.violations,
+            'high_violations': self.high_violations,
+            'medium_violations': self.medium_violations,
+            'low_violations': self.low_violations,
+            'pricing_analysis': self.pricing_analysis,
+            'clauses': self.clauses,
+            'product': self.product,
             'score': self.score,
             'grade': self.grade,
             'summary': self.summary,
@@ -130,6 +167,11 @@ class EvaluationResult:
     def total_violations(self) -> int:
         """违规总数"""
         return len(self.violations)
+
+    @property
+    def preprocess_id(self) -> str:
+        """预处理 ID"""
+        return f"PRE-{self.audit_id.split('-')[1]}"
 
 
 # 导入 _InsuranceProduct (避免循环导入)
