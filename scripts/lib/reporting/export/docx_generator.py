@@ -238,10 +238,6 @@ async function createAuditReport() {
         # 添加产品基本信息
         parts.append(self._generate_product_info_section(product_info))
 
-        # 添加条款内容章节
-        if context.clauses:
-            parts.append(self._generate_clauses_section(context.clauses))
-
         # 添加审核结论章节
         parts.append(self._generate_conclusion_section(score, grade, summary, violations, pricing_analysis))
 

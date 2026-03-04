@@ -32,6 +32,9 @@ from lib.exceptions import (
     ActuarySleuthException
 )
 from lib.logger import get_audit_logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # ========== 类型定义 ==========
@@ -161,9 +164,55 @@ def _run_audit_step(
     return result
 
 
+def _validate_report_completeness(evaluation: EvaluationResult) -> tuple[bool, List[str]]:
+    """
+    验证报告完整性
+
+    Args:
+        evaluation: 评估结果 (EvaluationResult)
+
+    Returns:
+        tuple: (是否通过验证, 缺失字段列表)
+    """
+    missing_fields = []
+
+    # 1. 验证产品信息完整性
+    required_product_fields = ['product_name']
+    for field in required_product_fields:
+        if not evaluation.product_info.get(field):
+            missing_fields.append(f'product_info.{field}')
+
+    # 2. 验证条款数据 - 这是用户特别关心的
+    if not evaluation.clauses or len(evaluation.clauses) == 0:
+        missing_fields.append('clauses')
+    else:
+        # 验证条款内容是否为空
+        empty_clauses = [i for i, clause in enumerate(evaluation.clauses)
+                        if not clause.get('text') or not clause.get('text').strip()]
+        if empty_clauses:
+            missing_fields.append(f'clauses[{empty_clauses[0]}].text (empty)')
+
+    # 3. 验证违规数据
+    if not evaluation.violations:
+        missing_fields.append('violations')
+
+    # 4. 验证评分
+    if evaluation.score is None:
+        missing_fields.append('score')
+
+    is_valid = len(missing_fields) == 0
+
+    if not is_valid:
+        print(f"[{evaluation.product.name}] ⚠️ Report validation failed, missing fields: {missing_fields}", file=sys.stderr)
+
+    return is_valid, missing_fields
+
+
 def _export_report(evaluation: EvaluationResult) -> Optional[Dict[str, Any]]:
     """
     导出报告 - 生成Word文档并推送到飞书
+
+    先验证报告完整性，再决定是否推送到飞书
 
     Args:
         evaluation: 评估结果 (EvaluationResult)
@@ -177,6 +226,20 @@ def _export_report(evaluation: EvaluationResult) -> Optional[Dict[str, Any]]:
     if not config.report.export_feishu:
         print(f"[{evaluation.product.name}] Step 6: Report export skipped (not configured)", file=sys.stderr)
         return None
+
+    # 验证报告完整性
+    is_valid, missing_fields = _validate_report_completeness(evaluation)
+    if not is_valid:
+        print(f"[{evaluation.product.name}] Step 6: Report export skipped (validation failed: {missing_fields})", file=sys.stderr)
+        return {
+            'success': False,
+            'error': f'Report validation failed, missing fields: {missing_fields}',
+            'error_type': 'ValidationError',
+            'validation_result': {
+                'is_valid': False,
+                'missing_fields': missing_fields
+            }
+        }
 
     print(f"[{evaluation.product.name}] Step 6: Generating Word report and pushing to Feishu...", file=sys.stderr)
 
@@ -214,6 +277,10 @@ def _export_report(evaluation: EvaluationResult) -> Optional[Dict[str, Any]]:
                 'file_path': export_result.get('file_path'),
                 'file_size': export_result.get('file_size'),
                 'title': export_result.get('title')
+            },
+            'validation_result': {
+                'is_valid': True,
+                'missing_fields': []
             }
         }
 
@@ -334,6 +401,13 @@ def _fetch_feishu_content(document_url: str) -> str:
 
             with open(md_file, 'r', encoding='utf-8') as f:
                 content = f.read()
+
+            # 智能截断文档以避免 LLM 超时
+            # 保留前 15000 字符，确保能够提取主要条款内容
+            MAX_CONTENT_LENGTH = 15000
+            if len(content) > MAX_CONTENT_LENGTH:
+                logger.info(f"Document too long ({len(content)} chars), truncating to {MAX_CONTENT_LENGTH}")
+                content = content[:MAX_CONTENT_LENGTH]
 
             return content
 
@@ -564,39 +638,16 @@ def run_preprocess(document_content: str, document_url: str) -> PreprocessResult
     Returns:
         dict: 预处理结果
     """
-    # 构建输入参数
+    # 直接导入和调用 preprocess.execute()，避免 subprocess 问题
+    # 这样可以确保配置正确加载，并且避免超时问题
+    import preprocess
+
     input_params = {
         'documentContent': document_content,
         'documentUrl': document_url
     }
 
-    # 使用临时文件传递参数
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
-        json.dump(input_params, f, ensure_ascii=False)
-        input_file = f.name
-
-    try:
-        # 调用预处理脚本
-        script_path = Path(__file__).parent / 'preprocess.py'
-        result = subprocess.run(
-            [sys.executable, str(script_path), '--input', input_file],
-            capture_output=True,
-            text=True,
-            check=False
-        )
-
-        if result.returncode != 0:
-            return {
-                'success': False,
-                'error': result.stderr,
-                'error_type': 'SubprocessError'
-            }
-
-        return json.loads(result.stdout)
-
-    finally:
-        # 清理临时文件
-        Path(input_file).unlink(missing_ok=True)
+    return preprocess.execute(input_params)
 
 
 def run_negative_list_check(clauses: List[Dict[str, Any]]) -> CheckResult:

@@ -305,6 +305,11 @@ class QualityAssessor:
 class LLMEnhancer:
     """LLM增强器 - 使用智谱GLM补充和验证规则提取结果"""
 
+    # 分块处理的文档长度阈值
+    CHUNK_THRESHOLD = 10000  # 超过此长度使用分块提取
+    CHUNK_SIZE = 8000        # 每块的最大字符数
+    CHUNK_OVERLAP = 500      # 块之间的重叠字符数
+
     def __init__(self, client: BaseLLMClient, max_tokens: int = 8192):
         """
         初始化LLM增强器
@@ -339,7 +344,16 @@ class LLMEnhancer:
         return self._merge_results(rule_result, llm_data)
 
     def extract_full(self, document: str) -> ExtractResult:
-        """完整LLM提取"""
+        """完整LLM提取 - 自动选择普通模式或分块模式"""
+        # 自动检测文档长度，选择合适的提取模式
+        doc_length = len(document)
+
+        if doc_length > self.CHUNK_THRESHOLD:
+            # 使用分块提取模式
+            logger.info(f"文档长度{doc_length}字符，使用分块提取模式")
+            return self.extract_full_chunked(document)
+
+        # 使用普通提取模式
         prompt = self._build_full_extract_prompt(document)
 
         logger.info(f"Calling LLM with prompt length: {len(prompt)}")
@@ -479,6 +493,217 @@ class LLMEnhancer:
         "premium_rate": "保费"
     }}
 }}"""
+
+    def _split_document_into_chunks(self, document: str) -> List[str]:
+        """将长文档分割成多个块，每个块保持语义完整性
+
+        策略：
+        1. 按段落分割（以空行分隔）
+        2. 确保每个块不超过CHUNK_SIZE
+        3. 块之间保持CHUNK_OVERLAP重叠，避免丢失上下文
+        4. 优先在"第X条"等标题处分割
+        """
+        import re
+
+        # 按段落分割
+        paragraphs = re.split(r'\n\s*\n', document)
+
+        chunks = []
+        current_chunk = ""
+        current_size = 0
+
+        for para in paragraphs:
+            para = para.strip()
+            if not para:
+                continue
+
+            para_size = len(para)
+
+            # 如果单个段落就超过CHUNK_SIZE，强制在"第X条"处分割
+            if para_size > self.CHUNK_SIZE:
+                # 先保存当前chunk
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                    current_chunk = ""
+                    current_size = 0
+
+                # 分割大段落
+                sub_chunks = self._split_large_paragraph(para)
+                chunks.extend(sub_chunks)
+                continue
+
+            # 检查加入这个段落是否会超过限制
+            if current_size + para_size > self.CHUNK_SIZE:
+                # 保存当前chunk
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+
+                # 开始新chunk，保留重叠部分
+                if self.CHUNK_OVERLAP > 0 and current_chunk:
+                    # 从上一个chunk的末尾取重叠部分
+                    overlap_text = current_chunk[-self.CHUNK_OVERLAP:]
+                    current_chunk = overlap_text + "\n\n" + para
+                    current_size = len(overlap_text) + para_size
+                else:
+                    current_chunk = para
+                    current_size = para_size
+            else:
+                # 加入当前chunk
+                if current_chunk:
+                    current_chunk += "\n\n" + para
+                    current_size += para_size + 2  # +2 for "\n\n"
+                else:
+                    current_chunk = para
+                    current_size = para_size
+
+        # 保存最后一个chunk
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+
+        logger.info(f"文档分割完成: 原文档{len(document)}字符 -> {len(chunks)}个块")
+        return chunks
+
+    def _split_large_paragraph(self, paragraph: str) -> List[str]:
+        """分割过大的段落，优先在"第X条"等位置分割"""
+        import re
+
+        # 查找所有可能的分割点
+        split_patterns = [
+            r'\n第[一二三四五六七八九十百千]+[、．.]\s*',  # 第一条、第二条
+            r'\n\d+[、．.]\s*',  # 1. 2.
+            r'\n###\s+',  # ### 标题
+            r'\n##\s+',  # ## 标题
+        ]
+
+        split_positions = [0]  # 起始位置
+
+        for pattern in split_patterns:
+            for match in re.finditer(pattern, paragraph):
+                pos = match.start()
+                # 确保不会太密集（至少间隔CHUNK_SIZE/2）
+                if pos - split_positions[-1] >= self.CHUNK_SIZE // 2:
+                    split_positions.append(pos)
+
+        # 如果没有找到合适的分割点，按固定长度分割
+        if len(split_positions) == 1:
+            for i in range(self.CHUNK_SIZE, len(paragraph), self.CHUNK_SIZE):
+                split_positions.append(i)
+
+        split_positions.append(len(paragraph))  # 结束位置
+
+        # 生成chunks
+        chunks = []
+        for i in range(len(split_positions) - 1):
+            start = split_positions[i]
+            end = split_positions[i + 1]
+            chunk = paragraph[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+
+        return chunks
+
+    def _extract_from_chunk(self, chunk: str, chunk_index: int, total_chunks: int) -> Dict[str, Any]:
+        """从单个文档块中提取信息"""
+        # 为每个块构建专门的prompt
+        prompt = f"""你是保险产品文档解析专家。请分析以下保险产品文档片段（第{chunk_index + 1}/{total_chunks}块），提取结构化信息。
+
+**重要要求**:
+1. 只提取"条款正文"中的真正条款
+2. 过滤HTML标签、格式化字符
+3. 提取所有可见的条款内容
+4. 如果产品信息在前面的块中已经提取过，可以忽略或补充
+
+文档片段:
+```
+{chunk}
+```
+
+**输出要求**:
+- 必须且只能返回JSON格式
+- 不要包含任何解释、分析或说明文字
+- 直接返回JSON，不要使用markdown代码块
+
+返回JSON:
+{{
+    "product_info": {{
+        "product_name": "产品名称（如果在当前块中）",
+        "insurance_company": "保险公司（如果在当前块中）"
+    }},
+    "clauses": [
+        {{"text": "条款内容", "reference": "条款编号/标题"}}
+    ]
+}}"""
+
+        response = self._call_llm(prompt)
+        return self._parse_llm_response(response)
+
+    def extract_full_chunked(self, document: str) -> ExtractResult:
+        """使用分块策略进行完整LLM提取
+
+        当文档长度超过CHUNK_THRESHOLD时，自动切换到分块模式
+        """
+        doc_length = len(document)
+
+        if doc_length <= self.CHUNK_THRESHOLD:
+            # 文档不长，使用普通提取
+            logger.info(f"文档长度{doc_length}字符，使用普通提取模式")
+            return self.extract_full(document)
+
+        # 文档太长，使用分块提取
+        logger.info(f"文档长度{doc_length}字符，超过阈值{self.CHUNK_THRESHOLD}，使用分块提取模式")
+
+        chunks = self._split_document_into_chunks(document)
+        logger.info(f"文档已分割为{len(chunks)}个块，开始逐块提取...")
+
+        all_product_info = {}
+        all_clauses = []
+        all_pricing_params = {}
+
+        for i, chunk in enumerate(chunks):
+            logger.info(f"正在处理第{i + 1}/{len(chunks)}个块（{len(chunk)}字符）...")
+            chunk_result = self._extract_from_chunk(chunk, i, len(chunks))
+
+            # 合并product_info
+            if 'product_info' in chunk_result:
+                for key, value in chunk_result['product_info'].items():
+                    if value and (key not in all_product_info or not all_product_info[key]):
+                        all_product_info[key] = value
+
+            # 合并clauses
+            if 'clauses' in chunk_result and isinstance(chunk_result['clauses'], list):
+                for clause in chunk_result['clauses']:
+                    if clause and isinstance(clause, dict) and 'text' in clause:
+                        # 去重：基于条款内容的前50个字符
+                        clause_prefix = clause['text'][:50]
+                        is_duplicate = any(
+                            existing['text'][:50] == clause_prefix
+                            for existing in all_clauses
+                        )
+                        if not is_duplicate:
+                            all_clauses.append(clause)
+
+            # 合并pricing_params
+            if 'pricing_params' in chunk_result:
+                for key, value in chunk_result['pricing_params'].items():
+                    if value and (key not in all_pricing_params or not all_pricing_params[key]):
+                        all_pricing_params[key] = value
+
+        # 构建最终结果
+        final_data = {}
+        if all_product_info:
+            final_data['product_info'] = all_product_info
+        if all_clauses:
+            final_data['clauses'] = all_clauses
+        if all_pricing_params:
+            final_data['pricing_params'] = all_pricing_params
+
+        logger.info(f"分块提取完成: 产品信息字段{len(all_product_info)}个, 条款{len(all_clauses)}条")
+
+        return ExtractResult(
+            data=final_data,
+            confidence={k: 0.75 for k in final_data},
+            provenance={k: 'llm_chunked' for k in final_data}
+        )
 
     def _call_llm(self, prompt: str) -> str:
         """调用LLM"""
