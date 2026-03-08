@@ -3,7 +3,7 @@
 """
 文档预处理脚本
 解析保险产品文档，提取结构化信息
-支持规则+LLM混合提取架构
+使用格式无关的提取框架，自动适配不同文档类型
 """
 import json
 import argparse
@@ -16,7 +16,7 @@ from typing import Dict, List, Any, Optional
 
 from lib.config import get_config
 from lib.id_generator import IDGenerator
-from lib.hybrid_extractor import HybridExtractor, extract_document
+from lib.extraction import ExtractionPipeline
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -99,14 +99,13 @@ def main():
 
 def execute(params: Dict[str, Any]) -> Dict[str, Any]:
     """
-    执行文档预处理（使用混合提取架构）
+    执行文档预处理（使用格式无关的提取框架）
 
     Args:
         params: 包含文档内容的字典
             - documentContent: 文档内容（Markdown 或纯文本）
             - documentUrl: 文档 URL（可选）
             - documentType: 文档类型（可选）
-            - use_hybrid: 是否使用混合提取（默认true）
 
     Returns:
         dict: 包含预处理结果的字典
@@ -118,94 +117,61 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
     document_content = params['documentContent']
     document_url = params.get('documentUrl', '')
     document_type = params.get('documentType', 'unknown')
-    use_hybrid = params.get('use_hybrid', True)
 
     # 生成预处理ID
     preprocess_id = IDGenerator.generate_preprocess()
 
-    if use_hybrid:
-        # 使用混合提取架构
-        logger.info("使用混合提取架构进行预处理")
+    # 使用新的提取框架
+    logger.info("使用格式无关提取框架进行预处理")
 
-        try:
-            # 执行混合提取
-            extract_result = extract_document(document_content)
+    try:
+        # 创建提取流程（使用配置）
+        config = get_config().llm.to_client_config()
+        pipeline = ExtractionPipeline(config=config)
 
-            # 解析文档结构
-            parsed_data = parse_document(document_content)
+        # 执行提取
+        extract_result = pipeline.extract(document_content)
 
-            # 从混合提取结果中提取结构化信息
-            product_info = _extract_product(extract_result)
-            clauses = _extract_clauses(extract_result)
-            pricing_params = _extract_pricing(extract_result)
+        # 解析文档结构
+        parsed_data = parse_document(document_content)
 
-            # 显示结构化内容供确认
-            display_structured_content(product_info, clauses, pricing_params)
+        # 从提取结果中提取结构化信息
+        product_info = _extract_product(extract_result)
+        clauses = _extract_clauses(extract_result)
+        pricing_params = _extract_pricing(extract_result)
 
-            # 构建结果
-            result = {
-                'success': True,
-                'preprocess_id': preprocess_id,
-                'metadata': {
-                    'document_url': document_url,
-                    'document_type': document_type,
-                    'timestamp': datetime.now().isoformat(),
-                    'content_length': len(document_content),
-                    'extraction_method': 'hybrid',
-                    'extraction_sources': extract_result.get_source_summary()
-                },
-                'product_info': product_info,
-                'structure': parsed_data,
-                'clauses': clauses,
-                'pricing_params': pricing_params,
-                'extraction_debug': {
-                    'confidence': extract_result.confidence,
-                    'provenance': extract_result.provenance,
-                    'low_confidence_fields': extract_result.get_low_confidence_fields()
-                }
+        # 显示结构化内容供确认
+        display_structured_content(product_info, clauses, pricing_params)
+
+        # 构建结果
+        result = {
+            'success': True,
+            'preprocess_id': preprocess_id,
+            'metadata': {
+                'document_url': document_url,
+                'document_type': document_type,
+                'timestamp': datetime.now().isoformat(),
+                'content_length': len(document_content),
+                'extraction_method': 'hybrid_v2',
+                'extraction_sources': extract_result.get_source_summary()
+            },
+            'product_info': product_info,
+            'structure': parsed_data,
+            'clauses': clauses,
+            'pricing_params': pricing_params,
+            'extraction_debug': {
+                'confidence': extract_result.confidence,
+                'provenance': extract_result.provenance,
+                'low_confidence_fields': extract_result.get_low_confidence_fields()
             }
+        }
 
-            return result
+        return result
 
-        except Exception as e:
-            import traceback
-            logger.warning(f"混合提取失败，回退到规则提取: {e}\n{traceback.format_exc()}")
-            # 回退到规则提取
-            pass
-
-    # 规则提取（原有逻辑）
-    logger.info("使用规则提取进行预处理")
-
-    # 解析文档结构
-    parsed_data = parse_document(document_content)
-
-    # 提取产品信息
-    product_info = extract_product_info(document_content)
-
-    # 提取条款列表
-    clauses = extract_clauses(document_content)
-
-    # 提取定价参数
-    pricing_params = extract_pricing_params(document_content)
-
-    # 构建结果
-    result = {
-        'success': True,
-        'preprocess_id': preprocess_id,
-        'metadata': {
-            'document_url': document_url,
-            'document_type': document_type,
-            'timestamp': datetime.now().isoformat(),
-            'content_length': len(document_content),
-            'extraction_method': 'rule'
-        },
-        'product_info': product_info,
-        'structure': parsed_data,
-        'clauses': clauses,
-        'pricing_params': pricing_params
-    }
-
-    return result
+    except Exception as e:
+        import traceback
+        logger.error(f"提取失败: {e}\n{traceback.format_exc()}")
+        raise
 
 
 def parse_document(content: str) -> Dict[str, Any]:
