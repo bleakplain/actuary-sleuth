@@ -88,6 +88,17 @@ class ZhipuClient(BaseLLMClient):
                 json=data,
                 timeout=self.timeout
             )
+
+            # 对 429 和 5xx 错误抛出包含状态码的异常，让上层重试机制能正确感知
+            if response.status_code == 429:
+                raise requests.exceptions.RequestException(
+                    f"429 Rate limit exceeded: {response.text[:200]}"
+                )
+            if response.status_code >= 500:
+                raise requests.exceptions.RequestException(
+                    f"{response.status_code} Server error: {response.text[:200]}"
+                )
+
             response.raise_for_status()
             result = response.json()
 
@@ -125,7 +136,7 @@ class ZhipuClient(BaseLLMClient):
         except requests.exceptions.RequestException as e:
             import logging
             logging.warning(f"Error calling ZhipuAI API: {e}")
-            return ""
+            raise  # 向上抛出，让调用方的重试逻辑处理
 
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         """
@@ -154,6 +165,17 @@ class ZhipuClient(BaseLLMClient):
                 json=data,
                 timeout=self.timeout
             )
+
+            # 对 429 和 5xx 错误抛出包含状态码的异常，让上层重试机制能正确感知
+            if response.status_code == 429:
+                raise requests.exceptions.RequestException(
+                    f"429 Rate limit exceeded: {response.text[:200]}"
+                )
+            if response.status_code >= 500:
+                raise requests.exceptions.RequestException(
+                    f"{response.status_code} Server error: {response.text[:200]}"
+                )
+
             response.raise_for_status()
             result = response.json()
 
@@ -167,8 +189,9 @@ class ZhipuClient(BaseLLMClient):
             return ""
 
         except requests.exceptions.RequestException as e:
-            print(f"Error calling ZhipuAI Chat API: {e}")
-            return ""
+            import logging
+            logging.warning(f"Error calling ZhipuAI Chat API: {e}")
+            raise
 
     def health_check(self) -> bool:
         """

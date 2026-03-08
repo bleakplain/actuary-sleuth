@@ -135,9 +135,9 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
             parsed_data = parse_document(document_content)
 
             # 从混合提取结果中提取结构化信息
-            product_info = _extract_product_info_from_result(extract_result)
-            clauses = _extract_clauses_from_result(extract_result)
-            pricing_params = _extract_pricing_from_result(extract_result)
+            product_info = _extract_product(extract_result)
+            clauses = _extract_clauses(extract_result)
+            pricing_params = _extract_pricing(extract_result)
 
             # 显示结构化内容供确认
             display_structured_content(product_info, clauses, pricing_params)
@@ -168,7 +168,8 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
             return result
 
         except Exception as e:
-            logger.warning(f"混合提取失败，回退到规则提取: {e}")
+            import traceback
+            logger.warning(f"混合提取失败，回退到规则提取: {e}\n{traceback.format_exc()}")
             # 回退到规则提取
             pass
 
@@ -369,6 +370,50 @@ def extract_clauses(content: str) -> List[Dict[str, Any]]:
     """
     clauses = []
 
+    # 优先尝试 HTML 表格条款解析（适用于 feishu2md 转换的表格型保险条款文档）
+    # 行结构模式（已验证）：
+    #   - 2-td 行：td[0]=编号(如 **1.1**) 或空, td[1]=条款内容
+    #   - 3-td 行：td[0]=空, td[1]=子项内容(疾病定义等), td[2]=空
+    # 合并规则：无编号行和3-td行都追加到当前最近的有编号行
+    table_rows = re.findall(r'<tr>(.*?)</tr>', content, re.DOTALL)
+    if table_rows:
+        def _strip_html(text):
+            text = re.sub(r'<[^>]+>', '', text)
+            text = re.sub(r'\*\*([^*]*)\*\*', r'\1', text)
+            return text.strip()
+
+        current_ref = None
+        current_texts = []
+        for row in table_rows:
+            tds = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL)
+            if len(tds) == 2:
+                ref = _strip_html(tds[0])
+                body = _strip_html(tds[1])
+                if re.match(r'^\d[\d.]*$', ref):
+                    # 有编号：保存上一条，开启新条款
+                    if current_ref and current_texts:
+                        full_text = '\n'.join(current_texts)
+                        if len(full_text) > 10:
+                            clauses.append({'text': full_text, 'reference': current_ref})
+                    current_ref = ref
+                    current_texts = [body] if body else []
+                elif not ref and body and current_ref is not None:
+                    # 无编号延续行
+                    current_texts.append(body)
+            elif len(tds) == 3:
+                # 子项行（如疾病定义列表）
+                body = _strip_html(tds[1])
+                if body and current_ref is not None:
+                    current_texts.append(body)
+        # 保存最后一条
+        if current_ref and current_texts:
+            full_text = '\n'.join(current_texts)
+            if len(full_text) > 10:
+                clauses.append({'text': full_text, 'reference': current_ref})
+
+    if clauses:
+        return clauses
+
     # 先清理HTML表格
     content = clean_html_tables(content)
 
@@ -529,7 +574,7 @@ def extract_pricing_params(content: str) -> Dict[str, Any]:
     return pricing_params
 
 
-def _extract_product_info_from_result(extract_result) -> Dict[str, Any]:
+def _extract_product(extract_result) -> Dict[str, Any]:
     """从混合提取结果中提取产品信息"""
     from lib.hybrid_extractor import ExtractResult
 
@@ -602,7 +647,7 @@ def _extract_product_info_from_result(extract_result) -> Dict[str, Any]:
     return product_info
 
 
-def _extract_clauses_from_result(extract_result) -> List[Dict[str, Any]]:
+def _extract_clauses(extract_result) -> List[Dict[str, Any]]:
     """从混合提取结果中提取条款列表"""
     from lib.hybrid_extractor import ExtractResult
 
@@ -645,7 +690,7 @@ def _extract_clauses_from_result(extract_result) -> List[Dict[str, Any]]:
     return clauses
 
 
-def _extract_pricing_from_result(extract_result) -> Dict[str, Any]:
+def _extract_pricing(extract_result) -> Dict[str, Any]:
     """从混合提取结果中提取定价参数"""
     from lib.hybrid_extractor import ExtractResult
 

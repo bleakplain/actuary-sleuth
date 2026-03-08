@@ -7,6 +7,7 @@
 import re
 import json
 import logging
+import time
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 from collections import Counter
@@ -20,12 +21,25 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(frozen=True)
 class ExtractResult:
     """提取结果"""
     data: Dict[str, Any] = field(default_factory=dict)
     confidence: Dict[str, float] = field(default_factory=dict)
     provenance: Dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self):
+        """验证数据完整性"""
+        # 确保data、confidence、provenance的keys一致
+        data_keys = set(self.data.keys())
+        conf_keys = set(self.confidence.keys())
+        prov_keys = set(self.provenance.keys())
+
+        if not data_keys == conf_keys == prov_keys:
+            raise ValueError(
+                f"ExtractResult字段不一致: data={sorted(data_keys)}, "
+                f"confidence={sorted(conf_keys)}, provenance={sorted(prov_keys)}"
+            )
 
     def get_source_summary(self) -> Dict[str, int]:
         """获取来源统计"""
@@ -45,6 +59,10 @@ class ExtractResult:
             k for k, v in self.provenance.items()
             if 'conflict' in v
         ]
+
+    def is_valid(self) -> bool:
+        """检查提取结果是否有效"""
+        return len(self.data) > 0 and any(v > 0.5 for v in self.confidence.values())
 
 
 @dataclass
@@ -228,9 +246,15 @@ class QualityAssessor:
         if not result.data:
             return 0.0
 
-        present = len(result.data)
+        # 收集顶层 key 以及一层嵌套字典（如 product_info）内的 key
+        all_keys = set(result.data.keys())
+        for v in result.data.values():
+            if isinstance(v, dict):
+                all_keys |= {k for k, val in v.items() if val}
+
+        present = len(self.REQUIRED_FIELDS & all_keys)
         required = len(self.REQUIRED_FIELDS)
-        return min(present / required, 1.0)
+        return present / required
 
     def _assess_accuracy(self, result: ExtractResult) -> float:
         """评估准确性 - 基于置信度"""
@@ -302,17 +326,21 @@ class QualityAssessor:
         return max(score, 0.0)
 
 
-class LLMEnhancer:
-    """LLM增强器 - 使用智谱GLM补充和验证规则提取结果"""
+class LLMExtractor:
+    """LLM提取器 - 使用智谱GLM进行文档信息提取"""
 
     # 分块处理的文档长度阈值
     CHUNK_THRESHOLD = 10000  # 超过此长度使用分块提取
-    CHUNK_SIZE = 8000        # 每块的最大字符数
-    CHUNK_OVERLAP = 500      # 块之间的重叠字符数
+    CHUNK_SIZE = 6000         # 每块的最大字符数
+    CHUNK_OVERLAP = 1500     # 块之间的重叠字符数
+
+    # 重试配置
+    MAX_RETRIES = 3          # 最大重试次数
+    RETRY_DELAY = 2          # 重试延迟（秒）
 
     def __init__(self, client: BaseLLMClient, max_tokens: int = 8192):
         """
-        初始化LLM增强器
+        初始化LLM提取器
 
         Args:
             client: LLM客户端实例
@@ -322,7 +350,7 @@ class LLMEnhancer:
         self.max_tokens = max_tokens
 
     def enhance(self, document: str, rule_result: ExtractResult) -> ExtractResult:
-        """增强规则提取结果"""
+        """增强规则提取结果（保留向后兼容）"""
 
         # 1. 识别缺失字段
         missing_fields = self._identify_missing(rule_result)
@@ -343,16 +371,8 @@ class LLMEnhancer:
         # 5. 合并结果
         return self._merge_results(rule_result, llm_data)
 
-    def extract_full(self, document: str) -> ExtractResult:
-        """完整LLM提取 - 自动选择普通模式或分块模式"""
-        # 自动检测文档长度，选择合适的提取模式
-        doc_length = len(document)
-
-        if doc_length > self.CHUNK_THRESHOLD:
-            # 使用分块提取模式
-            logger.info(f"文档长度{doc_length}字符，使用分块提取模式")
-            return self.extract_full_chunked(document)
-
+    def extract(self, document: str) -> ExtractResult:
+        """完整LLM提取 - 普通模式（短文档）。长文档由 HybridExtractor 显式调用 extract_chunked。"""
         # 使用普通提取模式
         prompt = self._build_full_extract_prompt(document)
 
@@ -497,70 +517,111 @@ class LLMEnhancer:
     def _split_document_into_chunks(self, document: str) -> List[str]:
         """将长文档分割成多个块，每个块保持语义完整性
 
-        策略：
-        1. 按段落分割（以空行分隔）
-        2. 确保每个块不超过CHUNK_SIZE
-        3. 块之间保持CHUNK_OVERLAP重叠，避免丢失上下文
-        4. 优先在"第X条"等标题处分割
+        改进策略：
+        1. 优先按章节标题分割（"第X条"、"## 标题"等），保持条款完整性
+        2. 减小块大小 (6000字符) 提高成功率
+        3. 增加重叠 (1500字符) 确保标题和内容不分离
+        4. 每个块包含完整的章节上下文
         """
         import re
 
-        # 按段落分割
-        paragraphs = re.split(r'\n\s*\n', document)
+        # 1. 首先按章节标题分割，保持条款完整性
+        section_patterns = [
+            r'\n\s*第[一二三四五六七八九十百千]+\s*[章节条款][\s、．.：（]',  # 第一条、第二章、第一条：
+            r'\n\s*第[一二三四五六七八九十百千]+\s*[、．.]',  # 第一条、第二条、1.、2.
+            r'\n\s*\d+[、．.：（]?\s*\S+',  # 1.、2.、1:、2: 后跟非空字符
+            r'\n\s*#{1,2}\s+',  # ## 标题
+            r'\n\s*#{3,4}\s+',  # ### 标题
+        ]
 
+        # 按章节分割
+        sections = []
+        last_pos = 0
+        current_lines = []
+        line_starts = []
+
+        # 找出所有可能的章节标题位置
+        for pattern in section_patterns:
+            for match in re.finditer(pattern, document, re.MULTILINE):
+                line_starts.append(match.start())
+
+        line_starts.sort()
+
+        # HTML 表格文档补充：当文本章节标题覆盖不足文档20%时（如 feishu2md 转换的表格型条款文档），
+        # 改用 <tr> 行边界作为分割候选点，避免产生超大单块导致 LLM 超时
+        if not line_starts or (line_starts and max(line_starts) < len(document) * 0.2):
+            tr_positions = [m.start() for m in re.finditer(r'\n<tr', document)]
+            if tr_positions:
+                line_starts.extend(tr_positions)
+                line_starts.sort()
+                logger.info(f"HTML表格文档：补充{len(tr_positions)}个<tr>分割点")
+
+        if line_starts:
+            # 在章节标题处创建分割点
+            last_pos = 0
+            for section_start in line_starts:
+                if section_start > last_pos + 100:  # 确保章节有足够内容
+                    sections.append({
+                        'start': last_pos,
+                        'end': section_start,
+                        'text': document[last_pos:section_start].strip()
+                    })
+                    last_pos = section_start
+
+            # 添加最后一部分
+            if last_pos < len(document):
+                sections.append({
+                    'start': last_pos,
+                    'end': len(document),
+                    'text': document[last_pos:].strip()
+                })
+        else:
+            # 没有找到章节，按段落分割
+            paragraphs = re.split(r'\n\s*\n', document)
+            start = 0
+            for para in paragraphs:
+                if para.strip():
+                    end = min(start + self.CHUNK_SIZE, len(document))
+                    sections.append({
+                        'start': start,
+                        'end': end,
+                        'text': para.strip()
+                    })
+                    start = end
+
+        # 2. 按章节构建最终块，确保重叠
         chunks = []
-        current_chunk = ""
+        current_text = ""
         current_size = 0
 
-        for para in paragraphs:
-            para = para.strip()
-            if not para:
-                continue
+        for section in sections:
+            section_text = section['text']
+            section_size = len(section_text)
 
-            para_size = len(para)
+            # 如果加入这个section会超过CHUNK_SIZE
+            if current_size + section_size > self.CHUNK_SIZE:
+                # 保存当前块
+                if current_text.strip():
+                    chunks.append(current_text.strip())
 
-            # 如果单个段落就超过CHUNK_SIZE，强制在"第X条"处分割
-            if para_size > self.CHUNK_SIZE:
-                # 先保存当前chunk
-                if current_chunk:
-                    chunks.append(current_chunk.strip())
-                    current_chunk = ""
-                    current_size = 0
-
-                # 分割大段落
-                sub_chunks = self._split_large_paragraph(para)
-                chunks.extend(sub_chunks)
-                continue
-
-            # 检查加入这个段落是否会超过限制
-            if current_size + para_size > self.CHUNK_SIZE:
-                # 保存当前chunk
-                if current_chunk:
-                    chunks.append(current_chunk.strip())
-
-                # 开始新chunk，保留重叠部分
-                if self.CHUNK_OVERLAP > 0 and current_chunk:
-                    # 从上一个chunk的末尾取重叠部分
-                    overlap_text = current_chunk[-self.CHUNK_OVERLAP:]
-                    current_chunk = overlap_text + "\n\n" + para
-                    current_size = len(overlap_text) + para_size
-                else:
-                    current_chunk = para
-                    current_size = para_size
+                # 开始新块，保留重叠（从前一块末尾往前取 CHUNK_OVERLAP 字符，接上新块内容）
+                overlap_start = max(0, section['start'] - self.CHUNK_OVERLAP)
+                overlap_text = document[overlap_start:section['start']]
+                current_text = overlap_text.strip() + "\n\n" + section_text
+                current_size = len(current_text)
             else:
-                # 加入当前chunk
-                if current_chunk:
-                    current_chunk += "\n\n" + para
-                    current_size += para_size + 2  # +2 for "\n\n"
+                # 加入当前块
+                if current_text:
+                    current_text += "\n\n" + section_text
                 else:
-                    current_chunk = para
-                    current_size = para_size
+                    current_text = section_text
+                current_size = len(current_text)
 
-        # 保存最后一个chunk
-        if current_chunk:
-            chunks.append(current_chunk.strip())
+        # 保存最后一个块
+        if current_text.strip():
+            chunks.append(current_text.strip())
 
-        logger.info(f"文档分割完成: 原文档{len(document)}字符 -> {len(chunks)}个块")
+        logger.info(f"文档分割完成: 原文档{len(document)}字符 -> {len(chunks)}个块 (每块~{self.CHUNK_SIZE}字符, 重叠{self.CHUNK_OVERLAP}字符)")
         return chunks
 
     def _split_large_paragraph(self, paragraph: str) -> List[str]:
@@ -612,6 +673,7 @@ class LLMEnhancer:
 2. 过滤HTML标签、格式化字符
 3. 提取所有可见的条款内容
 4. 如果产品信息在前面的块中已经提取过，可以忽略或补充
+5. 提取定价相关参数（利率、费用率等）
 
 文档片段:
 ```
@@ -627,27 +689,51 @@ class LLMEnhancer:
 {{
     "product_info": {{
         "product_name": "产品名称（如果在当前块中）",
-        "insurance_company": "保险公司（如果在当前块中）"
+        "insurance_company": "保险公司（如果在当前块中）",
+        "product_type": "产品类型（如果在当前块中）",
+        "insurance_period": "保险期间（如果在当前块中）",
+        "payment_method": "缴费方式（如果在当前块中）",
+        "age_min": "最低投保年龄（如果在当前块中）",
+        "age_max": "最高投保年龄（如果在当前块中）",
+        "waiting_period": "等待期天数（如果在当前块中）"
     }},
     "clauses": [
         {{"text": "条款内容", "reference": "条款编号/标题"}}
-    ]
+    ],
+    "pricing_params": {{
+        "interest_rate": "预定利率（如果在当前块中）",
+        "expense_rate": "费用率（如果在当前块中）",
+        "premium_rate": "保费（如果在当前块中）"
+    }}
 }}"""
 
         response = self._call_llm(prompt)
         return self._parse_llm_response(response)
 
-    def extract_full_chunked(self, document: str) -> ExtractResult:
+    @staticmethod
+    def _is_duplicate_clause(clause: Dict[str, Any], existing_clauses: List[Dict[str, Any]]) -> bool:
+        """判断条款是否已存在（基于前100字符+长度的组合特征，避免误判）"""
+        text = clause.get('text', '')
+        if not text:
+            return False
+        key = (text[:100], len(text) // 50)  # 前100字符 + 长度档位
+        for existing in existing_clauses:
+            existing_text = existing.get('text', '')
+            existing_key = (existing_text[:100], len(existing_text) // 50)
+            if key == existing_key:
+                return True
+        return False
+
+    def extract_chunked(self, document: str, rule_extractor: Optional['RuleExtractor'] = None) -> ExtractResult:
         """使用分块策略进行完整LLM提取
 
         当文档长度超过CHUNK_THRESHOLD时，自动切换到分块模式
+
+        Args:
+            document: 文档内容
+            rule_extractor: 规则提取器实例，用于分块完成后兜底补充缺失字段
         """
         doc_length = len(document)
-
-        if doc_length <= self.CHUNK_THRESHOLD:
-            # 文档不长，使用普通提取
-            logger.info(f"文档长度{doc_length}字符，使用普通提取模式")
-            return self.extract_full(document)
 
         # 文档太长，使用分块提取
         logger.info(f"文档长度{doc_length}字符，超过阈值{self.CHUNK_THRESHOLD}，使用分块提取模式")
@@ -669,17 +755,11 @@ class LLMEnhancer:
                     if value and (key not in all_product_info or not all_product_info[key]):
                         all_product_info[key] = value
 
-            # 合并clauses
+            # 合并clauses（使用改进的去重逻辑）
             if 'clauses' in chunk_result and isinstance(chunk_result['clauses'], list):
                 for clause in chunk_result['clauses']:
                     if clause and isinstance(clause, dict) and 'text' in clause:
-                        # 去重：基于条款内容的前50个字符
-                        clause_prefix = clause['text'][:50]
-                        is_duplicate = any(
-                            existing['text'][:50] == clause_prefix
-                            for existing in all_clauses
-                        )
-                        if not is_duplicate:
+                        if not self._is_duplicate_clause(clause, all_clauses):
                             all_clauses.append(clause)
 
             # 合并pricing_params
@@ -687,6 +767,10 @@ class LLMEnhancer:
                 for key, value in chunk_result['pricing_params'].items():
                     if value and (key not in all_pricing_params or not all_pricing_params[key]):
                         all_pricing_params[key] = value
+
+            # 块间速率控制：避免触发 QPS 限制
+            if i < len(chunks) - 1:
+                time.sleep(0.5)
 
         # 构建最终结果
         final_data = {}
@@ -697,7 +781,20 @@ class LLMEnhancer:
         if all_pricing_params:
             final_data['pricing_params'] = all_pricing_params
 
-        logger.info(f"分块提取完成: 产品信息字段{len(all_product_info)}个, 条款{len(all_clauses)}条")
+        # 规则提取回退：补充LLM未提取的字段（需外部传入 rule_extractor）
+        rule_supplement_count = 0
+        if rule_extractor is not None:
+            rule_result = rule_extractor.extract(document)
+            if rule_result.data:
+                for key, value in rule_result.data.items():
+                    if key not in all_product_info or not all_product_info[key]:
+                        all_product_info[key] = value
+                        rule_supplement_count += 1
+                for key, value in rule_result.data.items():
+                    if key not in all_pricing_params or not all_pricing_params[key]:
+                        all_pricing_params[key] = value
+
+        logger.info(f"分块提取完成: 产品信息字段{len(all_product_info)}个, 条款{len(all_clauses)}条, 规则补充{rule_supplement_count}个字段")
 
         return ExtractResult(
             data=final_data,
@@ -706,23 +803,35 @@ class LLMEnhancer:
         )
 
     def _call_llm(self, prompt: str) -> str:
-        """调用LLM"""
-        try:
-            # 使用配置的max_tokens，确保LLM有足够空间返回完整JSON响应
-            # 结构化数据通常需要更多tokens来包含完整的条款内容
-            # 设置temperature=0以确保输出的确定性，减少分析步骤
-            response = self.client.generate(
-                prompt,
-                max_tokens=self.max_tokens,
-                temperature=0  # 使用确定性输出，减少分析性文字
-            )
-            logger.info(f"LLM调用完成，max_tokens={self.max_tokens}, temperature=0, 响应长度={len(response)}")
-            return response
-        except Exception as e:
-            import traceback
-            logger.warning(f"LLM调用失败: {e}")
-            logger.warning(f"异常详情: {traceback.format_exc()}")
-            return "{}"
+        """调用LLM，带重试机制"""
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                # 使用配置的max_tokens，确保LLM有足够空间返回完整JSON响应
+                # 结构化数据通常需要更多tokens来包含完整的条款内容
+                # 设置temperature=0以确保输出的确定性，减少分析步骤
+                response = self.client.generate(
+                    prompt,
+                    max_tokens=self.max_tokens,
+                    temperature=0  # 使用确定性输出，减少分析性文字
+                )
+                logger.info(f"LLM调用完成，max_tokens={self.max_tokens}, temperature=0, 响应长度={len(response)}")
+                return response
+            except Exception as e:
+                error_msg = str(e)
+                # 检查是否为可重试的错误
+                is_retryable = any(code in error_msg for code in ['429', 'timeout', 'connection', 'rate limit'])
+
+                if attempt < self.MAX_RETRIES - 1 and is_retryable:
+                    wait_time = self.RETRY_DELAY * (2 ** attempt)  # 指数退避
+                    logger.warning(f"LLM调用失败 (attempt {attempt + 1}/{self.MAX_RETRIES}): {error_msg}")
+                    logger.info(f"等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                else:
+                    # 最后一次尝试或不可重试的错误
+                    import traceback
+                    logger.error(f"LLM调用失败 (最终): {error_msg}")
+                    logger.error(f"异常详情: {traceback.format_exc()}")
+                    return "{}"
 
     def _parse_llm_response(self, response: str) -> Dict[str, Any]:
         """解析LLM响应"""
@@ -771,6 +880,22 @@ class LLMEnhancer:
                         except json.JSONDecodeError:
                             break
 
+            # 方法5: 从末尾反向扫描，找最后一个完整 JSON 对象
+            # 适用于推理模式（reasoning_content）：推理过程在前，答案 JSON 在末尾
+            last_end = cleaned.rfind('}')
+            if last_end != -1:
+                depth = 0
+                for i in range(last_end, -1, -1):
+                    if cleaned[i] == '}':
+                        depth += 1
+                    elif cleaned[i] == '{':
+                        depth -= 1
+                    if depth == 0:
+                        try:
+                            return json.loads(cleaned[i:last_end + 1])
+                        except json.JSONDecodeError:
+                            break
+
             logger.warning(f"LLM响应JSON解析失败: {response[:200]}")
             return {}
 
@@ -806,8 +931,8 @@ class LLMEnhancer:
             new_key = f"{parent_key}{sep}{k}" if parent_key else k
             if isinstance(v, dict):
                 items.extend(self._flatten_dict(v, new_key, sep=sep).items())
-            elif isinstance(v, list) and v and isinstance(v[0], dict):
-                # 处理clauses列表
+            elif isinstance(v, list):
+                # 处理列表：对每个元素单独判断类型
                 for i, item in enumerate(v):
                     if isinstance(item, dict):
                         items.extend(self._flatten_dict(item, f"{new_key}_{i}", sep=sep).items())
@@ -922,7 +1047,7 @@ class HybridExtractor:
         # 增加到16384以确保能够返回完整的条款内容
         self.max_tokens = config.get('max_tokens', 16384)
 
-        self.llm_enhancer = LLMEnhancer(self.llm_client, max_tokens=self.max_tokens)
+        self.llm_extractor = LLMExtractor(self.llm_client, max_tokens=self.max_tokens)
         self.fusion = ResultFusion()
 
     def extract(self, document: str) -> ExtractResult:
@@ -931,7 +1056,11 @@ class HybridExtractor:
         logger.info("执行LLM完整提取...")
 
         # 步骤1: LLM完整提取（产品信息 + 条款内容）
-        llm_result = self.llm_enhancer.extract_full(document)
+        # 超长文档使用分块模式，传入 rule_extractor 以便分块完成后兜底补充
+        if len(document) > self.llm_extractor.CHUNK_THRESHOLD:
+            llm_result = self.llm_extractor.extract_chunked(document, self.rule_extractor)
+        else:
+            llm_result = self.llm_extractor.extract(document)
         logger.info(f"LLM提取完成: {len(llm_result.data)}个字段")
 
         # 步骤2: 规则快速验证和补充
@@ -962,8 +1091,9 @@ class HybridExtractor:
         score = quality.overall_score()
 
         llm_result = None
-        if score < self.thresholds['excellent']:
-            llm_result = self.llm_enhancer.extract_full(document)
+        # 使用质量评分决定是否需要LLM增强
+        if score < 90:  # 90分以下使用LLM增强
+            llm_result = self.llm_extractor.extract(document)
 
         final_result = self.fusion.fuse(rule_result, llm_result)
 
@@ -980,9 +1110,9 @@ class HybridExtractor:
 
     def _get_decision_label(self, score: int) -> str:
         """获取决策标签"""
-        if score >= self.thresholds['excellent']:
+        if score >= 90:
             return 'rule_only'
-        elif score >= self.thresholds['fair']:
+        elif score >= 75:
             return 'llm_enhanced'
         else:
             return 'llm_dominant'

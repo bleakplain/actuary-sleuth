@@ -12,6 +12,7 @@
 """
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -159,7 +160,8 @@ class LLMConfig:
                     # Claude 使用 ANTHROPIC_API_KEY 存储 API 密钥
                     if 'env' in claude_config and 'ANTHROPIC_API_KEY' in claude_config['env']:
                         api_key = claude_config['env']['ANTHROPIC_API_KEY']
-                        if api_key and '.' in api_key:  # 智谱API密钥格式检查
+                        # 智谱API密钥格式：两段字母数字，用"."分隔，总长度>30
+                        if api_key and re.match(r'^[A-Za-z0-9]+\.[A-Za-z0-9]+$', api_key) and len(api_key) > 30:
                             return api_key
         except Exception as e:
             if os.getenv('DEBUG'):
