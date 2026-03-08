@@ -402,13 +402,8 @@ def _fetch_feishu_content(document_url: str) -> str:
             with open(md_file, 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            # 智能截断文档以避免 LLM 超时
-            # 保留前 15000 字符，确保能够提取主要条款内容
-            MAX_CONTENT_LENGTH = 15000
-            if len(content) > MAX_CONTENT_LENGTH:
-                logger.info(f"Document too long ({len(content)} chars), truncating to {MAX_CONTENT_LENGTH}")
-                content = content[:MAX_CONTENT_LENGTH]
-
+            # 不再截断文档，保留完整内容
+            # LLM 可以通过分块处理和重试机制应对长文档
             return content
 
     except subprocess.CalledProcessError as e:

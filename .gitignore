@@ -52,3 +52,6 @@ tests/.coverage
 # Node.js
 node_modules/
 package-lock.json
+
+# Database (runtime data, not source)
+data/actuary.db
