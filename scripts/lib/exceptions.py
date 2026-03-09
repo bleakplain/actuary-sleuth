@@ -185,6 +185,23 @@ class OllamaException(ExternalServiceException):
         super().__init__("Ollama", message, details)
 
 
+class LLMException(ExternalServiceException):
+    """LLM服务异常"""
+
+    def __init__(self, message: str, details: Optional[dict] = None):
+        super().__init__("LLM", message, details)
+
+
+class LLMParseException(LLMException):
+    """LLM响应解析异常"""
+
+    def __init__(self, message: str = "LLM响应解析失败", details: Optional[dict] = None):
+        if details is None:
+            details = {}
+        details['response_preview'] = message[:200]
+        super().__init__(message, details)
+
+
 # ========== 配置异常 ==========
 
 class ConfigurationException(ActuarySleuthException):

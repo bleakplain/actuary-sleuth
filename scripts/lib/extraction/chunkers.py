@@ -10,6 +10,11 @@ import logging
 from abc import ABC, abstractmethod
 from typing import List
 
+from lib.constants import (
+    DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP,
+    TABLE_DENSITY_THRESHOLD, DENSITY_CALCULATION_MULTIPLIER
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +22,7 @@ logger = logging.getLogger(__name__)
 class BaseChunker(ABC):
     """分块策略基类"""
 
-    def __init__(self, chunk_size: int = 6000, overlap: int = 1500):
+    def __init__(self, chunk_size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_OVERLAP):
         """
         初始化分块器
 
@@ -210,18 +215,35 @@ class HybridChunker(BaseChunker):
     """
     混合分块器
 
-    先尝试章节分割，如果块太少或不均匀，再补充 <tr> 边界。
+    根据文档结构特征自动选择最佳分块策略：
+    - HTML表格密集 → TableSplitter
+    - 章节结构清晰 → SectionSplitter
+    - 纯文本段落 → SemanticSplitter
     """
 
     def split(self, document: str) -> List[str]:
         """混合分块策略"""
-        # 先用章节分割
-        chunks = SectionSplitter(self.chunk_size, self.overlap).split(document)
+        # 1. 计算表格密度
+        tr_count = len(re.findall(r'<tr', document))
+        table_density = tr_count * DENSITY_CALCULATION_MULTIPLIER / len(document) if document else 0
 
-        # 如果块太少或块大小不均匀，补充 <tr> 边界
-        if len(chunks) < 3:
-            tr_positions = [m.start() for m in re.finditer(r'\n<tr', document)]
-            if tr_positions:
-                return TableSplitter(self.chunk_size, self.overlap).split(document)
+        # 2. 计算章节密度
+        section_count = 0
+        for pattern in SectionSplitter.SECTION_PATTERNS:
+            section_count += len(re.findall(pattern, document, re.MULTILINE))
 
-        return chunks
+        section_density = section_count * DENSITY_CALCULATION_MULTIPLIER / len(document) if document else 0
+
+        logger.debug(f"文档特征: 表格密度={table_density:.2f}, 章节密度={section_density:.2f}")
+
+        # 3. 根据特征选择策略
+        if table_density > TABLE_DENSITY_THRESHOLD:
+            logger.info("检测到表格密集文档，使用 TableSplitter")
+            return TableSplitter(self.chunk_size, self.overlap).split(document)
+
+        if section_count >= 3:
+            logger.info("检测到章节结构，使用 SectionSplitter")
+            return SectionSplitter(self.chunk_size, self.overlap).split(document)
+
+        logger.info("未检测到明确结构，使用 SemanticSplitter")
+        return SemanticSplitter(self.chunk_size, self.overlap).split(document)

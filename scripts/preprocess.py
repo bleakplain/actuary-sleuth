@@ -16,7 +16,7 @@ from typing import Dict, List, Any, Optional
 
 from lib.config import get_config
 from lib.id_generator import IDGenerator
-from lib.extraction import ExtractionPipeline
+from lib.extraction import DocumentExtractor
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -127,7 +127,7 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
     try:
         # 创建提取流程（使用配置）
         config = get_config().llm.to_client_config()
-        pipeline = ExtractionPipeline(config=config)
+        pipeline = DocumentExtractor(config=config)
 
         # 执行提取
         extract_result = pipeline.extract(document_content)
@@ -542,7 +542,7 @@ def extract_pricing_params(content: str) -> Dict[str, Any]:
 
 def _extract_product(extract_result) -> Dict[str, Any]:
     """从混合提取结果中提取产品信息"""
-    from lib.hybrid_extractor import ExtractResult
+    from lib.extraction.models import ExtractResult
 
     if not isinstance(extract_result, ExtractResult):
         return {}
@@ -615,7 +615,7 @@ def _extract_product(extract_result) -> Dict[str, Any]:
 
 def _extract_clauses(extract_result) -> List[Dict[str, Any]]:
     """从混合提取结果中提取条款列表"""
-    from lib.hybrid_extractor import ExtractResult
+    from lib.extraction.models import ExtractResult
 
     if not isinstance(extract_result, ExtractResult):
         return []
@@ -658,7 +658,7 @@ def _extract_clauses(extract_result) -> List[Dict[str, Any]]:
 
 def _extract_pricing(extract_result) -> Dict[str, Any]:
     """从混合提取结果中提取定价参数"""
-    from lib.hybrid_extractor import ExtractResult
+    from lib.extraction.models import ExtractResult
 
     if not isinstance(extract_result, ExtractResult):
         return {}
