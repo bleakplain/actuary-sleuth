@@ -9,7 +9,7 @@ import logging
 import re
 from typing import Optional
 
-from .models import NormalizedDocument, FormatInfo, StructureMarkers
+from .models import NormalizedDocument, DocumentProfile, StructureMarkers
 
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class Normalizer:
 
         return NormalizedDocument(
             content=normalized,
-            format_info=format_info,
+            profile=format_info,
             structure_markers=structure_markers,
             metadata={
                 'original_length': len(document),
@@ -99,13 +99,9 @@ class Normalizer:
 
         return document.strip()
 
-    def _detect_format(self, document: str) -> FormatInfo:
-        """检测文档格式"""
-        # 检测表格密度
-        tr_count = len(re.findall(r'<tr', document))
-        table_density = tr_count * 1000 / len(document) if document else 0
-
-        # 检测章节结构
+    def _detect_format(self, document: str) -> DocumentProfile:
+        """分析文档画像：提取用于路由决策的关键特征"""
+        # 检测章节结构（至少5个章节才算有结构）
         section_patterns = [
             r'第[一二三四五六七八九十百千]+\s*[章节条款]',
             r'#{1,2}\s+',
@@ -115,6 +111,7 @@ class Normalizer:
             len(re.findall(p, document, re.MULTILINE))
             for p in section_patterns
         )
+        is_structured = section_count >= 5
 
         # 检测是否有条款编号
         has_clause_numbers = bool(
@@ -126,13 +123,10 @@ class Normalizer:
             re.search(r'(年龄|岁).*?(保费|费率|元)', document)
         )
 
-        return FormatInfo(
-            is_table_dense=table_density > 0.5,
-            is_structured=section_count >= 5,
+        return DocumentProfile(
+            is_structured=is_structured,
             has_clause_numbers=has_clause_numbers,
-            has_premium_table=has_premium_table,
-            table_density=table_density,
-            section_count=section_count
+            has_premium_table=has_premium_table
         )
 
     def _mark_structure(self, document: str) -> StructureMarkers:

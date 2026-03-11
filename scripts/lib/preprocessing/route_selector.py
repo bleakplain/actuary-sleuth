@@ -6,17 +6,19 @@
 根据文档特征和分类结果选择最优的提取通道。
 """
 import logging
-from typing import List
+from typing import List, Tuple, Union
 
-from .models import NormalizedDocument, ExtractionRoute, FormatInfo
+from .models import NormalizedDocument, DocumentProfile
 from .classifier import ProductTypeClassifier
+from .fast_extractor import FastExtractor
+from .dynamic_extractor import DynamicExtractor
 
 
 logger = logging.getLogger(__name__)
 
 
 class RouteSelector:
-    """提取路由选择器"""
+    """路由选择器：根据文档特征选择合适的提取器"""
 
     # 必需字段（所有产品都需要）
     REQUIRED_FIELDS = {
@@ -26,43 +28,48 @@ class RouteSelector:
         'waiting_period'
     }
 
-    def __init__(self):
+    def __init__(self, fast_extractor: FastExtractor, dynamic_extractor: DynamicExtractor):
+        """
+        初始化路由选择器
+
+        Args:
+            fast_extractor: 快速提取器
+            dynamic_extractor: 动态提取器
+        """
+        self.fast_extractor = fast_extractor
+        self.dynamic_extractor = dynamic_extractor
         self.type_classifier = ProductTypeClassifier()
 
-    def select_route(self, document: NormalizedDocument) -> ExtractionRoute:
+    def select_extractor(self, document: NormalizedDocument) -> Tuple[Union[FastExtractor, DynamicExtractor], str, float, bool]:
         """
-        选择提取路由
+        选择提取器
 
         Returns:
-            ExtractionRoute: 提取路由决策
+            (extractor, product_type, confidence, is_hybrid)
         """
         # 1. 产品类型识别
         type_code, confidence = self.type_classifier.get_primary_type(document.content)
+        is_hybrid = self.type_classifier.is_hybrid_product(document.content)
 
-        # 2. 判断是否走快速通道
-        use_dynamic = self._use_dynamic(
-            document.format_info, confidence, document
-        )
+        # 2. 判断是否走动态通道
+        use_dynamic = self._use_dynamic(document.profile, confidence, document)
 
+        # 3. 选择提取器
+        extractor = self.dynamic_extractor if use_dynamic else self.fast_extractor
+
+        # 4. 记录决策日志
         mode = 'dynamic' if use_dynamic else 'fast'
+        rationale = self._explain_decision(use_dynamic, document.profile, confidence)
+        logger.debug(f"路由决策: {mode} | {rationale}")
 
-        return ExtractionRoute(
-            mode=mode,
-            product_type=type_code,
-            confidence=confidence,
-            is_hybrid=self.type_classifier.is_hybrid_product(document.content),
-            reason=self._explain_decision(use_dynamic, document.format_info, confidence)
-        )
+        return extractor, type_code, confidence, is_hybrid
 
-    def _use_dynamic(self,
-                   format_info: FormatInfo,
-                   confidence: float,
-                   document: NormalizedDocument) -> bool:
+    def _use_dynamic(self, profile: DocumentProfile, confidence: float, document: NormalizedDocument) -> bool:
         """判断是否使用动态通道"""
         # 条件1: 格式非标准化 或 复杂结构
         is_complex = (
-            not format_info.is_structured or
-            not format_info.has_clause_numbers
+            not profile.is_structured or
+            not profile.has_clause_numbers
         )
 
         # 条件2: 分类置信度低
@@ -95,15 +102,12 @@ class RouteSelector:
         }
         return indicators.get(field, [field])
 
-    def _explain_decision(self,
-                        use_dynamic: bool,
-                        format_info: FormatInfo,
-                        confidence: float) -> str:
+    def _explain_decision(self, use_dynamic: bool, profile: DocumentProfile, confidence: float) -> str:
         """解释决策原因"""
         reasons = []
 
         if use_dynamic:
-            if not format_info.is_structured:
+            if not profile.is_structured:
                 reasons.append("格式非标准化")
             if confidence < 0.7:
                 reasons.append(f"分类置信度低({confidence:.2f})")

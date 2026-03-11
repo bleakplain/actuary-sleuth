@@ -10,54 +10,12 @@ import logging
 import re
 from typing import Dict, List, Any, Optional
 
-from .models import NormalizedDocument, ExtractionRoute, ExtractResult, StructureInfo
+from .models import NormalizedDocument, ExtractResult
 from .prompt_builder import PromptBuilder
 from .product_types import get_extraction_focus, get_output_schema
 
 
 logger = logging.getLogger(__name__)
-
-
-class StructureAnalyzer:
-    """结构分析器"""
-
-    STRUCTURE_PROMPT = """分析以下文档的结构，标记关键区块。
-
-文档内容（前 5000 字符）:
-{document}
-
-输出 (JSON):
-{{
-    "has_premium_table": true/false,
-    "has_clauses": true/false,
-    "sections": [
-        {{"type": "产品信息", "start_pos": 0}},
-        {{"type": "费率表", "start_pos": 1000}},
-        {{"type": "保险责任", "start_pos": 2000}}
-    ]
-}}
-"""
-
-    def __init__(self, llm_client):
-        self.llm_client = llm_client
-
-    def analyze(self, document: NormalizedDocument) -> StructureInfo:
-        """分析文档结构"""
-        try:
-            prompt = self.STRUCTURE_PROMPT.format(document=document.content[:5000])
-            response = self.llm_client.generate(
-                prompt,
-                max_tokens=500,
-                temperature=0.1
-            )
-            return StructureInfo.from_dict(json.loads(response))
-        except Exception as e:
-            logger.warning(f"结构分析失败，使用默认值: {e}")
-            return StructureInfo(
-                has_premium_table=document.format_info.has_premium_table,
-                has_clauses=document.format_info.has_clause_numbers,
-                sections=[]
-            )
 
 
 class PremiumTableExtractor:
@@ -182,7 +140,6 @@ class DynamicExtractor:
     def __init__(self, llm_client):
         self.llm_client = llm_client
         self.prompt_builder = PromptBuilder()
-        self.structure_analyzer = StructureAnalyzer(llm_client)
         self.specialized_extractors = {
             'premium_table': PremiumTableExtractor(llm_client),
             'clauses': ClauseExtractor(llm_client),
@@ -190,17 +147,18 @@ class DynamicExtractor:
 
     def extract(self,
                 document: NormalizedDocument,
-                route: ExtractionRoute,
+                product_type: str,
+                is_hybrid: bool,
                 required_fields: List[str]) -> ExtractResult:
         """结构化提取"""
 
         # 1. 构建 Prompt
         prompt = self.prompt_builder.build(
-            product_type=route.product_type,
+            product_type=product_type,
             required_fields=required_fields,
-            extraction_focus=get_extraction_focus(route.product_type),
-            output_schema=get_output_schema(route.product_type),
-            is_hybrid=route.is_hybrid
+            extraction_focus=get_extraction_focus(product_type),
+            output_schema=get_output_schema(product_type),
+            is_hybrid=is_hybrid
         )
 
         # 2. 添加文档内容 (增加到15000字符)
@@ -222,8 +180,7 @@ class DynamicExtractor:
 
         # 4. 专用提取器（按需）
         if 'premium_table' in required_fields or 'pricing_params' in required_fields:
-            structure = self.structure_analyzer.analyze(document)
-            if structure.has_premium_table:
+            if document.profile.has_premium_table:
                 premium_result = self.specialized_extractors['premium_table'].extract(
                     document.content
                 )
@@ -243,9 +200,8 @@ class DynamicExtractor:
             provenance={k: 'dynamic_llm' for k in result},
             metadata={
                 'extraction_mode': 'dynamic',
-                'product_type': route.product_type,
-                'confidence': route.confidence,
-                'is_hybrid': route.is_hybrid
+                'product_type': product_type,
+                'is_hybrid': is_hybrid
             }
         )
 

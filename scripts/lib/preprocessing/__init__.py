@@ -29,13 +29,11 @@
 
 from .models import (
     NormalizedDocument,
-    FormatInfo,
+    DocumentProfile,
     StructureMarkers,
-    ExtractionRoute,
     ExtractResult,
     ValidationResult,
     ProductType,
-    StructureInfo,
     ExtractionRequest,
     ExtractionResponse,
 )
@@ -46,7 +44,6 @@ from .route_selector import RouteSelector
 from .fast_extractor import FastExtractor, FastExtractionFailed
 from .prompt_builder import PromptBuilder
 from .dynamic_extractor import (
-    StructureAnalyzer,
     PremiumTableExtractor,
     ClauseExtractor,
     DynamicExtractor,
@@ -59,13 +56,11 @@ __version__ = '1.0.0'
 __all__ = [
     # Models
     'NormalizedDocument',
-    'FormatInfo',
+    'DocumentProfile',
     'StructureMarkers',
-    'ExtractionRoute',
     'ExtractResult',
     'ValidationResult',
     'ProductType',
-    'StructureInfo',
     'ExtractionRequest',
     'ExtractionResponse',
 
@@ -77,7 +72,6 @@ __all__ = [
     'FastExtractionFailed',
     'PromptBuilder',
     'DynamicExtractor',
-    'StructureAnalyzer',
     'PremiumTableExtractor',
     'ClauseExtractor',
     'ResultValidator',

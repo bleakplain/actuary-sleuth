@@ -10,14 +10,11 @@ from typing import Dict, List, Any, Optional
 
 
 @dataclass
-class FormatInfo:
-    """格式信息"""
-    is_table_dense: bool
-    is_structured: bool
-    has_clause_numbers: bool
-    has_premium_table: bool
-    table_density: float
-    section_count: int
+class DocumentProfile:
+    """文档画像：用于路由决策的文档特征"""
+    is_structured: bool          # 有章节结构（章节数≥5）
+    has_clause_numbers: bool     # 有条款编号（第X条）
+    has_premium_table: bool      # 包含费率表特征
 
 
 @dataclass
@@ -32,19 +29,9 @@ class StructureMarkers:
 class NormalizedDocument:
     """规范化文档"""
     content: str
-    format_info: FormatInfo
+    profile: DocumentProfile
     structure_markers: StructureMarkers
     metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class ExtractionRoute:
-    """提取路由决策"""
-    mode: str  # 'fast' | 'dynamic'
-    product_type: str
-    confidence: float
-    is_hybrid: bool
-    reason: str
 
 
 @dataclass
@@ -115,23 +102,6 @@ class ProductType:
 
         pattern = feature_map.get(feature, feature)
         return bool(re.search(pattern, document))
-
-
-@dataclass
-class StructureInfo:
-    """结构信息"""
-    has_premium_table: bool
-    has_clauses: bool
-    sections: List[Dict[str, Any]] = field(default_factory=list)
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> 'StructureInfo':
-        """从字典创建"""
-        return cls(
-            has_premium_table=data.get('has_premium_table', False),
-            has_clauses=data.get('has_clauses', False),
-            sections=data.get('sections', [])
-        )
 
 
 @dataclass

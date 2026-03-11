@@ -8,7 +8,7 @@
 import logging
 from typing import Dict, List, Any, Optional
 
-from .models import NormalizedDocument, ExtractionRoute, ExtractResult, ValidationResult
+from .models import NormalizedDocument, ExtractResult, ValidationResult
 from .normalizer import Normalizer
 from .route_selector import RouteSelector
 from .fast_extractor import FastExtractor, FastExtractionFailed
@@ -32,11 +32,11 @@ class DocumentExtractor:
         """
         self.config = config or {}
 
-        # 初始化组件
+        # 初始化组件（注意顺序：RouteSelector 依赖提取器）
         self.normalizer = Normalizer()
-        self.route_selector = RouteSelector()
         self.fast_extractor = FastExtractor(llm_client)
         self.dynamic_extractor = DynamicExtractor(llm_client)
+        self.route_selector = RouteSelector(self.fast_extractor, self.dynamic_extractor)
         self.validator = ResultValidator()
 
     def extract(self,
@@ -64,22 +64,23 @@ class DocumentExtractor:
         normalized = self.normalizer.normalize(document, source_type)
         logger.info(f"文档规范化完成: {normalized.metadata}")
 
-        # 2. 路由选择
-        route = self.route_selector.select_route(normalized)
-        logger.info(f"选择路由: {route.mode}, 产品类型: {route.product_type}, 置信度: {route.confidence:.2f}")
+        # 2. 选择提取器
+        extractor, product_type, confidence, is_hybrid = self.route_selector.select_extractor(normalized)
+        extractor_name = extractor.__class__.__name__
+        logger.info(f"选择提取器: {extractor_name}, 产品类型: {product_type}, 置信度: {confidence:.2f}")
 
         # 3. 执行提取
         try:
-            if route.mode == 'fast':
-                result = self.fast_extractor.extract(normalized, required_fields)
+            if isinstance(extractor, FastExtractor):
+                result = extractor.extract(normalized, required_fields)
                 logger.info("快速通道提取成功")
             else:
-                result = self.dynamic_extractor.extract(normalized, route, required_fields)
+                result = extractor.extract(normalized, product_type, is_hybrid, required_fields)
                 logger.info("动态通道提取成功")
         except FastExtractionFailed:
             # 快速通道失败，回退到动态通道
             logger.warning("快速通道失败，回退到动态通道")
-            result = self.dynamic_extractor.extract(normalized, route, required_fields)
+            result = self.dynamic_extractor.extract(normalized, product_type, is_hybrid, required_fields)
 
         # 4. 验证
         validation = self.validator.validate(result)
@@ -87,10 +88,10 @@ class DocumentExtractor:
 
         # 5. 添加元数据
         result.metadata.update({
-            'extraction_mode': route.mode,
-            'product_type': route.product_type,
-            'confidence': route.confidence,
-            'is_hybrid': route.is_hybrid,
+            'extraction_mode': 'fast' if isinstance(extractor, FastExtractor) else 'dynamic',
+            'product_type': product_type,
+            'confidence': confidence,
+            'is_hybrid': is_hybrid,
             'validation_score': validation.score,
             'validation_errors': validation.errors,
             'validation_warnings': validation.warnings
