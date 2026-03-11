@@ -23,9 +23,6 @@ logger = logging.getLogger(__name__)
 class LLMExtractor:
     """LLM提取器"""
 
-    MAX_RETRIES = 3
-    RETRY_DELAY = 2
-
     def __init__(self, client: BaseLLMClient, max_tokens: int = LLM_MAX_TOKENS):
         self.client = client
         self.max_tokens = max_tokens
@@ -99,24 +96,17 @@ class LLMExtractor:
         return document[:MAX_DOCUMENT_LENGTH]
 
     def _call_llm(self, prompt: str) -> str:
-        """调用LLM"""
-        for attempt in range(self.MAX_RETRIES):
-            try:
-                response = self.client.generate(
-                    prompt,
-                    max_tokens=self.max_tokens,
-                    temperature=0
-                )
-                return response
-            except Exception as e:
-                if attempt < self.MAX_RETRIES - 1 and '429' in str(e):
-                    import time
-                    wait_time = self.RETRY_DELAY * (2 ** attempt)
-                    logger.warning(f"LLM调用失败，{wait_time}秒后重试: {e}")
-                    time.sleep(wait_time)
-                else:
-                    logger.error(f"LLM调用失败: {e}")
-                    return "{}"
+        """调用LLM（由外部控制重试）"""
+        try:
+            response = self.client.generate(
+                prompt,
+                max_tokens=self.max_tokens,
+                temperature=0
+            )
+            return response
+        except Exception as e:
+            logger.error(f"LLM调用失败: {e}")
+            raise
 
     def _parse_response(self, response: str) -> Dict[str, Any]:
         """解析LLM响应"""
@@ -137,9 +127,9 @@ class LLMExtractor:
                 return json.loads(cleaned[first_brace:last_brace + 1])
 
             # 无法解析，抛出异常
-            logger.warning(f"LLM响应解析失败: {response[:200]}")
+            logger.debug(f"LLM响应解析失败: {response[:200]}")
             raise LLMParseException(f"无法从LLM响应中提取JSON: {response[:100]}")
 
         except json.JSONDecodeError as e:
-            logger.warning(f"LLM响应JSON解析失败: {e}")
+            logger.debug(f"LLM响应JSON解析失败: {e}")
             raise LLMParseException(f"JSON解析失败: {str(e)}")

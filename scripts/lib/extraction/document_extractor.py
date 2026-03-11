@@ -201,6 +201,10 @@ class DocumentExtractor:
         async def process_one(index: int, chunk: str):
             """处理单个块（带重试）"""
             async with semaphore:
+                # 请求间延迟（在信号量内执行）
+                if index > 0:
+                    await asyncio.sleep(self.request_delay)
+
                 # 指数退避重试
                 for attempt in range(LLM_MAX_RETRIES):
                     try:
@@ -241,9 +245,6 @@ class DocumentExtractor:
                         )
                         await asyncio.sleep(wait_time)
 
-                # 请求间延迟（避免触发限流）
-                await asyncio.sleep(self.request_delay)
-
         # 启动所有任务
         tasks = [process_one(i, chunk) for i, chunk in enumerate(chunks)]
         completed = await asyncio.gather(*tasks)
@@ -267,41 +268,53 @@ class DocumentExtractor:
         return self.llm_extractor.extract_chunk(chunk, index, total)
 
     def _merge_chunk_results(self, results: List[Dict]) -> ExtractResult:
-        """合并所有chunk的结果"""
-        all_product_info = {}
-        all_clauses = []
-        all_pricing_params = {}
+        """合并所有chunk的结果（动态处理所有字段）"""
+        # 分类收集器
+        dict_collectors = {}  # 存储字典类型的字段
+        list_collectors = {}  # 存储列表类型的字段
+        scalar_collectors = {}  # 存储标量类型的字段
 
         for result in results:
             if not result:
                 continue
 
-            if 'product_info' in result:
-                for key, value in result['product_info'].items():
-                    if value and (key not in all_product_info or not all_product_info[key]):
-                        all_product_info[key] = value
+            for key, value in result.items():
+                if value is None:
+                    continue
 
-            if 'clauses' in result and isinstance(result['clauses'], list):
-                for clause in result['clauses']:
-                    if clause and isinstance(clause, dict) and 'text' in clause:
-                        all_clauses.append(clause)
+                if isinstance(value, dict):
+                    if key not in dict_collectors:
+                        dict_collectors[key] = {}
+                    for k, v in value.items():
+                        if v and (k not in dict_collectors[key] or not dict_collectors[key][k]):
+                            dict_collectors[key][k] = v
 
-            if 'pricing_params' in result:
-                for key, value in result['pricing_params'].items():
-                    if value and (key not in all_pricing_params or not all_pricing_params[key]):
-                        all_pricing_params[key] = value
+                elif isinstance(value, list):
+                    if key not in list_collectors:
+                        list_collectors[key] = []
+                    for item in value:
+                        if item and isinstance(item, dict):
+                            list_collectors[key].append(item)
+                        elif isinstance(item, (str, int, float, bool)):
+                            # 标量列表去重
+                            if item not in list_collectors[key]:
+                                list_collectors[key].append(item)
 
+                else:
+                    # 标量值：优先使用非空值
+                    if key not in scalar_collectors or not scalar_collectors[key]:
+                        scalar_collectors[key] = value
+
+        # 组装最终数据
         final_data = {}
-        if all_product_info:
-            final_data['product_info'] = all_product_info
-        if all_clauses:
-            final_data['clauses'] = all_clauses
-        if all_pricing_params:
-            final_data['pricing_params'] = all_pricing_params
+        final_data.update(dict_collectors)
+        final_data.update(list_collectors)
+        final_data.update(scalar_collectors)
 
         logger.info(
-            f"分块提取完成: 产品信息 {len(all_product_info)} 字段, "
-            f"条款 {len(all_clauses)} 条"
+            f"分块提取完成: 字典字段 {len(dict_collectors)}, "
+            f"列表字段 {len(list_collectors)}, "
+            f"标量字段 {len(scalar_collectors)}"
         )
 
         return ExtractResult(

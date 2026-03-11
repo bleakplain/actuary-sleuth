@@ -6,7 +6,7 @@
 合并LLM提取和规则提取的结果，并评估质量。
 """
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Set, Optional
 
 from lib.constants import QUALITY_WEIGHTS, LLM_DEFAULT_CONFIDENCE
 from .models import ExtractResult, QualityMetrics
@@ -18,10 +18,20 @@ logger = logging.getLogger(__name__)
 class ExtractQualityAssessor:
     """提取质量评估器"""
 
-    REQUIRED_FIELDS = {
+    # 默认必填字段
+    DEFAULT_REQUIRED_FIELDS = {
         'product_name', 'insurance_company',
         'waiting_period', 'premium_rate'
     }
+
+    def __init__(self, required_fields: Optional[Set[str]] = None):
+        """
+        初始化质量评估器
+
+        Args:
+            required_fields: 必填字段集合，默认使用 DEFAULT_REQUIRED_FIELDS
+        """
+        self.required_fields = required_fields if required_fields is not None else self.DEFAULT_REQUIRED_FIELDS
 
     def assess(self, result: ExtractResult) -> QualityMetrics:
         """评估提取结果质量"""
@@ -42,8 +52,8 @@ class ExtractQualityAssessor:
             if isinstance(v, dict):
                 all_keys |= {k for k, val in v.items() if val}
 
-        present = len(self.REQUIRED_FIELDS & all_keys)
-        required = len(self.REQUIRED_FIELDS)
+        present = len(self.required_fields & all_keys)
+        required = len(self.required_fields)
         return present / required
 
     def _assess_accuracy(self, result: ExtractResult) -> float:

@@ -42,3 +42,10 @@ QUALITY_WEIGHTS = {
     'consistency': 0.15,
     'reasonableness': 0.10,
 }
+
+# 去重参数
+DEDUP_PREFIX_LENGTH = 200
+DEDUP_SUFFIX_LENGTH = 100
+
+# 分块策略阈值
+SECTION_MIN_COUNT = 5  # 最少章节数才使用章节分块

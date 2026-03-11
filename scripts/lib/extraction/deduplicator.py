@@ -10,6 +10,8 @@ import logging
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 
+from lib.constants import DEDUP_PREFIX_LENGTH, DEDUP_SUFFIX_LENGTH
+
 
 logger = logging.getLogger(__name__)
 
@@ -35,20 +37,24 @@ class HashDeduplicator(BaseDeduplicator):
     """
     哈希去重器
 
-    使用哈希策略：前200字符 + 长度 + 后100字符
+    使用哈希策略：前N字符 + 长度 + 后M字符
     """
 
-    # 哈希参数
-    PREFIX_LENGTH = 200
-    SUFFIX_LENGTH = 100
+    def __init__(self, prefix_length: int = DEDUP_PREFIX_LENGTH, suffix_length: int = DEDUP_SUFFIX_LENGTH):
+        """
+        初始化哈希去重器
 
-    def __init__(self):
-        pass
+        Args:
+            prefix_length: 前缀字符数
+            suffix_length: 后缀字符数
+        """
+        self.prefix_length = prefix_length
+        self.suffix_length = suffix_length
 
     def _hash_clause(self, text: str) -> str:
         """计算条款哈希"""
-        prefix = text[:self.PREFIX_LENGTH]
-        suffix = text[-self.SUFFIX_LENGTH:] if len(text) > self.SUFFIX_LENGTH else ''
+        prefix = text[:self.prefix_length]
+        suffix = text[-self.suffix_length:] if len(text) > self.suffix_length else ''
         content = f"{prefix}|||{len(text)}|||{suffix}"
         return hashlib.md5(content.encode('utf-8')).hexdigest()
 

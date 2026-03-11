@@ -12,7 +12,8 @@ from typing import List
 
 from lib.constants import (
     DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP,
-    TABLE_DENSITY_THRESHOLD, DENSITY_CALCULATION_MULTIPLIER
+    TABLE_DENSITY_THRESHOLD, DENSITY_CALCULATION_MULTIPLIER,
+    SECTION_MIN_COUNT
 )
 
 
@@ -241,7 +242,7 @@ class HybridChunker(BaseChunker):
             logger.info("检测到表格密集文档，使用 TableSplitter")
             return TableSplitter(self.chunk_size, self.overlap).split(document)
 
-        if section_count >= 3:
+        if section_count >= SECTION_MIN_COUNT:
             logger.info("检测到章节结构，使用 SectionSplitter")
             return SectionSplitter(self.chunk_size, self.overlap).split(document)
 
