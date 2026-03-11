@@ -16,7 +16,8 @@ from typing import Dict, List, Any, Optional
 
 from lib.config import get_config
 from lib.id_generator import IDGenerator
-from lib.extraction import DocumentExtractor
+from lib.preprocessing import DocumentExtractor
+from lib.llm_client import LLMClientFactory
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -125,12 +126,13 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
     logger.info("使用格式无关提取框架进行预处理")
 
     try:
-        # 创建提取流程（使用配置）
-        config = get_config().llm.to_client_config()
-        pipeline = DocumentExtractor(config=config)
+        # 创建提取流程（使用新的预处理模块）
+        llm_config = get_config().llm.to_client_config()
+        llm_client = LLMClientFactory.create_client(llm_config)
+        pipeline = DocumentExtractor(llm_client)
 
         # 执行提取
-        extract_result = pipeline.extract(document_content)
+        extract_result = pipeline.extract(document_content, source_type='text')
 
         # 解析文档结构
         parsed_data = parse_document(document_content)
@@ -152,8 +154,8 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
                 'document_type': document_type,
                 'timestamp': datetime.now().isoformat(),
                 'content_length': len(document_content),
-                'extraction_method': 'hybrid_v2',
-                'extraction_sources': extract_result.get_source_summary()
+                'extraction_method': extract_result.metadata.get('extraction_mode', 'unknown'),
+                'extraction_sources': extract_result.provenance
             },
             'product_info': product_info,
             'structure': parsed_data,
@@ -162,7 +164,7 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
             'extraction_debug': {
                 'confidence': extract_result.confidence,
                 'provenance': extract_result.provenance,
-                'low_confidence_fields': extract_result.get_low_confidence_fields()
+                'low_confidence_fields': [k for k, v in extract_result.confidence.items() if v < 0.7]
             }
         }
 
@@ -541,8 +543,8 @@ def extract_pricing_params(content: str) -> Dict[str, Any]:
 
 
 def _extract_product(extract_result) -> Dict[str, Any]:
-    """从混合提取结果中提取产品信息"""
-    from lib.extraction.models import ExtractResult
+    """从提取结果中提取产品信息"""
+    from lib.preprocessing.models import ExtractResult
 
     if not isinstance(extract_result, ExtractResult):
         return {}
@@ -614,8 +616,8 @@ def _extract_product(extract_result) -> Dict[str, Any]:
 
 
 def _extract_clauses(extract_result) -> List[Dict[str, Any]]:
-    """从混合提取结果中提取条款列表"""
-    from lib.extraction.models import ExtractResult
+    """从提取结果中提取条款列表"""
+    from lib.preprocessing.models import ExtractResult
 
     if not isinstance(extract_result, ExtractResult):
         return []
@@ -657,8 +659,8 @@ def _extract_clauses(extract_result) -> List[Dict[str, Any]]:
 
 
 def _extract_pricing(extract_result) -> Dict[str, Any]:
-    """从混合提取结果中提取定价参数"""
-    from lib.extraction.models import ExtractResult
+    """从提取结果中提取定价参数"""
+    from lib.preprocessing.models import ExtractResult
 
     if not isinstance(extract_result, ExtractResult):
         return {}
