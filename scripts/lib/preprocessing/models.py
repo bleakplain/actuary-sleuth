@@ -40,7 +40,7 @@ class NormalizedDocument:
 @dataclass
 class ExtractionRoute:
     """提取路由决策"""
-    mode: str  # 'fast' | 'structured'
+    mode: str  # 'fast' | 'dynamic'
     product_type: str
     confidence: float
     is_hybrid: bool

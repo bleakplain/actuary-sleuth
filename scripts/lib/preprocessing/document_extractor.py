@@ -9,10 +9,10 @@ import logging
 from typing import Dict, List, Any, Optional
 
 from .models import NormalizedDocument, ExtractionRoute, ExtractResult, ValidationResult
-from .document_normalizer import DocumentNormalizer
-from .path_selector import RouteSelector
+from .normalizer import Normalizer
+from .route_selector import RouteSelector
 from .fast_extractor import FastExtractor, FastExtractionFailed
-from .structured_extractor import StructuredExtractor
+from .dynamic_extractor import DynamicExtractor
 from .validator import ResultValidator
 
 
@@ -33,10 +33,10 @@ class DocumentExtractor:
         self.config = config or {}
 
         # 初始化组件
-        self.normalizer = DocumentNormalizer()
+        self.normalizer = Normalizer()
         self.route_selector = RouteSelector()
         self.fast_extractor = FastExtractor(llm_client)
-        self.structured_extractor = StructuredExtractor(llm_client)
+        self.dynamic_extractor = DynamicExtractor(llm_client)
         self.validator = ResultValidator()
 
     def extract(self,
@@ -74,12 +74,12 @@ class DocumentExtractor:
                 result = self.fast_extractor.extract(normalized, required_fields)
                 logger.info("快速通道提取成功")
             else:
-                result = self.structured_extractor.extract(normalized, route, required_fields)
-                logger.info("结构化通道提取成功")
+                result = self.dynamic_extractor.extract(normalized, route, required_fields)
+                logger.info("动态通道提取成功")
         except FastExtractionFailed:
-            # 快速通道失败，回退到结构化通道
-            logger.warning("快速通道失败，回退到结构化通道")
-            result = self.structured_extractor.extract(normalized, route, required_fields)
+            # 快速通道失败，回退到动态通道
+            logger.warning("快速通道失败，回退到动态通道")
+            result = self.dynamic_extractor.extract(normalized, route, required_fields)
 
         # 4. 验证
         validation = self.validator.validate(result)

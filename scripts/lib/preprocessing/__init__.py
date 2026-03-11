@@ -6,11 +6,11 @@
 统一的保险产品文档预处理框架。
 
 核心组件:
-- DocumentNormalizer: 文档规范化
+- Normalizer: 文档规范化
 - ProductTypeClassifier: 产品类型分类
 - RouteSelector: 提取路由选择
 - FastExtractor: 快速提取器（快速通道）
-- StructuredExtractor: 结构化提取器（完整通道）
+- DynamicExtractor: 动态提取器（动态通道）
 - ResultValidator: 结果验证器
 - DocumentExtractor: 统一提取器（主入口）
 
@@ -40,19 +40,19 @@ from .models import (
     ExtractionResponse,
 )
 
-from .document_normalizer import DocumentNormalizer
+from .normalizer import Normalizer
 from .classifier import ProductTypeClassifier
-from .path_selector import RouteSelector
+from .route_selector import RouteSelector
 from .fast_extractor import FastExtractor, FastExtractionFailed
 from .prompt_builder import PromptBuilder
-from .structured_extractor import (
+from .dynamic_extractor import (
     StructureAnalyzer,
     PremiumTableExtractor,
     ClauseExtractor,
-    StructuredExtractor,
+    DynamicExtractor,
 )
 from .validator import ResultValidator
-from .extractor import DocumentExtractor, create_extractor
+from .document_extractor import DocumentExtractor, create_extractor
 
 __version__ = '1.0.0'
 
@@ -70,13 +70,13 @@ __all__ = [
     'ExtractionResponse',
 
     # Core Components
-    'DocumentNormalizer',
+    'Normalizer',
     'ProductTypeClassifier',
     'RouteSelector',
     'FastExtractor',
     'FastExtractionFailed',
     'PromptBuilder',
-    'StructuredExtractor',
+    'DynamicExtractor',
     'StructureAnalyzer',
     'PremiumTableExtractor',
     'ClauseExtractor',

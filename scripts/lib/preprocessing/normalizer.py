@@ -15,7 +15,7 @@ from .models import NormalizedDocument, FormatInfo, StructureMarkers
 logger = logging.getLogger(__name__)
 
 
-class DocumentNormalizer:
+class Normalizer:
     """文档规范化器 - 统一输入格式"""
 
     def __init__(self):

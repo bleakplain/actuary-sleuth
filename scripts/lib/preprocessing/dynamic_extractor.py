@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-结构化提取器
+动态提取器
 
-用于结构化通道的完整提取，使用动态 Prompt 和专用提取器。
+用于动态通道的完整提取，使用动态 Prompt 和专用提取器。
 """
 import json
 import logging
@@ -176,8 +176,8 @@ class ClauseExtractor:
         return {}
 
 
-class StructuredExtractor:
-    """结构化提取器"""
+class DynamicExtractor:
+    """动态提取器"""
 
     def __init__(self, llm_client):
         self.llm_client = llm_client
@@ -217,7 +217,7 @@ class StructuredExtractor:
             result = self._parse_response(response)
 
         except Exception as e:
-            logger.error(f"结构化提取失败: {e}")
+            logger.error(f"动态提取失败: {e}")
             result = {}
 
         # 4. 专用提取器（按需）
@@ -240,9 +240,9 @@ class StructuredExtractor:
         return ExtractResult(
             data=result,
             confidence={k: 0.75 for k in result},
-            provenance={k: 'structured_llm' for k in result},
+            provenance={k: 'dynamic_llm' for k in result},
             metadata={
-                'extraction_mode': 'structured',
+                'extraction_mode': 'dynamic',
                 'product_type': route.product_type,
                 'confidence': route.confidence,
                 'is_hybrid': route.is_hybrid

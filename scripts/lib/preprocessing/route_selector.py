@@ -40,38 +40,38 @@ class RouteSelector:
         type_code, confidence = self.type_classifier.get_primary_type(document.content)
 
         # 2. 判断是否走快速通道
-        can_use_fast_route = self._can_use_fast_route(
+        use_dynamic = self._use_dynamic(
             document.format_info, confidence, document
         )
 
-        mode = 'fast' if can_use_fast_route else 'structured'
+        mode = 'dynamic' if use_dynamic else 'fast'
 
         return ExtractionRoute(
             mode=mode,
             product_type=type_code,
             confidence=confidence,
             is_hybrid=self.type_classifier.is_hybrid_product(document.content),
-            reason=self._explain_decision(can_use_fast_route, document.format_info, confidence)
+            reason=self._explain_decision(use_dynamic, document.format_info, confidence)
         )
 
-    def _can_use_fast_route(self,
-                           format_info: FormatInfo,
-                           confidence: float,
-                           document: NormalizedDocument) -> bool:
-        """判断是否可以使用快速通道"""
-        # 条件1: 格式标准化
-        is_standard = (
-            format_info.is_structured and
-            format_info.has_clause_numbers
+    def _use_dynamic(self,
+                   format_info: FormatInfo,
+                   confidence: float,
+                   document: NormalizedDocument) -> bool:
+        """判断是否使用动态通道"""
+        # 条件1: 格式非标准化 或 复杂结构
+        is_complex = (
+            not format_info.is_structured or
+            not format_info.has_clause_numbers
         )
 
-        # 条件2: 分类置信度高
-        is_confident = confidence >= 0.7
+        # 条件2: 分类置信度低
+        is_low_confidence = confidence < 0.7
 
-        # 条件3: 关键信息在文档前部可提取
-        has_key_info_front = self._check_key_info_position(document)
+        # 条件3: 关键信息不在文档前部
+        has_key_info_back = not self._check_key_info_position(document)
 
-        return is_standard and is_confident and has_key_info_front
+        return is_complex or is_low_confidence or has_key_info_back
 
     def _check_key_info_position(self, document: NormalizedDocument) -> bool:
         """检查关键信息是否在文档前部（前2000字符）"""
@@ -96,20 +96,22 @@ class RouteSelector:
         return indicators.get(field, [field])
 
     def _explain_decision(self,
-                        can_use_fast_route: bool,
+                        use_dynamic: bool,
                         format_info: FormatInfo,
                         confidence: float) -> str:
         """解释决策原因"""
         reasons = []
 
-        if can_use_fast_route:
-            reasons.append("格式标准化")
-            reasons.append(f"分类置信度高({confidence:.2f})")
-        else:
+        if use_dynamic:
             if not format_info.is_structured:
                 reasons.append("格式非标准化")
             if confidence < 0.7:
                 reasons.append(f"分类置信度低({confidence:.2f})")
+            if len(reasons) == 1:
+                reasons.append("或关键信息不在前部")
+        else:
+            reasons.append("格式标准化")
+            reasons.append(f"分类置信度高({confidence:.2f})")
 
         return "; ".join(reasons) if reasons else "默认路由"
 
