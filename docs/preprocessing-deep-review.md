@@ -9,14 +9,14 @@ lib/preprocessing/
 ├── __init__.py                 # 模块入口，导出所有公共API
 ├── models.py                  # 核心数据模型定义 (150行)
 ├── product_types.py            # 产品类型配置 (198行)
-├── document_normalizer.py     # 文档规范化处理 (155行)
+├── normalizer.py               # 文档规范化处理 (155行)
 ├── classifier.py               # 产品类型分类器 (72行)
-├── path_selector.py           # 路由选择器 (120行)
+├── route_selector.py           # 路由选择器 (120行)
 ├── prompt_builder.py          # 动态Prompt构建器 (224行)
 ├── fast_extractor.py          # 快速通道提取器 (160行)
-├── structured_extractor.py    # 结构化通道提取器 (271行)
+├── dynamic_extractor.py        # 动态通道提取器 (271行)
 ├── validator.py                # 结果验证器 (134行)
-└── extractor.py               # 主入口提取器 (107行)
+└── document_extractor.py       # 主入口提取器 (107行)
 
 总计: ~1800行代码，11个文件
 ```
@@ -45,7 +45,7 @@ lib/preprocessing/
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  第1步: 文档规范化 (DocumentNormalizer.normalize)                   │
+│  第1步: 文档规范化 (Normalizer.normalize)                           │
 ├─────────────────────────────────────────────────────────────────────┤
 │  输入: document: str, source_type: str                              │
 │  输出: NormalizedDocument {                                         │
@@ -68,7 +68,7 @@ lib/preprocessing/
 ├─────────────────────────────────────────────────────────────────────┤
 │  输入: NormalizedDocument                                            │
 │  输出: ExtractionRoute {                                              │
-│           mode: 'fast' | 'structured',      # 提取通道               │
+│           mode: 'fast' | 'dynamic',        # 提取通道               │
 │           product_type: str,                # 产品类型代码           │
 │           confidence: float,                # 分类置信度 (0-1)       │
 │           is_hybrid: bool,                  # 是否混合产品           │
@@ -80,10 +80,10 @@ lib/preprocessing/
 │     ├─ classify() → 遍历PRODUCT_TYPES计算匹配分数                   │
 │     └─ 返回 (type_code, confidence) 或默认 ("life_insurance", 0.0)  │
 │                                                                     │
-│  2. _can_use_fast_route() → 判断是否可使用快速通道                │
-│     ├─ is_standard: format_info.is_structured && has_clause_numbers │
-│     ├─ is_confident: confidence >= 0.7                               │
-│     └─ has_key_info_front: 前2000字符包含75%+必需字段指示词      │
+│  2. _use_dynamic() → 判断是否使用动态通道                          │
+│     ├─ is_complex: not is_structured or not has_clause_numbers      │
+│     ├─ is_low_confidence: confidence < 0.7                          │
+│     └─ has_key_info_back: 关键信息不在前2000字符                   │
 │                                                                     │
 │  3. is_hybrid_product() → 判断是否混合产品                         │
 │     └─ 至少2个类型且次优置信度 > 0.5                                │
@@ -92,10 +92,10 @@ lib/preprocessing/
                     ┌───────────────┴───────────────┐
                     ▼                               ▼
 ┌───────────────────────────────┐   ┌───────────────────────────────┐
-│     快速通道 (FastLane)        │   │   结构化通道 (StructuredLane)   │
+│     快速通道 (FastLane)        │   │   动态通道 (DynamicLane)       │
 │        目标: 80% 文档          │   │       目标: 20% 文档           │
 ├───────────────────────────────┤   ├───────────────────────────────┤
-│ FastExtractor.extract()       │   │ StructuredExtractor.extract()  │
+│ FastExtractor.extract()       │   │ DynamicExtractor.extract()    │
 │                               │   │                               │
 │ • Few-shot Prompt (2示例)     │   │ 1. PromptBuilder.build()      │
 │ • 文档截取: 1500字符          │   │    - 角色: 产品类型专家        │
@@ -108,7 +108,7 @@ lib/preprocessing/
 │                               │   │    - ClauseExtractor           │
 └───────────────────────────────┘   │                               │
                                     │ confidence: 0.75               │
-                                    │ provenance: 'structured_llm'   │
+                                    │ provenance: 'dynamic_llm'      │
                                     └───────────────────────────────┘
                                     │
                                     ▼
@@ -138,7 +138,7 @@ lib/preprocessing/
 │    confidence: Dict[str, float],   # 每个字段的置信度               │
 │    provenance: Dict[str, str],     # 每个字段的来源               │
 │    metadata: {                                                          │
-│      extraction_mode: str,         # 'fast' | 'structured'         │
+│      extraction_mode: str,         # 'fast' | 'dynamic'           │
 │      product_type: str,            # 产品类型代码                  │
 │      confidence: float,            # 分类置信度                    │
 │      is_hybrid: bool,              # 是否混合产品                  │
@@ -152,22 +152,22 @@ lib/preprocessing/
 
 ### 2.2 关键决策点
 
-#### 决策点1: 快速通道判定
+#### 决策点1: 动态通道判定
 
 ```python
-# path_selector.py: _can_use_fast_route()
+# route_selector.py: _use_dynamic()
 
-# 条件1: 格式标准化
-is_standard = format_info.is_structured and format_info.has_clause_numbers
+# 条件1: 格式非标准化或复杂结构
+is_complex = not format_info.is_structured or not format_info.has_clause_numbers
 
-# 条件2: 分类置信度高
-is_confident = confidence >= 0.7
+# 条件2: 分类置信度低
+is_low_confidence = confidence < 0.7
 
-# 条件3: 关键信息在前
-has_key_info_front = required_found >= len(REQUIRED_FIELDS) * 0.75
+# 条件3: 关键信息不在前部
+has_key_info_back = not self._check_key_info_position(document)
 
-# 最终决策
-return is_standard and is_confident and has_key_info_front
+# 最终决策：任一条件满足即走动态通道
+return is_complex or is_low_confidence or has_key_info_back
 ```
 
 **设计意图：**
@@ -204,7 +204,7 @@ return len(classifications) > 1 and classifications[1][1] > 0.5
          │                   │                   │
          ▼                   ▼                   ▼
 ┌────────────────┐  ┌────────────────┐  ┌────────────────┐
-│DocumentNormalizer│  │ RouteSelector  │  │ ResultValidator│
+│    Normalizer  │  │ RouteSelector  │  │ ResultValidator│
 └────────────────┘  └────────┬───────┘  └────────────────┘
                             │
                             ▼
@@ -216,7 +216,7 @@ return len(classifications) > 1 and classifications[1][1] > 0.5
          │                  │                  │
          ▼                  ▼                  ▼
 ┌────────────────┐  ┌────────────────┐  ┌────────────────┐
-│ FastExtractor  │  │PromptBuilder   │  │StructuredExtractor│
+│ FastExtractor  │  │PromptBuilder   │  │DynamicExtractor│
 └────────────────┘  └────────────────┘  └────────┬────────┘
                                              │
                               ┌──────────────┼──────────────┐
@@ -236,15 +236,15 @@ return len(classifications) > 1 and classifications[1][1] > 0.5
 | 文件 | 行数 | 职责 | 依赖 | 被依赖 |
 |------|------|------|------|--------|
 | `models.py` | 150 | 数据模型定义 | - | 所有文件 |
-| `product_types.py` | 198 | 产品类型配置 | models | classifier, prompt_builder, structured_extractor |
-| `document_normalizer.py` | 155 | 文档规范化 | models | extractor |
-| `classifier.py` | 72 | 产品分类 | models, product_types | path_selector |
-| `path_selector.py` | 120 | 路由选择 | models, classifier | extractor, validator |
-| `prompt_builder.py` | 224 | Prompt构建 | models, product_types | structured_extractor |
-| `fast_extractor.py` | 160 | 快速提取 | models | extractor |
-| `structured_extractor.py` | 271 | 结构化提取 | models, prompt_builder, product_types | extractor |
-| `validator.py` | 134 | 结果验证 | models | extractor |
-| `extractor.py` | 107 | 主入口 | models, document_normalizer, path_selector, fast_extractor, structured_extractor, validator | - |
+| `product_types.py` | 198 | 产品类型配置 | models | classifier, prompt_builder, dynamic_extractor |
+| `normalizer.py` | 155 | 文档规范化 | models | document_extractor |
+| `classifier.py` | 72 | 产品分类 | models, product_types | route_selector |
+| `route_selector.py` | 120 | 路由选择 | models, classifier | document_extractor, validator |
+| `prompt_builder.py` | 224 | Prompt构建 | models, product_types | dynamic_extractor |
+| `fast_extractor.py` | 160 | 快速提取 | models | document_extractor |
+| `dynamic_extractor.py` | 271 | 动态提取 | models, prompt_builder, product_types | document_extractor |
+| `validator.py` | 134 | 结果验证 | models | document_extractor |
+| `document_extractor.py` | 107 | 主入口 | models, normalizer, route_selector, fast_extractor, dynamic_extractor, validator | - |
 
 **依赖特点：**
 - 单向依赖，无循环依赖
@@ -286,26 +286,24 @@ def match_score(self, document: str) -> float:
 ### 4.2 路由选择算法
 
 ```python
-# path_selector.py: RouteSelector.select_route()
+# route_selector.py: RouteSelector.select_route()
 
 def select_route(self, document: NormalizedDocument) -> ExtractionRoute:
     # 1. 获取主导产品类型
     type_code, confidence = self.type_classifier.get_primary_type(document.content)
 
-    # 2. 判断快速通道条件
-    is_standard = format_info.is_structured and format_info.has_clause_numbers
-    is_confident = confidence >= 0.7
-    has_key_info_front = self._check_key_info_position(document)
+    # 2. 判断动态通道条件
+    use_dynamic = self._use_dynamic(format_info, confidence, document)
 
     # 3. 选择路由
-    mode = 'fast' if all([is_standard, is_confident, has_key_info_front]) else 'structured'
+    mode = 'dynamic' if use_dynamic else 'fast'
 
     return ExtractionRoute(
         mode=mode,
         product_type=type_code,
         confidence=confidence,
         is_hybrid=self.type_classifier.is_hybrid_product(document.content),
-        reason=self._explain_decision(...)
+        reason=self._explain_decision(use_dynamic, format_info, confidence)
     )
 ```
 
@@ -314,10 +312,10 @@ def select_route(self, document: NormalizedDocument) -> ExtractionRoute:
 | 格式标准化 | 置信度≥0.7 | 关键信息在前 | 路由 |
 |-----------|-----------|-----------|------|
 | ✓ | ✓ | ✓ | **快速通道** |
-| ✗ | ✓ | ✓ | 结构化 |
-| ✓ | ✗ | ✓ | 结构化 |
-| ✓ | ✓ | ✗ | 结构化 |
-| ✗ | ✗ | ✗ | 结构化 |
+| ✗ | ✓ | ✓ | 动态 |
+| ✓ | ✗ | ✓ | 动态 |
+| ✓ | ✓ | ✗ | 动态 |
+| ✗ | ✗ | ✗ | 动态 |
 
 ### 4.3 JSON解析算法
 
@@ -357,12 +355,12 @@ def _parse_response(self, response: str) -> Dict[str, Any]:
 ### 5.1 策略模式 (Strategy Pattern)
 
 ```python
-# extractor.py: DocumentExtractor.extract()
+# document_extractor.py: DocumentExtractor.extract()
 
 if route.mode == 'fast':
     result = self.fast_extractor.extract(normalized, required_fields)
 else:
-    result = self.structured_extractor.extract(normalized, route, required_fields)
+    result = self.dynamic_extractor.extract(normalized, route, required_fields)
 ```
 
 **应用场景：** 根据路由决策选择不同的提取策略
@@ -370,7 +368,7 @@ else:
 ### 5.2 模板方法模式 (Template Method Pattern)
 
 ```python
-# structured_extractor.py: StructuredExtractor.extract()
+# dynamic_extractor.py: DynamicExtractor.extract()
 
 def extract(self, document, route, required_fields):
     # 1. 构建 Prompt (钩子方法)
@@ -505,12 +503,12 @@ class ProductType:
     feature_weight_scale: float = 1.0  # 特征权重缩放
 ```
 
-#### 问题2: 快速通道阈值硬编码
+#### 问题2: 动态通道阈值硬编码
 
 ```python
-# path_selector.py
+# route_selector.py
 
-is_confident = confidence >= 0.7  # 硬编码
+is_low_confidence = confidence < 0.7  # 硬编码
 required_found >= len(self.REQUIRED_FIELDS) * 0.75  # 硬编码
 ```
 
@@ -582,7 +580,7 @@ class ProductType:
 #### 优化点2: 结构标记可缓存
 
 ```python
-class DocumentNormalizer:
+class Normalizer:
     @lru_cache(maxsize=128)
     def _mark_structure(self, document: str) -> StructureMarkers:
         # 对相同文档内容复用结果
@@ -608,10 +606,10 @@ class RouteSelector:
 | 测试文件 | 测试数 | 覆盖组件 |
 |---------|--------|---------|
 | test_classifier.py | 3 | ProductTypeClassifier |
-| test_normalizer.py | 3 | DocumentNormalizer |
+| test_normalizer.py | 3 | Normalizer |
 | test_route_selector.py | 2 | RouteSelector |
 | test_fast_extractor.py | 2 | FastExtractor |
-| test_structured_extractor.py | 1 | StructuredExtractor |
+| test_dynamic_extractor.py | 1 | DynamicExtractor |
 | test_result_validator.py | 2 | ResultValidator |
 | test_extractor.py | 2 | DocumentExtractor (端到端) |
 | test_prompt_builder.py | 2 | PromptBuilder |
@@ -624,9 +622,9 @@ class RouteSelector:
 
 | 未测试组件 | 原因 | 建议 |
 |----------|------|------|
-| StructureAnalyzer | 集成在StructuredExtractor中 | 单独测试 |
-| PremiumTableExtractor | 集成在StructuredExtractor中 | 单独测试 |
-| ClauseExtractor | 集成在StructuredExtractor中 | 单独测试 |
+| StructureAnalyzer | 集成在DynamicExtractor中 | 单独测试 |
+| PremiumTableExtractor | 集成在DynamicExtractor中 | 单独测试 |
+| ClauseExtractor | 集成在DynamicExtractor中 | 单独测试 |
 | BusinessRule | 通过ResultValidator间接测试 | 单独测试 |
 
 ---
@@ -704,7 +702,7 @@ BUSINESS_RULES.append(
 1. **双通道设计**: 80%快速通道大幅降低成本
 2. **配置驱动**: 产品类型、提取重点、Schema全部配置化
 3. **动态Prompt**: 根据产品类型自动生成针对性Prompt
-4. **容错降级**: 快速失败自动回退结构化
+4. **容错降级**: 快速失败自动回退动态通道
 5. **完整验证**: 多维度验证保证数据质量
 6. **来源追溯**: 每个字段记录置信度和来源
 
@@ -723,10 +721,10 @@ BUSINESS_RULES.append(
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                              DocumentExtractor                         │
-│  - normalizer: DocumentNormalizer                                   │
+│  - normalizer: Normalizer                                           │
 │  - route_selector: RouteSelector                                     │
 │  - fast_extractor: FastExtractor                                   │
-│  - structured_extractor: StructuredExtractor                         │
+│  - dynamic_extractor: DynamicExtractor                               │
 │  - validator: ResultValidator                                       │
 │  + extract(document, source_type, required_fields) -> ExtractResult │
 └─────────────────────────────────────────────────────────────────────┘
@@ -735,7 +733,7 @@ BUSINESS_RULES.append(
         │                           │                           │
         ▼                           ▼                           ▼
 ┌───────────────┐          ┌───────────────┐          ┌───────────────┐
-│ DocumentNormalizer│          │ RouteSelector │          │ ResultValidator│
+│   Normalizer  │          │ RouteSelector │          │ ResultValidator│
 └───────────────┘          └───────┬───────┘          └───────────────┘
                                 │
                 ┌───────────────┴───────────────┐

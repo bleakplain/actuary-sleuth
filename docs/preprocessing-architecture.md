@@ -12,9 +12,9 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │                        处理流程                                     │
 ├─────────────────────────────────────────────────────────────────┤
-│  1. DocumentNormalizer   →  文档规范化                             │
+│  1. Normalizer            →  文档规范化                             │
 │  2. RouteSelector         → 路由选择                               │
-│  3. Extractor (Fast/Structured) → 执行提取                        │
+│  3. Extractor (Fast/Dynamic) → 执行提取                          │
 │  4. ResultValidator       → 结果验证                              │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -30,7 +30,7 @@
     │
     ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  1. DocumentNormalizer.normalize()                           │
+│  1. Normalizer.normalize()                                   │
 │     输入: document (str), source_type (str)                   │
 │     输出: NormalizedDocument                                  │
 │                                                              │
@@ -55,14 +55,14 @@
 │                                                              │
 │     决策逻辑:                                                 │
 │     • ProductTypeClassifier.classify() → 产品类型            │
-│     • _can_use_fast_route()          → 路由判断               │
-│       - is_standard: 格式标准化                                │
-│       - is_confident: 置信度 ≥ 0.7                             │
-│       - has_key_info_front: 关键信息在前2000字符              │
+│     • _use_dynamic()                → 路由判断               │
+│       - is_complex: 格式非标准化或复杂结构                     │
+│       - is_low_confidence: 置信度 < 0.7                        │
+│       - has_key_info_back: 关键信息不在前2000字符             │
 └──────────────────────────────────────────────────────────────┘
     │
     │ ExtractionRoute {
-    │   mode: 'fast' | 'structured',
+    │   mode: 'fast' | 'dynamic',
     │   product_type: str,
     │   confidence: float,
     │   is_hybrid: bool,
@@ -73,8 +73,8 @@
     │                 │                 │
     ▼                 ▼                 ▼
 ┌──────────────┐  ┌──────────────┐  │
-│ Fast Lane    │  │Structured    │  │
-│ (80%)        │  │Lane (20%)    │  │
+│ Fast Lane    │  │Dynamic Lane  │  │
+│ (80%)        │  │(20%)         │  │
 └──────────────┘  └──────────────┘  │
     │                 │             │
     │                 ▼             │
@@ -84,7 +84,7 @@
     │    └─────────────────────────┘│
     │                 │             │
     │    ┌─────────────────────────┐│
-    │    │ StructuredExtractor     ││
+    │    │ DynamicExtractor        ││
     │    │ • StructureAnalyzer     ││
     │    │ • PremiumTableExtractor ││
     │    │ • ClauseExtractor       ││
@@ -122,7 +122,7 @@ ExtractResult {
 
 ## 三、核心组件详解
 
-### 3.1 文档规范化器 (DocumentNormalizer)
+### 3.1 文档规范化器 (Normalizer)
 
 | 组件 | 功能 |
 |------|------|
@@ -300,7 +300,7 @@ component_map = {
 - 使用正则表达式回退提取
 - 支持字段：product_name, insurance_company, insurance_period, waiting_period, payment_method
 
-### 5.2 结构化通道
+### 5.2 动态通道
 
 **特点：**
 - 目标覆盖：20% 的复杂文档
@@ -336,7 +336,7 @@ NormalizedDocument {
 }
     ↓
 ExtractionRoute {
-    mode: str                       → 'fast' | 'structured'
+    mode: str                       → 'fast' | 'dynamic'
     product_type: str               → 产品类型
     confidence: float               → 置信度
     is_hybrid: bool                 → 是否混合
@@ -348,7 +348,7 @@ ExtractResult {
     confidence: Dict[str, float]    → 字段置信度
     provenance: Dict[str, str]      → 字段来源
     metadata: Dict {
-        extraction_mode: str,        → 'fast' | 'structured'
+        extraction_mode: str,        → 'fast' | 'dynamic'
         product_type: str,
         confidence: float,
         validation_score: int,
@@ -380,11 +380,13 @@ ValidationResult {
 
 ### 7.2 调整快速通道阈值
 
-**位置：** `path_selector.py`
+**位置：** `route_selector.py`
 
 ```python
-# 置信度阈值
-is_confident = confidence >= 0.7  # 可调整
+# 动态通道判定条件（任一满足即走动态通道）
+is_complex = not format_info.is_structured or not format_info.has_clause_numbers
+is_low_confidence = confidence < 0.7  # 可调整
+has_key_info_back = not self._check_key_info_position(document)
 
 # 关键信息位置阈值
 return required_found >= len(self.REQUIRED_FIELDS) * 0.75  # 可调整
@@ -411,7 +413,7 @@ BUSINESS_RULES = [
 1. **成本优化**: 80% 文档走快速通道，单次 LLM 调用
 2. **准确率高**: 动态 Prompt 针对产品类型优化
 3. **可扩展性强**: 组件化 Prompt 构建，易于新增产品类型
-4. **容错性好**: 快速通道失败自动回退结构化通道
+4. **容错性好**: 快速通道失败自动回退动态通道
 5. **质量可控**: 多层验证（必需字段、数据类型、业务规则）
 6. **来源可追溯**: 每个字段记录置信度和来源
 7. **中文友好**: Token 预算针对中文优化（1500/6000 tokens）
@@ -420,24 +422,25 @@ BUSINESS_RULES = [
 
 ## 九、类名映射表
 
-| 新名称 | 旧名称 | 说明 |
-|--------|--------|------|
-| `DocumentExtractor` | `UnifiedDocumentExtractor` | 移除冗余的"Unified"前缀 |
-| `RouteSelector` | `ExtractionPathSelector` | 简化名称，路径→路由 |
-| `FastExtractor` | `LightweightExtractor` | 更直观的命名 |
-| `ResultValidator` | `ExtractResultValidator` | 简化名称 |
-| `ExtractionRoute` | `ExtractionPath` | 路径→路由 |
-| `FastExtractionFailed` | `FastPathExtractionFailed` | 保持一致性 |
-| `mode` | `path_type` | 更简洁的属性名 |
-| `extraction_mode` | `extraction_path` | 元数据中使用完整名称 |
+| 当前名称 | 说明 |
+|---------|------|
+| `DocumentExtractor` | 统一提取器（主入口） |
+| `Normalizer` | 文档规范化器 |
+| `RouteSelector` | 路由选择器 |
+| `FastExtractor` | 快速提取器 |
+| `DynamicExtractor` | 动态提取器 |
+| `ResultValidator` | 结果验证器 |
+| `ExtractionRoute` | 提取路由决策 |
+| `FastExtractionFailed` | 快速提取失败异常 |
 
 ---
 
 ## 十、术语对照表
 
-| 新术语 | 旧术语 | 说明 |
-|--------|--------|------|
-| 路由/通道 | 路径 | 更直观的提取方式描述 |
-| 快速通道 | 快速路径 | 80%文档的提取方式 |
-| 结构化通道 | 结构化路径 | 20%文档的提取方式 |
-| 路由选择 | 路径选择 | RouteSelector 的功能描述 |
+| 术语 | 说明 |
+|-----|------|
+| 路由/通道 | 提取方式：快速通道或动态通道 |
+| 快速通道 | 80%文档的提取方式，单次LLM调用 |
+| 动态通道 | 20%复杂文档的提取方式，动态Prompt |
+| 路由选择 | RouteSelector 根据文档特征选择通道 |
+| `use_dynamic()` | 判断是否使用动态通道的方法 |
