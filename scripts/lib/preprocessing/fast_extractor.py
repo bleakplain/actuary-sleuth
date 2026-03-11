@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-轻量级提取器
+快速提取器
 
-用于快速路径的低成本提取，使用 Few-shot Prompt。
+用于快速通道的低成本提取，使用 Few-shot Prompt。
 """
 import json
 import logging
@@ -16,13 +16,13 @@ from .models import NormalizedDocument, ExtractResult
 logger = logging.getLogger(__name__)
 
 
-class FastPathExtractionFailed(Exception):
-    """快速路径提取失败"""
+class FastExtractionFailed(Exception):
+    """快速通道提取失败"""
     pass
 
 
-class LightweightExtractor:
-    """轻量级提取器 - 用于快速路径"""
+class FastExtractor:
+    """快速提取器 - 用于快速通道"""
 
     # Few-shot 提取模板
     FEW_SHOT_EXTRACT = """你是保险产品信息提取专家。
@@ -45,7 +45,7 @@ class LightweightExtractor:
 - 如果字段不存在，使用 null
 - 日期格式统一为数字（如：90 表示 90 天）
 
-**输出**:"""
+**输出**: """
 
     def __init__(self, llm_client):
         self.llm_client = llm_client
@@ -54,7 +54,7 @@ class LightweightExtractor:
                 document: NormalizedDocument,
                 required_fields: List[str]) -> ExtractResult:
         """
-        轻量级提取
+        快速提取
 
         Args:
             document: 规范化文档
@@ -64,15 +64,15 @@ class LightweightExtractor:
             ExtractResult
 
         Raises:
-            FastPathExtractionFailed: 提取失败时
+            FastExtractionFailed: 提取失败时
         """
-        # 1. 使用 Few-shot Prompt 提取
-        prompt = self.FEW_SHOT_EXTRACT.format(document=document.content[:500])
+        # 1. 使用 Few-shot Prompt 提取 (增加到1500字符以支持中文)
+        prompt = self.FEW_SHOT_EXTRACT.format(document=document.content[:1500])
 
         try:
             response = self.llm_client.generate(
                 prompt,
-                max_tokens=500,
+                max_tokens=1500,  # 增加输出token预算
                 temperature=0.1
             )
 
@@ -86,13 +86,13 @@ class LightweightExtractor:
             return ExtractResult(
                 data=result,
                 confidence={k: 0.85 for k in result},
-                provenance={k: 'lightweight_llm' for k in result},
-                metadata={'extraction_path': 'fast'}
+                provenance={k: 'fast_llm' for k in result},
+                metadata={'extraction_mode': 'fast'}
             )
 
         except Exception as e:
-            logger.warning(f"轻量级提取失败: {e}")
-            raise FastPathExtractionFailed(f"快速路径提取失败: {e}")
+            logger.warning(f"快速提取失败: {e}")
+            raise FastExtractionFailed(f"快速通道提取失败: {e}")
 
     def _parse_response(self, response: str) -> Dict[str, Any]:
         """解析 LLM 响应"""

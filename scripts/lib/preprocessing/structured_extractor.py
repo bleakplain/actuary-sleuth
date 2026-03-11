@@ -3,14 +3,14 @@
 """
 结构化提取器
 
-用于结构化路径的完整提取，使用动态 Prompt 和专用提取器。
+用于结构化通道的完整提取，使用动态 Prompt 和专用提取器。
 """
 import json
 import logging
 import re
 from typing import Dict, List, Any, Optional
 
-from .models import NormalizedDocument, ExtractionPath, ExtractResult, StructureInfo
+from .models import NormalizedDocument, ExtractionRoute, ExtractResult, StructureInfo
 from .prompt_builder import PromptBuilder
 from .product_types import get_extraction_focus, get_output_schema
 
@@ -190,27 +190,27 @@ class StructuredExtractor:
 
     def extract(self,
                 document: NormalizedDocument,
-                path: ExtractionPath,
+                route: ExtractionRoute,
                 required_fields: List[str]) -> ExtractResult:
         """结构化提取"""
 
         # 1. 构建 Prompt
         prompt = self.prompt_builder.build(
-            product_type=path.product_type,
+            product_type=route.product_type,
             required_fields=required_fields,
-            extraction_focus=get_extraction_focus(path.product_type),
-            output_schema=get_output_schema(path.product_type),
-            is_hybrid=path.is_hybrid
+            extraction_focus=get_extraction_focus(route.product_type),
+            output_schema=get_output_schema(route.product_type),
+            is_hybrid=route.is_hybrid
         )
 
-        # 2. 添加文档内容
-        full_prompt = f"{prompt}\n\n文档内容:\n{document.content[:10000]}"
+        # 2. 添加文档内容 (增加到15000字符)
+        full_prompt = f"{prompt}\n\n文档内容:\n{document.content[:15000]}"
 
-        # 3. 调用 LLM
+        # 3. 调用 LLM (增加到6000 tokens)
         try:
             response = self.llm_client.generate(
                 full_prompt,
-                max_tokens=4000,
+                max_tokens=6000,
                 temperature=0.1
             )
 
@@ -242,10 +242,10 @@ class StructuredExtractor:
             confidence={k: 0.75 for k in result},
             provenance={k: 'structured_llm' for k in result},
             metadata={
-                'extraction_path': 'structured',
-                'product_type': path.product_type,
-                'confidence': path.confidence,
-                'is_hybrid': path.is_hybrid
+                'extraction_mode': 'structured',
+                'product_type': route.product_type,
+                'confidence': route.confidence,
+                'is_hybrid': route.is_hybrid
             }
         )
 

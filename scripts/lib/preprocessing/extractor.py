@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-统一文档提取器
+文档提取器
 
 主入口，整合所有组件，提供统一的提取接口。
 """
 import logging
 from typing import Dict, List, Any, Optional
 
-from .models import NormalizedDocument, ExtractionPath, ExtractResult, ValidationResult
+from .models import NormalizedDocument, ExtractionRoute, ExtractResult, ValidationResult
 from .document_normalizer import DocumentNormalizer
-from .path_selector import ExtractionPathSelector
-from .lightweight_extractor import LightweightExtractor, FastPathExtractionFailed
+from .path_selector import RouteSelector
+from .fast_extractor import FastExtractor, FastExtractionFailed
 from .structured_extractor import StructuredExtractor
-from .validator import ExtractResultValidator
+from .validator import ResultValidator
 
 
 logger = logging.getLogger(__name__)
 
 
-class UnifiedDocumentExtractor:
-    """统一文档提取器 - 主入口"""
+class DocumentExtractor:
+    """文档提取器 - 主入口"""
 
     def __init__(self, llm_client, config: Dict = None):
         """
@@ -34,10 +34,10 @@ class UnifiedDocumentExtractor:
 
         # 初始化组件
         self.normalizer = DocumentNormalizer()
-        self.path_selector = ExtractionPathSelector()
-        self.lightweight_extractor = LightweightExtractor(llm_client)
+        self.route_selector = RouteSelector()
+        self.fast_extractor = FastExtractor(llm_client)
         self.structured_extractor = StructuredExtractor(llm_client)
-        self.validator = ExtractResultValidator()
+        self.validator = ResultValidator()
 
     def extract(self,
                 document: str,
@@ -56,7 +56,7 @@ class UnifiedDocumentExtractor:
         """
         # 使用默认必需字段
         if required_fields is None:
-            required_fields = list(ExtractionPathSelector.get_required_fields())
+            required_fields = list(RouteSelector.get_required_fields())
 
         logger.info(f"开始文档提取，文档长度: {len(document)} 字符，来源类型: {source_type}")
 
@@ -64,22 +64,22 @@ class UnifiedDocumentExtractor:
         normalized = self.normalizer.normalize(document, source_type)
         logger.info(f"文档规范化完成: {normalized.metadata}")
 
-        # 2. 路径选择
-        path = self.path_selector.select_path(normalized)
-        logger.info(f"选择路径: {path.path_type}, 产品类型: {path.product_type}, 置信度: {path.confidence:.2f}")
+        # 2. 路由选择
+        route = self.route_selector.select_route(normalized)
+        logger.info(f"选择路由: {route.mode}, 产品类型: {route.product_type}, 置信度: {route.confidence:.2f}")
 
         # 3. 执行提取
         try:
-            if path.path_type == 'fast':
-                result = self.lightweight_extractor.extract(normalized, required_fields)
-                logger.info("快速路径提取成功")
+            if route.mode == 'fast':
+                result = self.fast_extractor.extract(normalized, required_fields)
+                logger.info("快速通道提取成功")
             else:
-                result = self.structured_extractor.extract(normalized, path, required_fields)
-                logger.info("结构化路径提取成功")
-        except FastPathExtractionFailed:
-            # 快速路径失败，回退到结构化路径
-            logger.warning("快速路径失败，回退到结构化路径")
-            result = self.structured_extractor.extract(normalized, path, required_fields)
+                result = self.structured_extractor.extract(normalized, route, required_fields)
+                logger.info("结构化通道提取成功")
+        except FastExtractionFailed:
+            # 快速通道失败，回退到结构化通道
+            logger.warning("快速通道失败，回退到结构化通道")
+            result = self.structured_extractor.extract(normalized, route, required_fields)
 
         # 4. 验证
         validation = self.validator.validate(result)
@@ -87,10 +87,10 @@ class UnifiedDocumentExtractor:
 
         # 5. 添加元数据
         result.metadata.update({
-            'extraction_path': path.path_type,
-            'product_type': path.product_type,
-            'confidence': path.confidence,
-            'is_hybrid': path.is_hybrid,
+            'extraction_mode': route.mode,
+            'product_type': route.product_type,
+            'confidence': route.confidence,
+            'is_hybrid': route.is_hybrid,
             'validation_score': validation.score,
             'validation_errors': validation.errors,
             'validation_warnings': validation.warnings
@@ -101,6 +101,6 @@ class UnifiedDocumentExtractor:
         return result
 
 
-def create_extractor(llm_client, config: Dict = None) -> UnifiedDocumentExtractor:
+def create_extractor(llm_client, config: Dict = None) -> DocumentExtractor:
     """创建提取器的便捷函数"""
-    return UnifiedDocumentExtractor(llm_client, config)
+    return DocumentExtractor(llm_client, config)

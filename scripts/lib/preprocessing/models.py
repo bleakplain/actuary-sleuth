@@ -38,9 +38,9 @@ class NormalizedDocument:
 
 
 @dataclass
-class ExtractionPath:
-    """提取路径决策"""
-    path_type: str  # 'fast' | 'structured'
+class ExtractionRoute:
+    """提取路由决策"""
+    mode: str  # 'fast' | 'structured'
     product_type: str
     confidence: float
     is_hybrid: bool

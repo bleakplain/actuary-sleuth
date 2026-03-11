@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-路径选择器
+路由选择器
 
-根据文档特征和分类结果选择最优的提取路径。
+根据文档特征和分类结果选择最优的提取通道。
 """
 import logging
 from typing import List
 
-from .models import NormalizedDocument, ExtractionPath, FormatInfo
+from .models import NormalizedDocument, ExtractionRoute, FormatInfo
 from .classifier import ProductTypeClassifier
 
 
 logger = logging.getLogger(__name__)
 
 
-class ExtractionPathSelector:
-    """提取路径选择器"""
+class RouteSelector:
+    """提取路由选择器"""
 
     # 必需字段（所有产品都需要）
     REQUIRED_FIELDS = {
@@ -29,36 +29,36 @@ class ExtractionPathSelector:
     def __init__(self):
         self.type_classifier = ProductTypeClassifier()
 
-    def select_path(self, document: NormalizedDocument) -> ExtractionPath:
+    def select_route(self, document: NormalizedDocument) -> ExtractionRoute:
         """
-        选择提取路径
+        选择提取路由
 
         Returns:
-            ExtractionPath: 提取路径决策
+            ExtractionRoute: 提取路由决策
         """
         # 1. 产品类型识别
         type_code, confidence = self.type_classifier.get_primary_type(document.content)
 
-        # 2. 判断是否走快速路径
-        can_use_fast_path = self._can_use_fast_path(
+        # 2. 判断是否走快速通道
+        can_use_fast_route = self._can_use_fast_route(
             document.format_info, confidence, document
         )
 
-        path_type = 'fast' if can_use_fast_path else 'structured'
+        mode = 'fast' if can_use_fast_route else 'structured'
 
-        return ExtractionPath(
-            path_type=path_type,
+        return ExtractionRoute(
+            mode=mode,
             product_type=type_code,
             confidence=confidence,
             is_hybrid=self.type_classifier.is_hybrid_product(document.content),
-            reason=self._explain_decision(can_use_fast_path, document.format_info, confidence)
+            reason=self._explain_decision(can_use_fast_route, document.format_info, confidence)
         )
 
-    def _can_use_fast_path(self,
-                          format_info: FormatInfo,
-                          confidence: float,
-                          document: NormalizedDocument) -> bool:
-        """判断是否可以使用快速路径"""
+    def _can_use_fast_route(self,
+                           format_info: FormatInfo,
+                           confidence: float,
+                           document: NormalizedDocument) -> bool:
+        """判断是否可以使用快速通道"""
         # 条件1: 格式标准化
         is_standard = (
             format_info.is_structured and
@@ -96,13 +96,13 @@ class ExtractionPathSelector:
         return indicators.get(field, [field])
 
     def _explain_decision(self,
-                        can_use_fast_path: bool,
+                        can_use_fast_route: bool,
                         format_info: FormatInfo,
                         confidence: float) -> str:
         """解释决策原因"""
         reasons = []
 
-        if can_use_fast_path:
+        if can_use_fast_route:
             reasons.append("格式标准化")
             reasons.append(f"分类置信度高({confidence:.2f})")
         else:
@@ -111,7 +111,7 @@ class ExtractionPathSelector:
             if confidence < 0.7:
                 reasons.append(f"分类置信度低({confidence:.2f})")
 
-        return "; ".join(reasons) if reasons else "默认路径"
+        return "; ".join(reasons) if reasons else "默认路由"
 
     @classmethod
     def get_required_fields(cls) -> set:

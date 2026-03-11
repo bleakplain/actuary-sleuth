@@ -23,7 +23,7 @@ class BusinessRule:
     error_message: str
 
 
-class ExtractResultValidator:
+class ResultValidator:
     """提取结果验证器"""
 
     # 业务规则
@@ -56,8 +56,8 @@ class ExtractResultValidator:
         warnings = []
 
         # 1. 必需字段检查
-        from .path_selector import ExtractionPathSelector
-        missing = ExtractionPathSelector.get_required_fields() - set(result.data.keys())
+        from .path_selector import RouteSelector
+        missing = RouteSelector.get_required_fields() - set(result.data.keys())
         if missing:
             errors.append(f"缺失必需字段: {missing}")
 
