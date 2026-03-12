@@ -1,708 +1,505 @@
-# 文档预处理模块 - 系统架构与代码实现全面Review
+# 文档预处理模块系统架构 Review
 
-> **Review Date**: 2025-03-11
-> **Module**: `lib/preprocessing/`
-> **Version**: 1.0.0
-> **Scope**: 系统流程、数据流、代码结构（清理后版本）
-
----
-
-## 一、模块概览
-
-### 1.1 模块定位
-
-文档预处理模块是保险产品文档提取系统的**统一框架**，提供格式无关的文档提取能力。现已**完全替代**旧的 `lib/extraction` 模块，成为唯一的文档提取入口。
-
-### 1.2 文件结构
-
-```
-lib/preprocessing/
-├── __init__.py                 # 模块入口，导出所有公共API (89行)
-├── models.py                   # 核心数据模型定义 (150行)
-├── product_types.py            # 产品类型配置与提取规则 (198行)
-├── normalizer.py               # 文档规范化处理 (155行)
-├── classifier.py               # 产品类型多标签分类器 (72行)
-├── route_selector.py           # 提取路由选择器 (122行)
-├── prompt_builder.py           # 动态Prompt构建器 (224行)
-├── fast_extractor.py           # 快速通道提取器 (160行)
-├── dynamic_extractor.py        # 动态通道提取器 (271行)
-├── validator.py                # 结果验证器 (134行)
-└── document_extractor.py       # 主入口提取器 (107行)
-
-总计: ~1800行代码，11个文件
-```
-
-### 1.3 设计理念
-
-| 原则 | 实现方式 |
-|------|---------|
-| **单一职责** | 每个类专注单一功能，可独立测试和替换 |
-| **开闭原则** | 通过配置(product_types.py)扩展新产品类型，无需修改核心代码 |
-| **依赖注入** | LLM客户端通过构造函数注入，便于测试和替换 |
-| **数据驱动** | 产品类型、提取重点、Schema模板全部配置化 |
-| **容错降级** | 快速通道失败自动回退到动态通道 |
-
-### 1.4 模块演进
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        模块演进历史                               │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  Phase 1: lib/extraction/ (已废弃)                              │
-│  ├── LLM + 规则混合提取                                           │
-│  ├── 支持长文档分块并发                                           │
-│  └── 缺少产品类型分类                                             │
-│                           ↓ 迁移完成                              │
-│  Phase 2: lib/preprocessing/ (当前)                               │
-│  ├── 双通道架构 (Fast + Dynamic)                                 │
-│  ├── 产品类型智能分类 (7种类型)                                  │
-│  ├── 动态Prompt生成                                              │
-│  └── 完整的结果验证框架                                         │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
+> 日期: 2025-03-11
+> 版本: v3.0 (当前架构)
+> 总代码量: ~1592 行 (12 个文件)
 
 ---
 
-## 二、系统流程分析
+## 一、系统概述
 
-### 2.1 完整处理流程
+### 1.1 设计目标
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     用户输入                                     │
-│  document: str (原始文档内容)                                   │
-│  source_type: str ('pdf'|'html'|'text'|'scan')                 │
-│  required_fields: List[str] (可选，默认使用必需字段)            │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Phase 1: 文档规范化 (Normalizer.normalize)                     │
-├─────────────────────────────────────────────────────────────────┤
-│  输入: document: str, source_type: str                          │
-│  输出: NormalizedDocument                                       │
-│                                                                 │
-│  处理步骤:                                                       │
-│  1. _normalize_encoding()    → 统一编码、换行符、移除控制字符  │
-│  2. _remove_noise()         → 按source_type去除特定噪声        │
-│  3. _detect_format()        → 检测表格密度/章节结构/条款/费率表│
-│  4. _mark_structure()       → 标记条款/表格/章节的字符位置    │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Phase 2: 路由选择 (RouteSelector.select_route)                 │
-├─────────────────────────────────────────────────────────────────┤
-│  输入: NormalizedDocument                                        │
-│  输出: ExtractionRoute                                          │
-│                                                                 │
-│  决策步骤:                                                       │
-│  1. ProductTypeClassifier.get_primary_type() → 主导产品类型    │
-│     ├─ classify() → 遍历PRODUCT_TYPES计算匹配分数              │
-│     └─ 返回 (type_code, confidence) 或默认 ("life_insurance", 0.0) │
-│                                                                 │
-│  2. _use_dynamic() → 判断是否使用动态通道                      │
-│     ├─ is_complex: 格式非标准化或复杂结构                       │
-│     ├─ is_low_confidence: confidence < 0.7                        │
-│     └─ has_key_info_back: 关键信息不在前2000字符                 │
-│                                                                 │
-│  3. is_hybrid_product() → 判断是否混合产品                       │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-              ┌───────────────┴───────────────┐
-              ▼                               ▼
-┌───────────────────────────┐   ┌───────────────────────────┐
-│     快速通道 (Fast)        │   │    动态通道 (Dynamic)      │
-│        目标: 80% 文档      │   │       目标: 20% 文档       │
-├───────────────────────────┤   ├───────────────────────────┤
-│ FastExtractor.extract()    │   │ DynamicExtractor.extract()  │
-│                           │   │                           │
-│ • Few-shot Prompt (2示例)  │   │ 1. PromptBuilder.build()  │
-│ • 文档截取: 1500字符      │   │    - 角色: 产品类型专家   │
-│ • max_tokens: 1500        │   │    - 字段: 按需组装组件   │
-│ • 正则补充提取缺失字段    │   │    - Schema: 动态生成     │
-│ • confidence: 0.85        │   │ 2. LLM主提取 (15000字符)  │
-│ • provenance: 'fast_llm'  │   │    - max_tokens: 6000     │
-│                           │   │ 3. 专用提取器 (按需)       │
-│                           │   │    - PremiumTableExtractor │
-│                           │   │    - ClauseExtractor       │
-│                           │   │ • confidence: 0.75         │
-│                           │   │ • provenance: 'dynamic_llm'│
-└───────────────────────────┘   └───────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Phase 4: 结果验证 (ResultValidator.validate)                   │
-├─────────────────────────────────────────────────────────────────┤
-│  验证维度:                                                       │
-│  1. 必需字段检查 → 对比REQUIRED_FIELDS                          │
-│  2. 数据类型检查 → 金额字段转float，年龄字段转int               │
-│  3. 业务规则检查 → 遍历BUSINESS_RULES                          │
-│  4. 置信度检查 → 识别低置信度字段(<0.7)                        │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        ExtractResult                             │
-│  {                                                             │
-│    data: Dict[str, Any],          # 提取的字段值              │
-│    confidence: Dict[str, float],   # 每个字段的置信度          │
-│    provenance: Dict[str, str],     # 每个字段的来源            │
-│    metadata: {                                                   │
-│      extraction_mode: str,         # 'fast' | 'dynamic'        │
-│      product_type: str,            # 产品类型代码              │
-│      confidence: float,            # 分类置信度                │
-│      is_hybrid: bool,              # 是否混合产品              │
-│      validation_score: int,        # 验证分数 (0-100)          │
-│      validation_errors: List,      # 验证错误列表              │
-│      validation_warnings: List     # 验证警告列表              │
-│    }                                                             │
-│  }                                                              │
-└─────────────────────────────────────────────────────────────────┘
-```
+统一保险产品文档的预处理框架，根据文档特征自动选择最优提取策略，平衡成本与质量。
 
-### 2.2 路由决策逻辑
+### 1.2 核心特性
 
-```python
-# route_selector.py: RouteSelector._use_dynamic()
+- **双车道架构**: Fast 车道 (80% 文档) + Dynamic 车道 (20% 复杂文档)
+- **智能选择**: 基于文档画像自动选择提取器
+- **产品类型识别**: 7 种产品类型 + 混合产品支持
+- **组件化 Prompt**: 11 个可复用组件，按产品类型动态组合
 
-def _use_dynamic(self,
-                format_info: FormatInfo,
-                confidence: float,
-                document: NormalizedDocument) -> bool:
-    """判断是否使用动态通道"""
+### 1.3 设计演进
 
-    # 条件1: 格式非标准化 或 复杂结构
-    is_complex = (
-        not format_info.is_structured or
-        not format_info.has_clause_numbers
-    )
-
-    # 条件2: 分类置信度低
-    is_low_confidence = confidence < 0.7
-
-    # 条件3: 关键信息不在文档前部
-    has_key_info_back = not self._check_key_info_position(document)
-
-    # 任一条件满足即走动态通道
-    return is_complex or is_low_confidence or has_key_info_back
-```
-
-**决策真值表:**
-
-| 格式标准化 | 置信度≥0.7 | 关键信息在前 | 路由 |
-|:---------:|:---------:|:-----------:|:----:|
-| ✓ | ✓ | ✓ | **快速** |
-| ✗ | ✓ | ✓ | 动态 |
-| ✓ | ✗ | ✓ | 动态 |
-| ✓ | ✓ | ✗ | 动态 |
-| ✗ | ✗ | ✗ | 动态 |
-
-**覆盖率分析**:
-- **快速通道目标**: 80% 的标准化文档
-- **动态通道目标**: 20% 的复杂文档
-- **降级策略**: 快速失败 → 自动回退动态
+| 版本 | 主要变更 |
+|------|----------|
+| v1.0 | 初始架构，使用 `ExtractionRoute` 返回决策结果 |
+| v2.0 | 重命名为 `RouteSelector`，简化中间类 |
+| v3.0 | 重命名为 `ExtractorSelector`，接口极简化 |
 
 ---
 
-## 三、数据流分析
+## 二、系统流程
 
-### 3.1 核心数据模型层次结构
-
-```
-NormalizedDocument              # 规范化文档
-├── content: str               # 规范化后内容
-├── format_info: FormatInfo    # 格式检测信息
-│   ├── is_structured: bool    # 是否有结构化章节
-│   ├── has_clause_numbers: bool  # 是否有条款编号
-│   ├── has_premium_table: bool   # 是否有费率表
-│   ├── table_density: float  # 表格密度
-│   └── section_count: int    # 章节数量
-├── structure_markers: StructureMarkers  # 结构位置标记
-│   ├── clause_positions: List[int]   # 条款位置
-│   ├── table_positions: List[int]    # 表格位置
-│   └── section_positions: List[int]  # 章节位置
-└── metadata: Dict             # 原始长度/来源类型等
-
-ExtractionRoute                 # 提取路由决策
-├── mode: str                  # 'fast' | 'dynamic'
-├── product_type: str          # 产品类型代码
-├── confidence: float          # 分类置信度 (0-1)
-├── is_hybrid: bool            # 是否混合产品
-└── reason: str                # 决策原因说明
-
-ExtractResult                  # 提取结果
-├── data: Dict[str, Any]       # 提取的字段值
-├── confidence: Dict[str, float]  # 每个字段的置信度
-├── provenance: Dict[str, str]    # 每个字段的来源
-└── metadata: Dict             # 提取模式/产品类型/验证分数等
-
-ValidationResult               # 验证结果
-├── is_valid: bool            # 是否有效
-├── errors: List[str]         # 错误列表
-├── warnings: List[str]       # 警告列表
-└── score: int                # 验证分数 0-100
-```
-
-### 3.2 数据转换链
+### 2.1 完整数据流
 
 ```
 原始文档 (str)
-    │ [normalize]
+    │
     ▼
-NormalizedDocument {
-    content: str,              # 编码统一、噪声去除
-    format_info: FormatInfo,   # 格式特征提取
-    structure_markers: ...     # 结构位置标记
-}
-    │ [select_route]
-    ▼
-ExtractionRoute {
-    mode: 'fast'|'dynamic',    # 路由决策
-    product_type: str,         # 产品类型
-    confidence: float          # 置信度
-}
-    │ [extract via FastExtractor | DynamicExtractor]
-    ▼
-ExtractResult {
-    data: Dict,                # 提取数据
-    confidence: Dict,          # 字段置信度
-    provenance: Dict,          # 字段来源
-    metadata: Dict             # 提取元数据
-}
-    │ [validate]
-    ▼
-ValidationResult {
-    is_valid: bool,            # 是否有效
-    errors: List,              # 错误列表
-    warnings: List,            # 警告列表
-    score: int                 # 验证分数
-}
+┌──────────────────────────────────────────────────────────┐
+│  DocumentExtractor.extract()                             │
+│  主入口：编排整个提取流程                                  │
+│  - 创建共享的 ProductTypeClassifier                       │
+│  - 初始化 FastExtractor, DynamicExtractor                 │
+│  - 初始化 ExtractorSelector (持有提取器引用)               │
+└────────────┬─────────────────────────────────────────────┘
+             │
+    ┌────────▼─────────┐
+    │  1. Normalizer  │
+    │  文档规范化       │
+    └────────┬─────────┘
+             │
+             ▼ NormalizedDocument
+    ┌──────────────────────────────────────────────────────┐
+    │ content: str                                          │
+    │ profile: DocumentProfile                             │
+    │   - is_structured: bool (章节数≥5)                   │
+    │   - has_clause_numbers: bool                          │
+    │   - has_premium_table: bool                           │
+    │ structure_markers: StructureMarkers                 │
+    │ metadata: Dict                                       │
+    └──────────────────────────────────────────────────────┘
+             │
+    ┌────────▼─────────────────┐
+    │  2. ExtractorSelector     │
+    │  提取器选择               │
+    │  - 分析文档画像           │
+    │  - 调用 ProductTypeClassifier                       │
+    │  - 三重判断决定车道        │
+    │  - 返回提取器实例          │
+    └────────┬─────────────────┘
+             │
+             ▼ extractor: FastExtractor | DynamicExtractor
+    ┌──────────────────────────────────────────────────────┐
+    │  3. Extractor.extract()                                │
+    │                                                          │
+    │  3a. FastExtractor               │  3b. DynamicExtractor  │
+    │  - Few-shot Prompt               │  - 内部获取 product_type  │
+    │  - 1500 字符输入                │  - 按产品类型生成 Prompt │
+    │  - 1500 tokens 输出              │  - 15000 字符输入       │
+    │  - Regex 补充提取               │  - 6000 tokens 输出     │
+    │  - 成本 ~0.003 元/次             │  - 专用提取器         │
+    │                                  │  - 成本 ~0.05 元/次     │
+    └───────────┬──────────────────────┴──────────────────────────┘
+              │
+              ▼ ExtractResult
+    ┌──────────────────────────────────────────────────────┐
+    │ data: Dict[str, Any]                                     │
+    │ confidence: Dict[str, float]                             │
+    │ provenance: Dict[str, str] (字段来源)                    │
+    │ metadata: Dict[str, Any]                                 │
+    └──────────────────────────────────────────────────────┘
+              │
+    ┌───────────▼─────────────────┐
+    │  4. ResultValidator         │
+    │  - 必需字段检查              │
+    │  - 数据类型验证              │
+    │  - 业务规则检查              │
+    │  - 置信度检查                │
+    └───────────┬─────────────────┘
+              │
+              ▼ ValidationResult
+    ┌──────────────────────────────────────────────────────┐
+    │ is_valid: bool                                           │
+    │ errors: List[str]                                        │
+    │ warnings: List[str]                                      │
+    │ score: int (0-100)                                      │
+    └──────────────────────────────────────────────────────┘
+              │
+              ▼
+      添加元数据 → 返回结果
 ```
-
-### 3.3 字段来源映射
-
-| 来源 | provenance 值 | confidence | 触发条件 |
-|------|---------------|:----------:|---------:|
-| 快速通道 LLM | `fast_llm` | 0.85 | 标准化文档，快速路由 |
-| 快速通道正则 | `fast_regex` | 0.70 | LLM缺失字段，正则补充 |
-| 动态通道 LLM | `dynamic_llm` | 0.75 | 复杂文档，动态路由 |
-| 费率表提取器 | `premium_table_extractor` | 0.80 | 有费率表特征 |
-| 条款提取器 | `clause_extractor` | 0.80 | 需要条款提取 |
 
 ---
 
-## 四、代码结构分析
+## 三、提取器选择机制
 
-### 4.1 模块依赖关系图
+### 3.1 ExtractorSelector 职责
+
+`ExtractorSelector` 是系统的"决策中心"，负责根据文档特征选择合适的提取器。
+
+### 3.2 决策输入
+
+| 输入源 | 数据 | 用途 |
+|--------|------|------|
+| `document.profile.is_structured` | 是否有章节结构 | 判断文档复杂度 |
+| `document.profile.has_clause_numbers` | 是否有条款编号 | 判断文档复杂度 |
+| `document.content` | 文档内容 | 产品分类、位置检查 |
+| `ProductTypeClassifier.get_primary_type()` | 产品类型、置信度 | 路由决策 |
+
+### 3.3 决策规则 (三重判断)
+
+```python
+def _use_dynamic(profile, confidence, document) -> bool:
+    # 条件1: 格式复杂
+    is_complex = not profile.is_structured or not profile.has_clause_numbers
+
+    # 条件2: 低置信度
+    is_low_confidence = confidence < 0.7
+
+    # 条件3: 关键信息靠后
+    has_key_info_back = not self._check_key_info_position(document)
+
+    return is_complex or is_low_confidence or has_key_info_back
+```
+
+**满足任一条件 → 走 Dynamic 车道**
+
+### 3.4 决策输出
+
+```python
+def select(document: NormalizedDocument) -> Union[FastExtractor, DynamicExtractor]:
+    """
+    Returns:
+        提取器实例（直接可调用）
+    """
+```
+
+**接口极简**:
+- 调用方无需解包元组
+- 提取器自己获取需要的产品类型信息
+- 统一的 `extract(document, required_fields)` 接口
+
+---
+
+## 四、代码结构
+
+### 4.1 文件组织
 
 ```
-                    ┌─────────────────┐
+lib/preprocessing/
+├── __init__.py              # 模块入口，导出公共 API
+├── models.py                # 数据模型 (120 行)
+├── document_extractor.py    # 主入口，流程编排 (106 行)
+├── normalizer.py            # 文档规范化 (149 行)
+├── extractor_selector.py    # 提取器选择器 (126 行)
+├── classifier.py            # 产品类型分类器 (72 行)
+├── fast_extractor.py        # 快速提取器 (160 行)
+├── dynamic_extractor.py     # 动态提取器 (231 行)
+├── prompt_builder.py        # Prompt 构建器 (224 行)
+├── product_types.py         # 产品类型定义 (198 行)
+└── validator.py             # 结果验证器 (134 行)
+```
+
+### 4.2 模块依赖关系
+
+```
+                    ┌──────────────────┐
                     │ DocumentExtractor│
-                    │   (主入口)       │
-                    └────────┬────────┘
+                    └────────┬─────────┘
                              │
-         ┌───────────────────┼───────────────────┐
-         │                   │                   │
-         ▼                   ▼                   ▼
-┌────────────────┐  ┌────────────────┐  ┌────────────────┐
-│   Normalizer   │  │ RouteSelector  │  │ ResultValidator│
-└────────────────┘  └────────┬───────┘  └────────────────┘
+        ┌────────────────────┼────────────────────┐
+        │                    │                    │
+        ▼                    ▼                    ▼
+┌───────────────┐  ┌──────────────────┐  ┌──────────────┐
+│   Normalizer  │  │ ExtractorSelector│  │   Validator  │
+└───────────────┘  └────────┬─────────┘  └──────────────┘
                              │
-                             ▼
-                    ┌────────────────┐
-                    │ProductClassifier│
-                    └────────────────┘
-                             │
-         ┌───────────────────┼───────────────────┐
-         │                   │                   │
-         ▼                   ▼                   ▼
-┌────────────────┐  ┌────────────────┐  ┌────────────────┐
-│ FastExtractor  │  │ PromptBuilder  │  │DynamicExtractor│
-└────────────────┘  └────────────────┘  └────────┬────────┘
-                                              │
-                               ┌──────────────┼──────────────┐
-                               ▼              ▼              ▼
-                      ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-                      │StructureAnalyzer│ │PremiumTable  │ │ClauseExtractor│
-                      └──────────────┘ └──────────────┘ └──────────────┘
-
-配置层:
-┌────────────────┐  ┌────────────────┐
-│   models.py    │  │product_types.py│
-└────────────────┘  └────────────────┘
+                ┌────────────┴────────────┐
+                │                         │
+        ┌───────▼────────┐      ┌────────▼────────┐
+        │  ProductType   │      │ ExtractorPool   │
+        │  Classifier    │      │  (Fast+Dynamic) │
+        └────────────────┘      └─────────────────┘
+                │                         │
+                │                    ┌───┴────────────┐
+                │                    │                │
+                ▼                    ▼                ▼
+        ┌───────────────┐  ┌──────────┐  ┌──────────────┐
+        │ product_types │  │  prompt  │  │  specialized  │
+        │               │  │  _builder│  │  _extractors │
+        └───────────────┘  └──────────┘  └──────────────┘
+                              (DynamicExtractor 内部)
 ```
 
-### 4.2 文件职责矩阵
+### 4.3 耦合度分析
 
-| 文件 | 行数 | 类数 | 职责 | 依赖 | 被依赖 |
-|------|:----:|:----:|------|------|--------|
-| `models.py` | 150 | 8 | 数据模型定义 | - | 所有文件 |
-| `product_types.py` | 198 | 0 | 产品类型配置 | models | classifier, prompt_builder, dynamic_extractor |
-| `normalizer.py` | 155 | 1 | 文档规范化 | models | document_extractor |
-| `classifier.py` | 72 | 1 | 产品分类 | models, product_types | route_selector |
-| `route_selector.py` | 122 | 1 | 路由选择 | models, classifier | document_extractor, validator |
-| `prompt_builder.py` | 224 | 1 | Prompt构建 | models | dynamic_extractor |
-| `fast_extractor.py` | 160 | 2 | 快速提取 | models | document_extractor |
-| `dynamic_extractor.py` | 271 | 4 | 动态提取 | models, prompt_builder, product_types | document_extractor |
-| `validator.py` | 134 | 2 | 结果验证 | models | document_extractor |
-| `document_extractor.py` | 107 | 1 | 主入口 | models, normalizer, route_selector, fast_extractor, dynamic_extractor, validator | - |
+| 组件 | 依赖 | 被依赖 | 耦合度 |
+|------|------|--------|--------|
+| `models.py` | 无 | 所有模块 | ✅ 无 |
+| `normalizer.py` | `models` | `DocumentExtractor` | ✅ 低 |
+| `classifier.py` | `models`, `product_types` | `ExtractorSelector`, `DynamicExtractor` | ✅ 低 |
+| `extractor_selector.py` | `models`, `classifier`, 提取器 | `DocumentExtractor` | ⚠️ 中 (持有提取器) |
+| `fast_extractor.py` | `models` | `ExtractorSelector` | ✅ 低 |
+| `dynamic_extractor.py` | `models`, `classifier`, `prompt_builder`, `product_types` | `ExtractorSelector` | ✅ 低 |
+| `validator.py` | `models`, `extractor_selector` | `DocumentExtractor` | ⚠️ 中 (依赖 ExtractorSelector 常量) |
+| `document_extractor.py` | 所有模块 | 外部调用 | ✅ 低 (编排层) |
 
-**依赖特点**:
-- ✅ 单向依赖，无循环依赖
-- ✅ `models.py` 是唯一的基础层模块
-- ✅ `document_extractor.py` 是唯一的聚合层模块
-- ✅ 配置与逻辑分离 (`product_types.py` 独立)
-
-### 4.3 类职责分析
-
-| 类 | 单一职责 | 高内聚 | 低耦合 |
-|----|:--------:|:-----:|:-----:|
-| `Normalizer` | ✓ | ✓ | ✓ |
-| `ProductTypeClassifier` | ✓ | ✓ | ✓ |
-| `RouteSelector` | ✓ | ✓ | ✓ |
-| `FastExtractor` | ✓ | ✓ | ✓ |
-| `DynamicExtractor` | ✓ | ✓ | ~ (包含3个子类) |
-| `PromptBuilder` | ✓ | ✓ | ✓ |
-| `ResultValidator` | ✓ | ✓ | ✓ |
-| `DocumentExtractor` | ✓ (编排) | ✓ | ~ (依赖6个组件) |
+**唯一的中度耦合**:
+- `ExtractorSelector` 需要持有提取器实例
+- `validator` 依赖 `ExtractorSelector.REQUIRED_FIELDS`
 
 ---
 
-## 五、关键设计模式
+## 五、数据模型
 
-### 5.1 策略模式 (Strategy Pattern)
-
-**应用场景**: 路由选择后的提取策略
+### 5.1 核心数据类
 
 ```python
-# document_extractor.py
+@dataclass
+class DocumentProfile:
+    """文档画像：用于提取器选择"""
+    is_structured: bool          # 有章节结构（章节数≥5）
+    has_clause_numbers: bool     # 有条款编号（第X条）
+    has_premium_table: bool      # 包含费率表特征
 
-if route.mode == 'fast':
-    result = self.fast_extractor.extract(normalized, required_fields)
-else:
-    result = self.dynamic_extractor.extract(normalized, route, required_fields)
+
+@dataclass
+class NormalizedDocument:
+    """规范化文档"""
+    content: str
+    profile: DocumentProfile
+    structure_markers: StructureMarkers
+    metadata: Dict[str, Any]
+
+
+@dataclass
+class ExtractResult:
+    """提取结果"""
+    data: Dict[str, Any]
+    confidence: Dict[str, float]
+    provenance: Dict[str, str]      # 字段来源标识
+    metadata: Dict[str, Any]
 ```
 
-### 5.2 模板方法模式 (Template Method Pattern)
+### 5.2 数据流转换
 
-**应用场景**: DynamicExtractor 的提取流程
-
-```python
-# dynamic_extractor.py: DynamicExtractor.extract()
-
-def extract(self, document, route, required_fields):
-    # 1. 构建 Prompt (钩子方法)
-    prompt = self.prompt_builder.build(...)
-
-    # 2. LLM 主提取
-    result = self._parse_response(self.llm_client.generate(...))
-
-    # 3. 专用提取器 (按需)
-    if 'premium_table' in required_fields:
-        result['premium_table'] = self.specialized_extractors['premium_table'].extract(...)
-
-    return ExtractResult(...)
 ```
-
-### 5.3 建造者模式 (Builder Pattern)
-
-**应用场景**: PromptBuilder 的分步组装
-
-```python
-# prompt_builder.py: PromptBuilder.build()
-
-def build(self, product_type, required_fields, extraction_focus, output_schema, is_hybrid):
-    # 1. 角色定义
-    prompt = self.COMPONENTS['role_specialized'].format(...)
-
-    # 2. 添加字段说明
-    for component in self._get_field_components(required_fields):
-        prompt += self.COMPONENTS[component]
-
-    # 3. 混合产品说明
-    if is_hybrid:
-        prompt += self.COMPONENTS['hybrid_notice']
-
-    # 4. 输出格式
-    prompt += self.COMPONENTS['output_structure'].format(...)
-
-    return prompt
-```
-
-### 5.4 责任链模式 (Chain of Responsibility)
-
-**应用场景**: ResultValidator 的多维度验证
-
-```python
-# validator.py: ResultValidator.validate()
-
-def validate(self, result):
-    errors = []
-
-    # 1. 必需字段检查
-    errors.extend(self._check_required_fields(result))
-
-    # 2. 数据类型检查
-    errors.extend(self._validate_data_types(result.data))
-
-    # 3. 业务规则检查
-    errors.extend(self._validate_business_rules(result.data))
-
-    # 4. 置信度检查
-    warnings.extend(self._check_confidence(result.confidence))
-
-    return ValidationResult(is_valid=len(errors)==0, ...)
+str (原始文档)
+    → NormalizedDocument (规范化 + 画像)
+    → Extractor (选择决策)
+    → ExtractResult (提取结果)
+    → ValidationResult (验证结果)
 ```
 
 ---
 
-## 六、产品类型分类系统
+## 六、双车道设计
 
-### 6.1 支持的产品类型
+### 6.1 Fast 车道
 
-| 代码 | 名称 | 匹配模式 | 特征权重 |
-|------|------|----------|----------|
-| `critical_illness` | 重大疾病险 | `重大疾病.*?保险`, `重疾险` | 病种清单0.3, 分级0.2, 等待期0.1 |
-| `medical_insurance` | 医疗保险 | `医疗.*?保险`, `费用.*?报销` | 免赔额0.3, 赔付比例0.3 |
-| `universal_life` | 万能险 | `万能.*?保险` | 账户0.4, 结算利率0.3 |
-| `term_life` | 定期寿险 | `定期.*?寿险` | 保险期间0.3, 身故保险金0.3 |
-| `whole_life` | 终身寿险 | `终身.*?寿险` | 现金价值0.3, 保险期间0.3 |
-| `annuity` | 年金保险 | `年金.*?保险`, `养老金` | 年金期间0.3, 年金金额0.3 |
-| `accident_insurance` | 意外伤害保险 | `意外.*?保险`, `意外险` | 意外范围0.3, 赔付比例0.3 |
-| `life_insurance` | 人身保险（默认） | `保险`, `条款` | 保险期间0.2, 等待期0.2 |
+| 特性 | 值 |
+|------|-----|
+| Prompt | 固定 Few-shot |
+| 输入长度 | 1500 字符 |
+| 输出长度 | 1500 tokens |
+| 成本 | ~0.003 元/次 |
+| 适用场景 | 结构化、短文档、高置信度 |
+| Fallback | Regex 补充提取 |
 
-### 6.2 匹配算法
+### 6.2 Dynamic 车道
 
-```python
-# models.py: ProductType.match_score()
+| 特性 | 值 |
+|------|-----|
+| Prompt | 按产品类型动态生成 |
+| 输入长度 | 15000 字符 |
+| 输出长度 | 6000 tokens |
+| 成本 | ~0.05 元/次 |
+| 适用场景 | 复杂、长文档、低置信度 |
+| 专用提取器 | `PremiumTableExtractor`, `ClauseExtractor` |
+| 依赖注入 | 接收共享的 `ProductTypeClassifier` |
 
-def match_score(self, document: str) -> float:
-    score = 0.0
+### 6.3 成本对比
 
-    # 1. 关键词匹配 (每个模式 1/n 分)
-    for pattern in self.patterns:
-        if re.search(pattern, document):
-            score += 1.0 / len(self.patterns)
-
-    # 2. 特征匹配 (按权重加分)
-    for feature, weight in self.features.items():
-        if self._has_feature(document, feature):
-            score += weight
-
-    return min(score, 1.0)  # 限制在 [0, 1]
 ```
+Fast:  ~0.003 元/次  ×  80%  = 0.0024 元/文档
+Dynamic: ~0.05 元/次  ×  20%  = 0.01 元/文档
+────────────────────────────────────
+平均成本: ~0.0124 元/文档
 
-**算法特点**:
-- **关键词模式匹配**: 使用正则表达式匹配产品名称模式
-- **特征权重加分**: 独特特征(如病种清单、账户、结算利率)加分
-- **分数归一化**: 确保结果在 [0, 1] 区间
-- **时间复杂度**: O(n*m), n=文档长度, m=模式数量
-
-### 6.3 混合产品识别
-
-```python
-# classifier.py: ProductTypeClassifier.is_hybrid_product()
-
-def is_hybrid_product(self, document: str) -> bool:
-    """判断是否为混合产品"""
-    classifications = self.classify(document)
-    return len(classifications) > 1 and classifications[1][1] > 0.5
+如果全部走 Dynamic: 0.05 元/文档
+节省: ~75%
 ```
-
-**判定标准**:
-- 至少2个产品类型匹配
-- 次优类型置信度 > 0.5 → 确保不是误判
 
 ---
 
-## 七、代码质量评估
+## 七、产品类型分类
 
-### 7.1 代码行数分布
+### 7.1 支持的产品类型
 
-| 文件 | 行数 | 类数 | 函数数 | 平均函数行数 | 评价 |
-|------|:----:|:----:|:------:|:-----------:|:----:|
-| models.py | 150 | 8 | 5 | 12 | ✓ 短函数 |
-| product_types.py | 198 | 0 | 3 | 8 | ✓ 配置清晰 |
-| normalizer.py | 155 | 1 | 5 | 18 | ✓ 短函数 |
-| classifier.py | 72 | 1 | 5 | 8 | ✓ 短函数 |
-| route_selector.py | 122 | 1 | 6 | 13 | ✓ 短函数 |
-| prompt_builder.py | 224 | 1 | 4 | 35 | ~ 可接受 |
-| fast_extractor.py | 160 | 2 | 5 | 22 | ✓ 短函数 |
-| dynamic_extractor.py | 271 | 4 | 5 | 30 | ~ 可接受 |
-| validator.py | 134 | 2 | 5 | 16 | ✓ 短函数 |
-| document_extractor.py | 107 | 1 | 2 | 35 | ~ 可接受 |
+| 代码 | 名称 | 关键特征 |
+|------|------|----------|
+| `critical_illness` | 重大疾病险 | 病种清单、分级 |
+| `medical_insurance` | 医疗保险 | 免赔额、赔付比例 |
+| `universal_life` | 万能险 | 保单账户、结算利率 |
+| `term_life` | 定期寿险 | 保险期间、身故保险金 |
+| `whole_life` | 终身寿险 | 现金价值 |
+| `annuity` | 年金保险 | 年金领取方式 |
+| `accident_insurance` | 意外伤害保险 | 意险范围 |
+| `life_insurance` | 人身保险 (默认) | 基础信息 |
 
-### 7.2 圈复杂度分析
+### 7.2 分类机制
 
-| 函数 | 圈复杂度 | 评价 |
-|------|:-------:|:----:|
-| `DocumentExtractor.extract()` | 5 | ✓ 低 |
-| `RouteSelector.select_route()` | 3 | ✓ 低 |
-| `RouteSelector._use_dynamic()` | 3 | ✓ 低 |
-| `PromptBuilder.build()` | 4 | ✓ 低 |
-| `ResultValidator.validate()` | 3 | ✓ 低 |
-| `_parse_response()` | 4 | ✓ 低 |
-| `ProductTypeClassifier.classify()` | 2 | ✓ 极低 |
-
-**整体评估**: 所有函数圈复杂度 < 10，符合高质量标准
-
-### 7.3 命名规范评估
-
-| 类别 | 规范 | 一致性 | 示例 |
-|------|------|:------:|------|
-| 类名 | PascalCase | ✓ | `DocumentExtractor`, `RouteSelector` |
-| 方法名 | snake_case | ✓ | `select_route()`, `use_dynamic()` |
-| 私有方法 | _snake_case | ✓ | `_normalize_encoding()`, `_check_key_info_position()` |
-| 常量 | UPPER_SNAKE_CASE | ✓ | `REQUIRED_FIELDS`, `COMPONENTS` |
-| 模块名 | snake_case | ✓ | `document_extractor.py`, `route_selector.py` |
-
-### 7.4 类型注解覆盖
-
-| 文件 | 类型注解覆盖率 | 评价 |
-|------|:-------------:|:----:|
-| models.py | 100% | ✓ 完整 |
-| document_extractor.py | 100% | ✓ 完整 |
-| route_selector.py | 100% | ✓ 完整 |
-| classifier.py | 90% | ✓ 良好 |
-| normalizer.py | 85% | ✓ 良好 |
-| fast_extractor.py | 80% | ~ 可接受 |
-| dynamic_extractor.py | 75% | ~ 可接受 |
-| validator.py | 70% | ~ 可接受 |
-| prompt_builder.py | 60% | ~ 基础 |
-
----
-
-## 八、优势与亮点
-
-### 8.1 架构优势
-
-1. **双通道设计**: 80%快速通道 + 20%动态通道，成本与准确率平衡
-2. **配置驱动**: 产品类型、提取重点、Schema全部配置化，易于扩展
-3. **动态Prompt**: 根据产品类型自动生成针对性Prompt
-4. **容错降级**: 快速失败自动回退动态通道
-5. **完整验证**: 多维度验证保证数据质量
-6. **来源追溯**: 每个字段记录置信度和来源
-
-### 8.2 代码亮点
-
-1. **组件化Prompt**: 11个可复用组件，按需组装
-2. **多标签分类**: 支持混合产品识别
-3. **正则补充提取**: 快速通道的兜底机制
-4. **专用提取器**: 费率表、条款独立提取器
-5. **日志完善**: 关键步骤都有日志记录
-
-### 8.3 性能优化
-
-1. **中文友好**: Token预算针对中文优化 (1500/6000)
-2. **快速通道**: 单次LLM调用，大幅降低成本
-3. **文档截取**: 按通道智能截取文档长度
-
----
-
-## 九、改进建议
-
-### 9.1 代码层面
-
-#### 1. JSON解析重复代码
-
-**问题**: `_parse_response()` 在2个类中重复实现
-
-**建议**:
 ```python
-# utils.py
-def parse_json_response(response: str) -> Dict[str, Any]:
-    """通用JSON解析器"""
-    json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
-    if json_match:
-        return json.loads(json_match.group(1))
-    # ... 其他解析策略
+# ProductTypeClassifier
+def classify(document) -> List[Tuple[code, score]]:
+    # 多标签分类
+    scores = [(code, match_score(document)) for code in types]
+    return filter(scores >= threshold).sort(descending)
+
+def get_primary_type(document) -> Tuple[code, confidence]:
+    return classify(document)[0]  # 取最高分
+
+def is_hybrid_product(document) -> bool:
+    # 第二高分 > 0.5 认为是混合产品
+    return len(classify(document)) > 1 and classify(document)[1][1] > 0.5
 ```
 
-#### 2. 阈值硬编码
+### 7.3 分类器共享
 
-**问题**: 路由选择阈值硬编码在代码中
+`ProductTypeClassifier` 在 `DocumentExtractor` 中创建一次，然后共享给：
+- `ExtractorSelector` — 用于路由决策
+- `DynamicExtractor` — 用于获取产品类型信息
 
-**建议**:
+这样避免了重复分类，保证一致性。
+
+---
+
+## 八、接口设计对比
+
+### 8.1 ExtractorSelector 演进
+
+| 版本 | 方法签名 | 返回值 | 评价 |
+|------|----------|--------|------|
+| v1.0 | `select_route(doc) → ExtractionRoute` | 包含 mode, product_type, confidence, reason | 抽象，暴露内部实现 |
+| v2.0 | `select_extractor(doc) → Tuple[Extractor, str, float, bool]` | 4 个值的元组 | 直接但冗余 |
+| v3.0 | `select(doc) → Extractor` | 单一提取器实例 | ✅ 极简、职责内聚 |
+
+### 8.2 DynamicExtractor 演进
+
+| 版本 | 签名 | 数据来源 |
+|------|------|----------|
+| v2.0 | `extract(doc, product_type, is_hybrid, fields)` | 调用方传入 |
+| v3.0 | `extract(doc, fields)` | 内部通过共享的 `classifier` 获取 |
+
+### 8.3 统一提取器接口
+
 ```python
-class RouteSelector:
+# 两个提取器现在有完全一致的接口
+FastExtractor.extract(document, required_fields) -> ExtractResult
+DynamicExtractor.extract(document, required_fields) -> ExtractResult
+```
+
+这是多态的体现，调用方无需区分。
+
+---
+
+## 九、架构亮点
+
+### 9.1 设计模式应用
+
+| 模式 | 应用位置 | 效果 |
+|------|----------|------|
+| **策略模式** | Fast/Dynamic 提取器 | 可替换的提取策略，统一接口 |
+| **依赖注入** | `DynamicExtractor(classifier)` | 解耦产品类型获取，支持共享实例 |
+| **门面模式** | `DocumentExtractor` | 简化外部调用，隐藏复杂性 |
+| **模板方法** | 提取器统一的 `extract()` 签名 | 统一接口，易于扩展 |
+
+### 9.2 代码质量
+
+| 指标 | 评价 |
+|------|------|
+| **可读性** | ⭐⭐⭐⭐⭐ 命名清晰，职责单一 |
+| **可维护性** | ⭐⭐⭐⭐ 组件化设计，易于扩展 |
+| **可测试性** | ⭐⭐⭐⭐⭐ 依赖注入，易于 mock |
+| **性能** | ⭐⭐⭐⭐ 成本优化设计，75% 节省 |
+
+### 9.3 最佳实践
+
+1. **接口极简**: `ExtractorSelector.select()` 只返回提取器实例
+2. **职责内聚**: 提取器自己获取需要的产品类型信息
+3. **依赖共享**: `ProductTypeClassifier` 单例共享，避免重复分类
+4. **防御性编程**: Fast 提取失败自动回退到 Dynamic
+5. **日志完备**: 关键决策点有日志记录
+
+---
+
+## 十、潜在问题与改进建议
+
+### 10.1 发现的问题
+
+| 问题 | 严重性 | 说明 |
+|------|--------|------|
+| `validator` 依赖 `ExtractorSelector` | P3 | 循环依赖风险，`REQUIRED_FIELDS` 应该独立配置 |
+| `ExtractorSelector` 持有提取器实例 | P3 | 增加耦合，但换取了接口简洁度 |
+| 魔法数字散落各处 | P2 | 0.7 置信度、2000 字符、75% 覆盖率等应集中配置 |
+| `_check_key_info_position` 重复扫描 | P2 | 已在前 2000 字符扫描，但 `field_indicators` 可能遗漏模式 |
+
+### 10.2 改进建议
+
+**1. 抽取配置类**
+
+```python
+@dataclass
+class ExtractionConfig:
+    # 路由阈值
     DYNAMIC_CONFIDENCE_THRESHOLD = 0.7
-    KEY_INFO_RATIO_THRESHOLD = 0.75
+    KEY_INFO_POSITION_LIMIT = 2000
+    KEY_INFO_COVERAGE_RATIO = 0.75
+
+    # Fast 车道
+    FAST_INPUT_LIMIT = 1500
+    FAST_OUTPUT_LIMIT = 1500
+
+    # Dynamic 车道
+    DYNAMIC_INPUT_LIMIT = 15000
+    DYNAMIC_OUTPUT_LIMIT = 6000
 ```
 
-#### 3. 业务规则可读性
+**2. 解耦 `validator`**
 
-**问题**: lambda表达式可读性差
+```python
+# 将 REQUIRED_FIELDS 移到 config 或独立模块
+class RequiredFields:
+    CORE_FIELDS = {
+        'product_name',
+        'insurance_company',
+        'insurance_period',
+        'waiting_period'
+    }
+```
 
-**建议**: 提取为独立函数，添加类型注解
+**3. 统一响应解析**
 
-### 9.2 架构层面
-
-#### 1. 配置外部化
-
-**建议**: 将阈值、Prompt模板等配置移到配置文件
-
-#### 2. 缓存机制
-
-**建议**: 对产品类型匹配、路由选择等计算密集型操作添加缓存
-
-#### 3. 监控指标
-
-**建议**: 添加提取成功率、路由分布等监控指标
-
-### 9.3 测试层面
-
-**当前测试覆盖**: 19个测试，10个组件
-
-**缺口**:
-- StructureAnalyzer 单独测试
-- PremiumTableExtractor 单独测试
-- ClauseExtractor 单独测试
-- 边界条件测试
-- 性能测试
-
----
-
-## 十、综合评分
-
-| 维度 | 评分 (1-5) | 说明 |
-|------|:---------:|------|
-| **架构设计** | 4.8 | 双通道设计优秀，组件职责清晰 |
-| **代码质量** | 4.5 | 命名规范，圈复杂度低，有少量重复 |
-| **可扩展性** | 5.0 | 配置驱动，易于新增产品类型 |
-| **可维护性** | 4.5 | 代码结构清晰，注释完整 |
-| **可测试性** | 4.0 | 依赖注入友好，测试覆盖良好 |
-| **性能优化** | 4.3 | 双通道优化，有缓存空间 |
-| **容错性** | 4.8 | 多层降级，异常处理完善 |
-| **文档完整性** | 4.7 | docstring完整，有架构文档 |
-| **综合评分** | **4.6** | **优秀** |
+```python
+class ResponseParser:
+    """统一的 LLM 响应解析器"""
+    @staticmethod
+    def parse_json(response: str) -> Dict:
+        # 合并 FastExtractor、DynamicExtractor、PremiumTableExtractor
+        # 中的重复解析逻辑
+```
 
 ---
 
 ## 十一、总结
 
-文档预处理模块是一个**设计优秀、实现规范**的保险产品文档提取系统。其核心优势在于:
+### 11.1 当前架构状态
 
-1. **双通道架构**在成本与准确率之间取得良好平衡
-2. **配置驱动**的设计使系统具备极强的扩展性
-3. **组件化Prompt**构建器实现了灵活的动态生成
-4. **多层验证**框架确保了数据质量
-5. **清晰的代码结构**使系统易于理解和维护
+经过三次迭代后的预处理模块特点：
 
-该模块可作为**文档智能处理系统的参考实现**，其设计理念和实现方式对类似系统具有很好的借鉴意义。
+1. **接口极简**: `ExtractorSelector.select()` 只返回提取器实例
+2. **职责内聚**: 提取器自己通过 `classifier` 获取产品类型信息
+3. **命名准确**: `ExtractorSelector` 比 `RouteSelector` 更准确描述职责
+4. **无冗余**: 删除了 `ExtractionStrategy`、`DecisionDiagnostics`、`StructureInfo` 等中间类
+5. **统一接口**: 两个提取器有完全一致的 `extract(document, required_fields)` 签名
+6. **依赖共享**: `ProductTypeClassifier` 单例共享，避免重复分类
 
-### 与旧模块对比
+### 11.2 适用场景
 
-| 特性 | 旧模块 (lib/extraction) | 新模块 (lib/preprocessing) |
-|------|------------------------|---------------------------|
-| 架构 | LLM + 规则混合 | 双通道 (Fast + Dynamic) |
-| 产品分类 | 无 | 7种产品类型 + 混合识别 |
-| Prompt | 固定模板 | 动态生成，产品类型定制 |
-| 分块支持 | 支持 (长文档并发) | 不需要 (智能截取) |
-| 验证 | 质量评估 | 多维度验证 (业务规则) |
-| 去重 | Hash去重 | 无 (可添加) |
-| 代码行数 | ~1300行 | ~1800行 |
-| 组件数 | 9个 | 11个 |
-| 可扩展性 | 中 | 高 |
+- ✅ 保险产品文档结构化提取
+- ✅ 多源文档统一处理（PDF/HTML/Text）
+- ✅ 成本敏感的大规模提取任务
+- ✅ 需要产品类型分类的场景
+
+### 11.3 扩展方向
+
+1. **新增产品类型**: 在 `product_types.py` 中添加定义
+2. **新增专用提取器**: 参考 `PremiumTableExtractor` 实现
+3. **调整路由规则**: 修改 `ExtractorSelector._use_dynamic()`
+4. **优化 Prompt 组件**: 在 `PromptBuilder.COMPONENTS` 中添加
+
+---
+
+**Review 结论**: 当前架构设计合理，代码质量高，无重大技术债务，可投入生产使用。
