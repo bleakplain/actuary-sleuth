@@ -134,17 +134,31 @@ class ClauseExtractor:
         estimated_clauses = sum(detected.values()) if detected else 50
         size_note = f"\n\n**注意**: 文档共 {structure['total_length']} 字符，预计包含约 {estimated_clauses} 个条款项，请确保提取完整，不要遗漏。" if structure['total_length'] > 10000 else ""
 
+        # HTML 表格特殊处理说明
+        table_note = ""
+        if structure.get('has_table') and 'html_bold_number' in detected:
+            table_note = """
+
+**HTML 表格格式解析说明**:
+文档包含 HTML 表格格式的条款，条款格式如下：
+- <td>**2.1**</td><td>**保险期间** 本合同保险期间为终身。</td>
+- 条款编号 **2.1** 在一个 <td> 中，标题和内容在另一个 <td> 中
+- 请忽略 HTML 标签，专注于提取 **数字.数字** 格式的条款编号及其后的标题和内容
+- 每个 **数字.数字** 格式都是一个独立的条款，必须全部提取
+"""
+
         return f"""你是保险条款提取专家，能够自适应识别各种文档格式的条款结构。
 
 **任务**: 从保险产品文档中提取所有条款内容。
 
-{format_info}{size_note}
+{format_info}{size_note}{table_note}
 
 **提取要求**:
 1. **完整性优先**: 必须提取文档中的所有条款，不要遗漏任何一项
 2. **保持结构**: 保留条款的编号、标题和完整内容
 3. **层级识别**: 正确识别章节、条款、子条款的层级关系
 4. **内容完整**: 条款内容要包含所有细节、条件和说明
+5. **逐一提取**: 对文档中的每个 **数字.数字** 格式编号，都要提取对应的条款，不要跳过
 
 **过滤规则**（不要提取这些内容）:
 - 阅读指引、投保须知、提示说明等非条款内容
@@ -180,12 +194,13 @@ class ClauseExtractor:
 
         # 根据文档大小和结构决定参数
         content_length = len(content)
+        detected_count = sum(structure['detected_patterns'].values())
 
-        # 动态调整参数
-        if content_length > 30000:
+        # 动态调整参数 - 基于检测到的条款数量和文档长度
+        if content_length > 30000 or detected_count > 30:
             max_chars = min(content_length, 60000)
             max_tokens = 16000
-        elif content_length > 15000:
+        elif content_length > 15000 or detected_count > 15:
             max_chars = min(content_length, 40000)
             max_tokens = 12000
         else:
