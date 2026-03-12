@@ -82,10 +82,19 @@ class Normalizer:
 
         # HTML 转换文档的特殊噪声
         elif source_type == 'html':
-            # 移除 HTML 标签残留
+            # 优先处理 HTML 表格格式（飞书在线文档）
+            # 将表格中的条款格式转换为更易读的格式
+            # <td>**2.1**</td><td>**标题** 内容</td> -> **2.1** **标题** 内容
+            document = re.sub(r'<td>\*\*(\d+\.\d+)\*\*\s*</td><td[^>]*>\*\*([^*]*)\*\*\s*', r'**\1** **\2** ', document)
+            document = re.sub(r'<td>\*\*(\d+\.\d+)\*\*\s*</td><td[^>]*>([^<]*)', r'**\1** \2', document)
+            document = re.sub(r'<td>\*\*(\d+)\*\*\s*</td><td[^>]*>\*\*([^*]*)\*\*\s*', r'**\1** **\2** ', document)
+            # 移除剩余的 HTML 标签
             document = re.sub(r'<[^>]+>', '', document)
-            # 移除多余空白
+            # 移除多余空白和换行
             document = re.sub(r'\n\s*\n\s*\n+', '\n\n', document)
+            # 清理 <br/> 残留
+            document = document.replace('<br/>', '\n')
+            document = document.replace('<br>', '\n')
 
         # 通用噪声处理
         # 移除全角空格
