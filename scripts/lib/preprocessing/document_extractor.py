@@ -4,8 +4,14 @@
 文档提取器
 
 主入口，整合所有组件，提供统一的提取接口。
+
+环境变量:
+    DEBUG: 设置为 true/1 时，将提取结果输出到 /tmp 目录
 """
+import json
 import logging
+import os
+from datetime import datetime
 from typing import Dict, List, Any, Optional
 
 from .models import NormalizedDocument, ExtractResult, ValidationResult
@@ -18,6 +24,9 @@ from .validator import ResultValidator
 
 
 logger = logging.getLogger(__name__)
+
+# Debug 模式：通过环境变量 DEBUG 控制
+DEBUG_MODE = os.getenv('DEBUG', '').lower() in ('true', '1', 'yes')
 
 
 class DocumentExtractor:
@@ -97,7 +106,28 @@ class DocumentExtractor:
 
         logger.info(f"文档提取完成，提取字段数: {len(result.data)}")
 
+        # Debug 模式：输出结构化结果
+        if DEBUG_MODE:
+            self._dump_debug_result(result)
+
         return result
+
+    def _dump_debug_result(self, result: ExtractResult):
+        """输出提取结果到 /tmp 目录"""
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_dir = "/tmp"
+        os.makedirs(output_dir, exist_ok=True)
+
+        # 输出 JSON 格式的提取结果
+        debug_file = os.path.join(output_dir, f"extraction_result_{timestamp}.json")
+        with open(debug_file, 'w', encoding='utf-8') as f:
+            json.dump({
+                'data': result.data,
+                'confidence': result.confidence,
+                'provenance': result.provenance,
+                'metadata': result.metadata,
+            }, f, ensure_ascii=False, indent=2)
+        logger.info(f"提取结果已输出: {debug_file}")
 
 
 def create_extractor(llm_client, config: Dict = None) -> DocumentExtractor:
