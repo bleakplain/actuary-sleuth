@@ -56,8 +56,8 @@ class ResultValidator:
         warnings = []
 
         # 1. 必需字段检查
-        from .route_selector import RouteSelector
-        missing = RouteSelector.get_required_fields() - set(result.data.keys())
+        from .extractor_selector import ExtractorSelector
+        missing = ExtractorSelector.get_required_fields() - set(result.data.keys())
         if missing:
             errors.append(f"缺失必需字段: {missing}")
 

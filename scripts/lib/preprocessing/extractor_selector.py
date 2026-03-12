@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-路由选择器
+提取器选择器
 
 根据文档特征和分类结果选择最优的提取通道。
 """
@@ -17,8 +17,8 @@ from .dynamic_extractor import DynamicExtractor
 logger = logging.getLogger(__name__)
 
 
-class RouteSelector:
-    """路由选择器：根据文档特征选择合适的提取器"""
+class ExtractorSelector:
+    """提取器选择器：根据文档特征选择合适的提取器"""
 
     # 必需字段（所有产品都需要）
     REQUIRED_FIELDS = {
@@ -28,28 +28,28 @@ class RouteSelector:
         'waiting_period'
     }
 
-    def __init__(self, fast_extractor: FastExtractor, dynamic_extractor: DynamicExtractor):
+    def __init__(self, fast_extractor: FastExtractor, dynamic_extractor: DynamicExtractor, classifier: ProductTypeClassifier = None):
         """
-        初始化路由选择器
+        初始化提取器选择器
 
         Args:
             fast_extractor: 快速提取器
             dynamic_extractor: 动态提取器
+            classifier: 产品类型分类器（可选，默认创建新实例）
         """
         self.fast_extractor = fast_extractor
         self.dynamic_extractor = dynamic_extractor
-        self.type_classifier = ProductTypeClassifier()
+        self.type_classifier = classifier or ProductTypeClassifier()
 
-    def select_extractor(self, document: NormalizedDocument) -> Tuple[Union[FastExtractor, DynamicExtractor], str, float, bool]:
+    def select(self, document: NormalizedDocument) -> Union[FastExtractor, DynamicExtractor]:
         """
         选择提取器
 
         Returns:
-            (extractor, product_type, confidence, is_hybrid)
+            提取器实例
         """
         # 1. 产品类型识别
         type_code, confidence = self.type_classifier.get_primary_type(document.content)
-        is_hybrid = self.type_classifier.is_hybrid_product(document.content)
 
         # 2. 判断是否走动态通道
         use_dynamic = self._use_dynamic(document.profile, confidence, document)
@@ -60,9 +60,9 @@ class RouteSelector:
         # 4. 记录决策日志
         mode = 'dynamic' if use_dynamic else 'fast'
         rationale = self._explain_decision(use_dynamic, document.profile, confidence)
-        logger.debug(f"路由决策: {mode} | {rationale}")
+        logger.debug(f"提取器选择: {mode} | {rationale}")
 
-        return extractor, type_code, confidence, is_hybrid
+        return extractor
 
     def _use_dynamic(self, profile: DocumentProfile, confidence: float, document: NormalizedDocument) -> bool:
         """判断是否使用动态通道"""

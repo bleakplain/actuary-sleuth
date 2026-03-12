@@ -11,6 +11,7 @@ import re
 from typing import Dict, List, Any, Optional
 
 from .models import NormalizedDocument, ExtractResult
+from .classifier import ProductTypeClassifier
 from .prompt_builder import PromptBuilder
 from .product_types import get_extraction_focus, get_output_schema
 
@@ -137,8 +138,9 @@ class ClauseExtractor:
 class DynamicExtractor:
     """动态提取器"""
 
-    def __init__(self, llm_client):
+    def __init__(self, llm_client, classifier: ProductTypeClassifier):
         self.llm_client = llm_client
+        self.classifier = classifier
         self.prompt_builder = PromptBuilder()
         self.specialized_extractors = {
             'premium_table': PremiumTableExtractor(llm_client),
@@ -147,12 +149,14 @@ class DynamicExtractor:
 
     def extract(self,
                 document: NormalizedDocument,
-                product_type: str,
-                is_hybrid: bool,
                 required_fields: List[str]) -> ExtractResult:
         """结构化提取"""
 
-        # 1. 构建 Prompt
+        # 1. 获取产品类型信息
+        product_type, _ = self.classifier.get_primary_type(document.content)
+        is_hybrid = self.classifier.is_hybrid_product(document.content)
+
+        # 2. 构建 Prompt
         prompt = self.prompt_builder.build(
             product_type=product_type,
             required_fields=required_fields,
