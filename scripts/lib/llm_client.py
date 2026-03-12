@@ -66,9 +66,74 @@ class ZhipuClient(BaseLLMClient):
             "Content-Type": "application/json"
         }
 
+    def _do_generate(self, prompt: str, **kwargs) -> str:
+        """
+        实际执行单次 API 调用
+
+        Args:
+            prompt: 提示词
+            **kwargs: 其他参数
+
+        Returns:
+            str: 生成的文本
+        """
+        url = f"{self.base_url}/chat/completions"
+        data = {
+            "model": kwargs.get('model', self.model),
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": kwargs.get('temperature', 0.1),
+            "max_tokens": kwargs.get('max_tokens', 8192),
+            "top_p": kwargs.get('top_p', 0.7)
+        }
+
+        response = requests.post(
+            url,
+            headers=self.headers,
+            json=data,
+            timeout=self.timeout
+        )
+
+        # 对 429 和 5xx 错误抛出包含状态码的异常
+        if response.status_code == 429:
+            raise requests.exceptions.RequestException(
+                f"429 Rate limit exceeded: {response.text[:200]}"
+            )
+        if response.status_code >= 500:
+            raise requests.exceptions.RequestException(
+                f"{response.status_code} Server error: {response.text[:200]}"
+            )
+
+        response.raise_for_status()
+        result = response.json()
+
+        # 提取生成内容
+        if 'choices' in result and len(result['choices']) > 0:
+            message = result['choices'][0]['message']
+
+            if message.get('content'):
+                return message['content']
+
+            # GLM-4.7 reasoning mode 处理
+            if message.get('reasoning_content'):
+                reasoning = message['reasoning_content']
+                import re
+                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', reasoning, re.DOTALL)
+                if json_match:
+                    try:
+                        import json
+                        parsed = json.loads(json_match.group(0))
+                        return json.dumps(parsed, ensure_ascii=False)
+                    except json.JSONDecodeError:
+                        pass
+                return reasoning
+
+        import logging
+        logging.warning(f"LLM response missing 'content' field. Response keys: {result.keys() if isinstance(result, dict) else type(result)}")
+        return ""
+
     def generate(self, prompt: str, **kwargs) -> str:
         """
-        生成文本
+        生成文本（自动重试）
 
         Args:
             prompt: 提示词
@@ -77,71 +142,52 @@ class ZhipuClient(BaseLLMClient):
         Returns:
             str: 生成的文本
         """
-        try:
-            url = f"{self.base_url}/chat/completions"
-            data = {
-                "model": kwargs.get('model', self.model),
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": kwargs.get('temperature', 0.1),
-                "max_tokens": kwargs.get('max_tokens', 8192),
-                "top_p": kwargs.get('top_p', 0.7)
-            }
+        import time
+        import logging
 
-            response = requests.post(
-                url,
-                headers=self.headers,
-                json=data,
-                timeout=self.timeout
-            )
+        max_retries = 3
+        base_delay = 2
+        last_exception = None
 
-            # 对 429 和 5xx 错误抛出包含状态码的异常，让上层重试机制能正确感知
-            if response.status_code == 429:
-                raise requests.exceptions.RequestException(
-                    f"429 Rate limit exceeded: {response.text[:200]}"
-                )
-            if response.status_code >= 500:
-                raise requests.exceptions.RequestException(
-                    f"{response.status_code} Server error: {response.text[:200]}"
-                )
+        for attempt in range(max_retries):
+            try:
+                return self._do_generate(prompt, **kwargs)
+            except requests.exceptions.RequestException as e:
+                last_exception = e
+                error_msg = str(e)
 
-            response.raise_for_status()
-            result = response.json()
+                # 429 速率限制 - 等待更长时间
+                if '429' in error_msg:
+                    wait_time = base_delay * (3 ** attempt)
+                    if attempt < max_retries - 1:
+                        logging.warning(f"Rate limit hit, waiting {wait_time:.1f}s before retry {attempt + 1}/{max_retries}")
+                        time.sleep(wait_time)
+                        continue
 
-            # 提取生成内容（支持多种响应格式）
-            if 'choices' in result and len(result['choices']) > 0:
-                message = result['choices'][0]['message']
+                # 5xx 服务器错误 - 指数退避
+                if any(code in error_msg for code in ['500', '502', '503', '504']):
+                    wait_time = base_delay * (2 ** attempt)
+                    if attempt < max_retries - 1:
+                        logging.warning(f"Server error, retrying {attempt + 1}/{max_retries} after {wait_time:.1f}s")
+                        time.sleep(wait_time)
+                        continue
 
-                # 优先使用 content（包含实际答案）
-                if message.get('content'):
-                    return message['content']
+                # 超时错误 - 指数退避
+                if 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower():
+                    wait_time = base_delay * (2 ** attempt)
+                    if attempt < max_retries - 1:
+                        logging.warning(f"Timeout, retrying {attempt + 1}/{max_retries} after {wait_time:.1f}s")
+                        time.sleep(wait_time)
+                        continue
 
-                # GLM-4.7 reasoning mode: if content is empty, reasoning_content may contain the answer
-                # when the response is cut off, check if there's useful content in reasoning_content
-                if message.get('reasoning_content'):
-                    reasoning = message['reasoning_content']
-                    # Try to extract JSON from reasoning
-                    import re
-                    json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', reasoning, re.DOTALL)
-                    if json_match:
-                        try:
-                            import json
-                            parsed = json.loads(json_match.group(0))
-                            return json.dumps(parsed, ensure_ascii=False)
-                        except json.JSONDecodeError:
-                            pass
-                    # Otherwise return reasoning content (may contain answer)
-                    return reasoning
+                # 其他错误直接抛出
+                if attempt == max_retries - 1:
+                    logging.error(f"All retries failed. Last error: {e}")
+                raise
 
-            # Debug: log response structure
-            import logging
-            logging.warning(f"LLM response missing 'content' field. Response keys: {result.keys() if isinstance(result, dict) else type(result)}")
-            logging.warning(f"Full response: {result}")
-            return ""
-
-        except requests.exceptions.RequestException as e:
-            import logging
-            logging.warning(f"Error calling ZhipuAI API: {e}")
-            raise  # 向上抛出，让调用方的重试逻辑处理
+        if last_exception:
+            raise last_exception
+        return ""  # 向上抛出，让调用方的重试逻辑处理
 
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         """
@@ -245,28 +291,53 @@ class OllamaClient(BaseLLMClient):
         super().__init__(model, timeout)
         self.host = host.rstrip('/')
 
-    def generate(self, prompt: str, **kwargs) -> str:
-        """生成文本"""
-        try:
-            url = f"{self.host}/api/generate"
-            data = {
-                "model": kwargs.get('model', self.model),
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": kwargs.get('temperature', 0.7),
-                    "num_predict": kwargs.get('max_tokens', 500)
-                }
+    def _do_generate(self, prompt: str, **kwargs) -> str:
+        """实际执行单次 API 调用"""
+        url = f"{self.host}/api/generate"
+        data = {
+            "model": kwargs.get('model', self.model),
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": kwargs.get('temperature', 0.7),
+                "num_predict": kwargs.get('max_tokens', 500)
             }
+        }
 
-            response = requests.post(url, json=data, timeout=self.timeout)
-            response.raise_for_status()
-            result = response.json()
-            return result.get('response', '')
+        response = requests.post(url, json=data, timeout=self.timeout)
+        response.raise_for_status()
+        result = response.json()
+        return result.get('response', '')
 
-        except requests.exceptions.RequestException as e:
-            print(f"Error calling Ollama API: {e}")
-            return ""
+    def generate(self, prompt: str, **kwargs) -> str:
+        """生成文本（自动重试）"""
+        import time
+        import logging
+
+        max_retries = 3
+        base_delay = 2
+        last_exception = None
+
+        for attempt in range(max_retries):
+            try:
+                return self._do_generate(prompt, **kwargs)
+            except requests.exceptions.RequestException as e:
+                last_exception = e
+                error_msg = str(e)
+
+                # 只对超时和 5xx 错误重试
+                if 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower() or any(code in error_msg for code in ['500', '502', '503', '504']):
+                    wait_time = base_delay * (2 ** attempt)
+                    if attempt < max_retries - 1:
+                        logging.warning(f"Ollama error, retrying {attempt + 1}/{max_retries} after {wait_time:.1f}s")
+                        time.sleep(wait_time)
+                        continue
+
+                raise
+
+        if last_exception:
+            raise last_exception
+        return ""
 
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         """对话生成"""

@@ -5,6 +5,12 @@ pyarrow>=14.0.0
 paddleocr>=2.7.0
 # feishu2md>=0.1.0
 
+# LlamaIndex dependencies for RAG engine
+llama-index-core>=0.10.0
+llama-index-llms-ollama>=0.1.0
+llama-index-embeddings-ollama>=0.1.0
+llama-index-vector-stores-lancedb>=0.1.0
+
 # Optional dependencies for enhanced functionality
 # markdown>=3.5.0
 # python-docx>=0.8.11
