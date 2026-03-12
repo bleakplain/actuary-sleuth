@@ -111,6 +111,20 @@ class PromptBuilder:
   - adjustment_rules: 保额调整规则
 """,
 
+        'field_clauses': """
+**条款信息**:
+- clauses: 条款列表
+  - number: 条款编号（如 2.1, 第一条, 7.11 等）
+  - title: 条款标题
+  - text: 条款完整文本内容
+
+**条款提取要求**:
+- 必须提取文档中的所有条款，确保完整性
+- 正确识别各种格式的条款编号（HTML 表格格式、标准格式等）
+- 保持条款的层级结构和完整内容
+- 过滤非条款内容（阅读指引、投保须知、目录等）
+""",
+
         # 输出格式组件
         'output_structure': """
 **输出要求**:
@@ -209,6 +223,7 @@ class PromptBuilder:
             'account_management': ['field_account'],
             'settlement_rate': ['field_settlement_rate'],
             'death_benefit': ['field_death_benefit'],
+            'clauses': ['field_clauses'],
         }
 
         components = set()

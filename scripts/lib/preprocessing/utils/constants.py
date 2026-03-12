@@ -31,7 +31,8 @@ class ExtractionConfig:
 
     # ========== Dynamic Lane ==========
     DYNAMIC_CONTENT_MAX_CHARS: int = 15000
-    DYNAMIC_EXTRACTION_MAX_TOKENS: int = 6000
+    DYNAMIC_EXTRACTION_MAX_TOKENS: int = 8000  # 提高以支持更多条款提取
+    DYNAMIC_EXTRACTION_MAX_TOKENS_LARGE: int = 16000  # 大文档的条款提取
     DEFAULT_DYNAMIC_CONFIDENCE: float = 0.75
 
     # ========== Specialized Extractors ==========
@@ -39,6 +40,9 @@ class ExtractionConfig:
     TABLE_EXTRACTION_MAX_TOKENS: int = 2000
     CLAUSE_CONTENT_MAX_CHARS: int = 8000
     CLAUSE_EXTRACTION_MAX_TOKENS: int = 4000
+    # HTML table format clauses (larger documents)
+    TABLE_CLAUSE_CONTENT_MAX_CHARS: int = 50000
+    TABLE_CLAUSE_EXTRACTION_MAX_TOKENS: int = 12000
 
     # ========== Metadata Keys ==========
     EXTRACTION_MODE: str = 'extraction_mode'

@@ -8,6 +8,7 @@
 """
 import json
 import logging
+import re
 from typing import Dict, List, Any, Optional
 
 from .models import NormalizedDocument, ExtractResult
@@ -69,49 +70,141 @@ class PremiumTableExtractor:
 
 
 class ClauseExtractor:
-    """条款专用提取器"""
+    """条款专用提取器 - 自适应动态提取"""
 
-    CLAUSE_PROMPT = """你是保险条款提取专家。
+    def __init__(self, llm_client):
+        self.llm_client = llm_client
 
-**任务**: 从以下内容中提取所有条款。
+    def _analyze_structure(self, content: str) -> Dict[str, Any]:
+        """分析文档结构，返回特征信息"""
+        import re
 
-**要求**:
-1. 提取每个条款的完整文本
-2. 识别条款编号或标题
-3. 过滤非条款内容（如"阅读指引"、"投保须知"）
+        # 采样分析（前 5000 字符）
+        sample = content[:5000]
+
+        # 检测各种可能的条款编号模式
+        patterns = {
+            'html_bold_number': r'\*\*\d+\.\d+\*\*',
+            'chapter_dot': r'第[一二三四五六七八九十\d]+\s*章',
+            'clause_number': r'第[一二三四五六七八九十\d]+\s*条',
+            'decimal_number': r'^\d+\.\d+\s',
+            'parenthesis_number': r'^\d+\)',
+            'chinese_number': r'[一二三四五六七八九十]+、',
+        }
+
+        detected = {}
+        for name, pattern in patterns.items():
+            matches = re.findall(pattern, sample, re.MULTILINE)
+            if matches:
+                detected[name] = len(matches)
+
+        # 检测 HTML 表格
+        has_table = '<table>' in content or '<tr>' in content
+
+        # 检测章节标题
+        headings = re.findall(r'^#{1,3}\s+.+$', sample, re.MULTILINE)
+
+        return {
+            'detected_patterns': detected,
+            'has_table': has_table,
+            'has_headings': len(headings) > 0,
+            'total_length': len(content)
+        }
+
+    def _build_prompt(self, content: str, structure: Dict[str, Any]) -> str:
+        """动态构建提取 Prompt"""
+        detected = structure['detected_patterns']
+
+        # 构建格式说明
+        format_desc = []
+        if 'html_bold_number' in detected:
+            format_desc.append(f"- HTML 表格中的粗体数字编号（如 **2.1**），检测到约 {detected['html_bold_number']} 处")
+        if 'chapter_dot' in detected:
+            format_desc.append(f"- 章节格式（如 第一章、第1章），检测到约 {detected['chapter_dot']} 处")
+        if 'clause_number' in detected:
+            format_desc.append(f"- 条款格式（如 第一条、第1条），检测到约 {detected['clause_number']} 处")
+        if 'decimal_number' in detected:
+            format_desc.append(f"- 小数点编号（如 1.1、2.3），检测到约 {detected['decimal_number']} 处")
+        if 'parenthesis_number' in detected:
+            format_desc.append(f"- 括号编号（如 1)、2)），检测到约 {detected['parenthesis_number']} 处")
+
+        format_info = "检测到的条款格式模式：\n" + "\n".join(format_desc) if format_desc else "未检测到明确的条款编号模式，请根据文档结构自行识别"
+
+        # 计算需要的输出规模
+        estimated_clauses = sum(detected.values()) if detected else 50
+        size_note = f"\n\n**注意**: 文档共 {structure['total_length']} 字符，预计包含约 {estimated_clauses} 个条款项，请确保提取完整，不要遗漏。" if structure['total_length'] > 10000 else ""
+
+        return f"""你是保险条款提取专家，能够自适应识别各种文档格式的条款结构。
+
+**任务**: 从保险产品文档中提取所有条款内容。
+
+{format_info}{size_note}
+
+**提取要求**:
+1. **完整性优先**: 必须提取文档中的所有条款，不要遗漏任何一项
+2. **保持结构**: 保留条款的编号、标题和完整内容
+3. **层级识别**: 正确识别章节、条款、子条款的层级关系
+4. **内容完整**: 条款内容要包含所有细节、条件和说明
+
+**过滤规则**（不要提取这些内容）:
+- 阅读指引、投保须知、提示说明等非条款内容
+- 目录、索引
+- 附表、费率表（除非是条款的一部分）
+- 页眉、页脚、页码等格式信息
 
 **输出格式** (JSON):
 {{
     "clauses": [
         {{
-            "number": "第一条",
-            "title": "保险责任",
-            "text": "本合同承担的保险责任为..."
+            "number": "条款编号（如 2.3, 第一条, 1.1 等）",
+            "title": "条款标题（如果有）",
+            "text": "条款的完整文本内容"
         }}
     ]
 }}
 
-条款内容:
-{clause_content}
+**重要**:
+- 输出必须是纯 JSON 格式，不要使用 markdown 代码块
+- 如果某个条款只有编号没有标题，title 字段留空或使用编号
+- 确保所有条款都被提取，不要在文档中间停止
+
+文档内容:
+{content}
 """
 
-    def __init__(self, llm_client):
-        self.llm_client = llm_client
-
     def extract(self, content: str) -> List[Dict[str, Any]]:
-        """提取条款"""
-        prompt = self.CLAUSE_PROMPT.format(
-            clause_content=content[:config.CLAUSE_CONTENT_MAX_CHARS]
-        )
+        """提取条款 - 自适应版本"""
+        # 分析文档结构
+        structure = self._analyze_structure(content)
+        logger.info(f"文档结构分析: {structure}")
+
+        # 根据文档大小和结构决定参数
+        content_length = len(content)
+
+        # 动态调整参数
+        if content_length > 30000:
+            max_chars = min(content_length, 60000)
+            max_tokens = 16000
+        elif content_length > 15000:
+            max_chars = min(content_length, 40000)
+            max_tokens = 12000
+        else:
+            max_chars = config.CLAUSE_CONTENT_MAX_CHARS
+            max_tokens = config.CLAUSE_EXTRACTION_MAX_TOKENS
+
+        # 构建 Prompt
+        prompt = self._build_prompt(content[:max_chars], structure)
 
         try:
             response = self.llm_client.generate(
                 prompt,
-                max_tokens=config.CLAUSE_EXTRACTION_MAX_TOKENS,
+                max_tokens=max_tokens,
                 temperature=0.1
             )
             result = parse_llm_json_response(response)
-            return result.get('clauses', [])
+            clauses = result.get('clauses', [])
+            logger.info(f"条款提取完成: 提取到 {len(clauses)} 个条款")
+            return clauses
         except Exception as e:
             logger.warning(f"条款提取失败: {e}")
             return []
@@ -206,6 +299,23 @@ class DynamicExtractor:
         chunk_size = config.DYNAMIC_CONTENT_MAX_CHARS
         overlap = 1000  # 块之间重叠 1000 字符以保持上下文
 
+        # 检测是否需要大量 token（如提取条款）
+        # 检测文档中的条款数量
+        import re
+        clause_patterns = [
+            r'\*\*\d+\.\d+\*\*',  # HTML 表格格式
+            r'第[一二三四五六七八九十\d]+\s*条',  # 标准格式
+            r'\d+\.\d+\s',  # 小数点格式
+        ]
+        estimated_clauses = sum(len(re.findall(p, content)) for p in clause_patterns)
+
+        # 根据条款数量调整 token 限制
+        if estimated_clauses > 50:
+            max_tokens = getattr(config, 'DYNAMIC_EXTRACTION_MAX_TOKENS_LARGE', 16000)
+            logger.info(f"检测到约 {estimated_clauses} 个条款，使用高 token 限制: {max_tokens}")
+        else:
+            max_tokens = config.DYNAMIC_EXTRACTION_MAX_TOKENS
+
         # 分块
         chunks = []
         start = 0
@@ -221,17 +331,22 @@ class DynamicExtractor:
         try:
             response = self.llm_client.generate(
                 first_prompt,
-                max_tokens=config.DYNAMIC_EXTRACTION_MAX_TOKENS,
+                max_tokens=max_tokens,
                 temperature=0.1
             )
             result = parse_llm_json_response(response)
-            logger.info(f"第 1/{len(chunks)} 块提取完成")
+            logger.info(f"第 1/{len(chunks)} 块提取完成，得到 {len(result)} 个字段")
+            if 'clauses' in result:
+                logger.info(f"  提取到 {len(result.get('clauses', []))} 个条款")
         except Exception as e:
             logger.error(f"第 1 块提取失败: {e}")
             result = {}
 
         # 后续块：补充提取
         for i, chunk in enumerate(chunks[1:], 1):
+            # 统计已有条款数
+            existing_clause_count = len(result.get('clauses', []))
+
             supplement_prompt = f"""你是保险产品信息提取专家。
 
 **任务**: 从以下文档片段中补充提取信息。
@@ -241,13 +356,17 @@ class DynamicExtractor:
 {json.dumps(result, ensure_ascii=False, indent=2)}
 ```
 
+已有条款数: {existing_clause_count} 条
+
 **新文档片段**:
 {chunk}
 
 **要求**:
-1. 只提取已有结果中缺失的字段
-2. 如果已有字段的值不完整，用新信息补充
-3. 输出格式为 JSON，只包含新增或更新的字段
+1. **特别关注条款**: 继续从新片段中提取所有条款，添加到 clauses 列表中
+2. 对条款列表使用追加模式，不要替换已有条款
+3. 只提取已有结果中缺失的字段
+4. 如果已有字段的值不完整，用新信息补充
+5. 输出格式为 JSON，只包含新增或更新的字段
 
 **输出格式** (JSON):
 {{}}
@@ -256,10 +375,13 @@ class DynamicExtractor:
             try:
                 response = self.llm_client.generate(
                     supplement_prompt,
-                    max_tokens=config.DYNAMIC_EXTRACTION_MAX_TOKENS,
+                    max_tokens=max_tokens,  # 使用相同的高 token 限制
                     temperature=0.1
                 )
                 chunk_result = parse_llm_json_response(response)
+
+                # 合并前记录条款数
+                before_clause_count = len(result.get('clauses', []))
 
                 # 合并结果
                 for key, value in chunk_result.items():
@@ -267,15 +389,29 @@ class DynamicExtractor:
                         result[key] = value
                     elif isinstance(value, dict) and isinstance(result.get(key), dict):
                         result[key].update(value)
+                    elif key == 'clauses' and isinstance(value, list) and isinstance(result.get(key), list):
+                        # 条款特殊去重：基于 number 字段
+                        existing_numbers = {c.get('number') for c in result[key] if c.get('number')}
+                        for item in value:
+                            item_number = item.get('number')
+                            if item_number and item_number not in existing_numbers:
+                                result[key].append(item)
+                                existing_numbers.add(item_number)
+                            elif not item_number:
+                                # 没有编号的条款，使用内容去重
+                                item_str = json.dumps(item, ensure_ascii=False)
+                                if item_str not in {json.dumps(c, ensure_ascii=False) for c in result[key]}:
+                                    result[key].append(item)
                     elif isinstance(value, list) and isinstance(result.get(key), list):
-                        # 去重合并列表
+                        # 其他列表的去重合并
                         existing = {json.dumps(item, ensure_ascii=False) for item in result[key]}
                         for item in value:
                             item_str = json.dumps(item, ensure_ascii=False)
                             if item_str not in existing:
                                 result[key].append(item)
 
-                logger.info(f"第 {i+1}/{len(chunks)} 块提取完成")
+                after_clause_count = len(result.get('clauses', []))
+                logger.info(f"第 {i+1}/{len(chunks)} 块提取完成，条款数: {before_clause_count} -> {after_clause_count}")
 
             except Exception as e:
                 logger.warning(f"第 {i+1} 块提取失败: {e}")
