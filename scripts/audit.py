@@ -373,38 +373,39 @@ def _fetch_feishu_content(document_url: str) -> str:
 
     doc_token = match.group(1)
     md_filename = f"{doc_token}.md"
+    output_dir = "/tmp"
 
-    # 使用 feishu2md 下载文档到当前目录
+    # 使用 feishu2md 下载文档到 /tmp 目录
     try:
-        # 先切换到临时目录执行下载，避免污染当前目录
-        import tempfile
+        # 确保输出目录存在
+        os.makedirs(output_dir, exist_ok=True)
+
+        # 切换到输出目录执行下载
         old_cwd = os.getcwd()
+        os.chdir(output_dir)
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            os.chdir(tmpdir)
+        result = subprocess.run(
+            ['feishu2md', 'download', document_url],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True
+        )
 
-            result = subprocess.run(
-                ['feishu2md', 'download', document_url],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=True
-            )
+        os.chdir(old_cwd)
 
-            os.chdir(old_cwd)
+        # feishu2md 会在执行目录生成 {token}.md 文件
+        md_file = os.path.join(output_dir, md_filename)
 
-            # feishu2md 会在执行目录生成 {token}.md 文件
-            md_file = os.path.join(tmpdir, md_filename)
+        if not os.path.exists(md_file):
+            raise Exception(f"Markdown file not generated: {md_file}")
 
-            if not os.path.exists(md_file):
-                raise Exception(f"Markdown file not generated: {md_file}")
+        with open(md_file, 'r', encoding='utf-8') as f:
+            content = f.read()
 
-            with open(md_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            # 不再截断文档，保留完整内容
-            # LLM 可以通过分块处理和重试机制应对长文档
-            return content
+        # 不再截断文档，保留完整内容
+        # LLM 可以通过分块处理和重试机制应对长文档
+        return content
 
     except subprocess.CalledProcessError as e:
         os.chdir(old_cwd)
