@@ -10,7 +10,7 @@ from typing import Dict, List, Any, Optional
 
 from .models import NormalizedDocument, ExtractResult, ValidationResult
 from .normalizer import Normalizer
-from .classifier import ProductTypeClassifier
+from .classifier import ProductClassifier
 from .extractor_selector import ExtractorSelector
 from .fast_extractor import FastExtractor, FastExtractionFailed
 from .dynamic_extractor import DynamicExtractor
@@ -35,7 +35,7 @@ class DocumentExtractor:
 
         # 初始化组件（注意顺序：DynamicExtractor 依赖 classifier）
         self.normalizer = Normalizer()
-        self.classifier = ProductTypeClassifier()
+        self.classifier = ProductClassifier()
         self.fast_extractor = FastExtractor(llm_client)
         self.dynamic_extractor = DynamicExtractor(llm_client, self.classifier)
         self.extractor_selector = ExtractorSelector(

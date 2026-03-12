@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-产品类型分类器
+产品分类器
 
 多标签产品类型分类，支持混合产品识别。
 """
@@ -15,8 +15,8 @@ from .models import ProductType
 logger = logging.getLogger(__name__)
 
 
-class ProductTypeClassifier:
-    """产品类型分类器 - 多标签支持"""
+class ProductClassifier:
+    """产品分类器 - 多标签支持"""
 
     def __init__(self, threshold: float = 0.3):
         self.types = PRODUCT_TYPES

@@ -7,7 +7,7 @@
 
 核心组件:
 - Normalizer: 文档规范化
-- ProductTypeClassifier: 产品类型分类
+- ProductClassifier: 产品分类
 - ExtractorSelector: 提取器选择
 - FastExtractor: 快速提取器（快速通道）
 - DynamicExtractor: 动态提取器（动态通道）
@@ -39,7 +39,7 @@ from .models import (
 )
 
 from .normalizer import Normalizer
-from .classifier import ProductTypeClassifier
+from .classifier import ProductClassifier
 from .extractor_selector import ExtractorSelector
 from .fast_extractor import FastExtractor, FastExtractionFailed
 from .prompt_builder import PromptBuilder
@@ -66,7 +66,7 @@ __all__ = [
 
     # Core Components
     'Normalizer',
-    'ProductTypeClassifier',
+    'ProductClassifier',
     'ExtractorSelector',
     'FastExtractor',
     'FastExtractionFailed',

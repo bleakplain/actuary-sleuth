@@ -9,7 +9,7 @@ import logging
 from typing import List, Tuple, Union
 
 from .models import NormalizedDocument, DocumentProfile
-from .classifier import ProductTypeClassifier
+from .classifier import ProductClassifier
 from .fast_extractor import FastExtractor
 from .dynamic_extractor import DynamicExtractor
 
@@ -28,7 +28,7 @@ class ExtractorSelector:
         'waiting_period'
     }
 
-    def __init__(self, fast_extractor: FastExtractor, dynamic_extractor: DynamicExtractor, classifier: ProductTypeClassifier = None):
+    def __init__(self, fast_extractor: FastExtractor, dynamic_extractor: DynamicExtractor, classifier: ProductClassifier = None):
         """
         初始化提取器选择器
 
@@ -39,7 +39,7 @@ class ExtractorSelector:
         """
         self.fast_extractor = fast_extractor
         self.dynamic_extractor = dynamic_extractor
-        self.type_classifier = classifier or ProductTypeClassifier()
+        self.type_classifier = classifier or ProductClassifier()
 
     def select(self, document: NormalizedDocument) -> Union[FastExtractor, DynamicExtractor]:
         """

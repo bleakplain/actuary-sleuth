@@ -11,7 +11,7 @@ import re
 from typing import Dict, List, Any, Optional
 
 from .models import NormalizedDocument, ExtractResult
-from .classifier import ProductTypeClassifier
+from .classifier import ProductClassifier
 from .prompt_builder import PromptBuilder
 from .product_types import get_extraction_focus, get_output_schema
 
@@ -138,7 +138,7 @@ class ClauseExtractor:
 class DynamicExtractor:
     """动态提取器"""
 
-    def __init__(self, llm_client, classifier: ProductTypeClassifier):
+    def __init__(self, llm_client, classifier: ProductClassifier):
         self.llm_client = llm_client
         self.classifier = classifier
         self.prompt_builder = PromptBuilder()
