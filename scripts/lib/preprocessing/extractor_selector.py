@@ -12,6 +12,7 @@ from .models import NormalizedDocument, DocumentProfile
 from .classifier import ProductClassifier
 from .fast_extractor import FastExtractor
 from .dynamic_extractor import DynamicExtractor
+from .utils.constants import config
 
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ class ExtractorSelector:
         )
 
         # 条件2: 分类置信度低
-        is_low_confidence = confidence < 0.7
+        is_low_confidence = confidence < config.LOW_CONFIDENCE_THRESHOLD
 
         # 条件3: 关键信息不在文档前部
         has_key_info_back = not self._check_key_info_position(document)
@@ -81,26 +82,16 @@ class ExtractorSelector:
         return is_complex or is_low_confidence or has_key_info_back
 
     def _check_key_info_position(self, document: NormalizedDocument) -> bool:
-        """检查关键信息是否在文档前部（前2000字符）"""
-        front = document.content[:2000]
+        """检查关键信息是否在文档前部"""
+        front = document.content[:config.KEY_INFO_SEARCH_WINDOW]
 
         # 检查必需字段是否在前面
         required_found = sum(
             1 for field in self.REQUIRED_FIELDS
-            if any(indicator in front for indicator in self._field_indicators(field))
+            if any(indicator in front for indicator in config.FIELD_INDICATORS.get(field, [field]))
         )
 
-        return required_found >= len(self.REQUIRED_FIELDS) * 0.75
-
-    def _field_indicators(self, field: str) -> List[str]:
-        """字段指示词列表"""
-        indicators = {
-            'product_name': ['产品名称', '保险产品', '保险计划'],
-            'insurance_company': ['保险公司', '承保机构', '公司名称'],
-            'insurance_period': ['保险期间', '保障期限', '保险期限'],
-            'waiting_period': ['等待期', '观察期']
-        }
-        return indicators.get(field, [field])
+        return required_found >= len(self.REQUIRED_FIELDS) * config.REQUIRED_FIELDS_COVERAGE_THRESHOLD
 
     def _explain_decision(self, use_dynamic: bool, profile: DocumentProfile, confidence: float) -> str:
         """解释决策原因"""
@@ -109,7 +100,7 @@ class ExtractorSelector:
         if use_dynamic:
             if not profile.is_structured:
                 reasons.append("格式非标准化")
-            if confidence < 0.7:
+            if confidence < config.LOW_CONFIDENCE_THRESHOLD:
                 reasons.append(f"分类置信度低({confidence:.2f})")
             if len(reasons) == 1:
                 reasons.append("或关键信息不在前部")

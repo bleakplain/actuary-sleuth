@@ -5,12 +5,13 @@
 
 用于快速通道的低成本提取，使用 Few-shot Prompt。
 """
-import json
 import logging
 import re
 from typing import Dict, List, Any, Optional
 
 from .models import NormalizedDocument, ExtractResult
+from .utils.json_parser import parse_llm_json_response
+from .utils.constants import config
 
 
 logger = logging.getLogger(__name__)
@@ -66,17 +67,19 @@ class FastExtractor:
         Raises:
             FastExtractionFailed: 提取失败时
         """
-        # 1. 使用 Few-shot Prompt 提取 (增加到1500字符以支持中文)
-        prompt = self.FEW_SHOT_EXTRACT.format(document=document.content[:1500])
+        # 1. 使用 Few-shot Prompt 提取
+        prompt = self.FEW_SHOT_EXTRACT.format(
+            document=document.content[:config.FAST_CONTENT_MAX_CHARS]
+        )
 
         try:
             response = self.llm_client.generate(
                 prompt,
-                max_tokens=1500,  # 增加输出token预算
+                max_tokens=config.FAST_EXTRACTION_MAX_TOKENS,
                 temperature=0.1
             )
 
-            result = self._parse_response(response)
+            result = parse_llm_json_response(response, strict=True)
 
             # 2. 补充提取（如果有缺失的必需字段）
             missing = [f for f in required_fields if f not in result]
@@ -85,33 +88,14 @@ class FastExtractor:
 
             return ExtractResult(
                 data=result,
-                confidence={k: 0.85 for k in result},
-                provenance={k: 'fast_llm' for k in result},
-                metadata={'extraction_mode': 'fast'}
+                confidence={k: config.DEFAULT_FAST_CONFIDENCE for k in result},
+                provenance={k: config.PROVENANCE_FAST_LLM for k in result},
+                metadata={config.EXTRACTION_MODE: 'fast'}
             )
 
         except Exception as e:
             logger.warning(f"快速提取失败: {e}")
             raise FastExtractionFailed(f"快速通道提取失败: {e}")
-
-    def _parse_response(self, response: str) -> Dict[str, Any]:
-        """解析 LLM 响应"""
-        # 尝试提取 JSON
-        json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group(1))
-
-        cleaned = response.strip()
-        if cleaned.startswith('{') and cleaned.endswith('}'):
-            return json.loads(cleaned)
-
-        # 查找完整 JSON 对象
-        first_brace = cleaned.find('{')
-        last_brace = cleaned.rfind('}')
-        if first_brace != -1 and last_brace != -1:
-            return json.loads(cleaned[first_brace:last_brace + 1])
-
-        raise ValueError(f"无法解析响应: {response[:100]}")
 
     def _supplement_extract(self,
                            document: NormalizedDocument,

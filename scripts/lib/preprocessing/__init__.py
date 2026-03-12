@@ -50,6 +50,7 @@ from .dynamic_extractor import (
 )
 from .validator import ResultValidator
 from .document_extractor import DocumentExtractor, create_extractor
+from .utils import parse_llm_json_response, config
 
 __version__ = '1.0.0'
 
@@ -79,4 +80,8 @@ __all__ = [
     # Main Entry
     'DocumentExtractor',
     'create_extractor',
+
+    # Utils
+    'parse_llm_json_response',
+    'config',
 ]

@@ -5,15 +5,15 @@
 
 用于动态通道的完整提取，使用动态 Prompt 和专用提取器。
 """
-import json
 import logging
-import re
 from typing import Dict, List, Any, Optional
 
 from .models import NormalizedDocument, ExtractResult
 from .classifier import ProductClassifier
 from .prompt_builder import PromptBuilder
 from .product_types import get_extraction_focus, get_output_schema
+from .utils.json_parser import parse_llm_json_response
+from .utils.constants import config
 
 
 logger = logging.getLogger(__name__)
@@ -50,30 +50,20 @@ class PremiumTableExtractor:
 
     def extract(self, content: str) -> Dict[str, Any]:
         """提取费率表"""
-        prompt = self.TABLE_PROMPT.format(table_content=content[:3000])
+        prompt = self.TABLE_PROMPT.format(
+            table_content=content[:config.TABLE_CONTENT_MAX_CHARS]
+        )
 
         try:
             response = self.llm_client.generate(
                 prompt,
-                max_tokens=2000,
+                max_tokens=config.TABLE_EXTRACTION_MAX_TOKENS,
                 temperature=0.1
             )
-            return self._parse_response(response)
+            return parse_llm_json_response(response)
         except Exception as e:
             logger.warning(f"费率表提取失败: {e}")
             return {}
-
-    def _parse_response(self, response: str) -> Dict[str, Any]:
-        """解析响应"""
-        json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group(1))
-
-        cleaned = response.strip()
-        if cleaned.startswith('{') and cleaned.endswith('}'):
-            return json.loads(cleaned)
-
-        return {}
 
 
 class ClauseExtractor:
@@ -108,31 +98,21 @@ class ClauseExtractor:
 
     def extract(self, content: str) -> List[Dict[str, Any]]:
         """提取条款"""
-        prompt = self.CLAUSE_PROMPT.format(clause_content=content[:8000])
+        prompt = self.CLAUSE_PROMPT.format(
+            clause_content=content[:config.CLAUSE_CONTENT_MAX_CHARS]
+        )
 
         try:
             response = self.llm_client.generate(
                 prompt,
-                max_tokens=4000,
+                max_tokens=config.CLAUSE_EXTRACTION_MAX_TOKENS,
                 temperature=0.1
             )
-            result = self._parse_response(response)
+            result = parse_llm_json_response(response)
             return result.get('clauses', [])
         except Exception as e:
             logger.warning(f"条款提取失败: {e}")
             return []
-
-    def _parse_response(self, response: str) -> Dict[str, Any]:
-        """解析响应"""
-        json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group(1))
-
-        cleaned = response.strip()
-        if cleaned.startswith('{') and cleaned.endswith('}'):
-            return json.loads(cleaned)
-
-        return {}
 
 
 class DynamicExtractor:
@@ -143,8 +123,8 @@ class DynamicExtractor:
         self.classifier = classifier
         self.prompt_builder = PromptBuilder()
         self.specialized_extractors = {
-            'premium_table': PremiumTableExtractor(llm_client),
-            'clauses': ClauseExtractor(llm_client),
+            config.EXTRACTOR_PREMIUM_TABLE: PremiumTableExtractor(llm_client),
+            config.EXTRACTOR_CLAUSES: ClauseExtractor(llm_client),
         }
 
     def extract(self,
@@ -152,9 +132,10 @@ class DynamicExtractor:
                 required_fields: List[str]) -> ExtractResult:
         """结构化提取"""
 
-        # 1. 获取产品类型信息
-        product_type, _ = self.classifier.get_primary_type(document.content)
-        is_hybrid = self.classifier.is_hybrid_product(document.content)
+        # 1. 获取产品类型信息（一次性分类，避免重复）
+        classifications = self.classifier.classify(document.content)
+        product_type = classifications[0][0] if classifications else 'life_insurance'
+        is_hybrid = len(classifications) > 1 and classifications[1][1] > config.HYBRID_PRODUCT_THRESHOLD
 
         # 2. 构建 Prompt
         prompt = self.prompt_builder.build(
@@ -165,66 +146,45 @@ class DynamicExtractor:
             is_hybrid=is_hybrid
         )
 
-        # 2. 添加文档内容 (增加到15000字符)
-        full_prompt = f"{prompt}\n\n文档内容:\n{document.content[:15000]}"
+        # 3. 添加文档内容
+        full_prompt = f"{prompt}\n\n文档内容:\n{document.content[:config.DYNAMIC_CONTENT_MAX_CHARS]}"
 
-        # 3. 调用 LLM (增加到6000 tokens)
+        # 4. 调用 LLM
         try:
             response = self.llm_client.generate(
                 full_prompt,
-                max_tokens=6000,
+                max_tokens=config.DYNAMIC_EXTRACTION_MAX_TOKENS,
                 temperature=0.1
             )
-
-            result = self._parse_response(response)
+            result = parse_llm_json_response(response)
 
         except Exception as e:
             logger.error(f"动态提取失败: {e}")
             result = {}
 
-        # 4. 专用提取器（按需）
-        if 'premium_table' in required_fields or 'pricing_params' in required_fields:
+        # 5. 专用提取器（按需）
+        if config.EXTRACTOR_PREMIUM_TABLE in required_fields or 'pricing_params' in required_fields:
             if document.profile.has_premium_table:
-                premium_result = self.specialized_extractors['premium_table'].extract(
+                premium_result = self.specialized_extractors[config.EXTRACTOR_PREMIUM_TABLE].extract(
                     document.content
                 )
                 if premium_result:
-                    result['premium_table'] = premium_result
+                    result[config.EXTRACTOR_PREMIUM_TABLE] = premium_result
 
-        if 'clauses' in required_fields:
-            clause_result = self.specialized_extractors['clauses'].extract(
+        if config.EXTRACTOR_CLAUSES in required_fields:
+            clause_result = self.specialized_extractors[config.EXTRACTOR_CLAUSES].extract(
                 document.content
             )
             if clause_result:
-                result['clauses'] = clause_result
+                result[config.EXTRACTOR_CLAUSES] = clause_result
 
         return ExtractResult(
             data=result,
-            confidence={k: 0.75 for k in result},
-            provenance={k: 'dynamic_llm' for k in result},
+            confidence={k: config.DEFAULT_DYNAMIC_CONFIDENCE for k in result},
+            provenance={k: config.PROVENANCE_DYNAMIC_LLM for k in result},
             metadata={
-                'extraction_mode': 'dynamic',
-                'product_type': product_type,
-                'is_hybrid': is_hybrid
+                config.EXTRACTION_MODE: 'dynamic',
+                config.PRODUCT_TYPE: product_type,
+                config.IS_HYBRID: is_hybrid
             }
         )
-
-    def _parse_response(self, response: str) -> Dict[str, Any]:
-        """解析 LLM 响应"""
-        # 尝试提取 JSON
-        json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group(1))
-
-        cleaned = response.strip()
-        if cleaned.startswith('{') and cleaned.endswith('}'):
-            return json.loads(cleaned)
-
-        # 查找完整 JSON 对象
-        first_brace = cleaned.find('{')
-        last_brace = cleaned.rfind('}')
-        if first_brace != -1 and last_brace != -1:
-            return json.loads(cleaned[first_brace:last_brace + 1])
-
-        logger.warning(f"无法解析 LLM 响应: {response[:200]}")
-        return {}
