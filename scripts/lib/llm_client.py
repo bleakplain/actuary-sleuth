@@ -39,19 +39,24 @@ class ZhipuClient(BaseLLMClient):
     def __init__(
         self,
         api_key: str,
-        model: str = "glm-4-flash",
+        model: str = "glm-z1-air",
         base_url: str = "https://open.bigmodel.cn/api/paas/v4/",
-        timeout: int = 30
+        timeout: int = 60
     ):
         """
         初始化智谱AI客户端
 
         Args:
             api_key: 智谱AI API密钥
-            model: 模型名称，默认 glm-4-flash
-                   可选: glm-4-flash, glm-4-air, glm-4-plus, glm-4-0520
+            model: 模型名称，默认 glm-z1-air（轻量模型，并发数30）
+                   可选:
+                   - glm-z1-air: 轻量模型，并发数30，适合批量处理
+                   - glm-4-flash: 快速响应，并发数较高
+                   - glm-4-air: 平衡性能
+                   - glm-4-plus: 高质量，并发数2
+                   - glm-4-0520: 旧版本
             base_url: API基础URL
-            timeout: 请求超时时间
+            timeout: 请求超时时间（秒）
         """
         super().__init__(model, timeout)
         self.api_key = api_key
@@ -326,9 +331,9 @@ class LLMClientFactory:
                 raise ValueError("ZhipuAI requires 'api_key' in config")
             return ZhipuClient(
                 api_key=api_key,
-                model=config.get('model', 'glm-4-flash'),
+                model=config.get('model', 'glm-z1-air'),
                 base_url=config.get('base_url', 'https://open.bigmodel.cn/api/paas/v4/'),
-                timeout=config.get('timeout', 30)
+                timeout=config.get('timeout', 60)
             )
 
         elif provider == 'ollama':
@@ -360,12 +365,12 @@ def get_client(config: Optional[Dict[str, Any]] = None) -> BaseLLMClient:
 
     if _client is None:
         if config is None:
-            # 默认使用智谱AI
+            # 默认使用智谱AI 轻量模型（高并发）
             config = {
                 'provider': 'zhipu',
-                'model': 'glm-4-flash',
+                'model': 'glm-z1-air',  # 轻量模型，并发数30
                 'api_key': '',  # 需要从环境变量或配置文件获取
-                'timeout': 30
+                'timeout': 60
             }
 
         _client = LLMClientFactory.create_client(config)
@@ -388,7 +393,7 @@ if __name__ == '__main__':
         print("\n1. Testing ZhipuAI client...")
         zhipu_config = {
             'provider': 'zhipu',
-            'model': 'glm-4-flash',
+            'model': 'glm-z1-air',  # 轻量模型
             'api_key': 'your_api_key_here'  # 替换为实际API密钥
         }
 
