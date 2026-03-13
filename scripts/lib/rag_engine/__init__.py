@@ -44,7 +44,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-from .config import RAGConfig, get_config
+from .config import RAGConfig, get_config, HybridQueryConfig
 from .rag_engine import RAGEngine, create_qa_engine, create_audit_engine
 from .doc_parser import RegulationDocParser
 from .index_manager import VectorIndexManager
@@ -53,6 +53,7 @@ from .data_importer import RegulationDataImporter
 __all__ = [
     'RAGConfig',
     'get_config',
+    'HybridQueryConfig',
     'RAGEngine',
     'create_qa_engine',
     'create_audit_engine',

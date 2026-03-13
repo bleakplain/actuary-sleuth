@@ -6,6 +6,14 @@ from dataclasses import dataclass
 
 
 @dataclass
+class HybridQueryConfig:
+    """混合查询配置"""
+    vector_top_k: int = 5
+    keyword_top_k: int = 5
+    alpha: float = 0.5  # 向量检索权重 (0-1), 1-alpha 为关键词检索权重
+
+
+@dataclass
 class RAGConfig:
     """法规 RAG 引擎配置"""
 
@@ -20,6 +28,7 @@ class RAGConfig:
     # 检索配置
     top_k_results: int = 5
     enable_streaming: bool = False
+    hybrid_config: HybridQueryConfig = None
 
     # 向量数据库配置
     collection_name: str = "regulations_vectors"
@@ -32,6 +41,9 @@ class RAGConfig:
         if not Path(self.regulations_dir).is_absolute():
             project_root = Path(__file__).parent.parent.parent.parent
             self.regulations_dir = str(project_root / self.regulations_dir)
+
+        if self.hybrid_config is None:
+            self.hybrid_config = HybridQueryConfig()
 
     @classmethod
     def from_dict(cls, config_dict: dict) -> 'RAGConfig':

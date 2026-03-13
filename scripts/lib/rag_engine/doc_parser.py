@@ -58,18 +58,31 @@ class RegulationNodeParser(NodeParser):
         return result_nodes
 
     def _extract_law_name(self, content: str, metadata: dict) -> str:
-        """提取法规名称"""
-        # 先尝试从 metadata 获取
         if 'law_name' in metadata:
             return metadata['law_name']
 
-        # 从内容中提取
-        match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
-        if match:
-            return match.group(1).strip()
+        matches = re.findall(r'^#\s+(.+)$', content, re.MULTILINE)
+        if matches:
+            for match in matches:
+                title = match.strip()
+                if not re.match(r'^第[一二三四五六七八九十百千\d]+部分', title):
+                    if not re.match(r'^[一二三四五六七八九十]+、', title):
+                        title = re.split(r'\d{4}年', title)[0].strip()
+                        if '(' in title:
+                            title = re.split(r'\(', title)[0].strip()
+                        elif '（' in title:
+                            title = re.split(r'（', title)[0].strip()
 
-        # 回退到文件名
-        return metadata.get('file_name', '未知法规')
+                        if title and len(title) > 5:
+                            return title
+
+        file_name = metadata.get('file_name', '未知法规')
+        if file_name.endswith('.md'):
+            name = file_name[:-3]
+            if name[0].isdigit():
+                name = '_'.join(name.split('_')[1:])
+            return name
+        return file_name
 
     def _parse_article_nodes(
         self,
