@@ -11,6 +11,7 @@ import time
 import logging
 import functools
 import uuid
+from collections import deque
 from typing import List, Dict, Optional, Any, Callable
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -18,13 +19,25 @@ from enum import Enum
 logger = logging.getLogger(__name__)
 
 
+class ModelName(str, Enum):
+    """模型名称常量"""
+    GLM_4_FLASH = "glm-4-flash"
+    GLM_4_PLUS = "glm-4-plus"
+    GLM_Z1_AIR = "glm-z1-air"
+    GLM_4_AIR = "glm-4-air"
+    EMBEDDING_3 = "embedding-3"
+    NOMIC_EMBED_TEXT = "nomic-embed-text"
+
+
 class APIMetrics:
     """API 调用指标收集"""
+
+    MAX_LATENCY_RECORDS = 100
 
     def __init__(self):
         self._calls: Dict[str, int] = {}
         self._failures: Dict[str, int] = {}
-        self._latencies: Dict[str, List[float]] = {}
+        self._latencies: Dict[str, deque] = {}
         self._lock = threading.Lock()
 
     def record_call(self, api: str, latency: float, success: bool):
@@ -34,16 +47,12 @@ class APIMetrics:
                 self._failures[api] = self._failures.get(api, 0) + 1
 
             if api not in self._latencies:
-                self._latencies[api] = []
+                self._latencies[api] = deque(maxlen=self.MAX_LATENCY_RECORDS)
             self._latencies[api].append(latency)
-
-            # 只保留最近 100 条延迟记录
-            if len(self._latencies[api]) > 100:
-                self._latencies[api] = self._latencies[api][-100:]
 
     def get_stats(self, api: str) -> Dict[str, Any]:
         with self._lock:
-            latencies = self._latencies.get(api, [])
+            latencies = list(self._latencies.get(api, []))
             avg_latency = sum(latencies) / len(latencies) if latencies else 0
             return {
                 "calls": self._calls.get(api, 0),
@@ -572,64 +581,67 @@ class OllamaClient(BaseLLMClient):
 class LLMClientFactory:
     """LLM客户端工厂类（面向场景）"""
 
+    _SCENARIOS = {
+        'reg_import': {'model': ModelName.GLM_4_FLASH, 'timeout': 60},
+        'doc_preprocess': {'model': None, 'timeout': None},  # 使用配置文件的值
+        'audit': {'model': ModelName.GLM_4_PLUS, 'timeout': 120},
+        'qa': {'model': ModelName.GLM_4_FLASH, 'timeout': 60},
+    }
+
     @staticmethod
-    def get_reg_import_llm() -> BaseLLMClient:
+    def _get_base_config() -> tuple:
+        """获取基础配置"""
         from lib.config import get_config
         app_config = get_config()
+        return app_config.llm.api_key, app_config.llm.base_url
+
+    @staticmethod
+    def _create_zhipu_client(model: str, timeout: int) -> BaseLLMClient:
+        """创建智谱客户端"""
+        api_key, base_url = LLMClientFactory._get_base_config()
         return LLMClientFactory.create_client({
             'provider': 'zhipu',
-            'model': 'glm-4-flash',
-            'api_key': app_config.llm.api_key,
-            'base_url': app_config.llm.base_url,
-            'timeout': 60
+            'model': model,
+            'api_key': api_key,
+            'base_url': base_url,
+            'timeout': timeout
         })
+
+    @staticmethod
+    def get_reg_import_llm() -> BaseLLMClient:
+        return LLMClientFactory._create_zhipu_client(
+            ModelName.GLM_4_FLASH, 60
+        )
 
     @staticmethod
     def get_doc_preprocess_llm() -> BaseLLMClient:
         from lib.config import get_config
         app_config = get_config()
-        return LLMClientFactory.create_client({
-            'provider': 'zhipu',
-            'model': app_config.llm.model,
-            'api_key': app_config.llm.api_key,
-            'base_url': app_config.llm.base_url,
-            'timeout': app_config.llm.timeout
-        })
+        return LLMClientFactory._create_zhipu_client(
+            app_config.llm.model, app_config.llm.timeout
+        )
 
     @staticmethod
     def get_audit_llm() -> BaseLLMClient:
-        from lib.config import get_config
-        app_config = get_config()
-        return LLMClientFactory.create_client({
-            'provider': 'zhipu',
-            'model': 'glm-4-plus',
-            'api_key': app_config.llm.api_key,
-            'base_url': app_config.llm.base_url,
-            'timeout': 120
-        })
+        return LLMClientFactory._create_zhipu_client(
+            ModelName.GLM_4_PLUS, 120
+        )
 
     @staticmethod
     def get_qa_llm() -> BaseLLMClient:
-        from lib.config import get_config
-        app_config = get_config()
-        return LLMClientFactory.create_client({
-            'provider': 'zhipu',
-            'model': 'glm-4-flash',
-            'api_key': app_config.llm.api_key,
-            'base_url': app_config.llm.base_url,
-            'timeout': 60
-        })
+        return LLMClientFactory._create_zhipu_client(
+            ModelName.GLM_4_FLASH, 60
+        )
 
     @staticmethod
     def get_embedding_config() -> dict:
         """获取嵌入模型配置"""
-        from lib.config import get_config
-        app_config = get_config()
+        api_key, base_url = LLMClientFactory._get_base_config()
         return {
             'provider': 'zhipu',
-            'model': 'embedding-3',
-            'api_key': app_config.llm.api_key,
-            'base_url': app_config.llm.base_url,
+            'model': ModelName.EMBEDDING_3,
+            'api_key': api_key,
+            'base_url': base_url,
             'timeout': 120,
         }
 
