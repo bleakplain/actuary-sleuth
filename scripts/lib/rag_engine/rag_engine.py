@@ -24,7 +24,6 @@ _engine_init_lock = threading.Lock()
 
 
 def _tokenize_chinese(text: str) -> List[str]:
-    """简单中文分词"""
     return re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z0-9]+', text.lower())
 
 
@@ -84,6 +83,7 @@ class RAGEngine:
 
         self._llm = None
         self._embed_model = None
+        self._avg_doc_len = 100
         self._setup_llm()
 
     def _setup_llm(self):
@@ -104,7 +104,6 @@ class RAGEngine:
             bool: 初始化是否成功
         """
         with _engine_init_lock:
-            # 确保使用当前引擎的 LLM 和嵌入模型
             Settings.llm = self._llm
             Settings.embed_model = self._embed_model
 
@@ -117,8 +116,19 @@ class RAGEngine:
                 logger.error("索引初始化失败")
                 return False
 
+            self._calculate_avg_doc_len(index)
             self.query_engine = self.index_manager.create_query_engine()
             return self.query_engine is not None
+
+    def _calculate_avg_doc_len(self, index) -> None:
+        doc_lengths = []
+        for node in index.docstore.docs.values():
+            tokens = _tokenize_chinese(node.text)
+            doc_lengths.append(len(tokens))
+
+        if doc_lengths:
+            self._avg_doc_len = sum(doc_lengths) / len(doc_lengths)
+            logger.info(f"Calculated average document length: {self._avg_doc_len:.1f} tokens")
 
     def ask(self, question: str, include_sources: bool = True) -> Dict[str, Any]:
         """
@@ -329,7 +339,6 @@ class RAGEngine:
 
         k1 = 1.5
         b = 0.75
-        avg_doc_len = 100
 
         doc_len = len(doc_tokens)
         doc_freq = {}
@@ -341,7 +350,7 @@ class RAGEngine:
             if token in doc_freq:
                 tf = doc_freq[token]
                 idf = 1.0
-                score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * doc_len / avg_doc_len))
+                score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * doc_len / self._avg_doc_len))
 
         return score
 

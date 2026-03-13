@@ -83,7 +83,7 @@ def get_metrics() -> APIMetrics:
     return _metrics
 
 
-def _track_timing(api_name: str) -> Callable:
+def _track_timing(api_name: str) -> Callable[[Callable], Callable]:
     """计时装饰器"""
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
@@ -200,7 +200,7 @@ def _retry_with_backoff(
     max_retries: int = 3,
     base_delay: float = 2,
     rate_limit_delay_mult: float = 3
-) -> Callable:
+) -> Callable[[Callable], Callable]:
     """重试装饰器，支持指数退避和速率限制处理"""
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
@@ -212,23 +212,37 @@ def _retry_with_backoff(
                     return func(*args, **kwargs)
                 except requests.exceptions.RequestException as e:
                     last_exception = e
-                    error_msg = str(e)
 
-                    if '429' in error_msg:
+                    is_rate_limit = False
+                    is_server_error = False
+                    is_timeout = False
+
+                    if hasattr(e, 'response') and e.response is not None:
+                        status_code = e.response.status_code
+                        if status_code == 429:
+                            is_rate_limit = True
+                        elif status_code >= 500:
+                            is_server_error = True
+                    elif isinstance(e, requests.exceptions.Timeout):
+                        is_timeout = True
+                    elif 'timeout' in str(e).lower() or 'timed out' in str(e).lower():
+                        is_timeout = True
+
+                    if is_rate_limit:
                         wait_time = base_delay * (rate_limit_delay_mult ** attempt)
                         if attempt < max_retries - 1:
                             logger.warning(f"Rate limit hit, waiting {wait_time:.1f}s before retry {attempt + 1}/{max_retries}")
                             time.sleep(wait_time)
                             continue
 
-                    if any(code in error_msg for code in ['500', '502', '503', '504']):
+                    if is_server_error:
                         wait_time = base_delay * (2 ** attempt)
                         if attempt < max_retries - 1:
                             logger.warning(f"Server error, retrying {attempt + 1}/{max_retries} after {wait_time:.1f}s")
                             time.sleep(wait_time)
                             continue
 
-                    if 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower():
+                    if is_timeout:
                         wait_time = base_delay * (2 ** attempt)
                         if attempt < max_retries - 1:
                             logger.warning(f"Timeout, retrying {attempt + 1}/{max_retries} after {wait_time:.1f}s")
@@ -247,7 +261,7 @@ def _retry_with_backoff(
     return decorator
 
 
-def _with_circuit_breaker(circuit_key: str) -> Callable:
+def _with_circuit_breaker(circuit_key: str) -> Callable[[Callable], Callable]:
     """熔断器装饰器"""
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
@@ -263,7 +277,7 @@ def _with_circuit_breaker(circuit_key: str) -> Callable:
                 result = func(*args, **kwargs)
                 cb.record_success()
                 return result
-            except Exception as e:
+            except (requests.exceptions.RequestException, ValueError, TimeoutError, ConnectionError) as e:
                 cb.record_failure()
                 raise
 
@@ -403,30 +417,26 @@ class ZhipuClient(BaseLLMClient):
         response.raise_for_status()
         result = response.json()
 
-        # 提取生成内容
-        if 'choices' in result and len(result['choices']) > 0:
-            message = result['choices'][0]['message']
+        if 'choices' not in result or len(result['choices']) == 0:
+            raise ValueError(f"Unexpected response format: 'choices' field missing or empty. Response keys: {list(result.keys()) if isinstance(result, dict) else type(result)}")
 
-            if message.get('content'):
-                return message['content']
+        message = result['choices'][0]['message']
 
-            # GLM-4.7 reasoning mode 处理
-            if message.get('reasoning_content'):
-                reasoning = message['reasoning_content']
-                import re
-                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', reasoning, re.DOTALL)
-                if json_match:
-                    try:
-                        import json
-                        parsed = json.loads(json_match.group(0))
-                        return json.dumps(parsed, ensure_ascii=False)
-                    except json.JSONDecodeError:
-                        pass
-                return reasoning
+        if message.get('content'):
+            return message['content']
 
-        import logging
-        logging.warning(f"LLM response missing 'content' field. Response keys: {result.keys() if isinstance(result, dict) else type(result)}")
-        return ""
+        if message.get('reasoning_content'):
+            reasoning = message['reasoning_content']
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', reasoning, re.DOTALL)
+            if json_match:
+                try:
+                    parsed = json.loads(json_match.group(0))
+                    return json.dumps(parsed, ensure_ascii=False)
+                except json.JSONDecodeError:
+                    pass
+            return reasoning
+
+        raise ValueError(f"Message missing both 'content' and 'reasoning_content' fields. Available keys: {list(message.keys())}")
 
     @_track_timing("zhipu")
     @_with_circuit_breaker("zhipu")
@@ -459,12 +469,14 @@ class ZhipuClient(BaseLLMClient):
         response.raise_for_status()
         result = response.json()
 
-        if 'choices' in result and len(result['choices']) > 0:
-            message = result['choices'][0]['message']
-            if message.get('content'):
-                return message['content']
+        if 'choices' not in result or len(result['choices']) == 0:
+            raise ValueError(f"Unexpected response format: 'choices' field missing or empty. Response keys: {list(result.keys()) if isinstance(result, dict) else type(result)}")
 
-        return ""
+        message = result['choices'][0]['message']
+        if not message.get('content'):
+            raise ValueError(f"Message missing 'content' field. Available keys: {list(message.keys())}")
+
+        return message['content']
 
     @_track_timing("zhipu")
     @_with_circuit_breaker("zhipu")
@@ -719,11 +731,12 @@ def get_client(config: Optional[Dict[str, Any]] = None) -> BaseLLMClient:
         with _client_lock:
             if _client is None:
                 if config is None:
-                    # 默认使用智谱AI 轻量模型（高并发）
+                    api_key, base_url = LLMClientFactory._get_base_config()
                     config = {
                         'provider': 'zhipu',
                         'model': 'glm-z1-air',
-                        'api_key': '',
+                        'api_key': api_key,
+                        'base_url': base_url,
                         'timeout': 60
                     }
 

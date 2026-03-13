@@ -205,7 +205,6 @@ class RegulationDocParser:
         使用 SimpleDirectoryReader (LlamaIndex 标准方式)
         """
         from llama_index.core.readers import SimpleDirectoryReader
-        import glob
 
         if not self.regulations_dir.exists():
             logger.error(f"法规目录不存在: {self.regulations_dir}")

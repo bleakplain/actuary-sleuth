@@ -10,7 +10,15 @@ class HybridQueryConfig:
     """混合查询配置"""
     vector_top_k: int = 5
     keyword_top_k: int = 5
-    alpha: float = 0.5  # 向量检索权重 (0-1), 1-alpha 为关键词检索权重
+    alpha: float = 0.5
+
+    def __post_init__(self):
+        if not 0 <= self.alpha <= 1:
+            raise ValueError(f"alpha must be between 0 and 1, got {self.alpha}")
+        if self.vector_top_k < 1:
+            raise ValueError(f"vector_top_k must be >= 1, got {self.vector_top_k}")
+        if self.keyword_top_k < 1:
+            raise ValueError(f"keyword_top_k must be >= 1, got {self.keyword_top_k}")
 
 
 @dataclass
@@ -41,6 +49,9 @@ class RAGConfig:
         if not Path(self.regulations_dir).is_absolute():
             project_root = Path(__file__).parent.parent.parent.parent
             self.regulations_dir = str(project_root / self.regulations_dir)
+
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError(f"chunk_overlap ({self.chunk_overlap}) must be less than chunk_size ({self.chunk_size})")
 
         if self.hybrid_config is None:
             self.hybrid_config = HybridQueryConfig()

@@ -167,6 +167,14 @@ class ZhipuEmbeddingAdapter(BaseEmbedding):
     def get_text_embedding(self, text: str) -> List[float]:
         return self._get_embedding(text)
 
+    def close(self):
+        if hasattr(self, '_session') and self._session:
+            self._session.close()
+            self._session = None
+
+    def __del__(self):
+        self.close()
+
     def get_text_embeddings(self, texts: List[str]) -> List[List[float]]:
         return self._get_embeddings(texts)
 
