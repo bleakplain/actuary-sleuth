@@ -6,30 +6,317 @@ LLM 客户端模块
 """
 import requests
 import json
-from typing import List, Dict, Optional, Any
+import threading
+import time
+import logging
+import functools
+import uuid
+from typing import List, Dict, Optional, Any, Callable
 from abc import ABC, abstractmethod
+from enum import Enum
+
+logger = logging.getLogger(__name__)
+
+
+class APIMetrics:
+    """API 调用指标收集"""
+
+    def __init__(self):
+        self._calls: Dict[str, int] = {}
+        self._failures: Dict[str, int] = {}
+        self._latencies: Dict[str, List[float]] = {}
+        self._lock = threading.Lock()
+
+    def record_call(self, api: str, latency: float, success: bool):
+        with self._lock:
+            self._calls[api] = self._calls.get(api, 0) + 1
+            if not success:
+                self._failures[api] = self._failures.get(api, 0) + 1
+
+            if api not in self._latencies:
+                self._latencies[api] = []
+            self._latencies[api].append(latency)
+
+            # 只保留最近 100 条延迟记录
+            if len(self._latencies[api]) > 100:
+                self._latencies[api] = self._latencies[api][-100:]
+
+    def get_stats(self, api: str) -> Dict[str, Any]:
+        with self._lock:
+            latencies = self._latencies.get(api, [])
+            avg_latency = sum(latencies) / len(latencies) if latencies else 0
+            return {
+                "calls": self._calls.get(api, 0),
+                "failures": self._failures.get(api, 0),
+                "success_rate": (
+                    (self._calls.get(api, 0) - self._failures.get(api, 0)) / self._calls.get(api, 1)
+                ),
+                "avg_latency_ms": avg_latency * 1000,
+            }
+
+    def reset(self, api: Optional[str] = None):
+        with self._lock:
+            if api:
+                self._calls.pop(api, None)
+                self._failures.pop(api, None)
+                self._latencies.pop(api, None)
+            else:
+                self._calls.clear()
+                self._failures.clear()
+                self._latencies.clear()
+
+
+# 全局指标收集器
+_metrics = APIMetrics()
+
+
+def get_metrics() -> APIMetrics:
+    return _metrics
+
+
+def _track_timing(api_name: str) -> Callable:
+    """计时装饰器"""
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            request_id = str(uuid.uuid4())[:8]
+            start_time = time.time()
+            success = False
+
+            logger.debug(f"[{request_id}] Calling {api_name}.{func.__name__}")
+
+            try:
+                result = func(*args, **kwargs)
+                success = True
+                return result
+            finally:
+                latency = time.time() - start_time
+                _metrics.record_call(f"{api_name}.{func.__name__}", latency, success)
+
+                if success:
+                    logger.debug(
+                        f"[{request_id}] {api_name}.{func.__name__} completed in {latency*1000:.1f}ms"
+                    )
+                else:
+                    logger.warning(
+                        f"[{request_id}] {api_name}.{func.__name__} failed after {latency*1000:.1f}ms"
+                    )
+
+        return wrapper
+    return decorator
+
+
+class CircuitState(Enum):
+    CLOSED = "closed"      # 正常状态
+    OPEN = "open"          # 熔断状态
+    HALF_OPEN = "half_open"  # 半开状态
+
+
+class CircuitBreaker:
+    """熔断器：防止连续失败时继续调用 API"""
+
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        timeout: float = 60,
+        half_open_attempts: int = 1
+    ):
+        self.failure_threshold = failure_threshold
+        self.timeout = timeout
+        self.half_open_attempts = half_open_attempts
+        self._state = CircuitState.CLOSED
+        self._failure_count = 0
+        self._last_failure_time = 0
+        self._half_open_success_count = 0
+        self._lock = threading.Lock()
+
+    @property
+    def state(self) -> CircuitState:
+        return self._state
+
+    def record_success(self):
+        with self._lock:
+            self._failure_count = 0
+            if self._state == CircuitState.HALF_OPEN:
+                self._half_open_success_count += 1
+                if self._half_open_success_count >= self.half_open_attempts:
+                    self._state = CircuitState.CLOSED
+                    self._half_open_success_count = 0
+                    logger.info("Circuit breaker recovered to CLOSED state")
+
+    def record_failure(self):
+        with self._lock:
+            self._failure_count += 1
+            self._last_failure_time = time.time()
+
+            if self._failure_count >= self.failure_threshold:
+                if self._state != CircuitState.OPEN:
+                    self._state = CircuitState.OPEN
+                    logger.error(
+                        f"Circuit breaker opened after {self._failure_count} failures"
+                    )
+
+    def can_attempt(self) -> bool:
+        with self._lock:
+            if self._state == CircuitState.CLOSED:
+                return True
+
+            if self._state == CircuitState.OPEN:
+                if time.time() - self._last_failure_time >= self.timeout:
+                    self._state = CircuitState.HALF_OPEN
+                    self._half_open_success_count = 0
+                    logger.info("Circuit breaker entering HALF_OPEN state")
+                    return True
+                return False
+
+            if self._state == CircuitState.HALF_OPEN:
+                return True
+
+            return False
+
+
+# 全局熔断器实例
+_circuit_breakers: Dict[str, CircuitBreaker] = {}
+_circuit_lock = threading.Lock()
+
+
+def _get_circuit_breaker(key: str) -> CircuitBreaker:
+    with _circuit_lock:
+        if key not in _circuit_breakers:
+            _circuit_breakers[key] = CircuitBreaker()
+        return _circuit_breakers[key]
+
+
+def _retry_with_backoff(
+    max_retries: int = 3,
+    base_delay: float = 2,
+    rate_limit_delay_mult: float = 3
+) -> Callable:
+    """重试装饰器，支持指数退避和速率限制处理"""
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except requests.exceptions.RequestException as e:
+                    last_exception = e
+                    error_msg = str(e)
+
+                    if '429' in error_msg:
+                        wait_time = base_delay * (rate_limit_delay_mult ** attempt)
+                        if attempt < max_retries - 1:
+                            logger.warning(f"Rate limit hit, waiting {wait_time:.1f}s before retry {attempt + 1}/{max_retries}")
+                            time.sleep(wait_time)
+                            continue
+
+                    if any(code in error_msg for code in ['500', '502', '503', '504']):
+                        wait_time = base_delay * (2 ** attempt)
+                        if attempt < max_retries - 1:
+                            logger.warning(f"Server error, retrying {attempt + 1}/{max_retries} after {wait_time:.1f}s")
+                            time.sleep(wait_time)
+                            continue
+
+                    if 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower():
+                        wait_time = base_delay * (2 ** attempt)
+                        if attempt < max_retries - 1:
+                            logger.warning(f"Timeout, retrying {attempt + 1}/{max_retries} after {wait_time:.1f}s")
+                            time.sleep(wait_time)
+                            continue
+
+                    if attempt == max_retries - 1:
+                        logger.error(f"All retries failed. Last error: {e}")
+                    raise
+
+            if last_exception:
+                raise last_exception
+            return None
+
+        return wrapper
+    return decorator
+
+
+def _with_circuit_breaker(circuit_key: str) -> Callable:
+    """熔断器装饰器"""
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            cb = _get_circuit_breaker(circuit_key)
+
+            if not cb.can_attempt():
+                raise Exception(
+                    f"Circuit breaker is {cb.state.value}. API calls are temporarily blocked."
+                )
+
+            try:
+                result = func(*args, **kwargs)
+                cb.record_success()
+                return result
+            except Exception as e:
+                cb.record_failure()
+                raise
+
+        return wrapper
+    return decorator
 
 
 class BaseLLMClient(ABC):
     """LLM客户端基类"""
 
+    MAX_PROMPT_LENGTH = 100000
+
     def __init__(self, model: str, timeout: int = 30):
         self.model = model
         self.timeout = timeout
+        self._session = None
+
+    def _validate_prompt(self, prompt: str) -> None:
+        if not prompt or not prompt.strip():
+            raise ValueError("提示词不能为空")
+        if len(prompt) > self.MAX_PROMPT_LENGTH:
+            raise ValueError(f"提示词过长: {len(prompt)} 字符 (最大 {self.MAX_PROMPT_LENGTH})")
+
+    def _validate_messages(self, messages: List[Dict[str, str]]) -> None:
+        if not messages:
+            raise ValueError("消息列表不能为空")
+        for i, msg in enumerate(messages):
+            if not isinstance(msg, dict):
+                raise ValueError(f"消息 {i} 必须是字典")
+            if 'role' not in msg or 'content' not in msg:
+                raise ValueError(f"消息 {i} 必须包含 'role' 和 'content' 字段")
+            if not msg['content'] or not msg['content'].strip():
+                raise ValueError(f"消息 {i} 的内容不能为空")
+
+    def close(self):
+        """显式关闭会话"""
+        if hasattr(self, '_session') and self._session is not None:
+            self._session.close()
+            self._session = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
     @abstractmethod
     def generate(self, prompt: str, **kwargs) -> str:
-        """生成文本"""
         pass
 
     @abstractmethod
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
-        """对话生成"""
         pass
 
     @abstractmethod
     def health_check(self) -> bool:
-        """健康检查"""
         pass
 
 
@@ -61,10 +348,11 @@ class ZhipuClient(BaseLLMClient):
         super().__init__(model, timeout)
         self.api_key = api_key
         self.base_url = base_url.rstrip('/')
-        self.headers = {
+        self._session = requests.Session()
+        self._session.headers.update({
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
-        }
+        })
 
     def _do_generate(self, prompt: str, **kwargs) -> str:
         """
@@ -77,6 +365,7 @@ class ZhipuClient(BaseLLMClient):
         Returns:
             str: 生成的文本
         """
+        self._validate_prompt(prompt)
         url = f"{self.base_url}/chat/completions"
         data = {
             "model": kwargs.get('model', self.model),
@@ -86,9 +375,8 @@ class ZhipuClient(BaseLLMClient):
             "top_p": kwargs.get('top_p', 0.7)
         }
 
-        response = requests.post(
+        response = self._session.post(
             url,
-            headers=self.headers,
             json=data,
             timeout=self.timeout
         )
@@ -131,118 +419,49 @@ class ZhipuClient(BaseLLMClient):
         logging.warning(f"LLM response missing 'content' field. Response keys: {result.keys() if isinstance(result, dict) else type(result)}")
         return ""
 
+    @_track_timing("zhipu")
+    @_with_circuit_breaker("zhipu")
+    @_retry_with_backoff(max_retries=3, base_delay=2, rate_limit_delay_mult=3)
     def generate(self, prompt: str, **kwargs) -> str:
-        """
-        生成文本（自动重试）
+        return self._do_generate(prompt, **kwargs)
 
-        Args:
-            prompt: 提示词
-            **kwargs: 其他参数（temperature, max_tokens等）
+    def _do_chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
+        self._validate_messages(messages)
+        url = f"{self.base_url}/chat/completions"
+        data = {
+            "model": kwargs.get('model', self.model),
+            "messages": messages,
+            "temperature": kwargs.get('temperature', 0.1),
+            "max_tokens": kwargs.get('max_tokens', 8192),
+            "top_p": kwargs.get('top_p', 0.7)
+        }
 
-        Returns:
-            str: 生成的文本
-        """
-        import time
-        import logging
+        response = self._session.post(url, json=data, timeout=self.timeout)
 
-        max_retries = 3
-        base_delay = 2
-        last_exception = None
-
-        for attempt in range(max_retries):
-            try:
-                return self._do_generate(prompt, **kwargs)
-            except requests.exceptions.RequestException as e:
-                last_exception = e
-                error_msg = str(e)
-
-                # 429 速率限制 - 等待更长时间
-                if '429' in error_msg:
-                    wait_time = base_delay * (3 ** attempt)
-                    if attempt < max_retries - 1:
-                        logging.warning(f"Rate limit hit, waiting {wait_time:.1f}s before retry {attempt + 1}/{max_retries}")
-                        time.sleep(wait_time)
-                        continue
-
-                # 5xx 服务器错误 - 指数退避
-                if any(code in error_msg for code in ['500', '502', '503', '504']):
-                    wait_time = base_delay * (2 ** attempt)
-                    if attempt < max_retries - 1:
-                        logging.warning(f"Server error, retrying {attempt + 1}/{max_retries} after {wait_time:.1f}s")
-                        time.sleep(wait_time)
-                        continue
-
-                # 超时错误 - 指数退避
-                if 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower():
-                    wait_time = base_delay * (2 ** attempt)
-                    if attempt < max_retries - 1:
-                        logging.warning(f"Timeout, retrying {attempt + 1}/{max_retries} after {wait_time:.1f}s")
-                        time.sleep(wait_time)
-                        continue
-
-                # 其他错误直接抛出
-                if attempt == max_retries - 1:
-                    logging.error(f"All retries failed. Last error: {e}")
-                raise
-
-        if last_exception:
-            raise last_exception
-        return ""  # 向上抛出，让调用方的重试逻辑处理
-
-    def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
-        """
-        对话生成
-
-        Args:
-            messages: 消息列表，格式为 [{"role": "user", "content": "..."}]
-            **kwargs: 其他参数
-
-        Returns:
-            str: 生成的回复
-        """
-        try:
-            url = f"{self.base_url}/chat/completions"
-            data = {
-                "model": kwargs.get('model', self.model),
-                "messages": messages,
-                "temperature": kwargs.get('temperature', 0.1),
-                "max_tokens": kwargs.get('max_tokens', 8192),
-                "top_p": kwargs.get('top_p', 0.7)
-            }
-
-            response = requests.post(
-                url,
-                headers=self.headers,
-                json=data,
-                timeout=self.timeout
+        if response.status_code == 429:
+            raise requests.exceptions.RequestException(
+                f"429 Rate limit exceeded: {response.text[:200]}"
+            )
+        if response.status_code >= 500:
+            raise requests.exceptions.RequestException(
+                f"{response.status_code} Server error: {response.text[:200]}"
             )
 
-            # 对 429 和 5xx 错误抛出包含状态码的异常，让上层重试机制能正确感知
-            if response.status_code == 429:
-                raise requests.exceptions.RequestException(
-                    f"429 Rate limit exceeded: {response.text[:200]}"
-                )
-            if response.status_code >= 500:
-                raise requests.exceptions.RequestException(
-                    f"{response.status_code} Server error: {response.text[:200]}"
-                )
+        response.raise_for_status()
+        result = response.json()
 
-            response.raise_for_status()
-            result = response.json()
+        if 'choices' in result and len(result['choices']) > 0:
+            message = result['choices'][0]['message']
+            if message.get('content'):
+                return message['content']
 
-            if 'choices' in result and len(result['choices']) > 0:
-                message = result['choices'][0]['message']
+        return ""
 
-                # 优先使用 content（包含实际答案）
-                if message.get('content'):
-                    return message['content']
-
-            return ""
-
-        except requests.exceptions.RequestException as e:
-            import logging
-            logging.warning(f"Error calling ZhipuAI Chat API: {e}")
-            raise
+    @_track_timing("zhipu")
+    @_with_circuit_breaker("zhipu")
+    @_retry_with_backoff(max_retries=3, base_delay=2, rate_limit_delay_mult=3)
+    def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
+        return self._do_chat(messages, **kwargs)
 
     def health_check(self) -> bool:
         """
@@ -259,9 +478,8 @@ class ZhipuClient(BaseLLMClient):
                 "max_tokens": 10
             }
 
-            response = requests.post(
+            response = self._session.post(
                 url,
-                headers=self.headers,
                 json=data,
                 timeout=5
             )
@@ -290,9 +508,11 @@ class OllamaClient(BaseLLMClient):
         """
         super().__init__(model, timeout)
         self.host = host.rstrip('/')
+        self._session = requests.Session()
 
     def _do_generate(self, prompt: str, **kwargs) -> str:
         """实际执行单次 API 调用"""
+        self._validate_prompt(prompt)
         url = f"{self.host}/api/generate"
         data = {
             "model": kwargs.get('model', self.model),
@@ -304,76 +524,124 @@ class OllamaClient(BaseLLMClient):
             }
         }
 
-        response = requests.post(url, json=data, timeout=self.timeout)
+        response = self._session.post(url, json=data, timeout=self.timeout)
         response.raise_for_status()
         result = response.json()
         return result.get('response', '')
 
+    @_track_timing("ollama")
+    @_with_circuit_breaker("ollama")
+    @_retry_with_backoff(max_retries=3, base_delay=2, rate_limit_delay_mult=2)
     def generate(self, prompt: str, **kwargs) -> str:
-        """生成文本（自动重试）"""
-        import time
-        import logging
+        return self._do_generate(prompt, **kwargs)
 
-        max_retries = 3
-        base_delay = 2
-        last_exception = None
-
-        for attempt in range(max_retries):
-            try:
-                return self._do_generate(prompt, **kwargs)
-            except requests.exceptions.RequestException as e:
-                last_exception = e
-                error_msg = str(e)
-
-                # 只对超时和 5xx 错误重试
-                if 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower() or any(code in error_msg for code in ['500', '502', '503', '504']):
-                    wait_time = base_delay * (2 ** attempt)
-                    if attempt < max_retries - 1:
-                        logging.warning(f"Ollama error, retrying {attempt + 1}/{max_retries} after {wait_time:.1f}s")
-                        time.sleep(wait_time)
-                        continue
-
-                raise
-
-        if last_exception:
-            raise last_exception
-        return ""
-
-    def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
-        """对话生成"""
-        try:
-            url = f"{self.host}/api/chat"
-            data = {
-                "model": kwargs.get('model', self.model),
-                "messages": messages,
-                "stream": False,
-                "options": {
-                    "temperature": kwargs.get('temperature', 0.7),
-                    "num_predict": kwargs.get('max_tokens', 500)
-                }
+    def _do_chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
+        self._validate_messages(messages)
+        url = f"{self.host}/api/chat"
+        data = {
+            "model": kwargs.get('model', self.model),
+            "messages": messages,
+            "stream": False,
+            "options": {
+                "temperature": kwargs.get('temperature', 0.7),
+                "num_predict": kwargs.get('max_tokens', 500)
             }
+        }
 
-            response = requests.post(url, json=data, timeout=self.timeout)
-            response.raise_for_status()
-            result = response.json()
-            return result.get('message', {}).get('content', '')
+        response = self._session.post(url, json=data, timeout=self.timeout)
+        response.raise_for_status()
+        result = response.json()
+        return result.get('message', {}).get('content', '')
 
-        except requests.exceptions.RequestException as e:
-            print(f"Error calling Ollama Chat API: {e}")
-            return ""
+    @_track_timing("ollama")
+    @_with_circuit_breaker("ollama")
+    @_retry_with_backoff(max_retries=3, base_delay=2, rate_limit_delay_mult=2)
+    def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
+        return self._do_chat(messages, **kwargs)
 
     def health_check(self) -> bool:
         """健康检查"""
         try:
             url = f"{self.host}/api/tags"
-            response = requests.get(url, timeout=5)
+            response = self._session.get(url, timeout=5)
             return response.status_code == 200
         except requests.exceptions.RequestException:
             return False
 
 
 class LLMClientFactory:
-    """LLM客户端工厂类"""
+    """LLM客户端工厂类（面向场景）"""
+
+    @staticmethod
+    def get_reg_import_llm() -> BaseLLMClient:
+        from lib.config import get_config
+        app_config = get_config()
+        return LLMClientFactory.create_client({
+            'provider': 'zhipu',
+            'model': 'glm-4-flash',
+            'api_key': app_config.llm.api_key,
+            'base_url': app_config.llm.base_url,
+            'timeout': 60
+        })
+
+    @staticmethod
+    def get_doc_preprocess_llm() -> BaseLLMClient:
+        from lib.config import get_config
+        app_config = get_config()
+        return LLMClientFactory.create_client({
+            'provider': 'zhipu',
+            'model': app_config.llm.model,
+            'api_key': app_config.llm.api_key,
+            'base_url': app_config.llm.base_url,
+            'timeout': app_config.llm.timeout
+        })
+
+    @staticmethod
+    def get_audit_llm() -> BaseLLMClient:
+        from lib.config import get_config
+        app_config = get_config()
+        return LLMClientFactory.create_client({
+            'provider': 'zhipu',
+            'model': 'glm-4-plus',
+            'api_key': app_config.llm.api_key,
+            'base_url': app_config.llm.base_url,
+            'timeout': 120
+        })
+
+    @staticmethod
+    def get_qa_llm() -> BaseLLMClient:
+        from lib.config import get_config
+        app_config = get_config()
+        return LLMClientFactory.create_client({
+            'provider': 'zhipu',
+            'model': 'glm-4-flash',
+            'api_key': app_config.llm.api_key,
+            'base_url': app_config.llm.base_url,
+            'timeout': 60
+        })
+
+    @staticmethod
+    def get_embedding_config() -> dict:
+        """获取嵌入模型配置"""
+        from lib.config import get_config
+        app_config = get_config()
+        return {
+            'provider': 'zhipu',
+            'model': 'embedding-3',
+            'api_key': app_config.llm.api_key,
+            'base_url': app_config.llm.base_url,
+            'timeout': 120,
+        }
+
+    @staticmethod
+    def get_embedding_llm() -> OllamaClient:
+        from lib.config import get_config
+        app_config = get_config()
+        return OllamaClient(
+            host=app_config.ollama.host,
+            model=app_config.ollama.embed_model,
+            timeout=30
+        )
 
     @staticmethod
     def create_client(config: Dict[str, Any]) -> BaseLLMClient:
@@ -418,13 +686,14 @@ class LLMClientFactory:
             raise ValueError(f"Unsupported LLM provider: {provider}")
 
 
-# 全局客户端实例
+# 全局客户端实例（线程安全单例）
 _client = None
+_client_lock = threading.Lock()
 
 
 def get_client(config: Optional[Dict[str, Any]] = None) -> BaseLLMClient:
     """
-    获取LLM客户端实例（单例模式）
+    获取LLM客户端实例
 
     Args:
         config: 配置字典，如果为None则使用默认配置
@@ -435,62 +704,55 @@ def get_client(config: Optional[Dict[str, Any]] = None) -> BaseLLMClient:
     global _client
 
     if _client is None:
-        if config is None:
-            # 默认使用智谱AI 轻量模型（高并发）
-            config = {
-                'provider': 'zhipu',
-                'model': 'glm-z1-air',  # 轻量模型，并发数30
-                'api_key': '',  # 需要从环境变量或配置文件获取
-                'timeout': 60
-            }
+        with _client_lock:
+            if _client is None:
+                if config is None:
+                    # 默认使用智谱AI 轻量模型（高并发）
+                    config = {
+                        'provider': 'zhipu',
+                        'model': 'glm-z1-air',
+                        'api_key': '',
+                        'timeout': 60
+                    }
 
-        _client = LLMClientFactory.create_client(config)
+                _client = LLMClientFactory.create_client(config)
 
     return _client
 
 
 def reset_client():
-    """重置全局客户端实例"""
     global _client
-    _client = None
+    with _client_lock:
+        _client = None
 
 
-if __name__ == '__main__':
-    # 测试代码
-    print("Testing LLM Client module...")
+def get_zhipu_client():
+    return LLMClientFactory.get_qa_llm()
 
-    try:
-        # 测试智谱AI
-        print("\n1. Testing ZhipuAI client...")
-        zhipu_config = {
-            'provider': 'zhipu',
-            'model': 'glm-z1-air',  # 轻量模型
-            'api_key': 'your_api_key_here'  # 替换为实际API密钥
-        }
 
-        try:
-            zhipu_client = LLMClientFactory.create_client(zhipu_config)
-            print(f"ZhipuAI client created: {zhipu_client.model}")
-            print(f"Health check: {zhipu_client.health_check()}")
-        except Exception as e:
-            print(f"ZhipuAI test failed: {e}")
+def get_ollama_client():
+    return LLMClientFactory.create_client({
+        'provider': 'ollama',
+        'model': 'qwen2:7b',
+        'host': 'http://localhost:11434',
+        'timeout': 30
+    })
 
-        # 测试Ollama
-        print("\n2. Testing Ollama client...")
-        ollama_config = {
-            'provider': 'ollama',
-            'model': 'qwen2:7b',
-            'host': 'http://localhost:11434'
-        }
 
-        try:
-            ollama_client = LLMClientFactory.create_client(ollama_config)
-            print(f"Ollama client created: {ollama_client.model}")
-            print(f"Health check: {ollama_client.health_check()}")
-        except Exception as e:
-            print(f"Ollama test failed: {e}")
+def get_embedding_client():
+    return LLMClientFactory.get_embedding_llm()
 
-        print("\nLLM Client module test completed!")
 
-    except Exception as e:
-        print(f"Test failed: {str(e)}")
+# 导出指标收集函数
+__all__ = [
+    'BaseLLMClient',
+    'ZhipuClient',
+    'OllamaClient',
+    'LLMClientFactory',
+    'get_client',
+    'reset_client',
+    'get_zhipu_client',
+    'get_ollama_client',
+    'get_embedding_client',
+    'get_metrics',
+]

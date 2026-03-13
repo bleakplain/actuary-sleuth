@@ -2,334 +2,48 @@
 # -*- coding: utf-8 -*-
 """
 导入法规数据到数据库
-从 markdown 文件解析法规条款并导入到 SQLite 和 LanceDB
+从 markdown 文件解析法规条款并导入到 SQLite 和 LanceDB（使用 LlamaIndex RAG 引擎）
 """
-import sqlite3
-import re
-import json
-from pathlib import Path
 import sys
+import argparse
+from pathlib import Path
 
-from lib.database import get_connection, add_regulation
+# 添加 scripts 目录到路径
+scripts_dir = Path(__file__).parent
+sys.path.insert(0, str(scripts_dir))
 
-
-class RegulationImporter:
-    """法规导入器"""
-
-    def __init__(self, refs_dir: Path, use_vectors: bool = False):
-        """
-        初始化导入器
-
-        Args:
-            refs_dir: 法规文档目录
-            use_vectors: 是否使用向量嵌入（需要 Ollama）
-        """
-        self.refs_dir = Path(refs_dir)
-        self.use_vectors = use_vectors
-        self.client = None
-
-        if self.use_vectors:
-            try:
-                from lib.ollama import get_client
-                self.client = get_client()
-                if not self.client.health_check():
-                    print("Warning: Ollama service not available, disabling vector imports")
-                    self.use_vectors = False
-            except Exception as e:
-                print(f"Warning: Could not initialize Ollama client: {e}")
-                self.use_vectors = False
-
-    def parse_markdown_file(self, file_path: Path) -> list:
-        """
-        解析 markdown 法规文件
-
-        Args:
-            file_path: markdown 文件路径
-
-        Returns:
-            list: 法规条款列表
-        """
-        regulations = []
-        current_law = None
-        current_category = None
-
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            # 提取法律名称（从文件名或标题）
-            law_name_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
-            if law_name_match:
-                current_law = law_name_match.group(1).strip()
-            else:
-                current_law = file_path.stem
-
-            # 使用更灵活的解析方式：按标题分割
-            lines = content.split('\n')
-            current_article = None
-            current_content = []
-
-            for i, line in enumerate(lines):
-                stripped = line.strip()
-
-                # 检测条款标题（多种格式）
-                # 格式1: ### 第十六条
-                # 格式2: ## 第十六条
-                # 格式3: 第十六条 （行首）
-                article_patterns = [
-                    r'###\s*第([一二三四五六七八九十百千\d]+)[条条]\s*(.+?)(?:\s|$)',
-                    r'##\s*第([一二三四五六七八九十百千\d]+)[条条]\s*(.+?)(?:\s|$)',
-                    r'^第([一二三四五六七八九十百千\d]+)[条条]\s*(.+?)(?:\s|$)',
-                ]
-
-                is_article = False
-                article_title = None
-
-                for pattern in article_patterns:
-                    match = re.match(pattern, stripped)
-                    if match:
-                        is_article = True
-                        article_num = match.group(1)
-                        article_desc = match.group(2).strip() if len(match.groups()) > 1 else ""
-                        current_article = f"第{article_num}条"
-                        if article_desc:
-                            current_article += f" {article_desc}"
-                        break
-
-                if is_article:
-                    # 保存前一条款
-                    if current_article and current_content:
-                        full_content = '\n'.join(current_content).strip()
-                        if len(full_content) > 20:
-                            # 清理标题标记
-                            full_content = re.sub(r'^#{1,3}\s*', '', full_content, flags=re.MULTILINE)
-                            full_content = full_content.strip()
-                            regulations.append({
-                                'law_name': current_law,
-                                'article_number': current_article,
-                                'content': full_content,
-                                'category': current_category or '未分类'
-                            })
-
-                    current_content = [line]
-                elif current_article:
-                    current_content.append(line)
-
-            # 保存最后一条款
-            if current_article and current_content:
-                full_content = '\n'.join(current_content).strip()
-                full_content = re.sub(r'^#{1,3}\s*', '', full_content, flags=re.MULTILINE)
-                full_content = full_content.strip()
-                if len(full_content) > 20:
-                    regulations.append({
-                        'law_name': current_law,
-                        'article_number': current_article,
-                        'content': full_content,
-                        'category': current_category or '未分类'
-                    })
-
-            print(f"Parsed {len(regulations)} regulations from {file_path.name}")
-            return regulations
-
-        except Exception as e:
-            print(f"Error parsing file {file_path}: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
-
-    def import_to_sqlite(self, regulations: list) -> int:
-        """
-        导入法规到 SQLite
-
-        Args:
-            regulations: 法规列表
-
-        Returns:
-            int: 成功导入的数量
-        """
-        imported = 0
-        try:
-            with get_connection() as conn:
-                for idx, reg in enumerate(regulations):
-                    reg_id = f"REG_{idx:06d}"
-
-                    data = {
-                        'id': reg_id,
-                        'law_name': reg['law_name'],
-                        'article_number': reg['article_number'],
-                        'content': reg['content'],
-                        'category': reg['category'],
-                        'tags': '',
-                        'effective_date': ''
-                    }
-
-                    if add_regulation(data):
-                        imported += 1
-                    else:
-                        print(f"Failed to import regulation {reg_id}")
-
-            print(f"Imported {imported} regulations to SQLite")
-            return imported
-
-        except Exception as e:
-            print(f"Error importing to SQLite: {e}")
-            return imported
-
-    def import_to_lancedb(self, regulations: list) -> int:
-        """
-        导入法规到 LanceDB（如果启用）
-
-        Args:
-            regulations: 法规列表
-
-        Returns:
-            int: 成功导入的文本块数量
-        """
-        if not self.use_vectors:
-            print("Vector import disabled (Ollama not available)")
-            return 0
-
-        try:
-            from vector_store import VectorDB
-
-            all_chunks = []
-            chunk_size = 500
-            chunk_overlap = 50
-
-            for idx, reg in enumerate(regulations):
-                reg_id = f"REG_{idx:06d}"
-
-                # 分割文本
-                start = 0
-                chunk_idx = 0
-                text = reg['content']
-
-                while start < len(text):
-                    end = start + chunk_size
-                    chunk_text = text[start:end]
-
-                    all_chunks.append({
-                        'id': f"{reg_id}_chunk_{chunk_idx}",
-                        'regulation_id': reg_id,
-                        'chunk_text': chunk_text,
-                        'vector': [],  # 将由 generate_embeddings 填充
-                        'metadata': {
-                            'law_name': reg['law_name'],
-                            'article_number': reg['article_number'],
-                            'category': reg['category'],
-                            'start_pos': start,
-                            'end_pos': end,
-                            'chunk_index': chunk_idx
-                        }
-                    })
-
-                    start = end - chunk_overlap
-                    chunk_idx += 1
-
-            print(f"Generated {len(all_chunks)} chunks, generating embeddings...")
-
-            # 生成向量
-            for chunk in all_chunks:
-                embedding = self.client.embed(chunk['chunk_text'])
-                if embedding:
-                    chunk['vector'] = embedding
-                else:
-                    chunk['vector'] = []
-
-            valid_chunks = [c for c in all_chunks if c.get('vector')]
-            print(f"Generated embeddings for {len(valid_chunks)}/{len(all_chunks)} chunks")
-
-            if VectorDB.add_vectors(valid_chunks):
-                print(f"Imported {len(valid_chunks)} chunks to LanceDB")
-
-            return len(valid_chunks)
-
-        except Exception as e:
-            print(f"Error importing to LanceDB: {e}")
-            return 0
-
-    def import_file(self, file_path: Path) -> dict:
-        """
-        导入单个文件
-
-        Args:
-            file_path: 文件路径
-
-        Returns:
-            dict: 导入结果统计
-        """
-        print(f"\n{'='*60}")
-        print(f"Importing: {file_path.name}")
-        print(f"{'='*60}")
-
-        # 解析文件
-        regulations = self.parse_markdown_file(file_path)
-        if not regulations:
-            return {'sqlite': 0, 'lancedb': 0}
-
-        # 导入到 SQLite
-        sqlite_count = self.import_to_sqlite(regulations)
-
-        # 导入到 LanceDB
-        lancedb_count = self.import_to_lancedb(regulations)
-
-        return {
-            'sqlite': sqlite_count,
-            'lancedb': lancedb_count
-        }
-
-    def import_all(self) -> dict:
-        """
-        导入所有 markdown 文件
-
-        Returns:
-            dict: 总体导入结果统计
-        """
-        if not self.refs_dir.exists():
-            print(f"Error: References directory not found: {self.refs_dir}")
-            return {'total_files': 0, 'total_sqlite': 0, 'total_lancedb': 0}
-
-        # 查找所有 markdown 文件
-        md_files = list(self.refs_dir.glob('*.md'))
-        md_files.sort()
-
-        print(f"Found {len(md_files)} markdown files in {self.refs_dir}")
-
-        total_stats = {
-            'total_files': len(md_files),
-            'total_sqlite': 0,
-            'total_lancedb': 0
-        }
-
-        for md_file in md_files:
-            if md_file.name == 'README.md':
-                continue
-
-            stats = self.import_file(md_file)
-            total_stats['total_sqlite'] += stats['sqlite']
-            total_stats['total_lancedb'] += stats['lancedb']
-
-        print(f"\n{'='*60}")
-        print("Import Summary")
-        print(f"{'='*60}")
-        print(f"Total files processed: {total_stats['total_files']}")
-        print(f"Total regulations imported to SQLite: {total_stats['total_sqlite']}")
-        print(f"Total chunks imported to LanceDB: {total_stats['total_lancedb']}")
-        print(f"{'='*60}\n")
-
-        return total_stats
+from lib.rag_engine import RegulationDataImporter, get_config
 
 
 def main():
     """主函数"""
-    import argparse
+    parser = argparse.ArgumentParser(
+        description='导入法规数据到数据库（SQLite + LanceDB）',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  # 导入所有法规（SQLite + 向量数据库）
+  python import_regs.py
 
-    parser = argparse.ArgumentParser(description='导入法规数据到数据库')
+  # 强制重建向量索引
+  python import_regs.py --rebuild
+
+  # 只导入到 SQLite，不创建向量索引
+  python import_regs.py --sqlite-only
+
+  # 导入单个文件
+  python import_regs.py --file 01_保险法相关监管规定.md
+
+  # 测试模式：只解析不导入
+  python import_regs.py --test
+        """
+    )
+
     parser.add_argument(
         '--refs-dir',
         type=str,
         default='./references',
-        help='法规文档目录路径'
+        help='法规文档目录路径 (默认: ./references)'
     )
     parser.add_argument(
         '--file',
@@ -337,29 +51,91 @@ def main():
         help='导入单个文件（指定文件名）'
     )
     parser.add_argument(
-        '--no-vectors',
+        '--rebuild',
         action='store_true',
-        help='禁用向量导入（不需要 Ollama）'
+        help='强制重建向量索引'
+    )
+    parser.add_argument(
+        '--sqlite-only',
+        action='store_true',
+        help='只导入到 SQLite，不创建向量索引'
+    )
+    parser.add_argument(
+        '--test',
+        action='store_true',
+        help='测试模式：解析文档但不导入'
+    )
+    parser.add_argument(
+        '--pattern',
+        type=str,
+        default='*.md',
+        help='文件匹配模式 (默认: *.md)'
     )
 
     args = parser.parse_args()
 
-    # 创建导入器
-    refs_dir = Path(args.refs_dir)
-    importer = RegulationImporter(refs_dir, use_vectors=not args.no_vectors)
+    print("=" * 60)
+    print("法规数据导入工具")
+    print("=" * 60)
 
-    # 导入数据
+    # 创建导入器配置
+    config = get_config(regulations_dir=args.refs_dir)
+    importer = RegulationDataImporter(config)
+
+    # 解析文档
     if args.file:
-        file_path = refs_dir / args.file
-        if not file_path.exists():
-            print(f"Error: File not found: {file_path}")
-            return
-
-        stats = importer.import_file(file_path)
-        print(f"\nImport complete: SQLite={stats['sqlite']}, LanceDB={stats['lancedb']}")
+        print(f"\n解析单个文件: {args.file}")
+        documents = importer.parse_single_file(args.file)
     else:
-        importer.import_all()
+        print(f"\n从 {args.refs_dir} 解析法规文档")
+        documents = importer.parse_documents(args.pattern)
+
+    if not documents:
+        print("没有解析到任何文档")
+        return 1
+
+    print(f"成功解析 {len(documents)} 条法规")
+
+    # 测试模式
+    if args.test:
+        print("\n测试模式 - 显示前 3 条法规:")
+        for i, doc in enumerate(documents[:3], 1):
+            law_name = doc.metadata.get('law_name', 'N/A')
+            article_num = doc.metadata.get('article_number', 'N/A')
+            print(f"\n{i}. [{law_name}] {article_num}")
+            print(f"   {doc.text[:100]}...")
+        return 0
+
+    # 执行导入
+    print("\n开始导入到数据库...")
+
+    stats = importer.import_all(
+        file_pattern=args.pattern,
+        force_rebuild=args.rebuild,
+        skip_sqlite=False,  # 始终导入 SQLite
+        skip_vector=args.sqlite_only  # 根据 --sqlite-only 参数决定是否跳过向量
+    )
+
+    # 显示导入结果
+    print("\n" + "=" * 60)
+    print("导入完成")
+    print("=" * 60)
+    print(f"解析文档: {stats.get('parsed', 0)} 条")
+    print(f"SQLite: {stats.get('sqlite', 0)} 条")
+    print(f"向量索引: {stats.get('vector', 0)} 条")
+    print("=" * 60)
+
+    return 0 if stats.get('parsed', 0) > 0 else 1
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\n\n导入已取消")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n错误: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

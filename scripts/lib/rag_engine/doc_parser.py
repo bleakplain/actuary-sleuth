@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+法规文档解析模块
+
+使用 LlamaIndex 标准模式:
+1. SimpleDirectoryReader 读取文件 (粗粒度)
+2. RegulationNodeParser 解析条款 (细粒度)
+"""
+import re
+import logging
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+
+from llama_index.core import Document
+from llama_index.core.node_parser import NodeParser
+from llama_index.core.readers import SimpleDirectoryReader
+from llama_index.core.schema import TextNode
+
+logger = logging.getLogger(__name__)
+
+
+class RegulationNodeParser(NodeParser):
+    """法规条款节点解析器
+
+    将完整的法规文档按条款分割成独立的节点
+    """
+
+    def __init__(self, include_extra_info: bool = True):
+        super().__init__(include_extra_info=include_extra_info)
+
+    def _parse_nodes(
+        self,
+        nodes: List,
+        show_progress: bool = False,
+        **kwargs
+    ) -> List:
+        """解析节点，将文件级 Document 转换为条款级 TextNode"""
+
+        result_nodes = []
+
+        for node in nodes:
+            # 只处理 Document 类型的节点
+            from llama_index.core.schema import Document
+            if not isinstance(node, Document):
+                result_nodes.append(node)
+                continue
+
+            # 解析条款
+            law_name = self._extract_law_name(node.text, node.metadata)
+            article_nodes = self._parse_article_nodes(
+                node.text,
+                law_name,
+                node.metadata
+            )
+            result_nodes.extend(article_nodes)
+
+        return result_nodes
+
+    def _extract_law_name(self, content: str, metadata: dict) -> str:
+        """提取法规名称"""
+        # 先尝试从 metadata 获取
+        if 'law_name' in metadata:
+            return metadata['law_name']
+
+        # 从内容中提取
+        match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+        if match:
+            return match.group(1).strip()
+
+        # 回退到文件名
+        return metadata.get('file_name', '未知法规')
+
+    def _parse_article_nodes(
+        self,
+        content: str,
+        law_name: str,
+        metadata: dict
+    ) -> List:
+        """解析单个文档中的所有条款"""
+
+        nodes = []
+        lines = content.split('\n')
+        current_article = None
+        current_content = []
+
+        # 条款标题模式
+        article_patterns = [
+            r'###\s*第([一二三四五六七八九十百千\d]+)[条条]\s*(.+?)(?:\s|$)',
+            r'##\s*第([一二三四五六七八九十百千\d]+)[条条]\s*(.+?)(?:\s|$)',
+            r'^第([一二三四五六七八九十百千\d]+)[条条]\s*(.+?)(?:\s|$)',
+        ]
+
+        for line in lines:
+            stripped = line.strip()
+
+            # 检测是否为条款标题
+            is_article = False
+            article_title = None
+
+            for pattern in article_patterns:
+                match = re.match(pattern, stripped)
+                if match:
+                    is_article = True
+                    article_num = match.group(1)
+                    article_desc = match.group(2).strip() if len(match.groups()) > 1 else ""
+                    article_title = f"第{article_num}条"
+                    if article_desc:
+                        article_title += f" {article_desc}"
+                    break
+
+            if is_article:
+                # 保存前一条款
+                if current_article and current_content:
+                    node = self._create_node(
+                        current_article,
+                        current_content,
+                        law_name,
+                        metadata
+                    )
+                    if node:
+                        nodes.append(node)
+
+                # 开始新条款
+                current_article = article_title
+                current_content = [line]
+            elif current_article:
+                current_content.append(line)
+
+        # 保存最后一条款
+        if current_article and current_content:
+            node = self._create_node(
+                current_article,
+                current_content,
+                law_name,
+                metadata
+            )
+            if node:
+                nodes.append(node)
+
+        return nodes
+
+    def _create_node(
+        self,
+        article_title: str,
+        content_lines: List[str],
+        law_name: str,
+        source_metadata: dict
+    ):
+        """创建条款节点"""
+
+        # 清理内容
+        full_content = '\n'.join(content_lines).strip()
+        full_content = re.sub(r'^#{1,3}\s*', '', full_content, flags=re.MULTILINE)
+        full_content = full_content.strip()
+
+        if len(full_content) <= 20:
+            return None
+
+        # 提取条款编号
+        article_num = article_title.split()[0] if article_title else article_title
+
+        from llama_index.core.schema import TextNode
+        return TextNode(
+            text=full_content,
+            metadata={
+                'law_name': law_name,
+                'article_number': article_title,
+                'article_num_only': article_num,
+                'category': '未分类',
+                'source_file': source_metadata.get('file_name', ''),
+                **source_metadata  # 保留原始元数据
+            }
+        )
+
+
+class RegulationDocParser:
+    """保险法规文档解析器
+
+    使用 LlamaIndex 标准模式:
+    1. SimpleDirectoryReader 读取文件
+    2. RegulationNodeParser 解析条款
+    """
+
+    def __init__(self, regulations_dir: str = "./references"):
+        self.regulations_dir = Path(regulations_dir)
+        self.node_parser = RegulationNodeParser()
+
+    def parse_all(self, file_pattern: str = "*.md") -> List[Document]:
+        """解析目录下所有法规文档
+
+        使用 SimpleDirectoryReader (LlamaIndex 标准方式)
+        """
+        from llama_index.core.readers import SimpleDirectoryReader
+        import glob
+
+        if not self.regulations_dir.exists():
+            logger.error(f"法规目录不存在: {self.regulations_dir}")
+            return []
+
+        # 获取文件列表
+        md_files = sorted(self.regulations_dir.glob(file_pattern))
+        if not md_files:
+            logger.error(f"未找到匹配 {file_pattern} 的文件")
+            return []
+
+        # 使用 SimpleDirectoryReader 读取文件 (标准方式)
+        # 需要将路径转换为字符串
+        file_paths = [str(f) for f in md_files]
+        reader = SimpleDirectoryReader(input_files=file_paths)
+        documents = reader.load_data()
+
+        # 使用 NodeParser 解析条款
+        nodes = self.node_parser._parse_nodes(documents)
+
+        # 将 TextNode 转换回 Document (兼容性)
+        result_documents = []
+        for node in nodes:
+            result_documents.append(
+                Document(text=node.text, metadata=node.metadata)
+            )
+
+        logger.info(f"在 {self.regulations_dir} 中找到 {len(md_files)} 个 markdown 文件")
+        logger.info(f"总共解析了 {len(result_documents)} 条法规条款")
+        return result_documents
+
+    def parse_single_file(self, file_name: str) -> List[Document]:
+        """解析单个法规文件"""
+        file_path = self.regulations_dir / file_name
+        if not file_path.exists():
+            logger.warning(f"文件不存在: {file_path}")
+            return []
+
+        # 使用 SimpleDirectoryReader 读取单个文件
+        from llama_index.core.readers import SimpleDirectoryReader
+
+        reader = SimpleDirectoryReader(input_files=[str(file_path)])
+        docs = reader.load_data()
+
+        if not docs:
+            logger.warning(f"未找到文件: {file_name}")
+            return []
+
+        # 使用 NodeParser 解析条款
+        nodes = self.node_parser._parse_nodes(docs)
+
+        return [
+            Document(text=node.text, metadata=node.metadata)
+            for node in nodes
+        ]
+
+    def documents_to_sqlite_format(self, documents: List[Document]) -> List[Dict[str, Any]]:
+        """将 LlamaIndex Document 转换为 SQLite 格式"""
+        sqlite_records = []
+
+        for idx, doc in enumerate(documents):
+            record = {
+                'id': f"REG_{idx:06d}",
+                'law_name': doc.metadata.get('law_name', ''),
+                'article_number': doc.metadata.get('article_number', ''),
+                'content': doc.text,
+                'category': doc.metadata.get('category', ''),
+                'tags': '',
+                'effective_date': ''
+            }
+            sqlite_records.append(record)
+
+        return sqlite_records

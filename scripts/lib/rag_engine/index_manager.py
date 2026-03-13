@@ -4,6 +4,7 @@
 向量索引管理模块
 负责创建、加载和管理法规向量索引
 """
+import logging
 from typing import List, Optional
 
 from llama_index.core import VectorStoreIndex, Settings
@@ -13,21 +14,16 @@ from llama_index.core.storage.storage_context import StorageContext
 
 from .config import RAGConfig
 
+logger = logging.getLogger(__name__)
+
 
 class VectorIndexManager:
     """法规向量索引管理器"""
 
     def __init__(self, config: RAGConfig = None):
-        """
-        初始化索引管理器
-
-        Args:
-            config: RAG 配置
-        """
         self.config = config or RAGConfig()
         self.index: Optional[VectorStoreIndex] = None
 
-        # 配置文本分块器
         Settings.text_splitter = SentenceSplitter(
             chunk_size=self.config.chunk_size,
             chunk_overlap=self.config.chunk_overlap,
@@ -54,11 +50,11 @@ class VectorIndexManager:
             loaded_index = self._load_existing_index()
             if loaded_index:
                 self.index = loaded_index
-                print(f"已加载已有的索引")
+                logger.info("已加载已有的索引")
                 return self.index
 
         if not documents:
-            print("没有文档可用于创建索引")
+            logger.warning("没有文档可用于创建索引")
             return None
 
         # 创建向量存储
@@ -71,14 +67,14 @@ class VectorIndexManager:
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
         # 创建索引
-        print(f"正在使用 {len(documents)} 条法规创建索引...")
+        logger.info(f"正在使用 {len(documents)} 条法规创建索引...")
         self.index = VectorStoreIndex.from_documents(
             documents,
             storage_context=storage_context,
             show_progress=True,
         )
 
-        print("索引创建成功")
+        logger.info("索引创建成功")
         return self.index
 
     def _load_existing_index(self) -> Optional[VectorStoreIndex]:
@@ -95,11 +91,11 @@ class VectorIndexManager:
             )
 
             index = VectorStoreIndex.from_vector_store(vector_store=vector_store)
-            print(f"从集合 '{self.config.collection_name}' 加载了已有索引")
+            logger.info(f"从集合 '{self.config.collection_name}' 加载了已有索引")
             return index
 
         except Exception as e:
-            print(f"加载已有索引失败: {e}")
+            logger.warning(f"加载已有索引失败: {e}")
             return None
 
     def get_index(self) -> Optional[VectorStoreIndex]:
@@ -123,7 +119,7 @@ class VectorIndexManager:
             查询引擎实例
         """
         if self.index is None:
-            print("索引未初始化")
+            logger.warning("索引未初始化")
             return None
 
         top_k = top_k or self.config.top_k_results
