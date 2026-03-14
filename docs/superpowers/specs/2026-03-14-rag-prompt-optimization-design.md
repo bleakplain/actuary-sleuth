@@ -61,6 +61,7 @@
 ```
 scripts/lib/rag_engine/
 ├── rag_engine.py          # 修改：重构 ask() 方法
+├── models.py              # 新增：数据结构定义
 ├── prompt_builder.py      # 新增：Prompt 构建器
 ├── self_check.py          # 新增：自检与 fallback
 ├── citation_mapper.py     # 新增：引用映射
@@ -68,6 +69,46 @@ scripts/lib/rag_engine/
     ├── system_prompt.yaml     # 系统提示词模板
     ├── self_check_prompt.yaml # 自检提示词模板
     └── query_rewrite_prompt.yaml # 查询重写模板
+```
+
+## 数据结构
+
+```python
+# models.py
+
+from dataclasses import dataclass
+from typing import List
+
+@dataclass
+class CheckResult:
+    """自检结果"""
+    is_sufficient: bool
+    needs_fallback: bool
+    issues: List[str]
+    confidence: float
+
+@dataclass
+class CitationResult:
+    """引用映射结果"""
+    answer_with_sources: str
+    sources: List['SourceInfo']
+
+@dataclass
+class SourceInfo:
+    """单个来源信息"""
+    index: int
+    law_name: str
+    article_number: str
+    content: str
+    score: float
+
+@dataclass
+class PromptConfig:
+    """Prompt 配置"""
+    max_contexts: int = 10
+    enable_fallback: bool = True
+    max_fallback_retries: int = 2
+    fallback_confidence_threshold: float = 0.5
 ```
 
 ## 组件设计
@@ -82,10 +123,13 @@ scripts/lib/rag_engine/
 **接口**：
 ```python
 class PromptBuilder:
+    def __init__(self, config: PromptConfig = None):
+        self.config = config or PromptConfig()
+
     def build_context(
         self,
         retrieved_docs: List[Dict],
-        max_contexts: int = 10
+        max_contexts: int = None
     ) -> str:
         """格式化检索上下文，返回带编号的文本"""
 
@@ -93,7 +137,13 @@ class PromptBuilder:
         """构建系统提示词"""
 
     def sort_by_hierarchy(self, docs: List[Dict]) -> List[Dict]:
-        """按法规层级排序：法律 > 部门规章 > 规范性文件"""
+        """按法规层级排序：法律 > 部门规章 > 规范性文件
+
+        层级检测基于 law_name 字段：
+        - 包含"法"且不含"办法"/"规定" → 法律
+        - 包含"办法"/"规定" → 部门规章
+        - 其他 → 规范性文件
+        """
 ```
 
 **系统提示词模板**：
@@ -130,23 +180,36 @@ class PromptBuilder:
 **接口**：
 ```python
 class SelfCheckProcessor:
-    async def check_answer(
+    def __init__(self, llm_provider: Callable[[], BaseLLMClient]):
+        self.llm_provider = llm_provider
+
+    def check_answer(
         self,
         question: str,
         answer: str,
         contexts: List[str]
     ) -> CheckResult:
-        """自检答案质量"""
+        """自检答案质量（同步方法）"""
 
-    def should_trigger_fallback(self, answer: str) -> bool:
+    def should_trigger_fallback(self, check_result: CheckResult) -> bool:
         """判断是否需要 fallback 检索"""
 
-    async def fallback_retrieve(
+    def fallback_retrieve(
         self,
         question: str,
-        engine: RAGEngine
+        search_func: Callable,
+        retry_count: int = 0
     ) -> List[Dict]:
-        """执行 fallback 检索"""
+        """执行 fallback 检索
+
+        Args:
+            question: 原始问题
+            search_func: 检索函数（签名：search(query, top_k, use_hybrid) -> List[Dict]）
+            retry_count: 当前重试次数
+
+        Returns:
+            额外的检索结果
+        """
 ```
 
 **自检提示词模板**：
@@ -177,6 +240,11 @@ class SelfCheckProcessor:
     │
     ▼
 ┌───────────────────┐
+│  自检答案质量      │
+└────────┬──────────┘
+         │
+         ▼
+┌───────────────────┐
 │  判断是否需要 fallback  │ ← needs_fallback || confidence < 0.5
 └────────┬──────────┘
          │ No
@@ -195,7 +263,7 @@ class SelfCheckProcessor:
          │
          ▼
 ┌───────────────────┐
-│  仍然不足？        │
+│  仍然不足？        │ ← retry_count < max_fallback_retries
 └────────┬──────────┘
          │ Yes
          ▼
@@ -229,31 +297,35 @@ class CitationMapper:
         answer: str,
         retrieved_docs: List[Dict]
     ) -> CitationResult:
-        """映射引用编号"""
+        """映射引用编号
+
+        1. 从答案中提取 [1][2] 引用编号
+        2. 验证编号在有效范围内
+        3. 生成带 sources 列表的答案
+        """
 
     def validate_citations(
         self,
         answer: str,
         max_index: int
-    ) -> List[str]:
-        """验证引用编号是否在有效范围内"""
+    ) -> List[int]:
+        """验证引用编号是否在有效范围内
+
+        Returns:
+            无效引用编号列表
+        """
+
+    def format_sources(
+        self,
+        used_docs: List[Dict]
+    ) -> str:
+        """格式化 sources 列表为可读文本"""
 ```
 
-**数据结构**：
-```python
-@dataclass
-class CitationResult:
-    answer_with_sources: str  # 带 sources 链接的答案
-    sources: List[SourceInfo]  # 来源详情
-
-@dataclass
-class SourceInfo:
-    index: int  # 编号
-    law_name: str
-    article_number: str
-    content: str
-    score: float
-```
+**SourceInfo 职责**：
+- 存储单个引用来源的完整元数据
+- 关联答案中的 `[1][2]` 编号与具体法规
+- 支持最终格式化输出
 
 ## 修改 RAGEngine
 
@@ -263,6 +335,8 @@ class SourceInfo:
 def ask(self, question: str, include_sources: bool = True) -> Dict[str, Any]:
     """
     问答模式：返回自然语言答案（带引用标注）
+
+    使用同步方法，自检和 fallback 也使用同步调用。
     """
     if self.query_engine is None:
         if not self.initialize():
@@ -271,9 +345,13 @@ def ask(self, question: str, include_sources: bool = True) -> Dict[str, Any]:
     # 1. 执行检索
     retrieved_docs = self.search(question, top_k=10, use_hybrid=True)
 
+    if not retrieved_docs:
+        return {'answer': '未找到相关法规', 'sources': []}
+
     # 2. 构建上下文
-    prompt_builder = PromptBuilder()
-    contexts = prompt_builder.build_context(retrieved_docs, max_contexts=10)
+    prompt_builder = PromptBuilder(self.config.prompt_config)
+    sorted_docs = prompt_builder.sort_by_hierarchy(retrieved_docs)
+    contexts = prompt_builder.build_context(sorted_docs, max_contexts=10)
     system_prompt = prompt_builder.build_system_prompt()
 
     # 3. 生成答案
@@ -285,26 +363,33 @@ def ask(self, question: str, include_sources: bool = True) -> Dict[str, Any]:
         system_prompt=system_prompt
     )
 
-    # 4. 自检与 fallback
-    self_check = SelfCheckProcessor(self)
-    check_result = await self_check.check_answer(question, answer, contexts)
+    # 4. 自检与 fallback（同步）
+    if self.config.prompt_config.enable_fallback:
+        self_check = SelfCheckProcessor(self.llm_provider)
+        check_result = self_check.check_answer(question, answer, contexts)
 
-    if check_result.needs_fallback:
-        fallback_docs = await self_check.fallback_retrieve(question, self)
-        retrieved_docs.extend(fallback_docs)
-        contexts = prompt_builder.build_context(retrieved_docs, max_contexts=10)
-        answer = llm_client.generate(
-            f"【问题】{question}\n\n【法规资料】\n{contexts}",
-            system_prompt=system_prompt
-        )
+        if check_result.needs_fallback:
+            fallback_docs = self_check.fallback_retrieve(
+                question,
+                self.search,  # 传入检索函数
+                retry_count=0
+            )
+            if fallback_docs:
+                retrieved_docs.extend(fallback_docs)
+                sorted_docs = prompt_builder.sort_by_hierarchy(retrieved_docs)
+                contexts = prompt_builder.build_context(sorted_docs, max_contexts=10)
+                answer = llm_client.generate(
+                    f"【问题】{question}\n\n【法规资料】\n{contexts}",
+                    system_prompt=system_prompt
+                )
 
     # 5. 映射引用
     citation_mapper = CitationMapper()
-    citation_result = citation_mapper.map_citations(answer, retrieved_docs)
+    citation_result = citation_mapper.map_citations(answer, sorted_docs)
 
     return {
         'answer': citation_result.answer_with_sources,
-        'sources': citation_result.sources
+        'sources': [asdict(s) for s in citation_result.sources]
     }
 ```
 
@@ -337,68 +422,80 @@ def ask(self, question: str, include_sources: bool = True) -> Dict[str, Any]:
 | 场景 | 处理方式 |
 |------|----------|
 | 检索无结果 | 返回"未找到相关法规"，不调用 LLM |
-| LLM 调用失败 | 记录错误，返回友好提示 |
-| 引用编号越界 | 记录警告，保留答案但标注引用无效 |
+| LLM 调用失败 | 记录错误，返回"生成答案时出错，请稍后重试" |
+| 引用编号越界 | 记录警告，保留答案但标注"引用 [X] 无效" |
 | Fallback 达到上限 | 停止重试，返回当前最佳答案 |
+| 自检 JSON 解析失败 | 默认不触发 fallback，记录警告 |
 
 ## 配置
 
-**新增配置项** (`RAGConfig`)：
+**扩展 RAGConfig**：
 ```python
-@dataclass
-class PromptConfig:
-    max_contexts: int = 10  # 传递给 LLM 的最大上下文数量
-    enable_fallback: bool = True  # 是否启用 fallback
-    max_fallback_retries: int = 2  # 最大 fallback 重试次数
-    fallback_confidence_threshold: float = 0.5  # 触发 fallback 的置信度阈值
+# config.py
 
 @dataclass
 class RAGConfig:
     # ... 现有字段 ...
     prompt_config: PromptConfig = None
+
+    def __post_init__(self):
+        # ... 现有逻辑 ...
+        if self.prompt_config is None:
+            self.prompt_config = PromptConfig()
 ```
 
 ## 测试计划
 
 ### 单元测试
 
-1. **PromptBuilder**
+1. **models.py**
+   - 测试各 dataclass 的序列化/反序列化
+   - 测试 CheckResult 的字段验证
+
+2. **PromptBuilder**
    - 测试上下文格式化正确性
-   - 测试层级排序逻辑
+   - 测试层级排序逻辑（基于 law_name 规则）
    - 测试最大上下文数量限制
 
-2. **SelfCheckProcessor**
-   - 测试自检结果解析
+3. **SelfCheckProcessor**
+   - 测试自检结果解析（JSON → CheckResult）
    - 测试 fallback 触发条件
-   - 测试查询重写
+   - 测试 fallback 深度限制
 
-3. **CitationMapper**
-   - 测试引用编号映射
+4. **CitationMapper**
+   - 测试引用编号提取（正则匹配）
    - 测试引用验证
+   - 测试 sources 格式化
 
 ### 集成测试
 
 1. 测试完整问答流程
-2. 测试 fallback 机制
-3. 测试边界条件（无结果、LLM 失败等）
+2. 测试 fallback 机制（宽化 → 重写）
+3. 测试边界条件（无结果、LLM 失败、JSON 解析失败等）
+4. 测试层级排序效果
 
 ### 评估指标
 
 - **答案质量**：法条引用准确率、信息覆盖率
 - **防幻觉**：无依据断言数量
 - **引用完整性**：引用标注覆盖率
+- **Fallback 效果**：fallback 后答案质量提升
 
 ## 实施步骤
 
-1. 创建 PromptBuilder 模块和模板
-2. 创建 SelfCheckProcessor 模块
-3. 创建 CitationMapper 模块
-4. 修改 RAGEngine.ask() 方法
-5. 添加配置项
-6. 编写测试
-7. 运行评估
+1. 创建 models.py（数据结构定义）
+2. 创建 prompts/ 目录和 YAML 模板
+3. 创建 PromptBuilder 模块
+4. 创建 SelfCheckProcessor 模块
+5. 创建 CitationMapper 模块
+6. 修改 RAGEngine.ask() 方法
+7. 扩展 RAGConfig 添加 PromptConfig
+8. 编写单元测试
+9. 编写集成测试
+10. 运行评估并调优
 
 ## 向后兼容
 
-现有 `search()` 方法保持不变，仅重构 `ask()` 方法。
-外部调用接口保持一致，返回格式增强（新增 sources 链接）。
+- `search()` 方法保持不变
+- `ask()` 方法返回格式增强（sources 新增字段）
+- 现有调用代码无需修改
