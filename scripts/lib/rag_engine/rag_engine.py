@@ -470,6 +470,39 @@ class RAGEngine:
         result = self.ask(message, include_sources=False)
         return result['answer']
 
+    def search_by_metadata(
+        self,
+        query: str,
+        law_name: str = None,
+        category: str = None,
+        hierarchy_level: str = None,
+        issuing_authority: str = None
+    ) -> List[Dict[str, Any]]:
+        """
+        使用增强元数据进行检索
+
+        Args:
+            query: 查询文本
+            law_name: 法规名称过滤
+            category: 分类过滤
+            hierarchy_level: 层级过滤
+            issuing_authority: 发布机关过滤
+
+        Returns:
+            List[Dict]: 检索结果
+        """
+        filters = {}
+        if law_name:
+            filters['law_name'] = law_name
+        if category:
+            filters['category'] = category
+        if hierarchy_level:
+            filters['hierarchy_level'] = hierarchy_level
+        if issuing_authority:
+            filters['issuing_authority'] = issuing_authority
+
+        return self.search(query, filters=filters)
+
 
 # 工厂函数：创建不同场景的引擎
 
