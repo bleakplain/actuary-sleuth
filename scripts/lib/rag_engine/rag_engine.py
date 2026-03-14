@@ -14,7 +14,7 @@ from .config import RAGConfig, HybridQueryConfig
 from .index_manager import VectorIndexManager
 from .llamaindex_adapter import ClientLLMAdapter, get_embedding_model
 from .retrieval import hybrid_search
-from lib.llm_client import BaseLLMClient, LLMClientFactory
+from lib.llm import BaseLLMClient, LLMClientFactory
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class RAGEngine:
 
         # 方式2: 直接构造
         from lib.rag_engine import RAGEngine
-        from lib.llm_client import LLMClientFactory
+        from lib.llm import LLMClientFactory
 
         engine = RAGEngine(llm_provider=LLMClientFactory.get_qa_llm)
     """

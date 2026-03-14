@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import List, Dict
 
 from lib.common.models import RegulationRecord, RegulationStatus, RegulationProcessingOutcome
-from lib.llm_client import BaseLLMClient, LLMClientFactory
+from lib.llm import BaseLLMClient, LLMClientFactory
 
 logger = logging.getLogger(__name__)
 

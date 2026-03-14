@@ -18,7 +18,7 @@
    - DocumentExtractor.extract_regulation_metadata(): 法规元数据提取
 
 产品文档使用示例:
-    from lib.llm_client import LLMClientFactory
+    from lib.llm import LLMClientFactory
     from lib.preprocessing import DocumentExtractor
 
     llm_client = LLMClientFactory.create_client({'provider': 'zhipu', 'model': 'glm-4-flash'})
@@ -30,7 +30,7 @@
     )
 
 法规文档使用示例:
-    from lib.llm_client import LLMClientFactory
+    from lib.llm import LLMClientFactory
     from lib.preprocessing import DocumentExtractor
 
     llm_client = LLMClientFactory.create_client({'provider': 'zhipu', 'model': 'glm-4-flash'})

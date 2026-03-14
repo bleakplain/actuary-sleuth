@@ -13,7 +13,7 @@ from .doc_parser import RegulationDocParser
 from .index_manager import VectorIndexManager
 from .config import RAGConfig
 from .llamaindex_adapter import get_embedding_model
-from lib.llm_client import LLMClientFactory
+from lib.llm import LLMClientFactory
 
 logger = logging.getLogger(__name__)
 
