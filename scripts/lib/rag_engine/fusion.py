@@ -5,16 +5,12 @@
 
 负责融合向量检索和关键词检索的结果。
 """
-import re
 import logging
 from typing import List, Dict, Any
 
+from .tokenizer import tokenize_chinese
+
 logger = logging.getLogger(__name__)
-
-
-def _tokenize_chinese(text: str) -> List[str]:
-    """中文分词"""
-    return re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z0-9]+', text.lower())
 
 
 def _normalize_scores(scores: List[float]) -> List[float]:

@@ -10,10 +10,11 @@ from typing import Callable, Dict, Any, List, Optional
 
 from llama_index.core import Settings
 
-from .config import RAGConfig, HybridQueryConfig
+from .config import RAGConfig
 from .index_manager import VectorIndexManager
 from .llamaindex_adapter import ClientLLMAdapter, get_embedding_model
 from .retrieval import hybrid_search
+from .tokenizer import tokenize_chinese
 from lib.llm import BaseLLMClient, LLMClientFactory
 
 logger = logging.getLogger(__name__)
@@ -107,7 +108,7 @@ class RAGEngine:
     def _calculate_avg_doc_len(self, index) -> None:
         doc_lengths = []
         for node in index.docstore.docs.values():
-            tokens = _tokenize_chinese(node.text)
+            tokens = tokenize_chinese(node.text)
             doc_lengths.append(len(tokens))
 
         if doc_lengths:

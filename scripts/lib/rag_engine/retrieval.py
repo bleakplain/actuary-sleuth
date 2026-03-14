@@ -5,7 +5,6 @@
 
 负责向量检索和关键词检索。
 """
-import re
 import logging
 from typing import List, Dict, Any, Optional
 
@@ -14,13 +13,9 @@ from llama_index.core.vector_stores import ExactMatchFilter, MetadataFilters
 from llama_index.core.schema import NodeWithScore
 
 from .fusion import compute_bm25_score, fuse_results
+from .tokenizer import tokenize_chinese
 
 logger = logging.getLogger(__name__)
-
-
-def _tokenize_chinese(text: str) -> List[str]:
-    """中文分词"""
-    return re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z0-9]+', text.lower())
 
 
 def vector_search(
@@ -85,11 +80,11 @@ def keyword_search(
             if all(node.metadata.get(k) == v for k, v in filters.items())
         ]
 
-    query_tokens = _tokenize_chinese(query_text)
+    query_tokens = tokenize_chinese(query_text)
 
     scores = []
     for node in all_nodes:
-        node_tokens = _tokenize_chinese(node.text)
+        node_tokens = tokenize_chinese(node.text)
         score = compute_bm25_score(query_tokens, node_tokens, avg_doc_len)
         scores.append((node, score))
 

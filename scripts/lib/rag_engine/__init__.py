@@ -51,6 +51,7 @@ from .index_manager import VectorIndexManager
 from .data_importer import RegulationDataImporter
 from .retrieval import hybrid_search, vector_search, keyword_search
 from .fusion import fuse_results, compute_bm25_score
+from .tokenizer import tokenize_chinese
 
 __all__ = [
     'RAGConfig',
@@ -67,6 +68,7 @@ __all__ = [
     'keyword_search',
     'fuse_results',
     'compute_bm25_score',
+    'tokenize_chinese',
 ]
 
 __version__ = '0.1.0'

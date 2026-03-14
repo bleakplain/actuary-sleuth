@@ -44,30 +44,52 @@ class LLMClientFactory:
         })
 
     @staticmethod
-    def get_reg_import_llm() -> BaseLLMClient:
+    def _create_scenario_llm(scenario: str) -> BaseLLMClient:
+        """
+        根据场景创建 LLM 客户端
+
+        Args:
+            scenario: 场景名称，对应 _SCENARIOS 的 key
+
+        Returns:
+            BaseLLMClient: LLM 客户端实例
+        """
+        if scenario not in LLMClientFactory._SCENARIOS:
+            raise ValueError(f"Unknown scenario: {scenario}. Available: {list(LLMClientFactory._SCENARIOS.keys())}")
+
+        config = LLMClientFactory._SCENARIOS[scenario]
+
+        # doc_preprocess 使用配置文件的值
+        if config['model'] is None:
+            from lib.config import get_config
+            app_config = get_config()
+            return LLMClientFactory._create_zhipu_client(
+                app_config.llm.model, app_config.llm.timeout
+            )
+
         return LLMClientFactory._create_zhipu_client(
-            ModelName.GLM_4_FLASH, 60
+            config['model'], config['timeout']
         )
+
+    @staticmethod
+    def get_reg_import_llm() -> BaseLLMClient:
+        """获取法规导入场景 LLM"""
+        return LLMClientFactory._create_scenario_llm('reg_import')
 
     @staticmethod
     def get_doc_preprocess_llm() -> BaseLLMClient:
-        from lib.config import get_config
-        app_config = get_config()
-        return LLMClientFactory._create_zhipu_client(
-            app_config.llm.model, app_config.llm.timeout
-        )
+        """获取文档预处理场景 LLM"""
+        return LLMClientFactory._create_scenario_llm('doc_preprocess')
 
     @staticmethod
     def get_audit_llm() -> BaseLLMClient:
-        return LLMClientFactory._create_zhipu_client(
-            ModelName.GLM_4_PLUS, 120
-        )
+        """获取审计场景 LLM"""
+        return LLMClientFactory._create_scenario_llm('audit')
 
     @staticmethod
     def get_qa_llm() -> BaseLLMClient:
-        return LLMClientFactory._create_zhipu_client(
-            ModelName.GLM_4_FLASH, 60
-        )
+        """获取问答场景 LLM"""
+        return LLMClientFactory._create_scenario_llm('qa')
 
     @staticmethod
     def get_embedding_config() -> dict:
