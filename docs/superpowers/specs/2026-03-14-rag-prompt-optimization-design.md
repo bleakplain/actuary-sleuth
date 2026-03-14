@@ -134,7 +134,8 @@ class PromptConfig:
 
     # 引用提取配置
     citation_pattern: str = r'\[(\d+)\]'
-    allow_multiple_citations: bool = False  # 暂不支持 [1,2,3] 格式
+    # 注意：当前正则只匹配 [数字] 格式，不支持 [1,2,3] 或 [1-3] 等格式
+    # allow_multiple_citations 预留用于未来扩展
 
     # 自检配置
     self_check_enabled: bool = True
@@ -273,6 +274,11 @@ class PromptBuilder:
         [1] 来源：{law_name} - {article_number}
         内容：{content}
 
+        参数处理：
+        - max_contexts=None：使用 self.config.max_contexts
+        - max_contexts > len(retrieved_docs)：使用所有可用文档
+        - max_contexts < 1：抛出 ValueError
+
         边界情况：
         - law_name 缺失时使用"未知法规"
         - article_number 缺失时使用"未知条款"
@@ -287,16 +293,22 @@ class PromptBuilder:
         return format_rag_user_prompt(question, contexts)
 
     def sort_by_hierarchy(self, docs: List[Dict]) -> List[Dict]:
-        """按法规层级排序：法律 > 部门规章 > 规范性文件"""
+        """按法规层级排序：法律 > 部门规章 > 规范性文件
+
+        同层级内保持原始检索顺序（已按 score 排序）。
+        """
 
     @staticmethod
     def _get_hierarchy_level(law_name: str) -> int:
         """根据法规名称推断层级
 
-        优先级 1（法律）：包含"法"且不含"办法"/"规定"/"通知"
-        优先级 2（部门规章）：包含"办法"/"规定"/"细则"
-        优先级 3（规范性文件）：包含"通知"/"指引"/"意见"
+        优先级 1（法律）：包含"法"且不含"办法"/"规定"/"通知"/"细则"
+        优先级 2（部门规章）：包含"办法"/"规定"/"细则"/"规程"
+        优先级 3（规范性文件）：包含"通知"/"指引"/"意见"/"批复"
         优先级 4（其他）：其他情况
+
+        注意：这是简化启发式规则，可能存在误分类。
+        未来可通过添加 metadata.hierarchy_level 字段来改进。
         """
 ```
 
@@ -333,16 +345,23 @@ class SelfCheckProcessor:
         self,
         question: str,
         answer: str,
-        contexts: str  # 格式化后的上下文字符串
+        contexts: str  # 格式化后的上下文字符串，用于自检提示词
     ) -> CheckResult:
         """自检答案质量
 
         调用 LLM 进行自检，解析返回的 JSON 结果。
         如果 JSON 解析失败，返回默认结果（不触发 fallback）。
+
+        注意：contexts 参数用于自检提示词中，让 LLM 知道有多少资料可用。
         """
 
     def should_trigger_fallback(self, check_result: CheckResult) -> bool:
-        """判断是否需要 fallback 检索"""
+        """判断是否需要 fallback 检索
+
+        触发条件：
+        - check_result.needs_fallback == True
+        - 或 check_result.confidence < fallback_confidence_threshold
+        """
 
     def fallback_retrieve(
         self,
@@ -350,14 +369,19 @@ class SelfCheckProcessor:
         search_func: Callable,
         retry_count: int = 0
     ) -> List[Dict]:
-        """执行 fallback 检索
+        """执行 fallback 检索（非递归实现）
+
+        每次调用只执行当前 retry_count 对应的策略，返回该策略的结果。
+        递归由调用方 ask_with_prompt() 控制。
 
         Fallback 策略：
         - retry_count=0：宽化检索（top_k * 2）
-        - retry_count=1：查询重写（使用 LLM 重写查询）
+        - retry_count=1：查询重写（使用 LLM 重写查询，然后检索）
 
         如果 retry_count >= max_fallback_retries（默认 2），返回空列表。
-        注意：max_fallback_retries=2 表示最多执行 2 次 fallback，加上首次共 3 次尝试。
+
+        注意：max_fallback_retries=2 表示最多允许 2 次 fallback 调用。
+        第一次 fallback (retry_count=0) 成功后，如果仍需 fallback，调用方会用 retry_count=1 再次调用。
         """
 
     def _rewrite_query(self, question: str) -> str:
@@ -427,9 +451,12 @@ class CitationMapper:
         """从答案中提取所有引用编号
 
         支持格式：
-        - [1] -> 1
-        - [2] -> 2
-        - [1][2] -> [1, 2]
+        - [1] -> [1]
+        - [2] -> [2]
+        - [1][2] -> [1, 2] （多个独立引用）
+
+        正则模式：r'\[(\d+)\]'
+        匹配方括号内的单个数字。
         """
 
     def format_sources(
@@ -565,6 +592,25 @@ class RAGEngine:
                             {'role': 'user', 'content': user_prompt}
                         ]
                         final_answer = llm_client.chat(messages)
+
+                        # 如果答案仍不满足，进行第二次 fallback（查询重写）
+                        second_check = self_check.check_answer(question, final_answer, contexts)
+                        if self_check.should_trigger_fallback(second_check):
+                            fallback_docs_2 = self_check.fallback_retrieve(
+                                question,
+                                self.search,
+                                retry_count=1
+                            )
+                            if fallback_docs_2:
+                                retrieved_docs.extend(fallback_docs_2)
+                                sorted_docs = prompt_builder.sort_by_hierarchy(retrieved_docs)
+                                contexts = prompt_builder.build_context(sorted_docs, max_contexts=config.max_contexts)
+                                user_prompt = prompt_builder.build_user_prompt(question, contexts)
+                                messages = [
+                                    {'role': 'system', 'content': system_prompt},
+                                    {'role': 'user', 'content': user_prompt}
+                                ]
+                                final_answer = llm_client.chat(messages)
                 except Exception as e:
                     logger.warning(f"Fallback failed: {e}, using original answer")
 
@@ -735,6 +781,68 @@ config.prompt_config.parse_json_fallback = True
 - **性能**：平均/p95 响应时间
 
 ## 实施步骤
+
+1. 创建 models.py（数据结构）
+2. 扩展 prompts.py（新增 RAG 相关模板）
+3. 创建 prompt_builder.py
+4. 创建 self_check.py
+5. 创建 citation_mapper.py
+6. 修改 rag_engine.py（新增 ask_with_prompt()）
+7. 扩展 config.py（添加 PromptConfig）
+8. 编写单元测试
+9. 编写集成测试
+10. 运行评估并调优
+
+## 迁移指南
+
+### 从 ask() 迁移到 ask_with_prompt()
+
+**步骤 1：更新调用代码**
+```python
+# 之前
+result = engine.ask("健康保险等待期有什么规定？")
+print(result['answer'])
+for source in result['sources']:
+    print(source['law_name'], source['article_number'])
+
+# 之后
+result = engine.ask_with_prompt("健康保险等待期有什么规定？")
+print(result['answer'])
+for source in result['sources']:
+    print(source['law_name'], source['article_number'])
+
+# 新增功能
+if result['invalid_citations']:
+    # 处理无效引用
+    pass
+if result['fallback_triggered']:
+    # 记录 fallback 使用情况
+    pass
+if result['confidence'] < 0.7:
+    # 低置信度答案处理
+    pass
+```
+
+**步骤 2：配置调优**
+```python
+# 根据场景调整配置
+config = RAGConfig()
+
+# 高质量优先（审计场景）
+config.prompt_config.max_contexts = 15
+config.prompt_config.enable_fallback = True
+config.prompt_config.fallback_confidence_threshold = 0.3
+
+# 低延迟优先（客服场景）
+config.prompt_config.max_contexts = 5
+config.prompt_config.enable_fallback = False
+config.prompt_config.self_check_enabled = False
+```
+
+**步骤 3：监控指标**
+- fallback_triggered 比率：过高可能需要优化检索
+- confidence 分布：过低可能需要调整阈值
+- invalid_citations 数量：过多可能需要优化 prompt
 
 1. 创建 models.py（数据结构）
 2. 扩展 prompts.py（新增 RAG 相关模板）
