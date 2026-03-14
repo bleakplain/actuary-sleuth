@@ -14,9 +14,8 @@
    - ResultValidator: 结果验证器
    - DocumentExtractor: 统一提取器（主入口）
 
-2. 法规文档预处理（用于 RAG 向量库）:
-   - RegulationCleaner: 法规文档清洗
-   - RegulationExtractor: 法规结构化信息提取
+2. 法规文档元数据提取（用于 RAG 向量库）:
+   - DocumentExtractor.extract_regulation_metadata(): 法规元数据提取
 
 产品文档使用示例:
     from lib.llm_client import LLMClientFactory
@@ -31,17 +30,18 @@
     )
 
 法规文档使用示例:
-    from lib.preprocessing import RegulationCleaner, RegulationExtractor
-    from lib.preprocessing.models import RegulationRecord
+    from lib.llm_client import LLMClientFactory
+    from lib.preprocessing import DocumentExtractor
 
-    cleaner = RegulationCleaner()
-    extractor = RegulationExtractor()
-    record = RegulationRecord(law_name="", article_number="", category="未分类")
+    llm_client = LLMClientFactory.create_client({'provider': 'zhipu', 'model': 'glm-4-flash'})
+    extractor = DocumentExtractor(llm_client)
 
-    # 清洗
-    clean_result = cleaner.clean(content, 'regulation.md', record)
-    # 提取
-    extract_result = extractor.extract(content, record)
+    # 提取法规元数据
+    result = extractor.extract_regulation_metadata(
+        content=open('regulation.md').read(),
+        source_file='regulation.md'
+    )
+    # result.record 包含 law_name, article_number, category 等字段
 """
 
 from .models import (
@@ -75,15 +75,6 @@ from .validator import ResultValidator
 from .document_extractor import DocumentExtractor, create_extractor
 from .utils import parse_llm_json_response, config
 
-# 法规文档预处理
-from .regulation_cleaner import RegulationCleaner
-from .regulation_extractor import (
-    RegulationExtractor,
-    get_regulation_cleaning_prompt,
-    get_regulation_extraction_prompt,
-    format_regulation_completeness_prompt,
-)
-
 __version__ = '1.0.0'
 
 __all__ = [
@@ -116,14 +107,7 @@ __all__ = [
     'ClauseExtractor',
     'ResultValidator',
 
-    # Core Components - 法规文档
-    'RegulationCleaner',
-    'RegulationExtractor',
-    'get_regulation_cleaning_prompt',
-    'get_regulation_extraction_prompt',
-    'format_regulation_completeness_prompt',
-
-    # Main Entry - 产品文档
+    # Main Entry - 产品文档兼法规元数据提取
     'DocumentExtractor',
     'create_extractor',
 

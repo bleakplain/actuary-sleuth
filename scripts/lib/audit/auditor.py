@@ -52,7 +52,7 @@ class ComplianceAuditor:
         product_clause: str,
         regulation_record: RegulationRecord,
         regulation_content: str
-    ) -> ProcessingOutcome:
+    ) -> RegulationProcessingOutcome:
         """
         审核产品条款是否符合监管规定
 

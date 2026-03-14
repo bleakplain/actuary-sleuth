@@ -49,6 +49,8 @@ from .rag_engine import RAGEngine, create_qa_engine, create_audit_engine
 from .doc_parser import RegulationDocParser
 from .index_manager import VectorIndexManager
 from .data_importer import RegulationDataImporter
+from .retrieval import hybrid_search, vector_search, keyword_search
+from .fusion import fuse_results, compute_bm25_score
 
 __all__ = [
     'RAGConfig',
@@ -60,6 +62,11 @@ __all__ = [
     'RegulationDocParser',
     'VectorIndexManager',
     'RegulationDataImporter',
+    'hybrid_search',
+    'vector_search',
+    'keyword_search',
+    'fuse_results',
+    'compute_bm25_score',
 ]
 
 __version__ = '0.1.0'
