@@ -138,7 +138,7 @@ class PromptConfig:
 
     # 自检配置
     self_check_enabled: bool = True
-    parse_json_fallback: bool = True  # JSON 解析失败时的行为
+    parse_json_fallback: bool = True  # JSON 解析失败时：True 返回默认值，False 抛出异常
 
     # 性能配置
     self_check_timeout: int = 30  # 自检 LLM 超时（秒）
@@ -272,6 +272,10 @@ class PromptBuilder:
         每个文档格式：
         [1] 来源：{law_name} - {article_number}
         内容：{content}
+
+        边界情况：
+        - law_name 缺失时使用"未知法规"
+        - article_number 缺失时使用"未知条款"
         """
 
     def build_system_prompt(self) -> str:
@@ -329,7 +333,7 @@ class SelfCheckProcessor:
         self,
         question: str,
         answer: str,
-        contexts: List[str]
+        contexts: str  # 格式化后的上下文字符串
     ) -> CheckResult:
         """自检答案质量
 
@@ -349,10 +353,11 @@ class SelfCheckProcessor:
         """执行 fallback 检索
 
         Fallback 策略：
-        - 第1次 retry (retry_count=0)：宽化检索（top_k * 2）
-        - 第2次 retry (retry_count=1)：查询重写（使用 LLM 重写查询）
+        - retry_count=0：宽化检索（top_k * 2）
+        - retry_count=1：查询重写（使用 LLM 重写查询）
 
-        如果 retry_count >= max_fallback_retries，返回空列表。
+        如果 retry_count >= max_fallback_retries（默认 2），返回空列表。
+        注意：max_fallback_retries=2 表示最多执行 2 次 fallback，加上首次共 3 次尝试。
         """
 
     def _rewrite_query(self, question: str) -> str:
@@ -361,8 +366,10 @@ class SelfCheckProcessor:
     def _parse_check_response(self, response: str) -> CheckResult:
         """解析自检响应
 
-        如果 JSON 解析失败且 parse_json_fallback=True，返回默认值。
-        否则抛出异常。
+        如果 JSON 解析失败且 parse_json_fallback=True，返回默认值：
+        CheckResult(is_sufficient=True, needs_fallback=False, issues=["解析失败"], confidence=0.5)
+
+        如果 parse_json_fallback=False，抛出 ValueError。
         """
 ```
 
@@ -431,11 +438,13 @@ class CitationMapper:
     ) -> str:
         """格式化 sources 列表为可读文本
 
-        格式：
+        返回格式：
         **相关法规**：
         - [1] 法规名称 - 条款号
           内容：摘要...
           相似度：0.xx
+
+        注意：此方法返回的字符串会追加到 answer_with_sources 中。
         """
 ```
 
@@ -572,7 +581,10 @@ class RAGEngine:
         }
 
     def _error_result(self, message: str) -> Dict[str, Any]:
-        """生成错误结果"""
+        """生成错误结果
+
+        同时记录错误日志。
+        """
         return {
             'answer': message,
             'sources': [],
@@ -664,13 +676,15 @@ config.prompt_config.parse_json_fallback = True
 
 ## 性能考虑
 
-| 操作 | LLM 调用 | 额外耗时 | 影响 |
-|------|----------|----------|------|
-| 首次问答 | 1 (chat) | 基线 | - |
-| 自检 | +1 (chat) | +100ms | +100% |
-| Fallback 宽化 | +1 (chat) | +100ms | +200% |
-| Fallback 重写 | +2 (chat + chat) | +200ms | +300% |
-| 最坏情况 | 4 | +400ms | +400% |
+| 操作 | LLM 调用 | 预估额外耗时 | 影响 |
+|------|----------|-------------|------|
+| 首次问答 | 1 (chat) | 基线 ~200ms | - |
+| 自检 | +1 (chat) | +100ms | +50% |
+| Fallback 宽化 | +1 (chat) | +100ms | +100% |
+| Fallback 重写 | +2 (chat + chat) | +200ms | +200% |
+| 最坏情况 | 4 | +400ms | +200% |
+
+注：实际耗时取决于 LLM 提供商和模型选择（glm-z1-air 约为 200ms，glm-4-plus 约为 500ms）
 
 **优化建议**：
 - 对延迟敏感的场景：禁用 fallback 和自检
@@ -763,3 +777,28 @@ print(f"Confidence: {result['confidence']:.2f}")
 - 自定义层级规则：在 PromptConfig 添加自定义排序函数
 - 更多引用格式：扩展 citation_pattern 支持 [1,2,3]
 - 缓存机制：缓存常见问题和答案
+
+## 其他考虑
+
+### 线程安全
+
+`ask_with_prompt()` 方法与现有 `ask()` 方法共享相同的 `RAGEngine` 实例。
+在多线程环境下使用时，需要注意：
+- 各组件（PromptBuilder、SelfCheckProcessor、CitationMapper）是无状态的，可以共享
+- `llm_provider` 返回的 `BaseLLMClient` 实例需要线程安全（现有实现已支持）
+
+### 日志策略
+
+| 组件 | 日志级别 | 场景 |
+|------|----------|------|
+| PromptBuilder | DEBUG | 上下文构建、层级排序 |
+| SelfCheckProcessor | INFO | 自检结果、fallback 触发 |
+| CitationMapper | WARNING | 引用越界、无引用 |
+| RAGEngine | ERROR | LLM 调用失败、检索失败 |
+
+### 引用格式设计
+
+选择 `r'\[(\d+)\]'` 正则表达式的原因：
+- 简单明确：只匹配 `[数字]` 格式
+- 避免误匹配：不会匹配 `[1,2,3]` 或 `[1-3]` 等复杂格式
+- 易于扩展：未来可通过修改 `citation_pattern` 支持更多格式
