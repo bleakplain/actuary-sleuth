@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 """
 数据库操作模块
-
-优化并发支持:
-- 启用 WAL 模式 (Write-Ahead Logging) 提升并发性能
-- 设置合理的超时时间避免锁等待失败
 """
+import logging
 import sqlite3
 import json
+from contextlib import contextmanager
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).parent.parent.parent / 'data' / 'actuary.db'
 
@@ -18,8 +18,8 @@ DB_TIMEOUT = 30  # 30秒超时
 DB_WAL_MODE = True  # 启用WAL模式
 
 
-def get_connection():
-    """获取数据库连接（优化并发支持）"""
+def _create_connection():
+    """创建数据库连接"""
     conn = sqlite3.connect(
         DB_PATH,
         timeout=DB_TIMEOUT,
@@ -39,6 +39,22 @@ def get_connection():
     return conn
 
 
+@contextmanager
+def get_connection():
+    """
+    获取数据库连接（支持 with 语句，自动关闭连接）
+    """
+    conn = _create_connection()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def find_regulation(article_number):
     """精确查找法规条款"""
     try:
@@ -53,7 +69,7 @@ def find_regulation(article_number):
                 return dict(row)
             return None
     except sqlite3.Error as e:
-        print(f"Error finding regulation: {e}")
+        logger.error(f"查找法规失败: {e}")
         return None
 
 
@@ -70,7 +86,7 @@ def search_regulations(keyword):
             rows = cur.fetchall()
             return [dict(row) for row in rows]
     except sqlite3.Error as e:
-        print(f"Error searching regulations: {e}")
+        logger.error(f"搜索法规失败: {e}")
         return []
 
 
@@ -83,7 +99,7 @@ def get_negative_list():
             rows = cur.fetchall()
             return [dict(row) for row in rows]
     except sqlite3.Error as e:
-        print(f"Error getting negative list: {e}")
+        logger.error(f"获取负面清单失败: {e}")
         return []
 
 
@@ -102,10 +118,9 @@ def save_audit_record(record):
                 json.dumps(record.get('violations', []), ensure_ascii=False),
                 record.get('score', 0)
             ))
-            conn.commit()
             return True
     except sqlite3.Error as e:
-        print(f"Error saving audit record: {e}")
+        logger.error(f"保存审核记录失败: {e}")
         return False
 
 
@@ -127,10 +142,9 @@ def add_regulation(regulation_data):
                 regulation_data.get('tags', ''),
                 regulation_data.get('effective_date', '')
             ))
-            conn.commit()
             return True
     except sqlite3.Error as e:
-        print(f"Error adding regulation: {e}")
+        logger.error(f"添加法规失败: {e}")
         return False
 
 
@@ -155,8 +169,7 @@ def add_negative_list_rule(rule_data):
                 rule_data.get('version', 'v1.0'),
                 rule_data.get('effective_date', '')
             ))
-            conn.commit()
             return True
     except sqlite3.Error as e:
-        print(f"Error adding negative list rule: {e}")
+        logger.error(f"添加负面清单规则失败: {e}")
         return False

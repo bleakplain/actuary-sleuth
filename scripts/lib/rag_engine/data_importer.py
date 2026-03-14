@@ -58,16 +58,37 @@ class RegulationDataImporter:
 
     def import_to_sqlite(self, documents: List) -> int:
         """导入到 SQLite"""
-        from lib.database import get_connection, add_regulation
+        from lib.database import get_connection
 
         sqlite_records = self.parser.documents_to_sqlite_format(documents)
         imported = 0
+        failed = 0
 
         try:
             with get_connection() as conn:
+                cur = conn.cursor()
                 for record in sqlite_records:
-                    if add_regulation(record):
+                    try:
+                        cur.execute('''
+                            INSERT OR REPLACE INTO regulations
+                            (id, law_name, article_number, content, category, tags, effective_date)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            record.get('id'),
+                            record.get('law_name'),
+                            record.get('article_number'),
+                            record.get('content'),
+                            record.get('category', ''),
+                            record.get('tags', ''),
+                            record.get('effective_date', '')
+                        ))
                         imported += 1
+                    except Exception as e:
+                        failed += 1
+                        logger.warning(f"导入法规失败 [{record.get('article_number', 'N/A')}]: {e}")
+
+            if failed > 0:
+                logger.warning(f"部分法规导入失败: {failed} 条")
 
             logger.info(f"已导入 {imported} 条法规到 SQLite")
             return imported
