@@ -5,16 +5,27 @@
 
 主入口，整合所有组件，提供统一的提取接口。
 
+支持两类文档:
+1. 保险产品文档: 提取产品信息用于精算审核
+2. 法规文档: 提取元数据用于 RAG 检索
+
 环境变量:
     DEBUG: 设置为 true/1 时，将提取结果输出到 /tmp 目录
 """
 import json
 import logging
 import os
+import re
+import hashlib
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
-from .models import NormalizedDocument, ExtractResult, ValidationResult
+from .models import (
+    NormalizedDocument, ExtractResult, ValidationResult,
+    # 法规文档模型
+    RegulationStatus, RegulationLevel, RegulationRecord,
+    RegulationProcessingOutcome,
+)
 from .normalizer import Normalizer
 from .classifier import ProductClassifier
 from .extractor_selector import ExtractorSelector
@@ -41,6 +52,7 @@ class DocumentExtractor:
             config: 配置字典
         """
         self.config = config or {}
+        self.llm_client = llm_client
 
         # 初始化组件（注意顺序：DynamicExtractor 依赖 classifier）
         self.normalizer = Normalizer()
@@ -111,6 +123,132 @@ class DocumentExtractor:
             self._dump_debug_result(result)
 
         return result
+
+    def extract_regulation_metadata(
+        self,
+        content: str,
+        source_file: str = ""
+    ) -> RegulationProcessingOutcome:
+        """
+        提取法规文档元数据（用于 RAG 检索增强）
+
+        Args:
+            content: 法规文档内容
+            source_file: 来源文件路径
+
+        Returns:
+            RegulationProcessingOutcome: 处理结果，包含提取的元数据
+        """
+        # 创建初始记录
+        record = RegulationRecord(
+            law_name="",
+            article_number="",
+            category="未分类",
+            status=RegulationStatus.RAW
+        )
+
+        try:
+            # 1. 清洗文档
+            cleaned_content = self._clean_regulation(content)
+
+            # 2. 提取元数据
+            extracted_info = self._extract_regulation_metadata(cleaned_content)
+
+            # 3. 更新记录
+            if extracted_info.get('law_name'):
+                record.law_name = extracted_info['law_name']
+            if extracted_info.get('effective_date'):
+                record.effective_date = extracted_info['effective_date']
+            if extracted_info.get('hierarchy_level'):
+                record.hierarchy_level = RegulationLevel(extracted_info['hierarchy_level'])
+            if extracted_info.get('issuing_authority'):
+                record.issuing_authority = extracted_info['issuing_authority']
+            if extracted_info.get('category'):
+                record.category = extracted_info['category']
+
+            record.status = RegulationStatus.EXTRACTED
+            record.quality_score = extracted_info.get('quality_score', 0.5)
+
+            return RegulationProcessingOutcome(
+                success=True,
+                regulation_id=self._generate_regulation_id(record),
+                record=record,
+                errors=[],
+                warnings=[],
+                processor="document_extractor"
+            )
+
+        except Exception as e:
+            logger.error(f"法规元数据提取失败: {e}")
+            record.status = RegulationStatus.FAILED
+            return RegulationProcessingOutcome(
+                success=False,
+                regulation_id="",
+                record=record,
+                errors=[str(e)],
+                warnings=[],
+                processor="document_extractor"
+            )
+
+    def _clean_regulation(self, content: str) -> str:
+        """清洗法规文档"""
+        # 去除图片链接
+        content = re.sub(r'!\[.*?\]\(.*?\)', '', content)
+        content = re.sub(r'<img[^>]*>', '', content)
+
+        # 去除 HTML 标签
+        content = re.sub(r'<[^>]+>', '', content)
+
+        # 统一换行符
+        content = re.sub(r'\r\n', '\n', content)
+
+        # 去除多余空行
+        content = re.sub(r'\n{3,}', '\n\n', content)
+
+        return content.strip()
+
+    def _extract_regulation_metadata(self, content: str) -> Dict[str, Any]:
+        """使用 LLM 提取法规元数据"""
+        prompt = f"""请从以下法规文档中提取元数据，输出 JSON 格式：
+
+【文档内容】
+{content[:5000]}
+
+【提取字段】
+- law_name: 法规/文件全称
+- effective_date: 生效日期（YYYY-MM-DD 格式，无法确定返回 null）
+- hierarchy_level: 法规层级（law/department_rule/normative/other）
+- issuing_authority: 发布机关
+- category: 法规分类（如"健康保险"、"产品管理"等）
+
+【层级判断】
+- law: 包含"法"字的法律
+- department_rule: 部门规章（办法、规定、细则）
+- normative: 规范性文件（通知、指引、意见）
+- other: 其他
+
+严格按照 JSON 格式输出，无其他内容：
+```json
+{{"law_name": "...", "effective_date": "...", "hierarchy_level": "...", "issuing_authority": "...", "category": "..."}}
+```
+"""
+
+        try:
+            response = self.llm_client.chat([
+                {'role': 'user', 'content': prompt}
+            ])
+
+            # 解析 JSON
+            import json
+            return json.loads(response)
+        except Exception as e:
+            logger.warning(f"法规元数据提取失败: {e}")
+            return {}
+
+    def _generate_regulation_id(self, record: RegulationRecord) -> str:
+        """生成法规唯一标识"""
+        key = f"{record.law_name}_{record.article_number}"
+        return hashlib.md5(key.encode()).hexdigest()[:16]
 
     def _dump_debug_result(self, result: ExtractResult):
         """输出提取结果到 /tmp 目录"""

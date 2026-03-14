@@ -4,7 +4,7 @@ from .models import (
     RegulationStatus,
     RegulationLevel,
     RegulationRecord,
-    ProcessingOutcome,
+    RegulationProcessingOutcome,
     RegulationDocument
 )
 
@@ -12,6 +12,6 @@ __all__ = [
     'RegulationStatus',
     'RegulationLevel',
     'RegulationRecord',
-    'ProcessingOutcome',
+    'RegulationProcessingOutcome',
     'RegulationDocument'
 ]

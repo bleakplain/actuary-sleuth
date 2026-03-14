@@ -12,7 +12,7 @@ import hashlib
 from dataclasses import dataclass
 from typing import List, Dict
 
-from lib.common.models import RegulationRecord, RegulationStatus, ProcessingOutcome
+from lib.common.models import RegulationRecord, RegulationStatus, RegulationProcessingOutcome
 from lib.llm_client import BaseLLMClient, LLMClientFactory
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ class ComplianceAuditor:
             # 更新记录状态
             regulation_record.status = RegulationStatus.AUDITED
 
-            return ProcessingOutcome(
+            return RegulationProcessingOutcome(
                 success=True,
                 regulation_id=self._generate_regulation_id(regulation_record),
                 record=regulation_record,
@@ -83,7 +83,7 @@ class ComplianceAuditor:
         except Exception as e:
             logger.error(f"合规审核失败: {e}")
             regulation_record.status = RegulationStatus.FAILED
-            return ProcessingOutcome(
+            return RegulationProcessingOutcome(
                 success=False,
                 regulation_id="",
                 record=regulation_record,
