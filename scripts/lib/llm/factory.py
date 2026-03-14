@@ -195,20 +195,3 @@ def reset_client():
     global _client
     with _client_lock:
         _client = None
-
-
-def get_zhipu_client():
-    return LLMClientFactory.get_qa_llm()
-
-
-def get_ollama_client():
-    return LLMClientFactory.create_client({
-        'provider': 'ollama',
-        'model': 'qwen2:7b',
-        'host': 'http://localhost:11434',
-        'timeout': 30
-    })
-
-
-def get_embedding_client():
-    return LLMClientFactory.get_embedding_llm()

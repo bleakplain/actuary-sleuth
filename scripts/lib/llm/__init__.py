@@ -54,9 +54,6 @@ from .factory import (
     LLMClientFactory,
     get_client,
     reset_client,
-    get_zhipu_client,
-    get_ollama_client,
-    get_embedding_client,
 )
 
 __all__ = [
@@ -78,9 +75,6 @@ __all__ = [
     'LLMClientFactory',
     'get_client',
     'reset_client',
-    'get_zhipu_client',
-    'get_ollama_client',
-    'get_embedding_client',
 ]
 
 __version__ = '2.0.0'

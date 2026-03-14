@@ -2,10 +2,6 @@
 # -*- coding: utf-8 -*-
 """
 法规文档解析模块
-
-使用 LlamaIndex 标准模式:
-1. SimpleDirectoryReader 读取文件 (粗粒度)
-2. RegulationNodeParser 解析条款 (细粒度)
 """
 import re
 import logging
@@ -188,22 +184,14 @@ class RegulationNodeParser(NodeParser):
 
 
 class RegulationDocParser:
-    """保险法规文档解析器
-
-    使用 LlamaIndex 标准模式:
-    1. SimpleDirectoryReader 读取文件
-    2. RegulationNodeParser 解析条款
-    """
+    """保险法规文档解析器"""
 
     def __init__(self, regulations_dir: str = "./references"):
         self.regulations_dir = Path(regulations_dir)
         self.node_parser = RegulationNodeParser()
 
     def parse_all(self, file_pattern: str = "*.md") -> List[Document]:
-        """解析目录下所有法规文档
-
-        使用 SimpleDirectoryReader (LlamaIndex 标准方式)
-        """
+        """解析目录下所有法规文档"""
         from llama_index.core.readers import SimpleDirectoryReader
 
         if not self.regulations_dir.exists():
@@ -225,7 +213,7 @@ class RegulationDocParser:
         # 使用 NodeParser 解析条款
         nodes = self.node_parser._parse_nodes(documents)
 
-        # 将 TextNode 转换回 Document (兼容性)
+        # 将 TextNode 转换回 Document
         result_documents = []
         for node in nodes:
             result_documents.append(
@@ -243,7 +231,6 @@ class RegulationDocParser:
             logger.warning(f"文件不存在: {file_path}")
             return []
 
-        # 使用 SimpleDirectoryReader 读取单个文件
         from llama_index.core.readers import SimpleDirectoryReader
 
         reader = SimpleDirectoryReader(input_files=[str(file_path)])

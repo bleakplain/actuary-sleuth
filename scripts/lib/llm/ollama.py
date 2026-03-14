@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class OllamaClient(BaseLLMClient):
-    """Ollama客户端（向后兼容）"""
+    """Ollama 客户端"""
 
     def __init__(
         self,
