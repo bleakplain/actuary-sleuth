@@ -134,8 +134,8 @@ class PromptConfig:
 
     # 引用提取配置
     citation_pattern: str = r'\[(\d+)\]'
-    # 注意：当前正则只匹配 [数字] 格式，不支持 [1,2,3] 或 [1-3] 等格式
-    # allow_multiple_citations 预留用于未来扩展
+    # 正则模式说明：匹配方括号内的单个数字，如 [1]、[2]
+    # 不支持 [1,2,3] 或 [1-3] 等复杂格式
 
     # 自检配置
     self_check_enabled: bool = True
@@ -338,6 +338,11 @@ class SelfCheckProcessor:
         llm_provider: Callable[[], BaseLLMClient],
         config: PromptConfig = None
     ):
+        """
+        llm_provider: 返回 LLM 客户端的可调用对象
+                   使用 Callable 而非直接传入 BaseLLMClient，允许每次调用获取新实例
+                   这与 RAGEngine 的设计保持一致
+        """
         self.llm_provider = llm_provider
         self.config = config or PromptConfig()
 
@@ -392,6 +397,7 @@ class SelfCheckProcessor:
 
         如果 JSON 解析失败且 parse_json_fallback=True，返回默认值：
         CheckResult(is_sufficient=True, needs_fallback=False, issues=["解析失败"], confidence=0.5)
+        注意：confidence=0.5 是中性值，不会单独触发 fallback（需要配合 needs_fallback）
 
         如果 parse_json_fallback=False，抛出 ValueError。
         """
@@ -722,13 +728,13 @@ config.prompt_config.parse_json_fallback = True
 
 ## 性能考虑
 
-| 操作 | LLM 调用 | 预估额外耗时 | 影响 |
-|------|----------|-------------|------|
-| 首次问答 | 1 (chat) | 基线 ~200ms | - |
-| 自检 | +1 (chat) | +100ms | +50% |
-| Fallback 宽化 | +1 (chat) | +100ms | +100% |
-| Fallback 重写 | +2 (chat + chat) | +200ms | +200% |
-| 最坏情况 | 4 | +400ms | +200% |
+| 操作 | LLM 调用 | 预估额外耗时 | 搜索调用 | 总耗时影响 |
+|------|----------|-------------|----------|-----------|
+| 首次问答 | 1 (chat) | 基线 ~200ms | 1 (hybrid) | 基线 |
+| 自检 | +1 (chat) | +100ms | 0 | +50% |
+| Fallback 宽化 | +1 (chat) | +100ms | +1 (hybrid) | +100% |
+| Fallback 重写 | +2 (chat + chat) | +200ms | +2 (rewrite + hybrid) | +200% |
+| 最坏情况 | 4 | +400ms | +3 | +200% |
 
 注：实际耗时取决于 LLM 提供商和模型选择（glm-z1-air 约为 200ms，glm-4-plus 约为 500ms）
 
@@ -768,7 +774,10 @@ config.prompt_config.parse_json_fallback = True
 
 1. 完整问答流程（正常路径）
 2. Fallback 机制（宽化 → 重写 → 上限）
-3. 边界条件（无结果、LLM 失败、JSON 失败、引用越界）
+3. 边界条件：
+   - 无结果、LLM 失败
+   - JSON 解析失败、LLM 返回非 JSON
+   - 引用越界、无引用编号
 4. 层级排序效果
 5. 与现有 ask() 方法对比
 
@@ -776,9 +785,9 @@ config.prompt_config.parse_json_fallback = True
 
 - **答案质量**：法条引用准确率、信息覆盖率
 - **防幻觉**：无依据断言数量
-- **引用完整性**：引用标注覆盖率
+- **引用完整性**：引用标注覆盖率、引用准确率
 - **Fallback 效果**：触发率、质量提升
-- **性能**：平均/p95 响应时间
+- **性能**：平均/p95 响应时间、LLM 调用次数
 
 ## 实施步骤
 
@@ -843,17 +852,6 @@ config.prompt_config.self_check_enabled = False
 - fallback_triggered 比率：过高可能需要优化检索
 - confidence 分布：过低可能需要调整阈值
 - invalid_citations 数量：过多可能需要优化 prompt
-
-1. 创建 models.py（数据结构）
-2. 扩展 prompts.py（新增 RAG 相关模板）
-3. 创建 prompt_builder.py
-4. 创建 self_check.py
-5. 创建 citation_mapper.py
-6. 修改 rag_engine.py（新增 ask_with_prompt()）
-7. 扩展 config.py（添加 PromptConfig）
-8. 编写单元测试
-9. 编写集成测试
-10. 运行评估并调优
 
 ## 向后兼容
 
