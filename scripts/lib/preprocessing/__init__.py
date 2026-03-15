@@ -21,7 +21,7 @@
     from lib.llm import LLMClientFactory
     from lib.preprocessing import DocumentExtractor
 
-    llm_client = LLMClientFactory.create_client({'provider': 'zhipu', 'model': 'glm-4-flash'})
+    llm_client = LLMClientFactory.get_doc_preprocess_llm()
     extractor = DocumentExtractor(llm_client)
 
     result = extractor.extract(
@@ -33,7 +33,7 @@
     from lib.llm import LLMClientFactory
     from lib.preprocessing import DocumentExtractor
 
-    llm_client = LLMClientFactory.create_client({'provider': 'zhipu', 'model': 'glm-4-flash'})
+    llm_client = LLMClientFactory.get_doc_preprocess_llm()
     extractor = DocumentExtractor(llm_client)
 
     # 提取法规元数据
