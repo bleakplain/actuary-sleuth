@@ -239,7 +239,6 @@ class DocumentExtractor:
             ])
 
             # 解析 JSON
-            import json
             return json.loads(response)
         except Exception as e:
             logger.warning(f"法规元数据提取失败: {e}")
