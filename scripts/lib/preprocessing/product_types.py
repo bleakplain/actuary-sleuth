@@ -77,10 +77,6 @@ PRODUCT_TYPES = [
 ]
 
 
-# 产品类型映射
-PRODUCT_TYPE_MAP = {pt.code: pt for pt in PRODUCT_TYPES}
-
-
 # 提取重点映射
 EXTRACTION_FOCUS_MAP = {
     'critical_illness': ['病种清单', '等待期', '赔付分级', '赔付比例'],
@@ -180,11 +176,6 @@ OUTPUT_SCHEMA_TEMPLATES = {
         }
     },
 }
-
-
-def get_product_type(code: str) -> ProductType:
-    """获取产品类型定义"""
-    return PRODUCT_TYPE_MAP.get(code, PRODUCT_TYPE_MAP['life_insurance'])
 
 
 def get_extraction_focus(product_type: str) -> List[str]:
