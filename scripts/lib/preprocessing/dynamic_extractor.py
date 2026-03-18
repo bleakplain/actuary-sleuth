@@ -77,8 +77,6 @@ class ClauseExtractor:
 
     def _analyze_structure(self, content: str) -> Dict[str, Any]:
         """分析文档结构，返回特征信息"""
-        import re
-
         # 采样分析（前 5000 字符）
         sample = content[:5000]
 
@@ -316,7 +314,6 @@ class DynamicExtractor:
 
         # 检测是否需要大量 token（如提取条款）
         # 检测文档中的条款数量
-        import re
         clause_patterns = [
             r'\*\*\d+\.\d+\*\*',  # HTML 表格格式
             r'第[一二三四五六七八九十\d]+\s*条',  # 标准格式
