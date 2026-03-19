@@ -6,6 +6,6 @@
 用于保险产品条款合规性审核。
 """
 
-from .auditor import ComplianceAuditor, AuditIssue, AuditReport
+from .auditor import ComplianceAuditor, AuditIssue, AuditResult, AuditOutcome
 
-__all__ = ['ComplianceAuditor', 'AuditIssue', 'AuditReport']
+__all__ = ['ComplianceAuditor', 'AuditIssue', 'AuditResult', 'AuditOutcome']

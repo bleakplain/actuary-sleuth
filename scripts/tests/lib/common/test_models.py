@@ -1,7 +1,7 @@
 # tests/lib/common/test_models.py
 
 import pytest
-from lib.common.models import RegulationStatus, RegulationLevel, RegulationRecord, ProcessingOutcome
+from lib.common.models import RegulationStatus, RegulationLevel, RegulationRecord, RegulationProcessingOutcome
 from datetime import datetime
 
 
@@ -65,13 +65,13 @@ def test_regulation_record_with_all_fields():
 
 
 def test_processing_outcome_defaults():
-    """测试 ProcessingOutcome 默认值"""
+    """测试 RegulationProcessingOutcome 默认值"""
     record = RegulationRecord(
         law_name="保险法",
         article_number="第十六条",
         category="健康保险"
     )
-    outcome = ProcessingOutcome(
+    outcome = RegulationProcessingOutcome(
         success=True,
         regulation_id="abc123",
         record=record
@@ -85,13 +85,13 @@ def test_processing_outcome_defaults():
 
 
 def test_processing_outcome_with_errors():
-    """测试 ProcessingOutcome 带错误信息"""
+    """测试 RegulationProcessingOutcome 带错误信息"""
     record = RegulationRecord(
         law_name="保险法",
         article_number="第十六条",
         category="健康保险"
     )
-    outcome = ProcessingOutcome(
+    outcome = RegulationProcessingOutcome(
         success=False,
         regulation_id="",
         record=record,
