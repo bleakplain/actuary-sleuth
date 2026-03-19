@@ -26,6 +26,11 @@ class BusinessRule:
 class ResultValidator:
     """提取结果验证器"""
 
+    # 验证阈值常量
+    LOW_CONFIDENCE_THRESHOLD = 0.7
+    ERROR_PENALTY = 20
+    WARNING_PENALTY = 5
+
     # 通用业务规则（适用于所有产品）
     COMMON_RULES = [
         BusinessRule(
@@ -96,7 +101,7 @@ class ResultValidator:
         # 4. 置信度检查
         low_confidence = [
             k for k, v in result.confidence.items()
-            if v < 0.7
+            if v < self.LOW_CONFIDENCE_THRESHOLD
         ]
         if low_confidence:
             warnings.append(f"低置信度字段: {low_confidence}")
@@ -159,9 +164,9 @@ class ResultValidator:
         score = 100
 
         # 错误扣分
-        score -= error_count * 20
+        score -= error_count * self.ERROR_PENALTY
 
         # 警告扣分
-        score -= warning_count * 5
+        score -= warning_count * self.WARNING_PENALTY
 
         return max(score, 0)

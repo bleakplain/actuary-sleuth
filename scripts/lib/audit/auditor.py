@@ -10,12 +10,12 @@ import json
 import logging
 import hashlib
 import re
-import hmac
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 
 from lib.common.models import RegulationRecord, RegulationStatus, AuditRequest, Product, ProductCategory, Coverage, Premium
 from lib.llm import BaseLLMClient, LLMClientFactory
+from .prompts import ASSESSMENT_RESULTS, AUDIT_DIMENSIONS, SEVERITY_LEVELS
 
 logger = logging.getLogger(__name__)
 
@@ -72,16 +72,16 @@ class AuditResult:
         """验证审核结果的完整性"""
         errors = []
 
-        if self.overall_assessment not in VALID_ASSESSMENTS:
+        if self.overall_assessment not in ASSESSMENT_RESULTS:
             errors.append(f"无效的评定结果: {self.overall_assessment}")
 
         if not 0 <= self.score <= 100:
             errors.append(f"分数超出范围: {self.score}")
 
         for i, issue in enumerate(self.issues):
-            if issue.severity not in VALID_SEVERITIES:
+            if issue.severity not in SEVERITY_LEVELS:
                 errors.append(f"问题 {i}: 无效的严重程度: {issue.severity}")
-            if issue.dimension not in VALID_DIMENSIONS:
+            if issue.dimension not in AUDIT_DIMENSIONS:
                 errors.append(f"问题 {i}: 无效的审核维度: {issue.dimension}")
 
         return errors
@@ -123,7 +123,6 @@ class ComplianceAuditor:
             raise ValueError("响应缺少 overall_assessment 字段")
 
         # 验证评定结果
-        from .prompts import ASSESSMENT_RESULTS
         if result['overall_assessment'] not in ASSESSMENT_RESULTS:
             raise ValueError(f"无效的评定结果: {result['overall_assessment']}")
 
@@ -135,8 +134,6 @@ class ComplianceAuditor:
         regulations: List[Dict[str, Any]]
     ) -> AuditResult:
         """创建审核结果"""
-        from .prompts import AUDIT_DIMENSIONS, SEVERITY_LEVELS
-
         issues = []
         for issue_data in result.get('issues', []):
             # 验证并规范化问题数据
@@ -224,7 +221,8 @@ class ComplianceAuditor:
                     regulations_count=len(regulations)
                 ))
             except Exception as e:
-                logger.error(f"审核失败: {e}")
+                clause_id = f"{clause_item.get('number', '')} {clause_item.get('title', '')}".strip()
+                logger.error(f"审核失败 [{clause_id}]: {e}")
                 outcomes.append(self._failed_outcome(str(e), record))
 
         return outcomes
@@ -250,7 +248,6 @@ class ComplianceAuditor:
 
         # 构建产品上下文，如果没有提供则使用默认值
         if product is None:
-            from lib.common.models import ProductCategory
             product = Product(
                 name="",
                 company="",

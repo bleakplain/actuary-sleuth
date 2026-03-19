@@ -255,9 +255,9 @@ class DocumentExtractor:
             return {}
 
     def _generate_regulation_id(self, record: RegulationRecord) -> str:
-        """生成法规唯一标识"""
+        """生成法规唯一标识（使用 SHA256 防止碰撞）"""
         key = f"{record.law_name}_{record.article_number}"
-        return hashlib.md5(key.encode()).hexdigest()[:16]
+        return hashlib.sha256(key.encode()).hexdigest()[:16]
 
     def _dump_debug_result(self, result: ExtractResult):
         """输出提取结果到 /tmp 目录"""
