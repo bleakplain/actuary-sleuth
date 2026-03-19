@@ -25,6 +25,7 @@ __pycache__/
 venv/
 env/
 ENV/
+.venv/
 
 # IDE
 .vscode/
@@ -55,3 +56,4 @@ package-lock.json
 
 # Database (runtime data, not source)
 data/actuary.db
+data/lancedb/
