@@ -159,10 +159,11 @@ class ClauseExtractor:
 5. **逐一提取**: 对文档中的每个 **数字.数字** 格式编号，都要提取对应的条款，不要跳过
 
 **过滤规则**（不要提取这些内容）:
-- 阅读指引、投保须知、提示说明等非条款内容
-- 目录、索引
+- 阅读指引、投保须知、提示说明、客户服务信息等非条款内容
+- 目录、索引、附录
 - 附表、费率表（除非是条款的一部分）
 - 页眉、页脚、页码等格式信息
+- 联系方式、公司地址等行政信息
 
 **输出格式** (JSON):
 {{
@@ -402,24 +403,18 @@ class DynamicExtractor:
                     elif isinstance(value, dict) and isinstance(result.get(key), dict):
                         result[key].update(value)
                     elif key == 'clauses' and isinstance(value, list) and isinstance(result.get(key), list):
-                        # 条款特殊去重：基于 number 字段
+                        # 条款去重：基于 number 字段，如果没有 number 则跳过
                         existing_numbers = {c.get('number') for c in result[key] if c.get('number')}
                         for item in value:
                             item_number = item.get('number')
+                            # 只添加有编号且不重复的条款
                             if item_number and item_number not in existing_numbers:
                                 result[key].append(item)
                                 existing_numbers.add(item_number)
-                            elif not item_number:
-                                # 没有编号的条款，使用内容去重
-                                item_str = json.dumps(item, ensure_ascii=False)
-                                if item_str not in {json.dumps(c, ensure_ascii=False) for c in result[key]}:
-                                    result[key].append(item)
                     elif isinstance(value, list) and isinstance(result.get(key), list):
-                        # 其他列表的去重合并
-                        existing = {json.dumps(item, ensure_ascii=False) for item in result[key]}
+                        # 其他列表的简单合并
                         for item in value:
-                            item_str = json.dumps(item, ensure_ascii=False)
-                            if item_str not in existing:
+                            if item not in result[key]:
                                 result[key].append(item)
 
                 after_clause_count = len(result.get('clauses', []))

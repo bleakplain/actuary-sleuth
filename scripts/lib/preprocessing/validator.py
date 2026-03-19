@@ -26,9 +26,8 @@ class BusinessRule:
 class ResultValidator:
     """提取结果验证器"""
 
-    # 业务规则
-    BUSINESS_RULES = [
-        # 年龄规则
+    # 通用业务规则（适用于所有产品）
+    COMMON_RULES = [
         BusinessRule(
             name="age_range",
             check=lambda data: (
@@ -36,16 +35,32 @@ class ResultValidator:
             ),
             error_message="最低投保年龄必须小于最高投保年龄"
         ),
-
-        # 等待期规则
-        BusinessRule(
-            name="waiting_period",
-            check=lambda data: (
-                0 <= int(data.get('waiting_period', 0)) <= 365
-            ),
-            error_message="等待期必须在 0-365 天之间"
-        ),
     ]
+
+    # 产品特定规则
+    PRODUCT_RULES = {
+        'critical_illness': [
+            BusinessRule(
+                name="waiting_period",
+                check=lambda data: 0 <= int(data.get('waiting_period', 90)) <= 180,
+                error_message="重疾险等待期应在 0-180 天"
+            ),
+        ],
+        'medical_insurance': [
+            BusinessRule(
+                name="waiting_period",
+                check=lambda data: 0 <= int(data.get('waiting_period', 30)) <= 90,
+                error_message="医疗险等待期应在 0-90 天"
+            ),
+        ],
+        'life_insurance': [
+            BusinessRule(
+                name="waiting_period_optional",
+                check=lambda data: data.get('waiting_period') is None or 0 <= int(data.get('waiting_period', 0)) <= 365,
+                error_message="寿险等待期应在 0-365 天（可为空）"
+            ),
+        ],
+    }
 
     def __init__(self):
         pass
@@ -55,18 +70,27 @@ class ResultValidator:
         errors = []
         warnings = []
 
-        # 1. 必需字段检查
+        # 1. 必需字段检查（根据产品类型动态确定）
         from .extractor_selector import ExtractorSelector
-        missing = ExtractorSelector.get_required_fields() - set(result.data.keys())
-        if missing:
-            errors.append(f"缺失必需字段: {missing}")
+        product_type = result.metadata.get('product_type', 'life_insurance')
+        required_fields = ExtractorSelector.get_required_fields(product_type)
+
+        # 区分核心字段和条件字段
+        from .extractor_selector import ExtractorSelector as ES
+        missing_core = ES.CORE_REQUIRED_FIELDS - set(result.data.keys())
+        missing = required_fields - set(result.data.keys())
+
+        if missing_core:
+            errors.append(f"缺失核心必需字段: {missing_core}")
+        if missing - ES.CORE_REQUIRED_FIELDS:
+            warnings.append(f"缺失条件必需字段: {missing - ES.CORE_REQUIRED_FIELDS}")
 
         # 2. 数据类型检查
         type_errors = self._validate_data_types(result.data)
         errors.extend(type_errors)
 
-        # 3. 业务规则检查
-        rule_errors = self._validate_business_rules(result.data)
+        # 3. 业务规则检查（根据产品类型）
+        rule_errors = self._validate_business_rules(result.data, product_type)
         errors.extend(rule_errors)
 
         # 4. 置信度检查
@@ -106,11 +130,21 @@ class ResultValidator:
 
         return errors
 
-    def _validate_business_rules(self, data: Dict) -> List[str]:
+    def _validate_business_rules(self, data: Dict, product_type: str) -> List[str]:
         """验证业务规则"""
         errors = []
 
-        for rule in self.BUSINESS_RULES:
+        # 通用规则
+        for rule in self.COMMON_RULES:
+            try:
+                if not rule.check(data):
+                    errors.append(f"{rule.name}: {rule.error_message}")
+            except Exception as e:
+                logger.debug(f"规则 {rule.name} 验证失败: {e}")
+
+        # 产品特定规则
+        product_rules = self.PRODUCT_RULES.get(product_type, [])
+        for rule in product_rules:
             try:
                 if not rule.check(data):
                     errors.append(f"{rule.name}: {rule.error_message}")

@@ -9,15 +9,42 @@
 import json
 import logging
 import hashlib
+import re
+import hmac
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 
-from lib.common.models import RegulationRecord, RegulationStatus
+from lib.common.models import RegulationRecord, RegulationStatus, AuditRequest, Product, ProductCategory, Coverage, Premium
 from lib.llm import BaseLLMClient, LLMClientFactory
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_CATEGORY = "未分类"
+
+
+def _parse_json_response(response: str, context: str = "") -> Dict[str, Any]:
+    """安全解析 LLM JSON 响应"""
+    try:
+        return json.loads(response)
+    except json.JSONDecodeError as e:
+        # 尝试提取 JSON（处理 markdown 代码块）
+        json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
+        if json_match:
+            try:
+                return json.loads(json_match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        # 尝试提取第一个 JSON 对象
+        first_brace = response.find('{')
+        last_brace = response.rfind('}')
+        if first_brace != -1 and last_brace != -1:
+            try:
+                return json.loads(response[first_brace:last_brace + 1])
+            except json.JSONDecodeError:
+                pass
+
+        raise ValueError(f"JSON 解析失败: {e}, 上下文: {context[:100]}")
 
 
 @dataclass
@@ -41,6 +68,24 @@ class AuditResult:
     summary: str
     regulations_used: List[str]  # 参与审核的法规列表
 
+    def validate(self) -> List[str]:
+        """验证审核结果的完整性"""
+        errors = []
+
+        if self.overall_assessment not in VALID_ASSESSMENTS:
+            errors.append(f"无效的评定结果: {self.overall_assessment}")
+
+        if not 0 <= self.score <= 100:
+            errors.append(f"分数超出范围: {self.score}")
+
+        for i, issue in enumerate(self.issues):
+            if issue.severity not in VALID_SEVERITIES:
+                errors.append(f"问题 {i}: 无效的严重程度: {issue.severity}")
+            if issue.dimension not in VALID_DIMENSIONS:
+                errors.append(f"问题 {i}: 无效的审核维度: {issue.dimension}")
+
+        return errors
+
 
 @dataclass
 class AuditOutcome:
@@ -62,49 +107,177 @@ class ComplianceAuditor:
         self.llm_client = llm_client or LLMClientFactory.get_audit_llm()
         self.rag_engine = rag_engine
 
+    def _build_regulations_reference(self, regulations: List[Dict[str, Any]]) -> List[str]:
+        """构建法规引用列表"""
+        return [
+            f"{ref.get('metadata', {}).get('law_name', '')} {ref.get('metadata', {}).get('article_number', '')}"
+            for ref in regulations
+        ]
+
+    def _parse_audit_response(self, response: str, clause_text: str) -> Dict[str, Any]:
+        """解析 LLM 审核响应"""
+        result = _parse_json_response(response, f"条款: {clause_text[:50]}...")
+
+        # 验证必需字段
+        if 'overall_assessment' not in result:
+            raise ValueError("响应缺少 overall_assessment 字段")
+
+        # 验证评定结果
+        from .prompts import ASSESSMENT_RESULTS
+        if result['overall_assessment'] not in ASSESSMENT_RESULTS:
+            raise ValueError(f"无效的评定结果: {result['overall_assessment']}")
+
+        return result
+
+    def _create_audit_result(
+        self,
+        result: Dict[str, Any],
+        regulations: List[Dict[str, Any]]
+    ) -> AuditResult:
+        """创建审核结果"""
+        from .prompts import AUDIT_DIMENSIONS, SEVERITY_LEVELS
+
+        issues = []
+        for issue_data in result.get('issues', []):
+            # 验证并规范化问题数据
+            severity = issue_data.get('severity', 'medium')
+            if severity not in SEVERITY_LEVELS:
+                logger.warning(f"无效的严重程度 '{severity}'，使用默认值 'medium'")
+                severity = 'medium'
+
+            dimension = issue_data.get('dimension', '合规性')
+            if dimension not in AUDIT_DIMENSIONS:
+                logger.warning(f"无效的审核维度 '{dimension}'，使用默认值 '合规性'")
+                dimension = '合规性'
+
+            issues.append(AuditIssue(
+                clause=issue_data.get('clause', ''),
+                severity=severity,
+                dimension=dimension,
+                regulation=issue_data.get('regulation', ''),
+                description=issue_data.get('description', ''),
+                suggestion=issue_data.get('suggestion', '')
+            ))
+
+        return AuditResult(
+            overall_assessment=result.get('overall_assessment', '不通过'),
+            assessment_reason=result.get('assessment_reason', ''),
+            issues=issues,
+            score=max(0, min(100, result.get('score', 0))),
+            summary=result.get('summary', ''),
+            regulations_used=self._build_regulations_reference(regulations)
+        )
+
     def audit(
         self,
-        product_clause: str,
+        request: AuditRequest,
         top_k: int = 3,
         filters: Dict[str, Any] = None
-    ) -> AuditOutcome:
+    ) -> List[AuditOutcome]:
+        if not request.clauses:
+            return [self._failed_outcome("没有待审核的条款")]
+
         if not self.rag_engine:
-            return self._failed_outcome("RAG 引擎未配置")
+            return [self._failed_outcome("RAG 引擎未配置")]
 
-        regulations = self._search_regulations(
-            query_text=product_clause,
-            top_k=top_k,
-            filters=filters
-        )
+        outcomes = []
+        for clause_item in request.clauses:
+            clause_text = clause_item.get('text', '')
+            if not clause_text:
+                continue
 
-        if not regulations:
-            return self._failed_outcome("未检索到相关法规")
-
-        primary_regulation = regulations[0]
-        metadata = primary_regulation.get('metadata', {})
-        record = RegulationRecord(
-            law_name=metadata.get('law_name', ''),
-            article_number=metadata.get('article_number', ''),
-            category=metadata.get('category', DEFAULT_CATEGORY),
-            status=RegulationStatus.AUDITED
-        )
-
-        try:
-            audit_result = self._llm_audit(product_clause, regulations)
-
-            return AuditOutcome(
-                success=True,
-                result=audit_result,
-                regulation_id=self._generate_regulation_id(record),
-                record=record,
-                errors=[],
-                warnings=[],
-                regulations_count=len(regulations)
+            # 使用条款文本进行法规检索
+            regulations = self._search_regulations(
+                query_text=clause_text,
+                top_k=top_k,
+                filters=filters
             )
 
-        except Exception as e:
-            logger.error(f"审核失败: {e}")
-            return self._failed_outcome(str(e), record)
+            if not regulations:
+                outcomes.append(self._failed_outcome("未检索到相关法规"))
+                continue
+
+            primary_regulation = regulations[0]
+            metadata = primary_regulation.get('metadata', {})
+            record = RegulationRecord(
+                law_name=metadata.get('law_name', ''),
+                article_number=metadata.get('article_number', ''),
+                category=metadata.get('category', DEFAULT_CATEGORY),
+                status=RegulationStatus.AUDITED
+            )
+
+            try:
+                audit_result = self._audit(
+                    clause=clause_item,
+                    regulations=regulations,
+                    product=request.product,
+                    coverage=request.coverage,
+                    premium=request.premium
+                )
+                outcomes.append(AuditOutcome(
+                    success=True,
+                    result=audit_result,
+                    regulation_id=self._generate_regulation_id(record),
+                    record=record,
+                    errors=[],
+                    warnings=[],
+                    regulations_count=len(regulations)
+                ))
+            except Exception as e:
+                logger.error(f"审核失败: {e}")
+                outcomes.append(self._failed_outcome(str(e), record))
+
+        return outcomes
+
+    def _audit(
+        self,
+        clause: Dict[str, str],
+        regulations: List[Dict[str, Any]],
+        product: Product = None,
+        coverage: Optional[Coverage] = None,
+        premium: Optional[Premium] = None
+    ) -> AuditResult:
+        """执行条款审核
+
+        Args:
+            clause: 条款对象，包含 text, number, title
+            regulations: 相关法规列表
+            product: 产品信息（可选）
+            coverage: 保障信息（可选）
+            premium: 费率信息（可选）
+        """
+        from .prompts import get_system_prompt, get_user_prompt
+
+        # 构建产品上下文，如果没有提供则使用默认值
+        if product is None:
+            from lib.common.models import ProductCategory
+            product = Product(
+                name="",
+                company="",
+                category=ProductCategory.OTHER,
+                period=""
+            )
+
+        product_context = self._build_product_context(product, coverage, premium)
+
+        clause_text = clause.get('text', '')
+        clause_for_log = f"{clause.get('number', '')} {clause.get('title', '')}"[:50]
+
+        messages = [
+            {'role': 'system', 'content': get_system_prompt()},
+            {'role': 'user', 'content': get_user_prompt(product_context, clause, regulations)}
+        ]
+
+        logger.info(f"开始审核条款: {clause_for_log}")
+
+        response = self.llm_client.chat(messages)
+        result = self._parse_audit_response(response, clause_text)
+
+        audit_result = self._create_audit_result(result, regulations)
+
+        logger.info(f"条款审核完成: 评定={audit_result.overall_assessment}, 分数={audit_result.score}, 问题数={len(audit_result.issues)}")
+
+        return audit_result
 
     def _search_regulations(
         self,
@@ -125,34 +298,39 @@ class ComplianceAuditor:
             logger.error(f"法规检索失败: {e}")
             return []
 
-    def _llm_audit(self, product_clause: str, regulations: List[Dict[str, Any]]) -> AuditResult:
-        from .prompts import get_system_prompt, get_user_prompt
+    def _build_product_context(
+        self,
+        product: Product,
+        coverage: Optional[Coverage] = None,
+        premium: Optional[Premium] = None
+    ) -> Dict[str, Any]:
+        """构建产品上下文"""
+        product_context = {
+            'product_name': product.name,
+            'company': product.company,
+            'category': product.category,
+            'period': product.period,
+            'waiting_period': product.waiting_period,
+            'age_min': product.age_min,
+            'age_max': product.age_max,
+        }
 
-        messages = [
-            {'role': 'system', 'content': get_system_prompt()},
-            {'role': 'user', 'content': get_user_prompt(product_clause, regulations)}
-        ]
+        if coverage and any([coverage.scope, coverage.deductible,
+                              coverage.payout_ratio, coverage.amount]):
+            product_context['coverage'] = {
+                'scope': coverage.scope,
+                'deductible': coverage.deductible,
+                'payout_ratio': coverage.payout_ratio,
+                'amount': coverage.amount,
+            }
 
-        response = self.llm_client.chat(messages)
-        result = json.loads(response)
+        if premium and any([premium.payment_method, premium.payment_period]):
+            product_context['premium'] = {
+                'payment_method': premium.payment_method,
+                'payment_period': premium.payment_period,
+            }
 
-        issues = [
-            AuditIssue(**issue) for issue in result.get('issues', [])
-        ]
-
-        regulations_used = [
-            f"{ref.get('metadata', {}).get('law_name', '')} {ref.get('metadata', {}).get('article_number', '')}"
-            for ref in regulations
-        ]
-
-        return AuditResult(
-            overall_assessment=result.get('overall_assessment', '不通过'),
-            assessment_reason=result.get('assessment_reason', ''),
-            issues=issues,
-            score=result.get('score', 0),
-            summary=result.get('summary', ''),
-            regulations_used=regulations_used
-        )
+        return product_context
 
     def _failed_outcome(
         self,
@@ -176,5 +354,6 @@ class ComplianceAuditor:
         )
 
     def _generate_regulation_id(self, record: RegulationRecord) -> str:
+        """生成法规唯一标识（使用 SHA256 防止碰撞）"""
         key = f"{record.law_name}_{record.article_number}"
-        return hashlib.md5(key.encode()).hexdigest()[:16]
+        return hashlib.sha256(key.encode()).hexdigest()[:16]

@@ -89,7 +89,10 @@ class DocumentExtractor:
 
         # 1. 文档规范化
         normalized = self.normalizer.normalize(document, source_type)
-        logger.info(f"文档规范化完成: {normalized.metadata}")
+        logger.info(f"文档规范化完成: 原始长度={normalized.metadata.get('original_length')}, "
+                   f"规范化长度={normalized.metadata.get('normalized_length')}, "
+                   f"结构化={normalized.profile.is_structured}, "
+                   f"有条款编号={normalized.profile.has_clause_numbers}")
 
         # 2. 选择提取器
         extractor = self.extractor_selector.select(normalized)
@@ -98,17 +101,24 @@ class DocumentExtractor:
         # 3. 执行提取
         try:
             result = extractor.extract(normalized, required_fields)
-            logger.info(f"{extractor.__class__.__name__} 提取成功")
+            logger.info(f"{extractor.__class__.__name__} 提取成功: 提取字段={list(result.data.keys())}")
         except FastExtractionFailed:
             # 快速通道失败，回退到动态通道
             logger.warning("快速通道失败，回退到动态通道")
             result = self.dynamic_extractor.extract(normalized, required_fields)
+            logger.info(f"动态通道回退成功: 提取字段={list(result.data.keys())}")
 
         # 4. 验证
         validation = self.validator.validate(result)
         logger.info(f"验证结果: {validation.score}/100, 错误: {len(validation.errors)}, 警告: {len(validation.warnings)}")
 
-        # 5. 添加元数据
+        # 5. 确保产品类型存在于元数据中
+        if 'product_type' not in result.metadata:
+            classifications = self.classifier.classify(normalized.content)
+            product_type = classifications[0][0] if classifications else 'life_insurance'
+            result.metadata['product_type'] = product_type
+
+        # 6. 添加元数据
         result.metadata.update({
             'extraction_mode': 'fast' if isinstance(extractor, FastExtractor) else 'dynamic',
             'validation_score': validation.score,

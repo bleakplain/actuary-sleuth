@@ -5,7 +5,12 @@ from .models import (
     RegulationLevel,
     RegulationRecord,
     RegulationProcessingOutcome,
-    RegulationDocument
+    RegulationDocument,
+    ProductCategory,
+    Product,
+    Coverage,
+    Premium,
+    AuditRequest,
 )
 
 __all__ = [
@@ -13,5 +18,10 @@ __all__ = [
     'RegulationLevel',
     'RegulationRecord',
     'RegulationProcessingOutcome',
-    'RegulationDocument'
+    'RegulationDocument',
+    'ProductCategory',
+    'Product',
+    'Coverage',
+    'Premium',
+    'AuditRequest',
 ]

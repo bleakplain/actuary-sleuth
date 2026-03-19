@@ -21,12 +21,16 @@ logger = logging.getLogger(__name__)
 class ExtractorSelector:
     """提取器选择器：根据文档特征选择合适的提取器"""
 
-    # 必需字段（所有产品都需要）
-    REQUIRED_FIELDS = {
+    # 核心必需字段（所有产品都需要）
+    CORE_REQUIRED_FIELDS = {
         'product_name',
         'insurance_company',
-        'insurance_period',
-        'waiting_period'
+    }
+
+    # 可选的必需字段（根据产品类型决定）
+    CONDITIONAL_REQUIRED_FIELDS = {
+        'insurance_period',  # 大部分产品需要
+        'waiting_period',    # 健康/重疾/意外险需要
     }
 
     def __init__(self, fast_extractor: FastExtractor, dynamic_extractor: DynamicExtractor, classifier: ProductClassifier = None):
@@ -85,13 +89,13 @@ class ExtractorSelector:
         """检查关键信息是否在文档前部"""
         front = document.content[:config.KEY_INFO_SEARCH_WINDOW]
 
-        # 检查必需字段是否在前面
+        # 检查核心必需字段是否在前面
         required_found = sum(
-            1 for field in self.REQUIRED_FIELDS
+            1 for field in self.CORE_REQUIRED_FIELDS
             if any(indicator in front for indicator in config.FIELD_INDICATORS.get(field, [field]))
         )
 
-        return required_found >= len(self.REQUIRED_FIELDS) * config.REQUIRED_FIELDS_COVERAGE_THRESHOLD
+        return required_found >= len(self.CORE_REQUIRED_FIELDS) * config.REQUIRED_FIELDS_COVERAGE_THRESHOLD
 
     def _explain_decision(self, use_dynamic: bool, profile: DocumentProfile, confidence: float) -> str:
         """解释决策原因"""
@@ -111,6 +115,24 @@ class ExtractorSelector:
         return "; ".join(reasons) if reasons else "默认路由"
 
     @classmethod
-    def get_required_fields(cls) -> set:
-        """获取必需字段集合"""
-        return cls.REQUIRED_FIELDS.copy()
+    def get_required_fields(cls, product_type: str = None) -> set:
+        """获取必需字段集合（向后兼容，默认返回所有字段）"""
+        if product_type is None:
+            # 向后兼容：返回所有可能的必需字段
+            fields = cls.CORE_REQUIRED_FIELDS.copy()
+            fields.update(cls.CONDITIONAL_REQUIRED_FIELDS)
+            return fields
+        return cls._get_required_fields_for_type(product_type)
+
+    @classmethod
+    def _get_required_fields_for_type(cls, product_type: str) -> set:
+        """获取指定产品类型的必需字段"""
+        fields = cls.CORE_REQUIRED_FIELDS.copy()
+
+        if product_type in ['term_life', 'whole_life', 'annuity', 'universal_life']:
+            fields.add('insurance_period')
+        if product_type in ['critical_illness', 'medical_insurance', 'accident_insurance']:
+            fields.add('waiting_period')
+            fields.add('insurance_period')
+
+        return fields

@@ -81,7 +81,10 @@ class FastExtractor:
 
             result = parse_llm_json_response(response, strict=True)
 
-            # 2. 补充提取（如果有缺失的必需字段）
+            # 2. 统一数据类型
+            result = self._normalize_types(result)
+
+            # 3. 补充提取（如果有缺失的必需字段）
             missing = [f for f in required_fields if f not in result]
             if missing:
                 result = self._supplement_extract(document, missing, result)
@@ -108,6 +111,25 @@ class FastExtractor:
                 current_result[field] = value
 
         return current_result
+
+    def _normalize_types(self, data: Dict) -> Dict:
+        """统一数据类型，与 DynamicExtractor 保持一致"""
+        # waiting_period 统一为 int
+        if 'waiting_period' in data:
+            try:
+                data['waiting_period'] = int(data['waiting_period'])
+            except (ValueError, TypeError):
+                pass
+
+        # age_min, age_max 统一为 int
+        for field in ['age_min', 'age_max']:
+            if field in data and data[field] is not None:
+                try:
+                    data[field] = int(data[field])
+                except (ValueError, TypeError):
+                    data[field] = None
+
+        return data
 
     def _extract_by_regex(self, document: str, field: str) -> Optional[str]:
         """使用正则表达式提取字段"""

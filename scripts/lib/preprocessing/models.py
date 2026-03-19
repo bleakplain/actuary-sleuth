@@ -175,3 +175,4 @@ class RegulationDocument:
     content: str
     source_file: str
     record: RegulationRecord
+
