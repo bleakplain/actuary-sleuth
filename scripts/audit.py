@@ -88,8 +88,12 @@ class ReportResult(TypedDict, total=False):
     error_type: str
 
 
-class AuditResult(TypedDict, total=False):
-    """审核结果类型"""
+class AuditApiResponse(TypedDict, total=False):
+    """审核API响应类型
+
+    顶层API响应格式，包含完整的审核结果信息。
+    区别于 lib.audit.AuditResult (dataclass) - 审核模块内部使用的数据类。
+    """
     success: bool
     audit_id: str
     violations: List[Dict[str, Any]]
@@ -105,6 +109,10 @@ class AuditResult(TypedDict, total=False):
     error: str
     error_type: str
     details: Dict[str, Any]
+
+
+# 向后兼容的别名
+AuditResult = AuditApiResponse
 
 
 # ========== 辅助函数 ==========
@@ -421,7 +429,7 @@ def _fetch_feishu_content(document_url: str) -> str:
         raise Exception(f"Failed to fetch Feishu document: {str(e)}")
 
 
-def execute(params: Dict[str, Any]) -> AuditResult:
+def execute(params: Dict[str, Any]) -> AuditApiResponse:
     """
     执行完整的产品审核流程
 
@@ -575,13 +583,13 @@ def _calculate_evaluation(data: AuditData) -> EvaluationResult:
 def _build_result(
     evaluation: EvaluationResult,
     export_result: Optional[Dict[str, Any]]
-) -> AuditResult:
+) -> AuditApiResponse:
     """
     构建最终审核结果
 
     重构版本：仅从 EvaluationResult 获取数据，实现真正的单向数据流。
 
-    数据流：AuditData → EvaluationResult → AuditResult (API响应)
+    数据流：AuditData → EvaluationResult → AuditApiResponse (API响应)
                            ↓
                     Export (报告生成)
 
@@ -590,7 +598,7 @@ def _build_result(
         export_result: 导出结果
 
     Returns:
-        AuditResult: 审核结果（API响应格式）
+        AuditApiResponse: 审核结果（API响应格式）
     """
     return {
         'success': True,

@@ -5,10 +5,12 @@
 
 ReportGenerationTemplate类：使用模板方法模式生成审核报告
 
+统一数据模型：接受 AuditResult 作为输入，消除数据转换
+
 模板方法定义报告生成的固定流程：
-1. 计算评分 (_calculate_score)
-2. 确定评级 (_calculate_grade)
-3. 生成摘要 (_generate_summary)
+1. 从 AuditResult 提取数据
+2. 确定评级（基于 audit 的 overall_assessment）
+3. 生成摘要 (_summarize_violations)
 4. 生成内容 (_generate_content)
 5. 生成块 (_generate_blocks)
 """
@@ -19,7 +21,7 @@ from lib.config import get_config, Config
 from lib.id_generator import IDGenerator
 from lib.reporting.strategies import RemediationStrategies
 from lib.reporting.model import EvaluationContext
-from lib.reporting.model import _InsuranceProduct as InsuranceProduct
+from lib.reporting.model import ProductInfo
 
 
 class ReportGenerationTemplate:
@@ -29,23 +31,20 @@ class ReportGenerationTemplate:
     使用模板方法模式,定义报告生成的固定流程:
 
     Template Method: generate()
-        ├─ step 1: _calculate_score()      # 计算评分
-        ├─ step 2: _calculate_grade()      # 确定评级
-        ├─ step 3: _generate_summary()     # 生成摘要
-        ├─ step 4: _generate_content()     # 生成内容 (核心步骤)
-        └─ step 5: _generate_blocks()      # 生成块 (核心步骤)
+        ├─ step 1: 构建评估上下文
+        ├─ step 2: 使用 audit 的 overall_assessment
+        ├─ step 3: 确定评级 (_calculate_grade)
+        ├─ step 4: 统计违规摘要（含分组）
+        ├─ step 5: 生成内容 (核心步骤)
+        └─ step 6: 生成块 (核心步骤)
 
-    子类可以重写各步骤方法来定制报告生成行为。
+    统一数据模型：
+    - 接受 AuditResult 作为输入（来自 audit 模块）
+    - 使用 audit 的 overall_assessment，不再重复计算结论
+    - 使用 audit 的 regulations_used，不再使用硬编码
     """
 
     # ========== 常量定义 ==========
-
-    # 违规严重程度扣分值
-    SEVERITY_PENALTY = {
-        'high': 20,
-        'medium': 10,
-        'low': 5
-    }
 
     # 评级阈值
     GRADE_THRESHOLDS = [
@@ -55,18 +54,17 @@ class ReportGenerationTemplate:
     ]
     GRADE_DEFAULT = '不合格'
 
-    # 分数范围
-    SCORE_MIN = 0
-    SCORE_MAX = 100
-    SCORE_BASE = 100
-
-    # 定价问题扣分值
-    PRICING_ISSUE_PENALTY = 10
-
     # 严重违规数量限制
     HIGH_VIOLATIONS_LIMIT = 20
     MEDIUM_VIOLATIONS_LIMIT = 10
-    P1_REMEDIATION_MEDIUM_LIMIT = 5  # P1级整改事项表中的中危违规数量限制
+    P1_REMEDIATION_MEDIUM_LIMIT = 5
+
+    # overall_assessment 到 grade 的映射
+    ASSESSMENT_TO_GRADE = {
+        '通过': '优秀',
+        '有条件通过': '良好',
+        '不通过': '不合格',
+    }
 
     def __init__(self, config: Optional[Config] = None):
         """
@@ -81,57 +79,39 @@ class ReportGenerationTemplate:
 
     def generate(
         self,
-        violations: List[Dict[str, Any]],
-        pricing_analysis: Dict[str, Any],
+        audit_result: 'AuditResult',
         product_info: Dict[str, Any],
-        score: Optional[int] = None
+        pricing_analysis: Dict[str, Any] = None,
+        clauses: List[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         模板方法：按固定流程生成报告
 
-        Steps:
-            1. 构建评估上下文
-            2. 计算综合评分
-            3. 确定合规评级
-            4. 统计违规摘要（含分组）
-            5. 生成报告内容
-            6. 转换为块格式
+        统一接口：接受 AuditResult 作为输入
 
         Args:
-            violations: 违规记录列表
-            pricing_analysis: 定价分析结果
+            audit_result: 审核结果（来自 audit 模块）
             product_info: 产品信息
-            score: 自定义分数(可选)
+            pricing_analysis: 定价分析结果（可选）
+            clauses: 条款内容（可选）
 
         Returns:
             dict: 包含 report_id, score, grade, summary, content, blocks
         """
         # 步骤1: 构建评估上下文
-        product = InsuranceProduct(
-            name=product_info.get('product_name', '未知产品'),
-            type=product_info.get('product_type', ''),
-            company=product_info.get('insurance_company', ''),
-            document_url=product_info.get('document_url', ''),
-            version=product_info.get('version', '')
-        )
+        product = ProductInfo.from_dict(product_info)
 
         context = EvaluationContext(
-            violations=violations,
-            pricing_analysis=pricing_analysis,
-            product=product
+            audit_result=audit_result,
+            product=product,
+            pricing_analysis=pricing_analysis or {},
+            clauses=clauses or []
         )
 
         # 生成报告ID
         self.report_id = IDGenerator.generate_report()
 
-        # 步骤2-4: 计算分数、评级、统计摘要（含分组）
-        if score is not None:
-            # 使用自定义分数
-            context.score = max(self.SCORE_MIN, min(self.SCORE_MAX, score))
-        else:
-            # 计算分数
-            self._calculate_score(context)
-
+        # 步骤2-4: 使用 audit 的 overall_assessment，确定评级，统计摘要
         self._calculate_grade(context)
         self._summarize_violations(context)
 
@@ -150,47 +130,25 @@ class ReportGenerationTemplate:
             'metadata': self._generate_metadata(context)
         }
 
-    def _calculate_score(self, context: EvaluationContext) -> None:
-        """
-        计算综合评分
-
-        Args:
-            context: 评估上下文，结果存储到 context.score
-        """
-        # 基础分
-        score = self.SCORE_BASE
-
-        # 根据违规严重程度扣分
-        for violation in context.violations:
-            severity = violation.get('severity', 'low')
-            score -= self.SEVERITY_PENALTY.get(severity, 0)
-
-        # 根据定价分析扣分
-        pricing_issues = self._count_pricing_issues(context.pricing_analysis)
-        score -= pricing_issues * self.PRICING_ISSUE_PENALTY
-
-        # 确保分数在范围内
-        context.score = max(self.SCORE_MIN, min(self.SCORE_MAX, score))
-
     def _calculate_grade(self, context: EvaluationContext) -> None:
         """
-        计算评级
+        确定评级（基于 audit 的 overall_assessment）
 
         Args:
             context: 评估上下文，结果存储到 context.grade
         """
-        for threshold, grade in self.GRADE_THRESHOLDS:
-            if context.score >= threshold:
-                context.grade = grade
-                return
-        context.grade = self.GRADE_DEFAULT
+        # 使用 audit 的 overall_assessment
+        assessment = context.overall_assessment
+
+        # 映射到 grade
+        context.grade = self.ASSESSMENT_TO_GRADE.get(assessment, self.GRADE_DEFAULT)
 
     def _summarize_violations(self, context: EvaluationContext) -> None:
         """
         统计违规摘要并分组
 
         Args:
-            context: 评估上下文，结果存储到 context.summary 和 context.context.high_violations 等
+            context: 评估上下文，结果存储到 context.summary 和分组违规项
         """
         # 统计违规数量
         violation_summary = {
@@ -212,8 +170,12 @@ class ReportGenerationTemplate:
         context.medium_violations = [v for v in context.violations if v.get('severity') == 'medium']
         context.low_violations = [v for v in context.violations if v.get('severity') == 'low']
 
-        # 生成审核依据
-        context.regulation_basis = self._generate_regulation_basis(context)
+        # 使用 audit 的 regulations_used 作为审核依据
+        if context.audit_result and context.audit_result.regulations_used:
+            context.regulation_basis = context.audit_result.regulations_used
+        else:
+            # 回退到默认依据
+            context.regulation_basis = self._generate_default_regulation_basis()
 
         # 存储摘要
         context.summary = {
@@ -221,7 +183,7 @@ class ReportGenerationTemplate:
             'violation_severity': violation_summary,
             'pricing_issues': pricing_issues,
             'has_critical_issues': violation_summary['high'] > 0 or pricing_issues > 1,
-            'has_issues': len(context.violations) > 0 or pricing_issues > 0
+            'has_issues': len(context.violations) > 0 or pricing_issues > 0,
         }
 
     def _count_pricing_issues(self, pricing_analysis: Dict[str, Any]) -> int:
@@ -243,17 +205,24 @@ class ReportGenerationTemplate:
                     pricing_issues += 1
         return pricing_issues
 
+    def _generate_default_regulation_basis(self) -> List[str]:
+        """生成默认审核依据（当 audit_result 为空时）"""
+        return [
+            "《中华人民共和国保险法》",
+            "《人身保险公司保险条款和保险费率管理办法》"
+        ]
+
     def _generate_content(self, context: EvaluationContext) -> str:
         """
         生成精算审核报告
 
         动态生成,基于实际审核情况:
         - 有问题才显示问题章节
-        - 审核依据根据产品类型动态生成
+        - 审核依据从 audit 获取
         - 表格只在有数据时显示
 
         结构:
-        1. 审核结论(始终显示)
+        1. 审核结论(始终显示) - 使用 audit 的 overall_assessment
         2. 问题详情及依据(有问题时显示)
         3. 修改建议(有问题时显示)
         """
@@ -280,7 +249,7 @@ class ReportGenerationTemplate:
 
         动态生成,基于实际审核情况:
         - 有问题才显示问题章节
-        - 审核依据根据产品类型动态生成
+        - 审核依据从 audit 获取
         - 表格只在有数据时显示
         """
         blocks = []
@@ -306,19 +275,21 @@ class ReportGenerationTemplate:
             'product_name': context.product.name,
             'insurance_company': context.product.company,
             'product_type': context.product.type,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'overall_assessment': context.overall_assessment,
         }
 
     # ========== 文本内容生成辅助方法 ==========
 
     def _generate_conclusion_section(self, context: EvaluationContext) -> List[str]:
-        """生成审核结论章节"""
+        """生成审核结论章节（使用 audit 的 overall_assessment）"""
         lines = []
 
         lines.append("一、审核结论")
 
-        # 生成审核意见
-        opinion, explanation = self._generate_conclusion_text(context.score, context.summary)
+        # 使用 audit 的 overall_assessment 和 assessment_reason
+        opinion = context.overall_assessment
+        explanation = context.assessment_reason or self._get_default_explanation(context)
 
         lines.append(f"**审核意见**:{opinion}")
         lines.append(f"**说明**:{explanation}")
@@ -341,13 +312,30 @@ class ReportGenerationTemplate:
 
         return lines
 
+    def _get_default_explanation(self, context: EvaluationContext) -> str:
+        """获取默认说明（当 audit_result.assessment_reason 为空时）"""
+        high_count = context.summary['violation_severity']['high']
+        medium_count = context.summary['violation_severity']['medium']
+        total = context.summary['total_violations']
+
+        if high_count > 0:
+            return f"产品存在{high_count}项严重违规,触及监管红线,需完成整改后重新审核"
+        elif context.score >= 90:
+            return "产品符合所有监管要求,未发现违规问题"
+        elif context.score >= 75:
+            return f"产品整体符合要求,存在{medium_count}项中等问题,建议完成修改后提交审核"
+        elif context.score >= 60:
+            return f"产品存在{total}项问题,建议补充说明材料后复审"
+        else:
+            return "产品合规性不足,不建议提交审核"
+
     def _generate_details_section(self, context: EvaluationContext) -> List[str]:
         """生成问题详情章节"""
         lines = []
 
         lines.append("二、问题详情及依据")
 
-        # 生成审核依据(动态)
+        # 生成审核依据(从 audit 获取)
         lines.append("**审核依据**")
         for i, reg in enumerate(context.regulation_basis, 1):
             lines.append(f"{i}. {reg}")
@@ -388,9 +376,8 @@ class ReportGenerationTemplate:
                 clause_ref = v.get('clause_reference', '')
                 clause_text = v.get('clause_text', '')[:80]
                 description = v.get('description', '未知')
-                category = v.get('category', '')
-                # 根据类别生成法规依据
-                regulation = self._get_regulation_basis(category)
+                # 使用 audit 的 regulation_citation
+                regulation = v.get('regulation_citation', self._get_regulation_basis(v.get('category', '')))
                 # 合并条款引用和原文
                 if clause_ref and not clause_ref.startswith('段落'):
                     full_clause = f"{clause_ref}:{clause_text}"
@@ -408,8 +395,7 @@ class ReportGenerationTemplate:
                 clause_ref = v.get('clause_reference', '')
                 clause_text = v.get('clause_text', '')[:80]
                 description = v.get('description', '未知')
-                category = v.get('category', '')
-                regulation = self._get_regulation_basis(category)
+                regulation = v.get('regulation_citation', self._get_regulation_basis(v.get('category', '')))
                 # 合并条款引用和原文
                 if clause_ref and not clause_ref.startswith('段落'):
                     full_clause = f"{clause_ref}:{clause_text}"
@@ -471,8 +457,9 @@ class ReportGenerationTemplate:
 
         blocks.append(self._create_heading_2("一、审核结论"))
 
-        # 生成审核意见
-        opinion, explanation = self._generate_conclusion_text(context.score, context.summary)
+        # 使用 audit 的 overall_assessment
+        opinion = context.overall_assessment
+        explanation = context.assessment_reason or self._get_default_explanation(context)
 
         blocks.append(self._create_bold_text(f"审核意见:{opinion}"))
         blocks.append(self._create_text(f"说明:{explanation}"))
@@ -504,8 +491,8 @@ class ReportGenerationTemplate:
 
         blocks.append(self._create_heading_2("二、问题详情及依据"))
 
-        # 生成审核依据(动态)
-        if context.regulation_basis:  # 只在有依据时显示
+        # 生成审核依据(从 audit 获取)
+        if context.regulation_basis:
             blocks.append(self._create_text("审核依据"))
             for reg in context.regulation_basis:
                 blocks.append(self._create_text(reg))
@@ -547,8 +534,7 @@ class ReportGenerationTemplate:
                 clause_ref = v.get('clause_reference', '')
                 clause_text = v.get('clause_text', '')[:80]
                 description = v.get('description', '未知')
-                category = v.get('category', '')
-                regulation = self._get_regulation_basis(category)
+                regulation = v.get('regulation_citation', self._get_regulation_basis(v.get('category', '')))
                 # 合并条款引用和原文
                 if clause_ref and not clause_ref.startswith('段落'):
                     full_clause = f"{clause_ref}:{clause_text}"
@@ -568,8 +554,7 @@ class ReportGenerationTemplate:
                 clause_ref = v.get('clause_reference', '')
                 clause_text = v.get('clause_text', '')[:80]
                 description = v.get('description', '未知')
-                category = v.get('category', '')
-                regulation = self._get_regulation_basis(category)
+                regulation = v.get('regulation_citation', self._get_regulation_basis(v.get('category', '')))
                 # 合并条款引用和原文
                 if clause_ref and not clause_ref.startswith('段落'):
                     full_clause = f"{clause_ref}:{clause_text}"
@@ -633,88 +618,6 @@ class ReportGenerationTemplate:
 
     # ========== 工具方法 ==========
 
-    def _generate_conclusion_text(self, score: int, summary: Dict[str, Any]) -> tuple:
-        """
-        生成审核结论文本
-
-        Args:
-            score: 综合评分
-            summary: 报告摘要
-
-        Returns:
-            tuple: (opinion, explanation)
-        """
-        high_count = summary['violation_severity']['high']
-        medium_count = summary['violation_severity']['medium']
-        total = summary['total_violations']
-
-        # 审核意见决策
-        if high_count > 0:
-            opinion = "不推荐上会"
-            explanation = f"产品存在{high_count}项严重违规,触及监管红线,需完成整改后重新审核"
-        elif score >= 90:
-            opinion = "推荐通过"
-            explanation = "产品符合所有监管要求,未发现违规问题"
-        elif score >= 75:
-            opinion = "条件推荐"
-            explanation = f"产品整体符合要求,存在{medium_count}项中等问题,建议完成修改后提交审核"
-        elif score >= 60:
-            opinion = "需补充材料"
-            explanation = f"产品存在{total}项问题,建议补充说明材料后复审"
-        else:
-            opinion = "不予推荐"
-            explanation = "产品合规性不足,不建议提交审核"
-
-        return opinion, explanation
-
-    def _generate_regulation_basis(self, context: EvaluationContext) -> List[str]:
-        """
-        动态生成审核依据
-
-        基于产品类型和违规情况,动态生成适用的法规依据列表
-
-        Args:
-            context: 评估上下文
-
-        Returns:
-            list: 法规依据列表
-        """
-        basis = []
-
-        # 基础法规(始终适用)
-        basis.append("《中华人民共和国保险法》")
-
-        # 根据产品类型添加专项法规
-        product_type = context.product.type.lower()
-        type_regulations = {
-            '寿险': '《人身保险公司保险条款和保险费率管理办法》',
-            '健康险': '《健康保险管理办法》',
-            '意外险': '《意外伤害保险管理办法》',
-            '万能险': '《万能型人身保险管理办法》',
-            '分红险': '《分红型人身保险管理办法》',
-        }
-
-        for key, regulation in type_regulations.items():
-            if key in product_type:
-                basis.append(regulation)
-                break
-
-        # 如果没有匹配到专项法规,添加通用规定
-        if len(basis) == 1:
-            basis.append('《保险公司管理规定》')
-
-        # 提取违规记录中引用的法规(如果有)
-        if context.violations:
-            cited_regs = set()
-            for v in context.violations:
-                if v.get('regulation_citation'):
-                    cited_regs.add(v['regulation_citation'])
-
-            if cited_regs:
-                basis.extend(sorted(cited_regs))
-
-        return basis
-
     def _get_score_description(self, score: int) -> str:
         """
         获取评分描述
@@ -746,14 +649,10 @@ class ReportGenerationTemplate:
             str: 法规依据(法规名称+条款+内容)
         """
         regulation_map = {
-            '产品条款表述': '《保险法》第十七条:订立保险合同,采用保险人提供的格式条款的,保险人向投保人提供的投保单应当附格式条款,保险人应当向投保人说明合同的内容。',
-            '产品责任设计': '《人身保险公司保险条款和保险费率管理办法》第六条:保险条款应当符合下列要求:(一)结构清晰、文字准确、表述严谨、通俗易懂；(二)要素完整、内容完备',
-            '产品费率厘定及精算假设': '《人身保险公司保险条款和保险费率管理办法》第三十六条:保险公司应当按照审慎原则拟定保险费率,不得因费率厘定不真实、不合理而损害投保人、被保险人和受益人的合法权益。',
-            '产品报送管理': '《人身保险公司保险条款和保险费率管理办法》第十二条:保险公司报送审批或者备案的保险条款和保险费率,应当符合下列条件:(一)结构清晰、文字准确、表述严谨、通俗易懂',
-            '产品形态设计': '《健康保险管理办法》第十六条:健康保险产品应当根据被保险人的年龄、性别、健康状况等因素,合理确定保险费率和保险金额。',
-            '销售管理': '《保险销售行为监管办法》第十三条:保险销售人员应当向投保人说明保险合同的内容,特别是对投保人、被保险人、受益人的权利和义务、免除保险人责任的条款以及其他重要条款。',
-            '理赔管理': '《保险法》第二十二条:保险事故发生后,按照保险合同请求保险人赔偿或者给付保险金时,投保人、被保险人或者受益人应当向保险人提供其所能提供的与确认保险事故的性质、原因、损失程度等有关的证明和资料。',
-            '客户服务': '《保险公司服务管理办法》第八条:保险公司应当建立客户服务制度,明确服务标准和服务流程。'
+            '合规性': '《保险法》第十七条:订立保险合同,采用保险人提供的格式条款的,保险人向投保人提供的投保单应当附格式条款,保险人应当向投保人说明合同的内容。',
+            '信息披露': '《人身保险公司保险条款和保险费率管理办法》第六条:保险条款应当符合下列要求:(一)结构清晰、文字准确、表述严谨、通俗易懂;(二)要素完整、内容完备',
+            '条款清晰度': '《人身保险公司保险条款和保险费率管理办法》第三十六条:保险公司应当按照审慎原则拟定保险费率,不得因费率厘定不真实、不合理而损害投保人、被保险人和受益人的合法权益。',
+            '费率合理性': '《健康保险管理办法》第十六条:健康保险产品应当根据被保险人的年龄、性别、健康状况等因素,合理确定保险费率和保险金额。',
         }
         return regulation_map.get(category, '《保险法》及相关监管规定')
 

@@ -154,13 +154,17 @@ class _DocxGenerator:
         # 使用常量
         C = DocxConstants
 
-        # 提取数据
+        # 提取数据（从统一数据模型）
         product_info = context.product
-        violations = context.violations
+        violations = context.violations  # 从 audit_result.issues 转换而来
         pricing_analysis = context.pricing_analysis
-        score = context.score or 0
+        score = context.score
         grade = context.grade or "未评级"
         summary = context.summary or {}
+
+        # 提取 audit 的结论
+        overall_assessment = context.overall_assessment
+        assessment_reason = context.assessment_reason
 
         # 生成JavaScript代码
         escaped_title = self._escape_js(title)
@@ -238,8 +242,8 @@ async function createAuditReport() {
         # 添加产品基本信息
         parts.append(self._generate_product_info_section(product_info))
 
-        # 添加审核结论章节
-        parts.append(self._generate_conclusion_section(score, grade, summary, violations, pricing_analysis))
+        # 添加审核结论章节（使用 audit 的结论）
+        parts.append(self._generate_conclusion_section(score, grade, summary, violations, pricing_analysis, overall_assessment, assessment_reason))
 
         # 添加问题详情章节
         logger.debug(f"生成问题详情章节: violations count={len(violations) if violations else 0}")
@@ -374,14 +378,17 @@ createAuditReport()
         grade: str,
         summary: Dict[str, Any],
         violations: List[Dict[str, Any]],
-        pricing_analysis: Dict[str, Any]
+        pricing_analysis: Dict[str, Any],
+        overall_assessment: str = "不通过",
+        assessment_reason: str = ""
     ) -> str:
-        """生成审核结论章节"""
+        """生成审核结论章节（使用 audit 的 overall_assessment）"""
         sections = []
         sections.append(self._generate_heading_paragraph("一、审核结论", 2))
 
-        # 生成审核意见
-        opinion, explanation = self._generate_conclusion_text(score, summary, violations)
+        # 使用 audit 的 overall_assessment
+        opinion = overall_assessment
+        explanation = assessment_reason or self._generate_conclusion_text(score, summary, violations)[1]
 
         sections.append(self._generate_field_paragraph("审核意见", opinion))
         sections.append(self._generate_field_paragraph("说明", explanation))
@@ -719,9 +726,19 @@ createAuditReport()
             return "产品不合格，不建议提交审核"
 
     def _generate_regulation_basis(self, violations: List[Dict[str, Any]]) -> List[str]:
-        """动态生成审核依据"""
+        """动态生成审核依据（优先使用 audit 的 regulation_citation）"""
         basis = ["《中华人民共和国保险法》"]
         basis.append("《人身保险公司保险条款和保险费率管理办法》")
+
+        # 提取违规记录中引用的法规
+        cited_regs = set()
+        for v in violations:
+            if v.get('regulation_citation'):
+                cited_regs.add(v['regulation_citation'])
+
+        if cited_regs:
+            basis.extend(sorted(cited_regs))
+
         return basis
 
     def _get_regulation_basis(self, category: str) -> str:
