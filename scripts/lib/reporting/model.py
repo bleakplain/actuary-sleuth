@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from lib.audit import AuditResult, AuditIssue
 
 from lib.common.models import Product as CommonProduct, ProductCategory
+from lib.common.product_type import from_chinese_string, to_display_name
 
 __all__ = ['EvaluationContext', 'ProductInfo']
 
@@ -40,20 +41,7 @@ class ProductInfo:
     @property
     def type(self) -> str:
         """产品类型（从 category enum 转换为字符串）"""
-        category_map = {
-            'critical_illness': '重大疾病保险',
-            'medical_insurance': '医疗保险',
-            'life_insurance': '人寿保险',
-            'participating_life': '分红型人寿保险',
-            'universal_life': '万能险',
-            'annuity': '年金保险',
-            'accident': '意外伤害保险',
-            'health': '健康保险',
-            'pension': '养老保险',
-            'other': '其他保险',
-        }
-        category_value = self.product.category.value if self.product.category else 'other'
-        return category_map.get(category_value, category_value)
+        return to_display_name(self.product.category) if self.product.category else '其他保险'
 
     @classmethod
     def from_common_product(
@@ -72,23 +60,9 @@ class ProductInfo:
     @classmethod
     def from_dict(cls, product_info: Dict[str, Any]) -> 'ProductInfo':
         """从字典创建 ProductInfo"""
-        category_map = {
-            '重大疾病保险': ProductCategory.CRITICAL_ILLNESS,
-            '医疗保险': ProductCategory.MEDICAL_INSURANCE,
-            '人寿保险': ProductCategory.LIFE_INSURANCE,
-            '终身寿险': ProductCategory.LIFE_INSURANCE,
-            '重疾险': ProductCategory.CRITICAL_ILLNESS,
-            '意外险': ProductCategory.ACCIDENT,
-            '意外伤害保险': ProductCategory.ACCIDENT,
-        }
-
-        # 确定产品类型
+        # 确定产品类型（使用统一映射）
         type_str = product_info.get('product_type', '')
-        category = ProductCategory.OTHER
-        for key, cat in category_map.items():
-            if key in type_str:
-                category = cat
-                break
+        category = from_chinese_string(type_str)
 
         product = CommonProduct(
             name=product_info.get('product_name', ''),

@@ -11,47 +11,31 @@
 - 不依赖外部状态
 - 不依赖上层模块（如 reporting），保持单向依赖
 """
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Tuple
 
 from lib.audit_data import AuditData, EvaluationResult
 from lib.common.models import Product, ProductCategory
+from lib.common.product_type import from_chinese_string
 from lib.reporting.model import ProductInfo
 
 __all__ = ['calculate_evaluation', 'calculate_score', 'calculate_grade',
            'calculate_summary', 'group_violations']
 
+# 模块级常量 - 避免每次函数调用时重建
+SCORE_BASE = 100
+SEVERITY_PENALTY = {
+    'high': 20,
+    'medium': 10,
+    'low': 5
+}
+PRICING_ISSUE_PENALTY = 10
 
-def _map_product_type(type_str: str) -> ProductCategory:
-    """
-    将产品类型字符串映射到 ProductCategory 枚举
-
-    Args:
-        type_str: 产品类型字符串
-
-    Returns:
-        ProductCategory: 产品类别枚举值
-    """
-    category_map = {
-        '重大疾病': ProductCategory.CRITICAL_ILLNESS,
-        '重疾': ProductCategory.CRITICAL_ILLNESS,
-        '医疗': ProductCategory.MEDICAL_INSURANCE,
-        '人寿': ProductCategory.LIFE_INSURANCE,
-        '寿险': ProductCategory.LIFE_INSURANCE,
-        '终身': ProductCategory.LIFE_INSURANCE,
-        '分红': ProductCategory.PARTICIPATING_LIFE,
-        '万能': ProductCategory.UNIVERSAL_LIFE,
-        '年金': ProductCategory.ANNUITY,
-        '意外': ProductCategory.ACCIDENT,
-        '伤害': ProductCategory.ACCIDENT,
-        '健康': ProductCategory.HEALTH,
-        '养老': ProductCategory.PENSION,
-    }
-
-    for key, category in category_map.items():
-        if key in type_str:
-            return category
-
-    return ProductCategory.OTHER
+GRADE_THRESHOLDS = [
+    (90, '优秀'),
+    (75, '良好'),
+    (60, '合格')
+]
+GRADE_DEFAULT = '不合格'
 
 
 def calculate_evaluation(data: AuditData) -> EvaluationResult:
@@ -69,18 +53,15 @@ def calculate_evaluation(data: AuditData) -> EvaluationResult:
     Returns:
         EvaluationResult: 评估计算结果（包含所有导出数据）
     """
-    # 构建 common.Product（不依赖 reporting 层）
+    # 构建 common.Product（使用统一的产品类型映射）
     product_type_str = data.product_info.get('product_type', '')
-    category = _map_product_type(product_type_str)
+    category = from_chinese_string(product_type_str)
 
     common_product = Product(
         name=data.product_info.get('product_name', '未知产品'),
         company=data.product_info.get('insurance_company', ''),
         category=category,
-        period=data.product_info.get('insurance_period', ''),
-        waiting_period=None,
-        age_min=None,
-        age_max=None
+        period=data.product_info.get('insurance_period', '')
     )
 
     # 包装为 ProductInfo（供报告层使用）
@@ -140,14 +121,6 @@ def calculate_score(violations: List[Dict[str, Any]], pricing_analysis: Dict[str
     Returns:
         int: 综合评分 (0-100)
     """
-    SCORE_BASE = 100
-    SEVERITY_PENALTY = {
-        'high': 20,
-        'medium': 10,
-        'low': 5
-    }
-    PRICING_ISSUE_PENALTY = 10
-
     score = SCORE_BASE
 
     # 根据违规严重程度扣分
@@ -172,13 +145,6 @@ def calculate_grade(score: int) -> str:
     Returns:
         str: 评级
     """
-    GRADE_THRESHOLDS = [
-        (90, '优秀'),
-        (75, '良好'),
-        (60, '合格')
-    ]
-    GRADE_DEFAULT = '不合格'
-
     for threshold, grade in GRADE_THRESHOLDS:
         if score >= threshold:
             return grade
@@ -201,12 +167,12 @@ def calculate_summary(
     Returns:
         dict: 违规摘要
     """
-    # 统计各严重程度数量
-    severity_counts = {
-        'high': len([v for v in violations if v.get('severity') == 'high']),
-        'medium': len([v for v in violations if v.get('severity') == 'medium']),
-        'low': len([v for v in violations if v.get('severity') == 'low'])
-    }
+    # 统计各严重程度数量（单次遍历）
+    severity_counts = {'high': 0, 'medium': 0, 'low': 0}
+    for v in violations:
+        severity = v.get('severity', 'low')
+        if severity in severity_counts:
+            severity_counts[severity] += 1
 
     # 统计定价问题
     pricing_issues = _count_pricing_issues(pricing_analysis)
@@ -226,9 +192,9 @@ def calculate_summary(
     }
 
 
-def group_violations(violations: List[Dict[str, Any]]) -> tuple:
+def group_violations(violations: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
-    按严重程度分组违规项
+    按严重程度分组违规项（单次遍历）
 
     Args:
         violations: 违规项列表
@@ -236,9 +202,18 @@ def group_violations(violations: List[Dict[str, Any]]) -> tuple:
     Returns:
         tuple: (high_violations, medium_violations, low_violations)
     """
-    high_violations = [v for v in violations if v.get('severity') == 'high']
-    medium_violations = [v for v in violations if v.get('severity') == 'medium']
-    low_violations = [v for v in violations if v.get('severity') == 'low']
+    high_violations = []
+    medium_violations = []
+    low_violations = []
+
+    for v in violations:
+        severity = v.get('severity', 'low')
+        if severity == 'high':
+            high_violations.append(v)
+        elif severity == 'medium':
+            medium_violations.append(v)
+        else:
+            low_violations.append(v)
 
     return high_violations, medium_violations, low_violations
 

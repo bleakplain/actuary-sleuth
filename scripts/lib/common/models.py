@@ -135,21 +135,10 @@ class AuditRequest:
                 f"建议审核时关注数据准确性"
             )
 
-        category_map = {
-            'critical_illness': ProductCategory.CRITICAL_ILLNESS,
-            'medical_insurance': ProductCategory.MEDICAL_INSURANCE,
-            'life_insurance': ProductCategory.LIFE_INSURANCE,
-            'term_life': ProductCategory.LIFE_INSURANCE,
-            'whole_life': ProductCategory.LIFE_INSURANCE,
-            'participating_life': ProductCategory.PARTICIPATING_LIFE,
-            'universal_life': ProductCategory.UNIVERSAL_LIFE,
-            'annuity': ProductCategory.ANNUITY,
-            'accident': ProductCategory.ACCIDENT,
-            'accident_insurance': ProductCategory.ACCIDENT,
-        }
-
+        # 使用统一的产品类型映射
+        from lib.common.product_type import from_classifier_code
         product_type = extract_result.metadata.get('product_type', 'other')
-        category = category_map.get(product_type, ProductCategory.OTHER)
+        category = from_classifier_code(product_type)
 
         product = Product(
             name=data.get('product_name', ''),
