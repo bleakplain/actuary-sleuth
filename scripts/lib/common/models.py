@@ -391,11 +391,17 @@ class ProductInfo:
     @classmethod
     def from_dict(cls, product_info: Dict[str, Any]) -> 'ProductInfo':
         """从字典创建 ProductInfo"""
-        from lib.common.product_type import get_category
+        from lib.common.product_type import get_category, from_code
         from lib.common.models import Product, ProductCategory
 
         type_str = product_info.get('product_type', '')
+
+        # 尝试从产品类型字符串解析类别
+        # 优先使用中文名称匹配（get_category），如果返回 OTHER 则尝试代码匹配（from_code）
         category = get_category(type_str)
+        if category == ProductCategory.OTHER and type_str:
+            # 可能是分类器代码，尝试使用 from_code
+            category = from_code(type_str)
 
         product = Product(
             name=product_info.get('product_name', ''),
