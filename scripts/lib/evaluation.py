@@ -15,7 +15,7 @@ from typing import Dict, List, Any, Tuple
 
 from lib.audit_data import AuditData, EvaluationResult
 from lib.common.models import Product, ProductCategory
-from lib.common.product_type import from_chinese_string
+from lib.common.product_type import get_category
 from lib.reporting.model import ProductInfo
 
 __all__ = ['calculate_evaluation', 'calculate_score', 'calculate_grade',
@@ -53,9 +53,9 @@ def calculate_evaluation(data: AuditData) -> EvaluationResult:
     Returns:
         EvaluationResult: 评估计算结果（包含所有导出数据）
     """
-    # 构建 common.Product（使用统一的产品类型映射）
+    # 构建产品对象
     product_type_str = data.product_info.get('product_type', '')
-    category = from_chinese_string(product_type_str)
+    category = get_category(product_type_str)
 
     common_product = Product(
         name=data.product_info.get('product_name', '未知产品'),

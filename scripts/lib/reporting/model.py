@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from lib.audit import AuditResult, AuditIssue
 
 from lib.common.models import Product as CommonProduct, ProductCategory
-from lib.common.product_type import from_chinese_string, to_display_name
+from lib.common.product_type import get_category, get_name
 
 __all__ = ['EvaluationContext', 'ProductInfo']
 
@@ -40,8 +40,8 @@ class ProductInfo:
 
     @property
     def type(self) -> str:
-        """产品类型（从 category enum 转换为字符串）"""
-        return to_display_name(self.product.category) if self.product.category else '其他保险'
+        """产品类型"""
+        return get_name(self.product.category) if self.product.category else '其他保险'
 
     @classmethod
     def from_common_product(
@@ -60,9 +60,8 @@ class ProductInfo:
     @classmethod
     def from_dict(cls, product_info: Dict[str, Any]) -> 'ProductInfo':
         """从字典创建 ProductInfo"""
-        # 确定产品类型（使用统一映射）
         type_str = product_info.get('product_type', '')
-        category = from_chinese_string(type_str)
+        category = get_category(type_str)
 
         product = CommonProduct(
             name=product_info.get('product_name', ''),

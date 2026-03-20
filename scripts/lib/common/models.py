@@ -136,9 +136,9 @@ class AuditRequest:
             )
 
         # 使用统一的产品类型映射
-        from lib.common.product_type import from_classifier_code
+        from lib.common.product_type import from_code
         product_type = extract_result.metadata.get('product_type', 'other')
-        category = from_classifier_code(product_type)
+        category = from_code(product_type)
 
         product = Product(
             name=data.get('product_name', ''),
