@@ -14,9 +14,8 @@
 from typing import Dict, List, Any, Tuple
 
 from lib.audit_data import AuditData, EvaluationResult
-from lib.common.models import Product, ProductCategory
+from lib.common.models import Product, ProductCategory, ProductInfo
 from lib.common.product_type import get_category
-from lib.reporting.model import ProductInfo
 
 __all__ = ['calculate_evaluation', 'calculate_score', 'calculate_grade',
            'calculate_summary', 'group_violations']
@@ -65,7 +64,7 @@ def calculate_evaluation(data: AuditData) -> EvaluationResult:
     )
 
     # 包装为 ProductInfo（供报告层使用）
-    product = ProductInfo.from_common_product(
+    product = ProductInfo.from_product(
         common_product,
         document_url=data.document_url,
         version=data.product_info.get('version', '')

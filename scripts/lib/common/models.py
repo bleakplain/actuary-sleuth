@@ -340,4 +340,75 @@ __all__ = [
     'Coverage',
     'Premium',
     'AuditRequest',
+    # Evaluation → Reporting 接口模型
+    'ProductInfo',
 ]
+
+
+# ==================== Evaluation → Reporting 接口模型 ====================
+
+@dataclass
+class ProductInfo:
+    """
+    产品信息（用于报告生成）
+
+    包装 Product，添加报告需要的额外字段。
+    位于 common/models.py 确保各模块可以共享此定义，
+    避免 evaluation 层依赖 reporting 层。
+    """
+    product: Product
+    document_url: str = ""
+    version: str = ""
+
+    @property
+    def name(self) -> str:
+        return self.product.name
+
+    @property
+    def company(self) -> str:
+        return self.product.company
+
+    @property
+    def type(self) -> str:
+        """产品类型"""
+        from lib.common.product_type import get_name
+        return get_name(self.product.category) if self.product.category else '其他保险'
+
+    @classmethod
+    def from_product(
+        cls,
+        product: Product,
+        document_url: str = "",
+        version: str = ""
+    ) -> 'ProductInfo':
+        """从 Product 创建 ProductInfo"""
+        return cls(
+            product=product,
+            document_url=document_url,
+            version=version
+        )
+
+    @classmethod
+    def from_dict(cls, product_info: Dict[str, Any]) -> 'ProductInfo':
+        """从字典创建 ProductInfo"""
+        from lib.common.product_type import get_category
+        from lib.common.models import Product, ProductCategory
+
+        type_str = product_info.get('product_type', '')
+        category = get_category(type_str)
+
+        product = Product(
+            name=product_info.get('product_name', ''),
+            company=product_info.get('insurance_company', ''),
+            category=category,
+            period=product_info.get('insurance_period', ''),
+            waiting_period=None,
+            age_min=None,
+            age_max=None
+        )
+
+        return cls(
+            product=product,
+            document_url=product_info.get('document_url', ''),
+            version=product_info.get('version', '')
+        )

@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
+from lib.common.models import ProductInfo
+
 __all__ = ['AuditData', 'EvaluationResult']
 
 
@@ -101,7 +103,7 @@ class EvaluationResult:
     clauses: List[Dict[str, Any]]
 
     # === 产品信息 ===
-    product: 'ProductInfo'
+    product: ProductInfo
     product_info: Dict[str, Any]  # 原始产品信息，用于 details 字段
 
     # === 元数据 ===
@@ -172,10 +174,3 @@ class EvaluationResult:
     def preprocess_id(self) -> str:
         """预处理 ID"""
         return f"PRE-{self.audit_id.split('-')[1]}"
-
-
-# 导入 ProductInfo (避免循环导入)
-# 注意：这里使用 TYPE_CHECKING 避免运行时循环依赖
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from lib.reporting.model import ProductInfo

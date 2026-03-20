@@ -13,71 +13,13 @@ from typing import Dict, List, Any, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from lib.audit import AuditResult, AuditIssue
 
-from lib.common.models import Product as CommonProduct, ProductCategory
+from lib.common.models import Product as CommonProduct, ProductCategory, ProductInfo as _ProductInfo
 from lib.common.product_type import get_category, get_name
 
 __all__ = ['EvaluationContext', 'ProductInfo']
 
-
-@dataclass
-class ProductInfo:
-    """
-    产品信息（用于报告生成）
-
-    包装 common.Product，添加报告需要的额外字段
-    """
-    product: CommonProduct
-    document_url: str = ""
-    version: str = ""
-
-    @property
-    def name(self) -> str:
-        return self.product.name
-
-    @property
-    def company(self) -> str:
-        return self.product.company
-
-    @property
-    def type(self) -> str:
-        """产品类型"""
-        return get_name(self.product.category) if self.product.category else '其他保险'
-
-    @classmethod
-    def from_common_product(
-        cls,
-        product: CommonProduct,
-        document_url: str = "",
-        version: str = ""
-    ) -> 'ProductInfo':
-        """从 common.Product 创建 ProductInfo"""
-        return cls(
-            product=product,
-            document_url=document_url,
-            version=version
-        )
-
-    @classmethod
-    def from_dict(cls, product_info: Dict[str, Any]) -> 'ProductInfo':
-        """从字典创建 ProductInfo"""
-        type_str = product_info.get('product_type', '')
-        category = get_category(type_str)
-
-        product = CommonProduct(
-            name=product_info.get('product_name', ''),
-            company=product_info.get('insurance_company', ''),
-            category=category,
-            period=product_info.get('insurance_period', ''),
-            waiting_period=None,
-            age_min=None,
-            age_max=None
-        )
-
-        return cls(
-            product=product,
-            document_url=product_info.get('document_url', ''),
-            version=product_info.get('version', '')
-        )
+# 向后兼容：从 common.models 导入 ProductInfo
+ProductInfo = _ProductInfo
 
 
 @dataclass
