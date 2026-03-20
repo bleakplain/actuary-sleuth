@@ -6,8 +6,10 @@
 import logging
 import sqlite3
 import json
+import inspect
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Callable, Any
 
 logger = logging.getLogger(__name__)
 
@@ -188,3 +190,33 @@ def add_negative_list_rule(rule_data):
     except sqlite3.Error as e:
         logger.error(f"添加负面清单规则失败: {e}")
         return False
+
+
+# ========== 数据库连接管理辅助工具（内部使用）==========
+
+@contextmanager
+def _managed_query(query_func: Callable, *args, **kwargs):
+    """
+    确保查询函数在 context manager 中执行（内部函数）
+
+    Args:
+        query_func: 查询函数
+        *args: 位置参数
+        **kwargs: 关键字参数
+
+    Yields:
+        查询结果
+
+    Note:
+        内部使用，不作为公开 API
+    """
+    with get_connection() as conn:
+        # 检查函数是否接受 conn 参数
+        sig = inspect.signature(query_func)
+        if 'conn' in sig.parameters:
+            result = query_func(*args, conn=conn, **kwargs)
+        else:
+            # 对于不需要 conn 的函数，直接调用
+            # (函数内部应该使用 get_connection())
+            result = query_func(*args, **kwargs)
+        yield result

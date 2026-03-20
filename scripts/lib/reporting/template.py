@@ -143,25 +143,22 @@ class ReportGenerationTemplate:
         Args:
             context: 评估上下文，结果存储到 context.summary 和分组违规项
         """
-        # 统计违规数量
-        violation_summary = {
-            'high': 0,
-            'medium': 0,
-            'low': 0
-        }
+        # 如果已经分组（from_evaluation_result 已处理），直接使用
+        # 否则进行分组
+        if not context.high_violations:
+            context.high_violations = [v for v in context.violations if v.get('severity') == 'high']
+            context.medium_violations = [v for v in context.violations if v.get('severity') == 'medium']
+            context.low_violations = [v for v in context.violations if v.get('severity') == 'low']
 
-        for violation in context.violations:
-            severity = violation.get('severity', 'low')
-            if severity in violation_summary:
-                violation_summary[severity] += 1
+        # 统计违规数量（使用分组后的结果，提高性能）
+        violation_summary = {
+            'high': len(context.high_violations),
+            'medium': len(context.medium_violations),
+            'low': len(context.low_violations)
+        }
 
         # 统计定价问题
         pricing_issues = self._count_pricing_issues(context.pricing_analysis)
-
-        # 分组违规项（只做一次，提高性能）
-        context.high_violations = [v for v in context.violations if v.get('severity') == 'high']
-        context.medium_violations = [v for v in context.violations if v.get('severity') == 'medium']
-        context.low_violations = [v for v in context.violations if v.get('severity') == 'low']
 
         # 使用默认审核依据
         if not context.regulation_basis:

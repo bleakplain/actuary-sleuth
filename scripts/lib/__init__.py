@@ -3,7 +3,7 @@
 """
 Infrastructure package init
 """
-from .database import get_connection
+from .common.database import get_connection
 from .config import get_config
 from .id_generator import IDGenerator
 from .exceptions import *

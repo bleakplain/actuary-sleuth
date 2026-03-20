@@ -58,7 +58,7 @@ class RegulationDataImporter:
 
     def import_to_sqlite(self, documents: List) -> int:
         """导入到 SQLite"""
-        from lib.database import get_connection
+        from lib.common.database import get_connection
 
         sqlite_records = self.parser.documents_to_sqlite_format(documents)
         imported = 0

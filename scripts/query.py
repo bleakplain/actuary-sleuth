@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Any
 
 from lib.config import get_config
-from lib import database as db
+from lib.common import database as db
 from lib import vector_store
 from lib import ollama
 

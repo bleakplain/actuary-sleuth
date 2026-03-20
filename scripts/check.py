@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Any
 
-from lib import database as db
+from lib.common import database as db
 from lib.config import get_config
 
 
@@ -74,51 +74,50 @@ def execute(params):
     if not isinstance(clauses, list):
         raise TypeError("'clauses' must be a list")
 
-    # 获取负面清单规则
-    rules = db.get_negative_list()
+    # 获取负面清单规则（使用 managed_query 确保连接管理）
+    with db._managed_query(db.get_negative_list) as rules:
+        if not rules:
+            return {
+                'success': True,
+                'violations': [],
+                'count': 0,
+                'summary': {'high': 0, 'medium': 0, 'low': 0},
+                'message': 'No negative list rules found in database'
+            }
 
-    if not rules:
+        # 执行检查
+        violations = []
+        for idx, clause in enumerate(clauses):
+            # 支持字符串或字典格式
+            if isinstance(clause, str):
+                clause_text = clause
+                clause_reference = f"条款{idx+1}"
+            elif isinstance(clause, dict):
+                clause_text = clause.get('text', '')
+                clause_reference = clause.get('reference', f"条款{idx+1}")
+            else:
+                continue
+
+            for rule in rules:
+                if match_rule(clause_text, rule):
+                    violations.append({
+                        'clause_index': idx,
+                        'clause_text': clause_text,  # 存储完整文本
+                        'clause_text_preview': clause_text[:100] + '...' if len(clause_text) > 100 else clause_text,  # 用于显示的预览
+                        'clause_reference': clause_reference,
+                        'rule': rule['rule_number'],
+                        'description': rule['description'],
+                        'severity': _normalize_severity(rule['severity']),
+                        'category': rule.get('category', ''),
+                        'remediation': rule.get('remediation', '')
+                    })
+
         return {
             'success': True,
-            'violations': [],
-            'count': 0,
-            'summary': {'high': 0, 'medium': 0, 'low': 0},
-            'message': 'No negative list rules found in database'
+            'violations': violations,
+            'count': len(violations),
+            'summary': group_by_severity(violations)
         }
-
-    # 执行检查
-    violations = []
-    for idx, clause in enumerate(clauses):
-        # 支持字符串或字典格式
-        if isinstance(clause, str):
-            clause_text = clause
-            clause_reference = f"条款{idx+1}"
-        elif isinstance(clause, dict):
-            clause_text = clause.get('text', '')
-            clause_reference = clause.get('reference', f"条款{idx+1}")
-        else:
-            continue
-
-        for rule in rules:
-            if match_rule(clause_text, rule):
-                violations.append({
-                    'clause_index': idx,
-                    'clause_text': clause_text,  # 存储完整文本
-                    'clause_text_preview': clause_text[:100] + '...' if len(clause_text) > 100 else clause_text,  # 用于显示的预览
-                    'clause_reference': clause_reference,
-                    'rule': rule['rule_number'],
-                    'description': rule['description'],
-                    'severity': _normalize_severity(rule['severity']),
-                    'category': rule.get('category', ''),
-                    'remediation': rule.get('remediation', '')
-                })
-
-    return {
-        'success': True,
-        'violations': violations,
-        'count': len(violations),
-        'summary': group_by_severity(violations)
-    }
 
 
 def match_rule(clause, rule):
