@@ -8,20 +8,29 @@ import json
 import argparse
 import sys
 import subprocess
-import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, TypedDict, Callable, Optional
-from dataclasses import replace
 
 # 添加 lib 目录到路径
 sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
-from lib.database import get_connection as db_get_connection
-from lib.evaluation import calculate_evaluation
-from lib.audit_data import AuditData, EvaluationResult
-from lib.common.models import Product, ProductCategory
-from lib.common.product_type import get_category, from_code
+from lib.evaluation import calculate_result
+from lib.common.audit import (
+    PreprocessedResult,
+    CheckedResult,
+    AnalyzedResult,
+    EvaluationResult,
+    get_violations,
+    get_product,
+    get_clauses,
+    get_pricing_analysis,
+    get_audit_id,
+    get_document_url,
+    get_timestamp,
+    get_preprocess_id
+)
+from lib.common.models import Product as ProductModel
 from lib.config import get_config
 from lib.id_generator import IDGenerator
 from lib.exceptions import (
@@ -37,6 +46,41 @@ from lib.logger import get_audit_logger
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+# ========== 产品类型映射 ==========
+
+def _map_product_category_to_scoring_type(category_value: str) -> str:
+    """
+    将 ProductCategory 枚举值映射到 scoring 模块的基准类型
+
+    Args:
+        category_value: ProductCategory.value (如 'critical_illness', 'life_insurance' 等)
+
+    Returns:
+        str: scoring 模块期望的类型 ('life', 'health', 'accident', 'default')
+    """
+    from lib.common.models import ProductCategory
+
+    # 映射规则：将具体的保险产品类型归类到 scoring 的三大类
+    mapping = {
+        # 寿险类 → life
+        ProductCategory.LIFE_INSURANCE: 'life',
+        ProductCategory.PARTICIPATING_LIFE: 'life',
+        ProductCategory.UNIVERSAL_LIFE: 'life',
+        ProductCategory.ANNUITY: 'life',
+        ProductCategory.PENSION: 'life',
+
+        # 健康险类 → health
+        ProductCategory.CRITICAL_ILLNESS: 'health',
+        ProductCategory.MEDICAL_INSURANCE: 'health',
+        ProductCategory.HEALTH: 'health',
+
+        # 意外险类 → accident
+        ProductCategory.ACCIDENT: 'accident',
+    }
+
+    return mapping.get(category_value, 'default')
 
 
 # ========== 类型定义 ==========
@@ -73,19 +117,6 @@ class PricingAnalysisResult(TypedDict, total=False):
     """定价分析结果类型"""
     success: bool
     pricing: Dict[str, Any]
-    error: str
-    error_type: str
-
-
-class ReportResult(TypedDict, total=False):
-    """报告生成结果类型"""
-    success: bool
-    report_id: str
-    score: int
-    grade: str
-    summary: Dict[str, Any]
-    content: str
-    blocks: List[Dict[str, Any]]
     error: str
     error_type: str
 
@@ -166,71 +197,76 @@ def _run_audit_step(
     return result
 
 
-def _validate_report_completeness(evaluation: EvaluationResult) -> tuple[bool, List[str]]:
+def _validate_report_completeness(
+    result: EvaluationResult
+) -> tuple[bool, List[str]]:
     """
     验证报告完整性
 
     Args:
-        evaluation: 评估结果 (EvaluationResult)
+        result: 评估结果
 
     Returns:
         tuple: (是否通过验证, 缺失字段列表)
     """
     missing_fields = []
+    product = get_product(result)
+    clauses = get_clauses(result)
+    violations = get_violations(result)
 
     # 1. 验证产品信息完整性
-    if not evaluation.product.name:
+    if not product.name:
         missing_fields.append('product.name')
 
-    # 2. 验证条款数据 - 这是用户特别关心的
-    if not evaluation.clauses or len(evaluation.clauses) == 0:
+    # 2. 验证条款数据
+    if not clauses or len(clauses) == 0:
         missing_fields.append('clauses')
     else:
         # 验证条款内容是否为空
-        empty_clauses = [i for i, clause in enumerate(evaluation.clauses)
+        empty_clauses = [i for i, clause in enumerate(clauses)
                         if not clause.get('text') or not clause.get('text').strip()]
         if empty_clauses:
             missing_fields.append(f'clauses[{empty_clauses[0]}].text (empty)')
 
     # 3. 验证违规数据
-    if not evaluation.violations:
+    if not violations:
         missing_fields.append('violations')
-
-    # 4. 验证评分
-    if evaluation.score is None:
-        missing_fields.append('score')
 
     is_valid = len(missing_fields) == 0
 
     if not is_valid:
-        print(f"[{evaluation.product.name}] ⚠️ Report validation failed, missing fields: {missing_fields}", file=sys.stderr)
+        print(f"[{product.name}] ⚠️ Report validation failed, missing fields: {missing_fields}", file=sys.stderr)
 
     return is_valid, missing_fields
 
 
-def _export_report(evaluation: EvaluationResult) -> Optional[Dict[str, Any]]:
+def _export_report(result: EvaluationResult) -> Optional[Dict[str, Any]]:
     """
     导出报告 - 生成Word文档并推送到飞书
 
     先验证报告完整性，再决定是否推送到飞书
 
     Args:
-        evaluation: 评估结果 (EvaluationResult)
+        result: 评估结果
 
     Returns:
         导出结果，包含docx_export和feishu_push信息
     """
     config = get_config()
+    product = get_product(result)
+    violations = get_violations(result)
+    clauses = get_clauses(result)
+    pricing_analysis = get_pricing_analysis(result)
 
     # 检查是否启用报告导出
     if not config.report.export_feishu:
-        print(f"[{evaluation.product.name}] Step 6: Report export skipped (not configured)", file=sys.stderr)
+        print(f"[{product.name}] Step 6: Report export skipped (not configured)", file=sys.stderr)
         return None
 
     # 验证报告完整性
-    is_valid, missing_fields = _validate_report_completeness(evaluation)
+    is_valid, missing_fields = _validate_report_completeness(result)
     if not is_valid:
-        print(f"[{evaluation.product.name}] Step 6: Report export skipped (validation failed: {missing_fields})", file=sys.stderr)
+        print(f"[{product.name}] Step 6: Report export skipped (validation failed: {missing_fields})", file=sys.stderr)
         return {
             'success': False,
             'error': f'Report validation failed, missing fields: {missing_fields}',
@@ -241,7 +277,7 @@ def _export_report(evaluation: EvaluationResult) -> Optional[Dict[str, Any]]:
             }
         }
 
-    print(f"[{evaluation.product.name}] Step 6: Generating Word report and pushing to Feishu...", file=sys.stderr)
+    print(f"[{product.name}] Step 6: Generating Word report and pushing to Feishu...", file=sys.stderr)
 
     try:
         # 导入新的Word导出模块
@@ -252,25 +288,14 @@ def _export_report(evaluation: EvaluationResult) -> Optional[Dict[str, Any]]:
             auto_push=True
         )
 
-        # 将 EvaluationResult 转换为 DocxExporter 期望的格式
+        # 将数据转换为 DocxExporter 期望的格式
         from lib.reporting.model import EvaluationContext
-        context = EvaluationContext(
-            violations=evaluation.violations,
-            pricing_analysis=evaluation.pricing_analysis,
-            product=evaluation.product,
-            score=evaluation.score,
-            grade=evaluation.grade,
-            summary=evaluation.summary,
-            high_violations=evaluation.high_violations,
-            medium_violations=evaluation.medium_violations,
-            low_violations=evaluation.low_violations,
-            clauses=evaluation.clauses
-        )
+        context = EvaluationContext.from_evaluation_result(result)
 
         export_result = exporter.export(context)
 
         # 构建返回结果
-        result = {
+        export_dict = {
             'success': export_result.get('success', False),
             'docx_export': {
                 'success': export_result.get('success', False),
@@ -287,26 +312,26 @@ def _export_report(evaluation: EvaluationResult) -> Optional[Dict[str, Any]]:
         # 添加推送结果
         push_result = export_result.get('push_result')
         if push_result:
-            result['feishu_push'] = {
+            export_dict['feishu_push'] = {
                 'success': push_result.get('success', False),
                 'message_id': push_result.get('message_id'),
                 'group_id': push_result.get('group_id')
             }
 
         if export_result.get('success'):
-            print(f"[{evaluation.product.name}] ✅ Word report generated: {export_result.get('title')}", file=sys.stderr)
+            print(f"[{product.name}] ✅ Word report generated: {export_result.get('title')}", file=sys.stderr)
             if push_result and push_result.get('success'):
-                print(f"[{evaluation.product.name}] ✅ Pushed to Feishu: {push_result.get('message_id')}", file=sys.stderr)
+                print(f"[{product.name}] ✅ Pushed to Feishu: {push_result.get('message_id')}", file=sys.stderr)
         else:
             error = export_result.get('error', 'Unknown error')
-            print(f"[{evaluation.product.name}] ⚠️ Export failed: {error}", file=sys.stderr)
-            result['error'] = error
+            print(f"[{product.name}] ⚠️ Export failed: {error}", file=sys.stderr)
+            export_dict['error'] = error
 
-        return result
+        return export_dict
 
     except Exception as e:
         error_msg = str(e)
-        print(f"[{evaluation.product.name}] ⚠️ Report export error: {error_msg}", file=sys.stderr)
+        print(f"[{product.name}] ⚠️ Report export error: {error_msg}", file=sys.stderr)
         return {
             'success': False,
             'error': error_msg,
@@ -433,7 +458,7 @@ def execute(params: Dict[str, Any]) -> AuditApiResponse:
     Returns:
         dict: 包含完整审核结果的字典
     """
-    # 创建审核数据
+    # 创建审核对象
     audit_id = IDGenerator.generate_audit()
     document_url = params.get('documentUrl', '')
 
@@ -448,45 +473,50 @@ def execute(params: Dict[str, Any]) -> AuditApiResponse:
     step_logger = get_audit_logger(audit_id)
 
     try:
-        # Step 1-3: 收集原始数据 (AuditData)
-        data = AuditData.create(audit_id, document_url)
-        data = _preprocess(data, document_content)
-        data = _check_violations(data)
-        data = _analyze_pricing(data)
+        # Step 1: 预处理
+        preprocessed = _preprocess(audit_id, document_url, document_content)
 
-        # Step 4: 计算评估结果 (EvaluationResult)
-        evaluation = _calculate_evaluation(data)
+        # Step 2: 负面清单检查
+        checked = _check_violations(preprocessed)
 
-        # Step 5: 保存审核记录
+        # Step 3: 定价分析
+        analyzed = _analyze_pricing(checked)
+
+        # Step 4: 计算评估结果
+        result = calculate_result(analyzed)
+
+        # Step 5: 导出报告（如果配置启用）
+        export_result = _export_report(result)
+
+        # Step 6: 保存审核记录（在所有处理成功后）
         step_logger.step("保存审核记录")
+        violations = get_violations(result)
         save_audit_record(
             audit_id,
             document_url,
-            data.violations,
-            evaluation.score
+            violations,
+            result.score
         )
 
-        # Step 6: 导出报告（如果配置启用）
-        export_result = _export_report(evaluation)
-
         print(f"[{audit_id}] Audit completed successfully!", file=sys.stderr)
-        return _build_result(evaluation, export_result)
+        return _build_result(result, export_result)
 
     except Exception as e:
         print(f"[{audit_id}] Audit failed: {str(e)}", file=sys.stderr)
         raise
 
 
-def _preprocess(data: AuditData, document_content: str) -> AuditData:
+def _preprocess(audit_id: str, document_url: str, document_content: str) -> PreprocessedResult:
     """
     执行文档预处理步骤
 
     Args:
-        data: 审核数据
+        audit_id: 审核ID
+        document_url: 文档URL
         document_content: 文档内容
 
     Returns:
-        AuditData: 更新后的审核数据
+        PreprocessedResult: 预处理结果
 
     Raises:
         DocumentPreprocessException: 预处理失败
@@ -495,151 +525,147 @@ def _preprocess(data: AuditData, document_content: str) -> AuditData:
         "预处理文档",
         run_preprocess,
         document_content,
-        data.document_url,
-        audit_id=data.audit_id,
-        document_url=data.document_url
+        document_url,
+        audit_id=audit_id,
+        document_url=document_url
     )
 
-    # 从预处理结果构建 Product 对象
+    # 从预处理结果构建 Product 对象（使用工厂函数）
     product_info = result.get('product_info', {})
-    product_type_str = product_info.get('product_type', '')
+    product_info['document_url'] = document_url  # 添加 document_url
 
-    # 解析产品类别
-    category = get_category(product_type_str)
-    if category == ProductCategory.OTHER and product_type_str:
-        category = from_code(product_type_str)
+    product = ProductModel.from_dict(product_info)
 
-    product = Product(
-        name=product_info.get('product_name', ''),
-        company=product_info.get('insurance_company', ''),
-        category=category,
-        period=product_info.get('insurance_period', ''),
-        waiting_period=None,
-        age_min=None,
-        age_max=None,
-        document_url=data.document_url,
-        version=product_info.get('version', '')
-    )
-
-    # 返回新的 AuditData (使用 dataclass.replace 创建新对象)
-    return replace(
-        data,
+    # 返回 PreprocessedResult
+    return PreprocessedResult(
+        audit_id=audit_id,
+        document_url=document_url,
+        timestamp=datetime.now(),
         product=product,
         clauses=result.get('clauses', []),
         pricing_params=result.get('pricing_params', {})
     )
 
 
-def _check_violations(data: AuditData) -> AuditData:
+def _check_violations(preprocessed: PreprocessedResult) -> CheckedResult:
     """
     执行负面清单检查步骤
 
     Args:
-        data: 审核数据
+        preprocessed: 预处理结果
 
     Returns:
-        AuditData: 更新后的审核数据
+        CheckedResult: 检查结果
 
     Raises:
         NegativeListCheckException: 检查失败
     """
+    # 验证条款不为空
+    if not preprocessed.clauses:
+        raise NegativeListCheckException("没有可审核的条款：预处理未提取到任何条款内容")
+
     result = _run_audit_step(
         "负面清单检查",
         run_negative_list_check,
-        data.clauses,
-        audit_id=data.audit_id
+        preprocessed.clauses,
+        audit_id=preprocessed.audit_id
     )
 
-    # 返回新的 AuditData
-    return replace(data, violations=result.get('violations', []))
+    # 返回 CheckedResult
+    return CheckedResult(
+        preprocessed=preprocessed,
+        violations=result.get('violations', [])
+    )
 
 
-def _analyze_pricing(data: AuditData) -> AuditData:
+def _analyze_pricing(checked: CheckedResult) -> AnalyzedResult:
     """
     执行定价分析步骤
 
     Args:
-        data: 审核数据
+        checked: 检查结果
 
     Returns:
-        AuditData: 更新后的审核数据
+        AnalyzedResult: 分析结果
 
     Raises:
         PricingAnalysisException: 分析失败
     """
-    product_type = data.product.category.value  # 使用 Product.category 的枚举值
+    # 将 ProductCategory 映射到 scoring 模块期望的类型
+    category_value = checked.preprocessed.product.category.value
+    scoring_type = _map_product_category_to_scoring_type(category_value)
+
     result = _run_audit_step(
         "定价分析",
         run_pricing_analysis,
-        data.pricing_params,
-        product_type,
-        audit_id=data.audit_id
+        checked.preprocessed.pricing_params,
+        scoring_type,
+        audit_id=checked.preprocessed.audit_id
     )
 
-    # 返回新的 AuditData
-    return replace(data, pricing_analysis=result)
-
-
-def _calculate_evaluation(data: AuditData) -> EvaluationResult:
-    """
-    计算评估结果
-
-    Args:
-        data: 审核数据
-
-    Returns:
-        EvaluationResult: 评估结果
-    """
-    return calculate_evaluation(data)
+    # 返回 AnalyzedResult（只提取 pricing 字段）
+    return AnalyzedResult(
+        checked=checked,
+        pricing_analysis=result.get('pricing', {})
+    )
 
 
 def _build_result(
-    evaluation: EvaluationResult,
+    result: EvaluationResult,
     export_result: Optional[Dict[str, Any]]
 ) -> AuditApiResponse:
     """
     构建最终审核结果
 
-    重构版本：仅从 EvaluationResult 获取数据，实现真正的单向数据流。
-
-    数据流：AuditData → EvaluationResult → AuditApiResponse (API响应)
-                           ↓
-                    Export (报告生成)
+    数据流：EvaluationResult → AuditApiResponse (API响应)
+                                  ↓
+                          Export (报告生成)
 
     Args:
-        evaluation: 评估结果（包含所有导出数据）
+        result: 评估结果
         export_result: 导出结果
 
     Returns:
         AuditApiResponse: 审核结果（API响应格式）
     """
+    violations = get_violations(result)
+    product = get_product(result)
+    clauses = get_clauses(result)
+    pricing_analysis = get_pricing_analysis(result)
+    audit_id = get_audit_id(result)
+    document_url = get_document_url(result)
+    timestamp = get_timestamp(result)
+    preprocess_id = get_preprocess_id(result)
+
+    total_violations = len(violations)
+
     return {
         'success': True,
-        'audit_id': evaluation.audit_id,
-        'violations': evaluation.violations,
-        'violation_count': evaluation.total_violations,
+        'audit_id': audit_id,
+        'violations': violations,
+        'violation_count': total_violations,
         'violation_summary': {
-            'high': len(evaluation.high_violations),
-            'medium': len(evaluation.medium_violations),
-            'low': len(evaluation.low_violations)
+            'high': sum(1 for v in violations if v.get('severity') == 'high'),
+            'medium': sum(1 for v in violations if v.get('severity') == 'medium'),
+            'low': sum(1 for v in violations if v.get('severity') == 'low'),
         },
-        'pricing': evaluation.pricing_analysis,
-        'score': evaluation.score,
-        'grade': evaluation.grade,
-        'summary': evaluation.summary,
+        'pricing': pricing_analysis,
+        'score': result.score,
+        'grade': result.grade,
+        'summary': result.summary,
         'report': '',
         'metadata': {
             'audit_type': 'full',
-            'document_url': evaluation.document_url,
-            'timestamp': evaluation.timestamp.isoformat(),
+            'document_url': document_url,
+            'timestamp': timestamp.isoformat(),
         },
         'details': {
-            'preprocess_id': evaluation.preprocess_id,
-            'product_name': evaluation.product.name,
-            'product_type': evaluation.product.type,
-            'insurance_company': evaluation.product.company,
-            'clauses': evaluation.clauses,
-            'document_url': evaluation.document_url
+            'preprocess_id': preprocess_id,
+            'product_name': product.name,
+            'product_type': product.type,
+            'insurance_company': product.company,
+            'clauses': clauses,
+            'document_url': document_url
         },
         'report_export': export_result or {}
     }
@@ -656,8 +682,6 @@ def run_preprocess(document_content: str, document_url: str) -> PreprocessResult
     Returns:
         dict: 预处理结果
     """
-    # 直接导入和调用 preprocess.execute()，避免 subprocess 问题
-    # 这样可以确保配置正确加载，并且避免超时问题
     import preprocess
 
     input_params = {
@@ -665,7 +689,14 @@ def run_preprocess(document_content: str, document_url: str) -> PreprocessResult
         'documentUrl': document_url
     }
 
-    return preprocess.execute(input_params)
+    try:
+        return preprocess.execute(input_params)
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'error_type': type(e).__name__
+        }
 
 
 def run_negative_list_check(clauses: List[Dict[str, Any]]) -> CheckResult:
@@ -724,98 +755,6 @@ def run_pricing_analysis(pricing_params: Dict[str, Any], product_type: str) -> P
         }
 
 
-def run_report_generation(
-    violations: List[Dict[str, Any]],
-    pricing_analysis: PricingAnalysisResult,
-    product_info: Dict[str, Any]
-) -> ReportResult:
-    """
-    生成审核报告
-
-    Args:
-        violations: 违规记录列表
-        pricing_analysis: 定价分析结果
-        product_info: 产品信息
-
-    Returns:
-        dict: 报告结果
-    """
-    # 导入report模块直接调用
-    import report
-
-    input_params = {
-        'violations': violations,
-        'pricing_analysis': pricing_analysis,
-        'product_info': product_info
-    }
-
-    try:
-        return report.execute(input_params)
-    except Exception as e:
-        return {
-            'success': False,
-            'error': str(e),
-            'error_type': type(e).__name__
-        }
-
-
-def export_report(
-    report_content: str,
-    product_info: Dict[str, Any],
-    report_blocks: List[Dict[str, Any]] = None,
-    export_format: str = None
-) -> Dict[str, Any]:
-    """
-    导出审核报告到目标平台
-
-    基于配置自动选择导出方式：
-    - 默认：导出到飞书在线文档
-    - 可扩展：支持其他导出格式（PDF、本地文件等）
-
-    Args:
-        report_content: 报告内容（Markdown 格式，备用）
-        product_info: 产品信息
-        report_blocks: 报告块列表（推荐格式）
-        export_format: 导出格式（None 表示使用配置默认值）
-
-    Returns:
-        dict: 导出结果，包含 success 和 document_url 或 error
-    """
-    # 导入 report 模块使用其导出功能
-    import report
-
-    # 构建文档标题（产品名-审核报告）
-    product_name = product_info.get('product_name', '未知产品')
-    title = f"{product_name} - 审核报告"
-
-    try:
-        # 如果有 blocks，使用 blocks；否则使用简单转换
-        if report_blocks:
-            return report.export_to_feishu(
-                report_blocks,
-                title=title
-            )
-        else:
-            # 备用方案：将 Markdown 内容转换为简单块
-            import re
-            blocks = []
-            for line in report_content.split('\n'):
-                if line.strip():
-                    blocks.append(report.create_text(line))
-                else:
-                    blocks.append(report.create_text(""))
-            return report.export_to_feishu(
-                blocks,
-                title=title
-            )
-    except Exception as e:
-        return {
-            'success': False,
-            'error': str(e),
-            'error_type': type(e).__name__
-        }
-
-
 def save_audit_record(
     audit_id: str,
     document_url: str,
@@ -834,49 +773,15 @@ def save_audit_record(
     Returns:
         bool: 是否保存成功
     """
-    try:
-        record = {
-            'id': audit_id,
-            'document_url': document_url,
-            'violations': violations,
-            'score': score
-        }
-        # 直接保存，不再通过db模块
-        import sqlite3
-        import json
-        from pathlib import Path
+    from lib.database import save_audit_record as db_save
 
-        DB_PATH = Path(__file__).parent.parent / 'data' / 'actuary.db'
-
-        try:
-            conn = sqlite3.connect(
-                str(DB_PATH),
-                timeout=30,
-                check_same_thread=False
-            )
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA busy_timeout=30000")
-
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO audit_history (id, user_id, document_url, violations, score)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (
-                record['id'],
-                record.get('user_id', ''),
-                record.get('document_url', ''),
-                json.dumps(record.get('violations', []), ensure_ascii=False),
-                record.get('score', 0)
-            ))
-            conn.commit()
-            conn.close()
-            return True
-        except Exception as e:
-            print(f"Warning: Failed to save audit record: {e}", file=sys.stderr)
-            return False
-    except Exception as e:
-        print(f"Warning: Failed to save audit record: {e}", file=sys.stderr)
-        return False
+    record = {
+        'id': audit_id,
+        'document_url': document_url,
+        'violations': violations,
+        'score': score
+    }
+    return db_save(record)
 
 
 if __name__ == '__main__':

@@ -11,17 +11,31 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).parent.parent.parent / 'data' / 'actuary.db'
+# 数据库路径 - 从配置读取
+def get_db_path() -> Path:
+    """获取数据库路径"""
+    from lib.config import get_config
+    config = get_config()
+    rel_path = config.data_paths.sqlite_db  # 从配置读取相对路径
+
+    # 如果是相对路径，相对于脚本目录解析
+    if not Path(rel_path).is_absolute():
+        script_dir = Path(__file__).parent.parent
+        return script_dir / rel_path
+    return Path(rel_path)
 
 # 并发优化配置
 DB_TIMEOUT = 30  # 30秒超时
 DB_WAL_MODE = True  # 启用WAL模式
 
 
-def _create_connection():
+def _create_connection(db_path: Path = None):
     """创建数据库连接"""
+    if db_path is None:
+        db_path = get_db_path()
+
     conn = sqlite3.connect(
-        DB_PATH,
+        str(db_path),
         timeout=DB_TIMEOUT,
         check_same_thread=False  # 允许多线程使用
     )
@@ -44,7 +58,8 @@ def get_connection():
     """
     获取数据库连接（支持 with 语句，自动关闭连接）
     """
-    conn = _create_connection()
+    db_path = get_db_path()
+    conn = _create_connection(db_path)
     try:
         yield conn
         conn.commit()

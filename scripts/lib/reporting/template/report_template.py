@@ -21,7 +21,7 @@ from lib.config import get_config, Config
 from lib.id_generator import IDGenerator
 from lib.reporting.strategies import RemediationStrategies
 from lib.reporting.model import EvaluationContext
-from lib.reporting.model import Product
+from lib.common.models import Product
 
 
 class ReportGenerationTemplate:
@@ -79,34 +79,22 @@ class ReportGenerationTemplate:
 
     def generate(
         self,
-        audit_result: 'AuditResult',
-        product_info: Dict[str, Any],
-        pricing_analysis: Dict[str, Any] = None,
-        clauses: List[Dict[str, Any]] = None
+        context: EvaluationContext,
+        title: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         模板方法：按固定流程生成报告
 
-        统一接口：接受 AuditResult 作为输入
-
         Args:
-            audit_result: 审核结果（来自 audit 模块）
-            product_info: 产品信息
-            pricing_analysis: 定价分析结果（可选）
-            clauses: 条款内容（可选）
+            context: 评估上下文对象
+            title: 报告标题（可选）
 
         Returns:
             dict: 包含 report_id, score, grade, summary, content, blocks
         """
-        # 步骤1: 构建评估上下文
-        product = Product.from_dict(product_info)
-
-        context = EvaluationContext(
-            audit_result=audit_result,
-            product=product,
-            pricing_analysis=pricing_analysis or {},
-            clauses=clauses or []
-        )
+        # 验证输入
+        if not isinstance(context, EvaluationContext):
+            raise TypeError(f"context must be EvaluationContext, got {type(context)}")
 
         # 生成报告ID
         self.report_id = IDGenerator.generate_report()
@@ -132,16 +120,21 @@ class ReportGenerationTemplate:
 
     def _calculate_grade(self, context: EvaluationContext) -> None:
         """
-        确定评级（基于 audit 的 overall_assessment）
+        确定评级（根据 score 计算）
 
         Args:
             context: 评估上下文，结果存储到 context.grade
         """
-        # 使用 audit 的 overall_assessment
-        assessment = context.overall_assessment
-
-        # 映射到 grade
-        context.grade = self.ASSESSMENT_TO_GRADE.get(assessment, self.GRADE_DEFAULT)
+        if context.score is not None:
+            # 根据 score 计算评级
+            for threshold, grade in self.GRADE_THRESHOLDS:
+                if context.score >= threshold:
+                    context.grade = grade
+                    break
+            else:
+                context.grade = self.GRADE_DEFAULT
+        else:
+            context.grade = self.GRADE_DEFAULT
 
     def _summarize_violations(self, context: EvaluationContext) -> None:
         """
@@ -170,11 +163,8 @@ class ReportGenerationTemplate:
         context.medium_violations = [v for v in context.violations if v.get('severity') == 'medium']
         context.low_violations = [v for v in context.violations if v.get('severity') == 'low']
 
-        # 使用 audit 的 regulations_used 作为审核依据
-        if context.audit_result and context.audit_result.regulations_used:
-            context.regulation_basis = context.audit_result.regulations_used
-        else:
-            # 回退到默认依据
+        # 使用默认审核依据
+        if not context.regulation_basis:
             context.regulation_basis = self._generate_default_regulation_basis()
 
         # 存储摘要
@@ -191,16 +181,15 @@ class ReportGenerationTemplate:
         统计定价问题数量
 
         Args:
-            pricing_analysis: 定价分析结果
+            pricing_analysis: 定价分析结果（已包含 {mortality, interest, expense} 键）
 
         Returns:
             int: 定价问题数量
         """
         pricing_issues = 0
-        pricing = pricing_analysis.get('pricing', {})
-        if isinstance(pricing, dict):
+        if isinstance(pricing_analysis, dict):
             for category in ['mortality', 'interest', 'expense']:
-                analysis = pricing.get(category, {})
+                analysis = pricing_analysis.get(category, {})
                 if isinstance(analysis, dict) and analysis.get('reasonable') is False:
                     pricing_issues += 1
         return pricing_issues
@@ -271,25 +260,51 @@ class ReportGenerationTemplate:
 
     def _generate_metadata(self, context: EvaluationContext) -> Dict[str, Any]:
         """生成元数据"""
+        # 获取 overall_assessment（从 audit_result 或计算）
+        audit_result = getattr(context, 'audit_result', None)
+        if audit_result and hasattr(audit_result, 'overall_assessment'):
+            overall_assessment = audit_result.overall_assessment
+        else:
+            # 根据 grade 推断 overall_assessment
+            grade_to_assessment = {
+                '优秀': 'pass',
+                '良好': 'pass',
+                '合格': 'pass',
+                '不合格': 'fail'
+            }
+            overall_assessment = grade_to_assessment.get(context.grade or 'unknown', 'unknown')
+
         return {
             'product_name': context.product.name,
             'insurance_company': context.product.company,
             'product_type': context.product.type,
             'timestamp': datetime.now().isoformat(),
-            'overall_assessment': context.overall_assessment,
+            'overall_assessment': overall_assessment,
         }
 
     # ========== 文本内容生成辅助方法 ==========
 
     def _generate_conclusion_section(self, context: EvaluationContext) -> List[str]:
-        """生成审核结论章节（使用 audit 的 overall_assessment）"""
+        """生成审核结论章节"""
         lines = []
 
         lines.append("一、审核结论")
 
-        # 使用 audit 的 overall_assessment 和 assessment_reason
-        opinion = context.overall_assessment
-        explanation = context.assessment_reason or self._get_default_explanation(context)
+        # 获取 overall_assessment（从 audit_result 或计算）
+        audit_result = getattr(context, 'audit_result', None)
+        if audit_result and hasattr(audit_result, 'overall_assessment'):
+            opinion = audit_result.overall_assessment
+            explanation = getattr(audit_result, 'assessment_reason', None) or self._get_default_explanation(context)
+        else:
+            # 根据 grade 生成审核意见
+            grade_to_opinion = {
+                '优秀': '通过',
+                '良好': '通过',
+                '合格': '通过',
+                '不合格': '不通过'
+            }
+            opinion = grade_to_opinion.get(context.grade or 'unknown', '待定')
+            explanation = self._get_default_explanation(context)
 
         lines.append(f"**审核意见**:{opinion}")
         lines.append(f"**说明**:{explanation}")
@@ -374,7 +389,8 @@ class ReportGenerationTemplate:
             lines.append("|:----:|:---------|:---------|:---------|")
             for i, v in enumerate(context.high_violations[:self.HIGH_VIOLATIONS_LIMIT], 1):
                 clause_ref = v.get('clause_reference', '')
-                clause_text = v.get('clause_text', '')[:80]
+                # 优先使用预览字段，如果没有则回退到完整文本并截断
+                clause_text = v.get('clause_text_preview', v.get('clause_text', '')[:80])
                 description = v.get('description', '未知')
                 # 使用 audit 的 regulation_citation
                 regulation = v.get('regulation_citation', self._get_regulation_basis(v.get('category', '')))
@@ -393,7 +409,8 @@ class ReportGenerationTemplate:
             lines.append("|:----:|:---------|:---------|:---------|")
             for i, v in enumerate(context.medium_violations[:self.MEDIUM_VIOLATIONS_LIMIT], 1):
                 clause_ref = v.get('clause_reference', '')
-                clause_text = v.get('clause_text', '')[:80]
+                # 优先使用预览字段，如果没有则回退到完整文本并截断
+                clause_text = v.get('clause_text_preview', v.get('clause_text', '')[:80])
                 description = v.get('description', '未知')
                 regulation = v.get('regulation_citation', self._get_regulation_basis(v.get('category', '')))
                 # 合并条款引用和原文
@@ -404,13 +421,18 @@ class ReportGenerationTemplate:
                 lines.append(f"| {i} | {full_clause}... | {description} | {regulation} |")
 
         # 定价问题
-        pricing = context.pricing_analysis.get('pricing', {})
+        pricing = context.pricing_analysis  # 已经是 {mortality, interest, expense} 格式
         if isinstance(pricing, dict):
             pricing_issues = []
-            for category in ['interest', 'expense']:
+            for category in ['mortality', 'interest', 'expense']:
                 analysis = pricing.get(category)
                 if analysis and not analysis.get('reasonable', True):
-                    pricing_issues.append(f"{'预定利率' if category == 'interest' else '费用率'}:{analysis.get('note', '不符合监管要求')}")
+                    category_name = {
+                        'mortality': '死亡率/发生率',
+                        'interest': '预定利率',
+                        'expense': '费用率'
+                    }.get(category, category)
+                    pricing_issues.append(f"{category_name}:{analysis.get('note', '不符合监管要求')}")
 
             if pricing_issues:
                 lines.append("")
@@ -418,7 +440,10 @@ class ReportGenerationTemplate:
                 lines.append("| 序号 | 问题类型 | 问题描述 |")
                 lines.append("|:----:|:---------|:---------|")
                 for i, issue in enumerate(pricing_issues, 1):
-                    lines.append(f"| {i} | {'预定利率' if '预定利率' in issue else '费用率'} | {issue.split(':')[1] if ':' in issue else issue} |")
+                    parts = issue.split(':', 1)
+                    issue_type = parts[0] if parts else '未知'
+                    issue_desc = parts[1] if len(parts) > 1 else issue
+                    lines.append(f"| {i} | {issue_type} | {issue_desc} |")
 
         return lines
 
@@ -457,9 +482,21 @@ class ReportGenerationTemplate:
 
         blocks.append(self._create_heading_2("一、审核结论"))
 
-        # 使用 audit 的 overall_assessment
-        opinion = context.overall_assessment
-        explanation = context.assessment_reason or self._get_default_explanation(context)
+        # 获取 overall_assessment（从 audit_result 或计算）
+        audit_result = getattr(context, 'audit_result', None)
+        if audit_result and hasattr(audit_result, 'overall_assessment'):
+            opinion = audit_result.overall_assessment
+            explanation = getattr(audit_result, 'assessment_reason', None) or self._get_default_explanation(context)
+        else:
+            # 根据 grade 生成审核意见
+            grade_to_opinion = {
+                '优秀': '通过',
+                '良好': '通过',
+                '合格': '通过',
+                '不合格': '不通过'
+            }
+            opinion = grade_to_opinion.get(context.grade or 'unknown', '待定')
+            explanation = self._get_default_explanation(context)
 
         blocks.append(self._create_bold_text(f"审核意见:{opinion}"))
         blocks.append(self._create_text(f"说明:{explanation}"))
@@ -552,7 +589,8 @@ class ReportGenerationTemplate:
             medium_violation_data = [["序号", "条款内容", "问题说明", "法规依据"]]
             for i, v in enumerate(context.medium_violations[:self.MEDIUM_VIOLATIONS_LIMIT], 1):
                 clause_ref = v.get('clause_reference', '')
-                clause_text = v.get('clause_text', '')[:80]
+                # 优先使用预览字段，如果没有则回退到完整文本并截断
+                clause_text = v.get('clause_text_preview', v.get('clause_text', '')[:80])
                 description = v.get('description', '未知')
                 regulation = v.get('regulation_citation', self._get_regulation_basis(v.get('category', '')))
                 # 合并条款引用和原文
@@ -565,13 +603,18 @@ class ReportGenerationTemplate:
             blocks.extend(self._create_table_blocks(medium_violation_data))
 
         # 定价问题
-        pricing = context.pricing_analysis.get('pricing', {})
+        pricing = context.pricing_analysis  # 已经是 {mortality, interest, expense} 格式
         if isinstance(pricing, dict):
             pricing_issues = []
-            for category in ['interest', 'expense']:
+            for category in ['mortality', 'interest', 'expense']:
                 analysis = pricing.get(category)
                 if analysis and not analysis.get('reasonable', True):
-                    pricing_issues.append(f"{'预定利率' if category == 'interest' else '费用率'}:{analysis.get('note', '不符合监管要求')}")
+                    category_name = {
+                        'mortality': '死亡率/发生率',
+                        'interest': '预定利率',
+                        'expense': '费用率'
+                    }.get(category, category)
+                    pricing_issues.append(f"{category_name}:{analysis.get('note', '不符合监管要求')}")
 
             if pricing_issues:
                 blocks.append(self._create_text(""))
@@ -579,7 +622,10 @@ class ReportGenerationTemplate:
 
                 pricing_data = [["序号", "问题类型", "问题描述"]]
                 for i, issue in enumerate(pricing_issues, 1):
-                    pricing_data.append([str(i), '预定利率' if '预定利率' in issue else '费用率', issue.split(':')[1] if ':' in issue else issue])
+                    parts = issue.split(':', 1)
+                    issue_type = parts[0] if parts else '未知'
+                    issue_desc = parts[1] if len(parts) > 1 else issue
+                    pricing_data.append([str(i), issue_type, issue_desc])
 
                 blocks.extend(self._create_table_blocks(pricing_data))
 

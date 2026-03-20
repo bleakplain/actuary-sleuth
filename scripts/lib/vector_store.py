@@ -12,8 +12,18 @@ import json
 import threading
 from numbers import Real
 
-# 数据库路径配置
-DB_URI = str(Path(__file__).parent.parent.parent / 'data' / 'lancedb')
+# 数据库路径配置 - 从配置读取
+def get_db_uri() -> str:
+    """获取 LanceDB 数据库 URI"""
+    from lib.config import get_config
+    config = get_config()
+    rel_path = config.data_paths.lancedb_uri  # 从配置读取相对路径
+
+    # 如果是相对路径，相对于脚本目录解析
+    if not Path(rel_path).is_absolute():
+        script_dir = Path(__file__).parent.parent
+        return str(script_dir / rel_path)
+    return str(Path(rel_path))
 
 
 class VectorDB:
@@ -37,13 +47,14 @@ class VectorDB:
         try:
             with cls._lock:
                 if cls._instance is None:
+                    db_uri = get_db_uri()
                     # 确保数据目录存在
-                    db_path = Path(DB_URI)
+                    db_path = Path(db_uri)
                     db_path.mkdir(parents=True, exist_ok=True)
 
                     # 连接到数据库
-                    cls._instance = lancedb.connect(DB_URI)
-                    print(f"Connected to LanceDB at: {DB_URI}")
+                    cls._instance = lancedb.connect(db_uri)
+                    print(f"Connected to LanceDB at: {db_uri}")
             return cls._instance
         except Exception as e:
             raise Exception(f"Failed to connect to LanceDB: {str(e)}")

@@ -170,6 +170,12 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
 
         return result
 
+    except ImportError as e:
+        # LLM 提取框架不可用，回退到基于规则的提取
+        logger.warning(f"LLM extraction framework not available: {e}, falling back to rule-based extraction")
+        return _execute_with_rule_based_extraction(
+            document_content, document_url, document_type, preprocess_id
+        )
     except Exception as e:
         import traceback
         logger.error(f"提取失败: {e}\n{traceback.format_exc()}")
@@ -326,9 +332,17 @@ def clean_html_tables(text: str) -> str:
     return text.strip()
 
 
-def extract_clauses(content: str) -> List[Dict[str, Any]]:
+def parse_clauses_from_html(content: str) -> List[Dict[str, Any]]:
     """
-    提取条款列表（包含章节信息）
+    从 HTML 表格内容解析条款列表（包含章节信息）
+
+    这是 feishu2md 转换的表格型保险条款文档的回退解析器。
+    优先使用 LLM 提取，只有当 LLM 提取失败时才使用此方法。
+
+    行结构模式（已验证）：
+      - 2-td 行：td[0]=编号(如 **1.1**) 或空, td[1]=条款内容
+      - 3-td 行：td[0]=空, td[1]=子项内容(疾病定义等), td[2]=空
+    合并规则：无编号行和3-td行都追加到当前最近的有编号行
 
     Args:
         content: 文档内容
@@ -338,11 +352,7 @@ def extract_clauses(content: str) -> List[Dict[str, Any]]:
     """
     clauses = []
 
-    # 优先尝试 HTML 表格条款解析（适用于 feishu2md 转换的表格型保险条款文档）
-    # 行结构模式（已验证）：
-    #   - 2-td 行：td[0]=编号(如 **1.1**) 或空, td[1]=条款内容
-    #   - 3-td 行：td[0]=空, td[1]=子项内容(疾病定义等), td[2]=空
-    # 合并规则：无编号行和3-td行都追加到当前最近的有编号行
+    # 优先尝试 HTML 表格条款解析
     table_rows = re.findall(r'<tr>(.*?)</tr>', content, re.DOTALL)
     if table_rows:
         def _strip_html(text):
@@ -695,6 +705,61 @@ def _extract_pricing(extract_result) -> Dict[str, Any]:
         pricing_params['cash_value'] = bool(extract_result.data['cash_value'])
 
     return pricing_params
+
+
+def _execute_with_rule_based_extraction(
+    document_content: str,
+    document_url: str,
+    document_type: str,
+    preprocess_id: str
+) -> Dict[str, Any]:
+    """
+    基于规则的提取（回退方案）
+
+    当 LLM 提取框架不可用时使用纯正则表达式进行提取。
+
+    Args:
+        document_content: 文档内容
+        document_url: 文档URL
+        document_type: 文档类型
+        preprocess_id: 预处理ID
+
+    Returns:
+        dict: 预处理结果
+    """
+    logger.info("使用基于规则的后备提取方法")
+
+    # 使用规则提取函数
+    product_info = extract_product_info(document_content)
+    clauses = parse_clauses_from_html(document_content)
+    pricing_params = extract_pricing_params(document_content)
+    parsed_data = parse_document(document_content)
+
+    # 显示结构化内容供确认
+    display_structured_content(product_info, clauses, pricing_params)
+
+    # 构建结果
+    return {
+        'success': True,
+        'preprocess_id': preprocess_id,
+        'metadata': {
+            'document_url': document_url,
+            'document_type': document_type,
+            'timestamp': datetime.now().isoformat(),
+            'content_length': len(document_content),
+            'extraction_method': 'rule_based_fallback',
+            'extraction_sources': {}
+        },
+        'product_info': product_info,
+        'structure': parsed_data,
+        'clauses': clauses,
+        'pricing_params': pricing_params,
+        'extraction_debug': {
+            'confidence': {},
+            'provenance': {},
+            'low_confidence_fields': []
+        }
+    }
 
 
 if __name__ == '__main__':

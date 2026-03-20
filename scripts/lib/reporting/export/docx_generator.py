@@ -479,7 +479,8 @@ createAuditReport()
             rows = [["序号", "条款内容", "问题说明", "法规依据"]]
             for i, v in enumerate(high_violations[:20], 1):
                 clause_ref = v.get('clause_reference', '')
-                clause_text = v.get('clause_text', '')[:80]
+                # 优先使用预览字段，如果没有则回退到完整文本并截断
+                clause_text = v.get('clause_text_preview', v.get('clause_text', '')[:80])
                 description = v.get('description', '未知')
                 category = v.get('category', '')
                 regulation = self._get_regulation_basis(category)
@@ -504,7 +505,8 @@ createAuditReport()
             rows = [["序号", "条款内容", "问题说明", "法规依据"]]
             for i, v in enumerate(medium_violations[:10], 1):
                 clause_ref = v.get('clause_reference', '')
-                clause_text = v.get('clause_text', '')[:80]
+                # 优先使用预览字段，如果没有则回退到完整文本并截断
+                clause_text = v.get('clause_text_preview', v.get('clause_text', '')[:80])
                 description = v.get('description', '未知')
                 category = v.get('category', '')
                 regulation = self._get_regulation_basis(category)
@@ -521,11 +523,16 @@ createAuditReport()
         # 定价问题汇总表（表2-4）
         pricing_issues = []
         if pricing_analysis:
-            for category in ['interest', 'expense']:
+            for category in ['mortality', 'interest', 'expense']:
                 value = pricing_analysis.get(category)
                 if isinstance(value, dict) and not value.get('reasonable', True):
                     note = value.get('note', '不符合监管要求')
-                    pricing_issues.append(('预定利率' if category == 'interest' else '费用率', note))
+                    category_name = {
+                        'mortality': '死亡率/发生率',
+                        'interest': '预定利率',
+                        'expense': '费用率'
+                    }.get(category, category)
+                    pricing_issues.append((category_name, note))
 
         if pricing_issues:
             sections.append(self._generate_text_paragraph(""))

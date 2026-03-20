@@ -101,16 +101,14 @@ def execute(params):
 
         for rule in rules:
             if match_rule(clause_text, rule):
-                # 截断过长的条款文本用于显示
-                clause_preview = clause_text[:100] + '...' if len(clause_text) > 100 else clause_text
-
                 violations.append({
                     'clause_index': idx,
-                    'clause_text': clause_preview,
-                    'clause_reference': clause_reference,  # 新增：保存条款引用
+                    'clause_text': clause_text,  # 存储完整文本
+                    'clause_text_preview': clause_text[:100] + '...' if len(clause_text) > 100 else clause_text,  # 用于显示的预览
+                    'clause_reference': clause_reference,
                     'rule': rule['rule_number'],
                     'description': rule['description'],
-                    'severity': rule['severity'],
+                    'severity': _normalize_severity(rule['severity']),
                     'category': rule.get('category', ''),
                     'remediation': rule.get('remediation', '')
                 })
@@ -133,6 +131,15 @@ def match_rule(clause, rule):
     Returns:
         bool: 如果匹配则返回True
     """
+    # 验证 severity 字段
+    severity = rule.get('severity', 'low')
+    if severity not in ('high', 'medium', 'low'):
+        # 记录警告但继续处理
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Invalid severity '{severity}' in rule {rule.get('rule_number')}, defaulting to 'low'")
+        severity = 'low'
+
     # 关键词匹配
     keywords = _parse_json_field(rule.get('keywords', '[]'))
     if keywords:
@@ -153,6 +160,44 @@ def match_rule(clause, rule):
                     continue
 
     return False
+
+
+# 有效的严重程度值
+VALID_SEVERITIES = ('high', 'medium', 'low')
+
+
+def _normalize_severity(severity: str) -> str:
+    """规范化严重程度值
+
+    Args:
+        severity: 原始严重程度值
+
+    Returns:
+        str: 规范化后的严重程度值
+    """
+    if not isinstance(severity, str):
+        return 'low'
+
+    normalized = severity.lower().strip()
+    if normalized not in VALID_SEVERITIES:
+        # 尝试映射常见别名
+        aliases = {
+            'high': ['high', '严重', 'critical', 'h', '3'],
+            'medium': ['medium', '中等', 'moderate', 'm', '2'],
+            'low': ['low', '轻微', 'minor', 'l', '1', '']
+        }
+
+        for level, synonyms in aliases.items():
+            if normalized in synonyms:
+                return level
+
+        # 记录警告并返回默认值
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Unknown severity '{severity}', defaulting to 'low'")
+        return 'low'
+
+    return normalized
 
 
 def _parse_json_field(field_value):

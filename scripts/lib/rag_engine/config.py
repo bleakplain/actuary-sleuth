@@ -43,12 +43,27 @@ class RAGConfig:
 
     def __post_init__(self):
         if self.vector_db_path is None:
-            project_root = Path(__file__).parent.parent.parent.parent
-            self.vector_db_path = str(project_root / 'data' / 'lancedb')
+            # 使用统一的配置系统
+            from lib.config import get_config
+            config = get_config()
+            rel_path = config.data_paths.lancedb_uri
+            # 解析相对路径
+            if not Path(rel_path).is_absolute():
+                script_dir = Path(__file__).parent.parent.parent
+                self.vector_db_path = str(script_dir / rel_path)
+            else:
+                self.vector_db_path = str(Path(rel_path))
 
         if not Path(self.regulations_dir).is_absolute():
-            project_root = Path(__file__).parent.parent.parent.parent
-            self.regulations_dir = str(project_root / self.regulations_dir)
+            # 使用统一的配置系统
+            from lib.config import get_config
+            config = get_config()
+            reg_dir = config.regulation_search.data_dir
+            if not Path(reg_dir).is_absolute():
+                script_dir = Path(__file__).parent.parent.parent
+                self.regulations_dir = str(script_dir / reg_dir)
+            else:
+                self.regulations_dir = reg_dir
 
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError(f"chunk_overlap ({self.chunk_overlap}) must be less than chunk_size ({self.chunk_size})")

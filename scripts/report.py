@@ -19,8 +19,8 @@ from typing import Dict, Any
 
 from lib.config import get_config
 from lib.reporting.template import ReportGenerationTemplate
-# FeishuExporter has been replaced by DocxExporter for Word export
-# from lib.reporting.export import FeishuExporter
+from lib.reporting.model import EvaluationContext
+from lib.common.models import Product
 from lib.exceptions import InvalidParameterException
 
 
@@ -110,36 +110,25 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(details, dict):
         details = {}
 
-    score = params.get('score')
+    score = params.get('score', 0)
+
+    # 构建统一的 EvaluationContext
+    product = Product.from_dict(details)
+    context = EvaluationContext(
+        product=product,
+        violations=violations,
+        clauses=violations,  # 使用相同数据
+        pricing_analysis=pricing_analysis,
+        score=score,
+        grade=None,  # 将由模板计算
+        summary=None  # 将由模板计算
+    )
 
     # 使用 ReportGenerationTemplate 生成报告
     generator = ReportGenerationTemplate()
-    result = generator.generate(
-        violations=violations,
-        pricing_analysis=pricing_analysis,
-        product_info=details,
-        score=score
-    )
+    result = generator.generate(context)
 
     return result
-
-
-def export_to_feishu(blocks: list, title: str = None) -> Dict[str, Any]:
-    """
-    将报告导出为飞书在线文档
-
-    Args:
-        blocks: 飞书文档块列表
-        title: 文档标题（可选）
-
-    Returns:
-        dict: 包含文档 URL 的结果
-    """
-    return {
-        'success': False,
-        'error': 'export_to_feishu is not implemented. Use DocxExporter instead.',
-        'error_type': 'NotImplemented'
-    }
 
 
 if __name__ == '__main__':

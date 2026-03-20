@@ -357,7 +357,7 @@ __all__ = [
 
 # ==================== Product 工厂方法 ====================
 
-def create_product_from_dict(cls, product_info: Dict[str, Any]) -> 'Product':
+def create_product_from_dict(product_info: Dict[str, Any]) -> Product:
     """
     从字典创建 Product 对象
 
@@ -378,7 +378,7 @@ def create_product_from_dict(cls, product_info: Dict[str, Any]) -> 'Product':
         # 可能是分类器代码，尝试使用 from_code
         category = from_code(type_str)
 
-    return cls(
+    return Product(
         name=product_info.get('product_name', ''),
         company=product_info.get('insurance_company', ''),
         category=category,
@@ -392,4 +392,4 @@ def create_product_from_dict(cls, product_info: Dict[str, Any]) -> 'Product':
 
 
 # 将工厂方法附加到 Product 类
-Product.from_dict = classmethod(create_product_from_dict)
+Product.from_dict = staticmethod(create_product_from_dict)
