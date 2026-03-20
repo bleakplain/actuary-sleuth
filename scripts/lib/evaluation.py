@@ -9,14 +9,49 @@
 - 所有函数都是纯函数，无副作用
 - 输入输出明确，易于测试
 - 不依赖外部状态
+- 不依赖上层模块（如 reporting），保持单向依赖
 """
 from typing import Dict, List, Any
 
 from lib.audit_data import AuditData, EvaluationResult
-from lib.reporting.model import _InsuranceProduct
+from lib.common.models import Product, ProductCategory
+from lib.reporting.model import ProductInfo
 
 __all__ = ['calculate_evaluation', 'calculate_score', 'calculate_grade',
            'calculate_summary', 'group_violations']
+
+
+def _map_product_type(type_str: str) -> ProductCategory:
+    """
+    将产品类型字符串映射到 ProductCategory 枚举
+
+    Args:
+        type_str: 产品类型字符串
+
+    Returns:
+        ProductCategory: 产品类别枚举值
+    """
+    category_map = {
+        '重大疾病': ProductCategory.CRITICAL_ILLNESS,
+        '重疾': ProductCategory.CRITICAL_ILLNESS,
+        '医疗': ProductCategory.MEDICAL_INSURANCE,
+        '人寿': ProductCategory.LIFE_INSURANCE,
+        '寿险': ProductCategory.LIFE_INSURANCE,
+        '终身': ProductCategory.LIFE_INSURANCE,
+        '分红': ProductCategory.PARTICIPATING_LIFE,
+        '万能': ProductCategory.UNIVERSAL_LIFE,
+        '年金': ProductCategory.ANNUITY,
+        '意外': ProductCategory.ACCIDENT,
+        '伤害': ProductCategory.ACCIDENT,
+        '健康': ProductCategory.HEALTH,
+        '养老': ProductCategory.PENSION,
+    }
+
+    for key, category in category_map.items():
+        if key in type_str:
+            return category
+
+    return ProductCategory.OTHER
 
 
 def calculate_evaluation(data: AuditData) -> EvaluationResult:
@@ -34,13 +69,25 @@ def calculate_evaluation(data: AuditData) -> EvaluationResult:
     Returns:
         EvaluationResult: 评估计算结果（包含所有导出数据）
     """
-    # 构建产品对象
-    product = _InsuranceProduct(
+    # 构建 common.Product（不依赖 reporting 层）
+    product_type_str = data.product_info.get('product_type', '')
+    category = _map_product_type(product_type_str)
+
+    common_product = Product(
         name=data.product_info.get('product_name', '未知产品'),
-        type=data.product_info.get('product_type', ''),
         company=data.product_info.get('insurance_company', ''),
-        version=data.product_info.get('version', ''),
-        document_url=data.product_info.get('document_url', '')
+        category=category,
+        period=data.product_info.get('insurance_period', ''),
+        waiting_period=None,
+        age_min=None,
+        age_max=None
+    )
+
+    # 包装为 ProductInfo（供报告层使用）
+    product = ProductInfo.from_common_product(
+        common_product,
+        document_url=data.document_url,
+        version=data.product_info.get('version', '')
     )
 
     # 分组违规项

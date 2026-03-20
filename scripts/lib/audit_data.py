@@ -101,7 +101,7 @@ class EvaluationResult:
     clauses: List[Dict[str, Any]]
 
     # === 产品信息 ===
-    product: '_InsuranceProduct'
+    product: 'ProductInfo'
     product_info: Dict[str, Any]  # 原始产品信息，用于 details 字段
 
     # === 元数据 ===
@@ -174,5 +174,8 @@ class EvaluationResult:
         return f"PRE-{self.audit_id.split('-')[1]}"
 
 
-# 导入 _InsuranceProduct (避免循环导入)
-from lib.reporting.model import _InsuranceProduct
+# 导入 ProductInfo (避免循环导入)
+# 注意：这里使用 TYPE_CHECKING 避免运行时循环依赖
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from lib.reporting.model import ProductInfo
