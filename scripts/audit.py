@@ -20,6 +20,8 @@ sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 from lib.database import get_connection as db_get_connection
 from lib.evaluation import calculate_evaluation
 from lib.audit_data import AuditData, EvaluationResult
+from lib.common.models import Product, ProductCategory
+from lib.common.product_type import get_category, from_code
 from lib.config import get_config
 from lib.id_generator import IDGenerator
 from lib.exceptions import (
@@ -177,10 +179,8 @@ def _validate_report_completeness(evaluation: EvaluationResult) -> tuple[bool, L
     missing_fields = []
 
     # 1. 验证产品信息完整性
-    required_product_fields = ['product_name']
-    for field in required_product_fields:
-        if not evaluation.product_info.get(field):
-            missing_fields.append(f'product_info.{field}')
+    if not evaluation.product.name:
+        missing_fields.append('product.name')
 
     # 2. 验证条款数据 - 这是用户特别关心的
     if not evaluation.clauses or len(evaluation.clauses) == 0:
@@ -500,10 +500,31 @@ def _preprocess(data: AuditData, document_content: str) -> AuditData:
         document_url=data.document_url
     )
 
+    # 从预处理结果构建 Product 对象
+    product_info = result.get('product_info', {})
+    product_type_str = product_info.get('product_type', '')
+
+    # 解析产品类别
+    category = get_category(product_type_str)
+    if category == ProductCategory.OTHER and product_type_str:
+        category = from_code(product_type_str)
+
+    product = Product(
+        name=product_info.get('product_name', ''),
+        company=product_info.get('insurance_company', ''),
+        category=category,
+        period=product_info.get('insurance_period', ''),
+        waiting_period=None,
+        age_min=None,
+        age_max=None,
+        document_url=data.document_url,
+        version=product_info.get('version', '')
+    )
+
     # 返回新的 AuditData (使用 dataclass.replace 创建新对象)
     return replace(
         data,
-        product_info=result.get('product_info', {}),
+        product=product,
         clauses=result.get('clauses', []),
         pricing_params=result.get('pricing_params', {})
     )
@@ -546,7 +567,7 @@ def _analyze_pricing(data: AuditData) -> AuditData:
     Raises:
         PricingAnalysisException: 分析失败
     """
-    product_type = data.product_info.get('product_type', 'unknown')
+    product_type = data.product.category.value  # 使用 Product.category 的枚举值
     result = _run_audit_step(
         "定价分析",
         run_pricing_analysis,
@@ -611,11 +632,12 @@ def _build_result(
             'audit_type': 'full',
             'document_url': evaluation.document_url,
             'timestamp': evaluation.timestamp.isoformat(),
-            'product_info': evaluation.product_info
         },
         'details': {
             'preprocess_id': evaluation.preprocess_id,
-            'product_info': evaluation.product_info,
+            'product_name': evaluation.product.name,
+            'product_type': evaluation.product.type,
+            'insurance_company': evaluation.product.company,
             'clauses': evaluation.clauses,
             'document_url': evaluation.document_url
         },

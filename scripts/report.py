@@ -52,7 +52,7 @@ def main():
         if export_feishu:
             feishu_result = export_to_feishu(
                 result.get('blocks', []),
-                title=f"审核报告-{params.get('product_info', {}).get('product_name', '未知产品')}"
+                title=f"审核报告-{params.get('details', {}).get('product_name', '未知产品')}"
             )
             result['report_export'] = feishu_result
 
@@ -106,9 +106,9 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(pricing_analysis, dict):
         pricing_analysis = {}
 
-    product_info = params.get('product_info', {})
-    if not isinstance(product_info, dict):
-        product_info = {}
+    details = params.get('details', {})
+    if not isinstance(details, dict):
+        details = {}
 
     score = params.get('score')
 
@@ -117,7 +117,7 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
     result = generator.generate(
         violations=violations,
         pricing_analysis=pricing_analysis,
-        product_info=product_info,
+        product_info=details,
         score=score
     )
 

@@ -240,7 +240,7 @@ async function createAuditReport() {
         ]
 
         # 添加产品基本信息
-        parts.append(self._generate_product_info_section(product_info))
+        parts.append(self._generate_product_section(product_info))
 
         # 添加审核结论章节（使用 audit 的结论）
         parts.append(self._generate_conclusion_section(score, grade, summary, violations, pricing_analysis, overall_assessment, assessment_reason))
@@ -325,7 +325,7 @@ createAuditReport()
                     ]
                 }}),'''
 
-    def _generate_product_info_section(self, product: 'Product') -> str:
+    def _generate_product_section(self, product: 'Product') -> str:
         """生成产品信息部分"""
         sections = []
         sections.append(self._generate_heading_paragraph("产品信息", 2))

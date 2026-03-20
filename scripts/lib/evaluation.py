@@ -15,7 +15,6 @@ from typing import Dict, List, Any, Tuple
 
 from lib.audit_data import AuditData, EvaluationResult
 from lib.common.models import Product, ProductCategory
-from lib.common.product_type import get_category, from_code
 
 __all__ = ['calculate_evaluation', 'calculate_score', 'calculate_grade',
            'calculate_summary', 'group_violations']
@@ -52,24 +51,8 @@ def calculate_evaluation(data: AuditData) -> EvaluationResult:
     Returns:
         EvaluationResult: 评估计算结果（包含所有导出数据）
     """
-    # 构建产品对象
-    product_type_str = data.product_info.get('product_type', '')
-
-    # 尝试从产品类型字符串解析类别
-    # 优先使用中文名称匹配（get_category），如果返回 OTHER 则尝试代码匹配（from_code）
-    category = get_category(product_type_str)
-    if category == ProductCategory.OTHER and product_type_str:
-        # 可能是分类器代码，尝试使用 from_code
-        category = from_code(product_type_str)
-
-    product = Product(
-        name=data.product_info.get('product_name', '未知产品'),
-        company=data.product_info.get('insurance_company', ''),
-        category=category,
-        period=data.product_info.get('insurance_period', ''),
-        document_url=data.document_url,
-        version=data.product_info.get('version', '')
-    )
+    # 直接使用 AuditData 中的 product 对象
+    product = data.product
 
     # 分组违规项
     high_violations, medium_violations, low_violations = group_violations(data.violations)

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
-from lib.common.models import Product
+from lib.common.models import Product, ProductCategory
 
 __all__ = ['AuditData', 'EvaluationResult']
 
@@ -41,7 +41,7 @@ class AuditData:
     timestamp: datetime
 
     # 预处理数据
-    product_info: Dict[str, Any]
+    product: Product
     clauses: List[Dict[str, Any]]
     pricing_params: Dict[str, Any]
 
@@ -58,7 +58,7 @@ class AuditData:
             audit_id=audit_id,
             document_url=document_url,
             timestamp=datetime.now(),
-            product_info={},
+            product=Product(name="", company="", category=ProductCategory.OTHER, period=""),
             clauses=[],
             pricing_params={},
             violations=[],
@@ -76,7 +76,7 @@ class EvaluationResult:
     职责：
     - 存储计算结果（分数、评级、摘要）
     - 存储结构化数据（产品对象、分组违规项）
-    - 存储所有导出需要的数据（clauses、product_info、metadata）
+    - 存储所有导出需要的数据（clauses、product、metadata）
     - 作为唯一的导出数据源，API 响应和报告生成都应从此获取数据
 
     设计原则：
@@ -104,7 +104,6 @@ class EvaluationResult:
 
     # === 产品信息 ===
     product: Product
-    product_info: Dict[str, Any]  # 原始产品信息，用于 details 字段
 
     # === 元数据 ===
     audit_id: str
@@ -130,7 +129,13 @@ class EvaluationResult:
             'grade': self.grade,
             'summary': self.summary,
             'clauses': self.clauses,
-            'product_info': self.product_info,
+            'product_info': {
+                'product_name': self.product.name,
+                'product_type': self.product.type,
+                'insurance_company': self.product.company,
+                'document_url': self.product.document_url,
+                'version': self.product.version,
+            },
             'audit_id': self.audit_id,
             'document_url': self.document_url,
             'timestamp': self.timestamp.isoformat(),
