@@ -13,13 +13,13 @@ from typing import Dict, List, Any, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from lib.audit import AuditResult, AuditIssue
 
-from lib.common.models import Product as CommonProduct, ProductCategory, ProductInfo as _ProductInfo
+from lib.common.models import Product as CommonProduct, ProductCategory, Product
 from lib.common.product_type import get_category, get_name
 
-__all__ = ['EvaluationContext', 'ProductInfo']
+__all__ = ['EvaluationContext', 'Product']
 
-# 向后兼容：从 common.models 导入 ProductInfo
-ProductInfo = _ProductInfo
+# 向后兼容：Product 别名
+Product = Product
 
 
 @dataclass
@@ -34,13 +34,11 @@ class EvaluationContext:
     - violations 从 audit_result.issues 转换而来
     """
     audit_result: Optional['AuditResult'] = None
-    product: ProductInfo = field(default_factory=lambda: ProductInfo(
-        product=CommonProduct(
-            name="",
-            company="",
-            category=ProductCategory.OTHER,
-            period=""
-        )
+    product: Product = field(default_factory=lambda: Product(
+        name="",
+        company="",
+        category=ProductCategory.OTHER,
+        period=""
     ))
     pricing_analysis: Dict[str, Any] = field(default_factory=dict)
     clauses: List[Dict[str, Any]] = field(default_factory=list)

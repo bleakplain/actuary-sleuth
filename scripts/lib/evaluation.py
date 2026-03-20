@@ -14,7 +14,7 @@
 from typing import Dict, List, Any, Tuple
 
 from lib.audit_data import AuditData, EvaluationResult
-from lib.common.models import Product, ProductCategory, ProductInfo
+from lib.common.models import Product, ProductCategory
 from lib.common.product_type import get_category, from_code
 
 __all__ = ['calculate_evaluation', 'calculate_score', 'calculate_grade',
@@ -62,16 +62,11 @@ def calculate_evaluation(data: AuditData) -> EvaluationResult:
         # 可能是分类器代码，尝试使用 from_code
         category = from_code(product_type_str)
 
-    common_product = Product(
+    product = Product(
         name=data.product_info.get('product_name', '未知产品'),
         company=data.product_info.get('insurance_company', ''),
         category=category,
-        period=data.product_info.get('insurance_period', '')
-    )
-
-    # 包装为 ProductInfo（供报告层使用）
-    product = ProductInfo.from_product(
-        common_product,
+        period=data.product_info.get('insurance_period', ''),
         document_url=data.document_url,
         version=data.product_info.get('version', '')
     )

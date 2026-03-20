@@ -21,7 +21,7 @@ from lib.config import get_config, Config
 from lib.id_generator import IDGenerator
 from lib.reporting.strategies import RemediationStrategies
 from lib.reporting.model import EvaluationContext
-from lib.reporting.model import ProductInfo
+from lib.reporting.model import Product
 
 
 class ReportGenerationTemplate:
@@ -99,7 +99,7 @@ class ReportGenerationTemplate:
             dict: 包含 report_id, score, grade, summary, content, blocks
         """
         # 步骤1: 构建评估上下文
-        product = ProductInfo.from_dict(product_info)
+        product = Product.from_dict(product_info)
 
         context = EvaluationContext(
             audit_result=audit_result,

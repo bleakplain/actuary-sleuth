@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
-from lib.common.models import ProductInfo
+from lib.common.models import Product
 
 __all__ = ['AuditData', 'EvaluationResult']
 
@@ -103,7 +103,7 @@ class EvaluationResult:
     clauses: List[Dict[str, Any]]
 
     # === 产品信息 ===
-    product: ProductInfo
+    product: Product
     product_info: Dict[str, Any]  # 原始产品信息，用于 details 字段
 
     # === 元数据 ===

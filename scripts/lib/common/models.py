@@ -53,6 +53,14 @@ class Product:
     waiting_period: Optional[int] = None
     age_min: Optional[int] = None
     age_max: Optional[int] = None
+    document_url: str = ""
+    version: str = ""
+
+    @property
+    def type(self) -> str:
+        """产品类型（中文显示名称）"""
+        from lib.common.product_type import get_name
+        return get_name(self.category) if self.category else '其他保险'
 
 
 @dataclass
@@ -89,7 +97,9 @@ class AuditRequest:
                 name="",
                 company="",
                 category=ProductCategory.OTHER,
-                period=""
+                period="",
+                document_url="",
+                version=""
             )
 
     @classmethod
@@ -148,6 +158,8 @@ class AuditRequest:
             waiting_period=_parse_days(data.get('waiting_period')),
             age_min=_parse_age_min(data.get('age_min')),
             age_max=_parse_age_max(data.get('age_max')),
+            document_url=extract_result.metadata.get('source_file', ''),
+            version=data.get('version', ''),
         )
 
         coverage = None
@@ -340,81 +352,44 @@ __all__ = [
     'Coverage',
     'Premium',
     'AuditRequest',
-    # Evaluation → Reporting 接口模型
-    'ProductInfo',
 ]
 
 
-# ==================== Evaluation → Reporting 接口模型 ====================
+# ==================== Product 工厂方法 ====================
 
-@dataclass
-class ProductInfo:
+def create_product_from_dict(cls, product_info: Dict[str, Any]) -> 'Product':
     """
-    产品信息（用于报告生成）
+    从字典创建 Product 对象
 
-    包装 Product，添加报告需要的额外字段。
-    位于 common/models.py 确保各模块可以共享此定义，
-    避免 evaluation 层依赖 reporting 层。
+    Args:
+        product_info: 包含产品信息的字典
+
+    Returns:
+        Product: 产品对象
     """
-    product: Product
-    document_url: str = ""
-    version: str = ""
+    from lib.common.product_type import get_category, from_code
 
-    @property
-    def name(self) -> str:
-        return self.product.name
+    type_str = product_info.get('product_type', '')
 
-    @property
-    def company(self) -> str:
-        return self.product.company
+    # 尝试从产品类型字符串解析类别
+    # 优先使用中文名称匹配（get_category），如果返回 OTHER 则尝试代码匹配（from_code）
+    category = get_category(type_str)
+    if category == ProductCategory.OTHER and type_str:
+        # 可能是分类器代码，尝试使用 from_code
+        category = from_code(type_str)
 
-    @property
-    def type(self) -> str:
-        """产品类型"""
-        from lib.common.product_type import get_name
-        return get_name(self.product.category) if self.product.category else '其他保险'
+    return cls(
+        name=product_info.get('product_name', ''),
+        company=product_info.get('insurance_company', ''),
+        category=category,
+        period=product_info.get('insurance_period', ''),
+        waiting_period=None,
+        age_min=None,
+        age_max=None,
+        document_url=product_info.get('document_url', ''),
+        version=product_info.get('version', '')
+    )
 
-    @classmethod
-    def from_product(
-        cls,
-        product: Product,
-        document_url: str = "",
-        version: str = ""
-    ) -> 'ProductInfo':
-        """从 Product 创建 ProductInfo"""
-        return cls(
-            product=product,
-            document_url=document_url,
-            version=version
-        )
 
-    @classmethod
-    def from_dict(cls, product_info: Dict[str, Any]) -> 'ProductInfo':
-        """从字典创建 ProductInfo"""
-        from lib.common.product_type import get_category, from_code
-        from lib.common.models import Product, ProductCategory
-
-        type_str = product_info.get('product_type', '')
-
-        # 尝试从产品类型字符串解析类别
-        # 优先使用中文名称匹配（get_category），如果返回 OTHER 则尝试代码匹配（from_code）
-        category = get_category(type_str)
-        if category == ProductCategory.OTHER and type_str:
-            # 可能是分类器代码，尝试使用 from_code
-            category = from_code(type_str)
-
-        product = Product(
-            name=product_info.get('product_name', ''),
-            company=product_info.get('insurance_company', ''),
-            category=category,
-            period=product_info.get('insurance_period', ''),
-            waiting_period=None,
-            age_min=None,
-            age_max=None
-        )
-
-        return cls(
-            product=product,
-            document_url=product_info.get('document_url', ''),
-            version=product_info.get('version', '')
-        )
+# 将工厂方法附加到 Product 类
+Product.from_dict = classmethod(create_product_from_dict)
