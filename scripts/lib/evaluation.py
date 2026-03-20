@@ -214,7 +214,6 @@ def calculate_summary(
     # 判断是否有严重问题
     has_critical_issues = severity_counts['high'] > 0 or pricing_issues > 1
 
-    # 使用扁平结构 (与 docx_generator 兼容)
     return {
         'high': severity_counts['high'],
         'medium': severity_counts['medium'],
@@ -223,7 +222,6 @@ def calculate_summary(
         'pricing_issues': pricing_issues,
         'has_issues': len(violations) > 0 or pricing_issues > 0,
         'has_critical_issues': has_critical_issues,
-        # 保留嵌套格式用于向后兼容
         'violation_severity': severity_counts
     }
 

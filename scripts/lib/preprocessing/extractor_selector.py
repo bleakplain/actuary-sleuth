@@ -116,9 +116,8 @@ class ExtractorSelector:
 
     @classmethod
     def get_required_fields(cls, product_type: str = None) -> set:
-        """获取必需字段集合（向后兼容，默认返回所有字段）"""
+        """获取必需字段集合"""
         if product_type is None:
-            # 向后兼容：返回所有可能的必需字段
             fields = cls.CORE_REQUIRED_FIELDS.copy()
             fields.update(cls.CONDITIONAL_REQUIRED_FIELDS)
             return fields

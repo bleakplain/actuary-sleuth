@@ -325,7 +325,7 @@ createAuditReport()
                     ]
                 }}),'''
 
-    def _generate_product_info_section(self, product: '_InsuranceProduct') -> str:
+    def _generate_product_info_section(self, product: 'ProductInfo') -> str:
         """生成产品信息部分"""
         sections = []
         sections.append(self._generate_heading_paragraph("产品信息", 2))

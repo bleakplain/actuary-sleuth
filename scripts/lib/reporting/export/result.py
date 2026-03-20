@@ -43,7 +43,7 @@ class ExportResult:
         return self.error or "未知错误"
 
     def to_dict(self) -> Dict[str, Any]:
-        """转换为字典格式（向后兼容）"""
+        """转换为字典格式"""
         result = {
             'success': self.success,
             'timestamp': self.timestamp

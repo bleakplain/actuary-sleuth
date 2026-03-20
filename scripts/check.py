@@ -89,7 +89,7 @@ def execute(params):
     # 执行检查
     violations = []
     for idx, clause in enumerate(clauses):
-        # 兼容新旧格式：字符串或字典
+        # 支持字符串或字典格式
         if isinstance(clause, str):
             clause_text = clause
             clause_reference = f"条款{idx+1}"

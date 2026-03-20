@@ -140,14 +140,13 @@ class IDGenerator:
         return True
 
 
-# 便捷函数，保持向后兼容
 def generate_audit_id() -> str:
-    """生成审核ID (便捷函数)"""
+    """生成审核ID"""
     return IDGenerator.generate_audit()
 
 
 def generate_preprocess_id() -> str:
-    """生成预处理ID (便捷函数)"""
+    """生成预处理ID"""
     return IDGenerator.generate_preprocess()
 
 

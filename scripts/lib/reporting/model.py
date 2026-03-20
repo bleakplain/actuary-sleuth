@@ -71,7 +71,7 @@ class ProductInfo:
 
     @classmethod
     def from_dict(cls, product_info: Dict[str, Any]) -> 'ProductInfo':
-        """从字典创建 ProductInfo（向后兼容）"""
+        """从字典创建 ProductInfo"""
         category_map = {
             '重大疾病保险': ProductCategory.CRITICAL_ILLNESS,
             '医疗保险': ProductCategory.MEDICAL_INSURANCE,
@@ -107,40 +107,18 @@ class ProductInfo:
         )
 
 
-# 向后兼容的别名
-_InsuranceProduct = ProductInfo
-
-
 @dataclass
 class EvaluationContext:
     """
     评估上下文
 
-    承载审核评估过程中的所有数据，
-    在模板编排的各个步骤之间传递
+    承载审核评估过程中的所有数据，在模板编排的各步骤之间传递
 
     统一数据模型设计：
     - 使用 AuditResult 作为单一数据源（audit 模块输出）
-    - 消除数据转换，直接使用 audit 的结论
     - violations 从 audit_result.issues 转换而来
-
-    职责：
-    - 存储 AuditResult（来自 audit 模块）
-    - 存储产品信息和定价分析
-    - 提供便捷方法访问 violations（从 AuditResult.issues 转换）
-    - 存储计算结果（grade，score 来自 AuditResult）
-
-    设计原则：
-    - 纯数据载体，不包含业务逻辑
-    - 可变对象，在各步骤中被填充
-    - 向后兼容，提供 to_dict() 方法
     """
-    # ========== 核心：审核结果（单一数据源） ==========
-
     audit_result: Optional['AuditResult'] = None
-
-    # ========== 产品信息 ==========
-
     product: ProductInfo = field(default_factory=lambda: ProductInfo(
         product=CommonProduct(
             name="",
@@ -149,32 +127,14 @@ class EvaluationContext:
             period=""
         )
     ))
-
-    # ========== 定价分析（可选） ==========
-
     pricing_analysis: Dict[str, Any] = field(default_factory=dict)
-
-    # ========== 条款内容（可选） ==========
-
     clauses: List[Dict[str, Any]] = field(default_factory=list)
-
-    # ========== 计算结果（从 audit_result 衍生） ==========
-
     grade: Optional[str] = None
     summary: Optional[Dict[str, Any]] = None
-
-    # ========== 分组后的违规项（从 audit_result.issues 转换） ==========
-
     high_violations: List[Dict[str, Any]] = field(default_factory=list)
     medium_violations: List[Dict[str, Any]] = field(default_factory=list)
     low_violations: List[Dict[str, Any]] = field(default_factory=list)
-
-    # ========== 审核依据（从 audit_result.regulations_used） ==========
-
     regulation_basis: List[str] = field(default_factory=list)
-
-    # ========== 缓存 ==========
-
     _violations_cache: Optional[List[Dict[str, Any]]] = None
 
     @property
@@ -188,19 +148,13 @@ class EvaluationContext:
     def violations(self) -> List[Dict[str, Any]]:
         """
         获取违规列表（从 audit_result.issues 转换，带缓存）
-
-        将 AuditIssue 转换为 reporting 需要的格式
-
-        缓存策略：当 audit_result 变化时清除缓存
         """
         if not self.audit_result:
             return []
 
-        # 检查缓存
         if self._violations_cache is not None:
             return self._violations_cache
 
-        # 构建并缓存
         self._violations_cache = [
             {
                 'clause_reference': issue.clause,
@@ -221,24 +175,20 @@ class EvaluationContext:
 
     @property
     def overall_assessment(self) -> str:
-        """获取审核结论（从 audit_result）"""
+        """获取审核结论"""
         if self.audit_result:
             return self.audit_result.overall_assessment
         return "不通过"
 
     @property
     def assessment_reason(self) -> str:
-        """获取审核依据说明（从 audit_result）"""
+        """获取审核依据说明"""
         if self.audit_result:
             return self.audit_result.assessment_reason
         return ""
 
     def to_dict(self) -> Dict[str, Any]:
-        """
-        转换为字典格式
-
-        用于向后兼容，保持与现有接口的一致性
-        """
+        """转换为字典格式"""
         return {
             'audit_result': {
                 'overall_assessment': self.overall_assessment,

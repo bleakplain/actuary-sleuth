@@ -89,11 +89,7 @@ class ReportResult(TypedDict, total=False):
 
 
 class AuditApiResponse(TypedDict, total=False):
-    """审核API响应类型
-
-    顶层API响应格式，包含完整的审核结果信息。
-    区别于 lib.audit.AuditResult (dataclass) - 审核模块内部使用的数据类。
-    """
+    """审核API响应类型"""
     success: bool
     audit_id: str
     violations: List[Dict[str, Any]]
@@ -109,10 +105,6 @@ class AuditApiResponse(TypedDict, total=False):
     error: str
     error_type: str
     details: Dict[str, Any]
-
-
-# 向后兼容的别名
-AuditResult = AuditApiResponse
 
 
 # ========== 辅助函数 ==========

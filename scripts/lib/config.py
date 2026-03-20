@@ -99,7 +99,7 @@ class AuditConfig:
 
 
 class OllamaConfig:
-    """Ollama 配置（向后兼容）"""
+    """Ollama 配置"""
 
     def __init__(self, config_dict: Dict[str, Any]):
         self._config = config_dict.get('ollama', {})
