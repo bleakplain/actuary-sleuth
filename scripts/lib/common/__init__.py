@@ -42,6 +42,7 @@ from .constants import (
 from .cache import CacheManager, cached
 from .logging_config import setup_logging, StructuredFormatter
 from .date_utils import get_current_timestamp
+from .middleware import Middleware, LoggingMiddleware, PerformanceMiddleware, MiddlewareChain
 
 __all__ = [
     # Models
@@ -97,4 +98,9 @@ __all__ = [
     'StructuredFormatter',
     # Date utils
     'get_current_timestamp',
+    # Middleware
+    'Middleware',
+    'LoggingMiddleware',
+    'PerformanceMiddleware',
+    'MiddlewareChain',
 ]
