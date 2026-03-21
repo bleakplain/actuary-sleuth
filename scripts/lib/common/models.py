@@ -5,33 +5,69 @@
 
 预处理、审核、RAG 等模块共享的数据结构。
 """
-
-import sys
-from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Any, Optional, Union, Tuple
+from typing import Dict, List, Any, Optional
 
-# 添加 scripts 目录到路径以便导入
-scripts_dir = Path(__file__).parent.parent.parent
-if str(scripts_dir) not in sys.path:
-    sys.path.insert(0, str(scripts_dir))
-
-from lib.preprocessing.models import (
-    RegulationStatus,
-    RegulationLevel,
-    RegulationRecord,
-    RegulationProcessingOutcome,
-    RegulationDocument,
-)
 from lib.common.constants import DocumentValidation
 
-# Use DocumentValidation constants for validation
 MAX_CLAUSES_COUNT = DocumentValidation.MAX_CLAUSES_COUNT
 MAX_CLAUSE_LENGTH = DocumentValidation.MAX_CLAUSE_LENGTH
 MIN_CLAUSE_LENGTH = DocumentValidation.MIN_CLAUSE_LENGTH
 MAX_TOTAL_TEXT_LENGTH = DocumentValidation.MAX_TOTAL_TEXT_LENGTH
+
+
+# ==================== 法规文档预处理模型 ====================
+
+class RegulationStatus(str, Enum):
+    """法规处理状态"""
+    RAW = "raw"
+    CLEANED = "cleaned"
+    EXTRACTED = "extracted"
+    AUDITED = "audited"
+    FAILED = "failed"
+
+
+class RegulationLevel(str, Enum):
+    """法规层级"""
+    LAW = "law"
+    DEPARTMENT_RULE = "department_rule"
+    NORMATIVE = "normative"
+    OTHER = "other"
+
+
+@dataclass
+class RegulationRecord:
+    """法规基本信息记录"""
+    law_name: str
+    article_number: str
+    category: str
+    effective_date: Optional[str] = None
+    hierarchy_level: Optional[RegulationLevel] = None
+    issuing_authority: Optional[str] = None
+    status: RegulationStatus = RegulationStatus.RAW
+    quality_score: Optional[float] = None
+
+
+@dataclass
+class RegulationProcessingOutcome:
+    """法规处理结果"""
+    success: bool
+    regulation_id: str
+    record: RegulationRecord
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    processed_at: datetime = field(default_factory=datetime.now)
+    processor: str = ""  # 处理器标识，如 "regulation_cleaner" 或 "regulation_extractor"
+
+
+@dataclass
+class RegulationDocument:
+    """法规文档"""
+    content: str
+    source_file: str
+    record: RegulationRecord
 
 
 # ==================== Preprocessing → Audit 接口模型 ====================
@@ -186,10 +222,8 @@ class AuditRequest:
                 payment_period=data.get('payment_period'),
             )
 
-        # 获取并规范化 clauses
         clauses_data = _normalize_clauses(data.get('clauses', []), validate=True)
 
-        # 验证 clauses 不为空
         if not clauses_data:
             raise ValueError("没有可审核的条款：clauses 为空")
 
@@ -385,34 +419,9 @@ def _used_fields() -> set:
     }
 
 
-__all__ = [
-    # 法规文档模型
-    'RegulationStatus',
-    'RegulationLevel',
-    'RegulationRecord',
-    'RegulationProcessingOutcome',
-    'RegulationDocument',
-    # Preprocessing → Audit 接口模型
-    'ProductCategory',
-    'Product',
-    'Coverage',
-    'Premium',
-    'AuditRequest',
-]
-
-
 # ==================== Product 工厂方法 ====================
 
 def create_product_from_dict(product_info: Dict[str, Any]) -> Product:
-    """
-    从字典创建 Product 对象
-
-    Args:
-        product_info: 包含产品信息的字典
-
-    Returns:
-        Product: 产品对象
-    """
     from lib.common.product import get_category, from_code
 
     type_str = product_info.get('product_type', '')
@@ -435,3 +444,19 @@ def create_product_from_dict(product_info: Dict[str, Any]) -> Product:
 
 
 Product.from_dict = staticmethod(create_product_from_dict)
+
+
+__all__ = [
+    # 法规文档模型
+    'RegulationStatus',
+    'RegulationLevel',
+    'RegulationRecord',
+    'RegulationProcessingOutcome',
+    'RegulationDocument',
+    # Preprocessing → Audit 接口模型
+    'ProductCategory',
+    'Product',
+    'Coverage',
+    'Premium',
+    'AuditRequest',
+]

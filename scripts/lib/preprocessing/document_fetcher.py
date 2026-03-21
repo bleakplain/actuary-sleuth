@@ -4,7 +4,7 @@ import re
 import subprocess
 from contextlib import contextmanager
 from typing import Generator
-from lib.preprocessing.exceptions import DocumentFetchError
+from lib.common.exceptions import DocumentPreprocessException as DocumentFetchError
 
 
 @contextmanager

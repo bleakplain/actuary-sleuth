@@ -7,13 +7,15 @@
 
 包含两类模型：
 1. 产品文档预处理：DocumentProfile, ExtractResult 等
-2. 法规文档预处理：RegulationRecord, RegulationStatus 等
+2. 法规文档预处理：从 lib.common.models 重新导出
 """
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Any, Optional
 
+
+# ==================== 产品文档预处理模型 ====================
 
 @dataclass
 class DocumentProfile:
@@ -126,53 +128,31 @@ class ExtractionResponse:
 
 
 # ==================== 法规文档预处理模型 ====================
+# 从 lib.common.models 重新导出，避免重复定义
 
-class RegulationStatus(str, Enum):
-    """法规处理状态"""
-    RAW = "raw"                      # 原始文档
-    CLEANED = "cleaned"              # 已清洗
-    EXTRACTED = "extracted"          # 已提取结构化信息
-    AUDITED = "audited"              # 已审核
-    FAILED = "failed"                # 处理失败
-
-
-class RegulationLevel(str, Enum):
-    """法规层级"""
-    LAW = "law"                                  # 法律
-    DEPARTMENT_RULE = "department_rule"          # 部门规章
-    NORMATIVE = "normative"                      # 规范性文件
-    OTHER = "other"                              # 其他
+from lib.common.models import (
+    RegulationStatus,
+    RegulationLevel,
+    RegulationRecord,
+    RegulationProcessingOutcome,
+    RegulationDocument,
+)
 
 
-@dataclass
-class RegulationRecord:
-    """法规基本信息记录"""
-    law_name: str
-    article_number: str
-    category: str
-    effective_date: Optional[str] = None
-    hierarchy_level: Optional[RegulationLevel] = None
-    issuing_authority: Optional[str] = None
-    status: RegulationStatus = RegulationStatus.RAW
-    quality_score: Optional[float] = None
-
-
-@dataclass
-class RegulationProcessingOutcome:
-    """法规处理结果"""
-    success: bool
-    regulation_id: str
-    record: RegulationRecord
-    errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
-    processed_at: datetime = field(default_factory=datetime.now)
-    processor: str = ""  # 处理器标识，如 "regulation_cleaner" 或 "regulation_extractor"
-
-
-@dataclass
-class RegulationDocument:
-    """法规文档"""
-    content: str
-    source_file: str
-    record: RegulationRecord
-
+__all__ = [
+    # 产品文档预处理模型
+    'DocumentProfile',
+    'StructureMarkers',
+    'NormalizedDocument',
+    'ExtractResult',
+    'ValidationResult',
+    'ProductType',
+    'ExtractionRequest',
+    'ExtractionResponse',
+    # 法规文档预处理模型（从 common 重新导出）
+    'RegulationStatus',
+    'RegulationLevel',
+    'RegulationRecord',
+    'RegulationProcessingOutcome',
+    'RegulationDocument',
+]
