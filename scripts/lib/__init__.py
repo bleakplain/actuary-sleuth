@@ -6,7 +6,7 @@ Infrastructure package init
 from .common.database import get_connection
 from .config import get_config
 from .common.id_generator import IDGenerator
-from .exceptions import *
+from .common.exceptions import *
 from .common.logger import AuditLogger, AuditStepLogger, get_logger, get_audit_logger
 
 # VectorDB - 延迟导入以避免依赖问题

@@ -6,7 +6,7 @@
 提供参数验证功能
 """
 from typing import Any, Optional
-from lib.exceptions import InvalidParameterException, ValidationException
+from lib.common.exceptions import InvalidParameterException, ValidationException
 
 
 def validate_evaluation_context(context: Any) -> None:

@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 
-from lib.exceptions import ExportException
+from lib.common.exceptions import ExportException
 from lib.common.logger import get_logger
 from .constants import DocxConstants
 from .result import GenerationResult

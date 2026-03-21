@@ -13,7 +13,7 @@ DocxExporter类：整合文档生成和推送的完整导出流程
 from typing import Dict, Any, Optional, TYPE_CHECKING
 from pathlib import Path
 
-from lib.exceptions import ExportException, ValidationException
+from lib.common.exceptions import ExportException, ValidationException
 from lib.common.logger import get_logger
 from .docx_generator import _DocxGenerator
 from .feishu_pusher import _FeishuPusher

@@ -21,7 +21,7 @@ from lib.config import get_config
 from lib.reporting.template import ReportGenerationTemplate
 from lib.reporting.model import EvaluationContext
 from lib.common.models import Product
-from lib.exceptions import InvalidParameterException
+from lib.common.exceptions import InvalidParameterException
 
 
 def main():
