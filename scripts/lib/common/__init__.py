@@ -31,7 +31,7 @@ from .exceptions import (
     DatabaseException,
     RecordNotFoundError,
 )
-from .product_type import from_code, get_category, get_name
+from .product import from_code, get_category, get_name, map_to_scoring_type, ScoringType
 from .constants import (
     DocumentValidation,
     AuditConstants,
@@ -84,6 +84,8 @@ __all__ = [
     'from_code',
     'get_category',
     'get_name',
+    'map_to_scoring_type',
+    'ScoringType',
     # Constants
     'DocumentValidation',
     'AuditConstants',

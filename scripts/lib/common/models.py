@@ -66,7 +66,7 @@ class Product:
     @property
     def type(self) -> str:
         """产品类型（中文显示名称）"""
-        from lib.common.product_type import get_name
+        from lib.common.product import get_name
         return get_name(self.category) if self.category else '其他保险'
 
 
@@ -153,7 +153,7 @@ class AuditRequest:
             )
 
         # 使用统一的产品类型映射
-        from lib.common.product_type import from_code
+        from lib.common.product import from_code
         product_type = extract_result.metadata.get('product_type', 'other')
         category = from_code(product_type)
 
@@ -413,7 +413,7 @@ def create_product_from_dict(product_info: Dict[str, Any]) -> Product:
     Returns:
         Product: 产品对象
     """
-    from lib.common.product_type import get_category, from_code
+    from lib.common.product import get_category, from_code
 
     type_str = product_info.get('product_type', '')
 

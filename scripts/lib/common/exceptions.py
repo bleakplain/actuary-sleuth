@@ -2,28 +2,14 @@
 """
 公共异常模块
 
-提供统一的异常访问点。
+提供统一的异常访问点，重新导出 lib.exceptions 中的常用异常。
 """
-
-# 基础异常
-class ActuarySleuthException(Exception):
-    pass
-
-
-class DatabaseError(ActuarySleuthException):
-    pass
-
-
-class RecordNotFoundError(ActuarySleuthException):
-    pass
-
-
-class AuditStepException(ActuarySleuthException):
-    pass
-
 
 # 从主异常模块重新导出
 from lib.exceptions import (
+    ActuarySleuthException,
+    DatabaseError,
+    AuditStepException,
     ValidationException,
     MissingParameterException,
     InvalidParameterException,
@@ -40,6 +26,12 @@ from lib.exceptions import (
     ConfigurationException,
     ExportException,
 )
+
+
+# 本模块独有的异常
+class RecordNotFoundError(ActuarySleuthException):
+    """记录未找到异常"""
+    pass
 
 
 __all__ = [
