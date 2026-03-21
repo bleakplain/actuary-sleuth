@@ -331,4 +331,37 @@ EvaluationResult (+ Score + Grade)
 13. **常量集中**：所有常量归档到 `lib/common/constants.py`
 14. **配置管理**：使用线程安全单例 `lib/config.py`
 
+---
 
+## 最近变更
+
+### 2025-03-21 - CLAUDE.md 格式完善
+**Commit**: `76bff07`
+
+- 简化项目结构章节（移除过度细节）
+- 添加 NEVER 规则（不创建新的 service 包）
+- 添加 ALWAYS 规则（使用 frozen dataclass、异常归档）
+- 精简约束总结从 18 条到 14 条
+
+### 2025-03-21 - 代码结构重组
+**Commit**: `2844889`
+
+文件移动:
+- `lib/logger.py` → `lib/common/logger.py`
+- `lib/id_generator.py` → `lib/common/id_generator.py`
+- `lib/evaluation.py` → `lib/audit/evaluation.py`
+- `lib/vector_store.py` → `lib/rag_engine/vector_store.py`
+
+文件删除:
+- `lib/ollama.py` (重复)
+- `lib/constants.py` (已合并)
+
+**测试**: 159 passed, 1 skipped, 50.90% coverage
+
+---
+
+## 待办事项 (TODO)
+
+- [ ] 提升测试覆盖率到 70%
+- [ ] 添加更多集成测试
+- [ ] 完善异常处理的单元测试
