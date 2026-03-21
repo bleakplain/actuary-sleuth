@@ -117,10 +117,10 @@ def execute_check(preprocessed):
 def execute_score(checked):
     import scoring
 
-    category = checked.preprocessed.product.category
+    category = checked.product.category
     scoring_type = map_to_scoring_type(category)
 
-    step_logger = get_audit_logger(checked.preprocessed.audit_id)
+    step_logger = get_audit_logger(checked.audit_id)
     step_logger.step("定价分析")
 
     result = scoring.execute({

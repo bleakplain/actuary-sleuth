@@ -1,16 +1,6 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-审核数据模型 (阶段式处理)
-
-设计原则：
-1. 每个阶段对应一个结果类
-2. 通过组合体现数据流：PreprocessedResult → CheckedResult → AnalyzedResult → EvaluationResult
-3. 不可变数据：使用 frozen dataclass
-4. 职责清晰：每个类只包含对应阶段的输出
-"""
 from dataclasses import dataclass
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from datetime import datetime
 
 from lib.common.models import Product, ProductCategory
@@ -28,17 +18,9 @@ __all__ = [
 
 @dataclass(frozen=True)
 class PreprocessedResult:
-    """
-    预处理结果
-
-    预处理步骤的输出，包含解析出的产品和条款信息。
-    """
-    # 元数据
     audit_id: str
     document_url: str
     timestamp: datetime
-
-    # 预处理输出
     product: Product
     clauses: List[Dict[str, Any]]
     pricing_params: Dict[str, Any]
@@ -46,24 +28,42 @@ class PreprocessedResult:
 
 @dataclass(frozen=True)
 class CheckedResult:
-    """
-    负面清单检查结果
-
-    检查步骤的输出，在预处理基础上增加了违规信息。
-    """
     preprocessed: PreprocessedResult
     violations: List[Dict[str, Any]]
+
+    @property
+    def audit_id(self) -> str:
+        return self.preprocessed.audit_id
+
+    @property
+    def product(self) -> Product:
+        return self.preprocessed.product
+
+    @property
+    def clauses(self) -> List[Dict]:
+        return self.preprocessed.clauses
 
 
 @dataclass(frozen=True)
 class AnalyzedResult:
-    """
-    定价分析结果
-
-    分析步骤的输出，在检查基础上增加了定价分析。
-    """
     checked: CheckedResult
     pricing_analysis: Dict[str, Any]
+
+    @property
+    def audit_id(self) -> str:
+        return self.checked.audit_id
+
+    @property
+    def product(self) -> Product:
+        return self.checked.product
+
+    @property
+    def preprocessed(self) -> PreprocessedResult:
+        return self.checked.preprocessed
+
+    @property
+    def violations(self) -> List[Dict]:
+        return self.checked.violations
 
 
 @dataclass(frozen=True)
@@ -73,14 +73,26 @@ class EvaluationResult:
     grade: str
     summary: Dict[str, Any]
 
+    @property
+    def audit_id(self) -> str:
+        return self.analyzed.audit_id
+
+    @property
+    def product(self) -> Product:
+        return self.analyzed.product
+
+    @property
+    def violations(self) -> List[Dict]:
+        return self.analyzed.violations
+
     def get_violations(self) -> List[Dict[str, Any]]:
-        return self.analyzed.checked.violations
+        return self.analyzed.violations
 
     def get_violation_count(self) -> int:
-        return len(self.analyzed.checked.violations)
+        return len(self.analyzed.violations)
 
     def get_violation_summary(self) -> Dict[str, int]:
-        violations = self.analyzed.checked.violations
+        violations = self.analyzed.violations
         return {
             'high': sum(1 for v in violations if v.get('severity') == 'high'),
             'medium': sum(1 for v in violations if v.get('severity') == 'medium'),
@@ -88,27 +100,21 @@ class EvaluationResult:
         }
 
     def to_dict(self) -> Dict[str, Any]:
-        preprocessed = self.analyzed.checked.preprocessed
-        checked = self.analyzed.checked
-        analyzed = self.analyzed
-
+        preprocessed = self.analyzed.preprocessed
         return {
             'success': True,
-            'audit_id': preprocessed.audit_id,
-            'violations': checked.violations,
+            'audit_id': self.audit_id,
+            'violations': self.violations,
             'violation_count': self.get_violation_count(),
             'violation_summary': self.get_violation_summary(),
-            'pricing': analyzed.pricing_analysis,
+            'pricing': self.analyzed.pricing_analysis,
             'score': self.score,
             'grade': self.grade,
             'summary': self.summary,
         }
 
 
-# ==================== 工厂函数 ====================
-
 def create_preprocessed_result(audit_id: str, document_url: str) -> PreprocessedResult:
-    """创建空的 PreprocessedResult 对象"""
     return PreprocessedResult(
         audit_id=audit_id,
         document_url=document_url,
@@ -124,71 +130,50 @@ def create_preprocessed_result(audit_id: str, document_url: str) -> Preprocessed
     )
 
 
-# ==================== 便捷访问属性 ====================
-
 def get_violations(result: EvaluationResult) -> List[Dict[str, Any]]:
-    """获取违规列表"""
-    return result.analyzed.checked.violations
+    return result.violations
+
 
 def get_product(result: EvaluationResult) -> Product:
-    """获取产品信息"""
-    return result.analyzed.checked.preprocessed.product
+    return result.product
+
 
 def get_clauses(result: EvaluationResult) -> List[Dict[str, Any]]:
-    """获取条款列表"""
-    return result.analyzed.checked.preprocessed.clauses
+    return result.analyzed.preprocessed.clauses
+
 
 def get_pricing_analysis(result: EvaluationResult) -> Dict[str, Any]:
-    """获取定价分析"""
     return result.analyzed.pricing_analysis
 
+
 def get_audit_id(result: EvaluationResult) -> str:
-    """获取审核ID"""
-    return result.analyzed.checked.preprocessed.audit_id
+    return result.audit_id
+
 
 def get_document_url(result: EvaluationResult) -> str:
-    """获取文档URL"""
-    return result.analyzed.checked.preprocessed.document_url
+    return result.analyzed.preprocessed.document_url
+
 
 def get_timestamp(result: EvaluationResult) -> datetime:
-    """获取时间戳"""
-    return result.analyzed.checked.preprocessed.timestamp
+    return result.analyzed.preprocessed.timestamp
+
 
 def get_preprocess_id(result: EvaluationResult) -> str:
-    """获取预处理ID"""
-    return f"PRE-{result.analyzed.checked.preprocessed.audit_id.split('-')[1]}"
+    return f"PRE-{result.audit_id.split('-')[1]}"
 
-
-# ==================== 转换函数 ====================
 
 def to_api_dict(result: EvaluationResult) -> Dict[str, Any]:
-    """
-    转换为 API 响应格式
-
-    Args:
-        result: 评估结果
-
-    Returns:
-        API 响应字典
-    """
-    preprocessed = result.analyzed.checked.preprocessed
-    checked = result.analyzed.checked
-    analyzed = result.analyzed
-
-    violations = checked.violations
+    preprocessed = result.analyzed.preprocessed
+    violations = result.violations
     total_violations = len(violations)
 
     return {
         'success': True,
-        'audit_id': preprocessed.audit_id,
+        'audit_id': result.audit_id,
         'violations': violations,
         'violation_count': total_violations,
-        'violation_summary': {
-            'high': sum(1 for v in violations if v.get('severity') == 'high'),
-            'medium': sum(1 for v in violations if v.get('severity') == 'medium'),
-            'low': sum(1 for v in violations if v.get('severity') == 'low'),
-        },
-        'pricing': analyzed.pricing_analysis,
+        'violation_summary': result.get_violation_summary(),
+        'pricing': result.analyzed.pricing_analysis,
         'score': result.score,
         'grade': result.grade,
         'summary': result.summary,
@@ -210,27 +195,15 @@ def to_api_dict(result: EvaluationResult) -> Dict[str, Any]:
 
 
 def to_export_dict(result: EvaluationResult) -> Dict[str, Any]:
-    """
-    转换为导出格式
-
-    Args:
-        result: 评估结果
-
-    Returns:
-        导出格式字典
-    """
-    preprocessed = result.analyzed.checked.preprocessed
-    checked = result.analyzed.checked
-    analyzed = result.analyzed
-
-    violations = checked.violations
+    preprocessed = result.analyzed.preprocessed
+    violations = result.violations
 
     return {
         'violations': violations,
         'high_violations': [v for v in violations if v.get('severity') == 'high'],
         'medium_violations': [v for v in violations if v.get('severity') == 'medium'],
         'low_violations': [v for v in violations if v.get('severity') == 'low'],
-        'pricing_analysis': analyzed.pricing_analysis,
+        'pricing_analysis': result.analyzed.pricing_analysis,
         'clauses': preprocessed.clauses,
         'product': preprocessed.product,
         'score': result.score,
