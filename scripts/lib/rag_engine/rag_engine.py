@@ -8,7 +8,10 @@ import logging
 import threading
 from typing import Callable, Dict, Any, List, Optional
 
-from llama_index.core import Settings
+try:
+    from llama_index.core import Settings
+except ImportError:
+    Settings = None
 
 from .config import RAGConfig
 from .index_manager import VectorIndexManager
@@ -88,6 +91,10 @@ class RAGEngine:
         Returns:
             bool: 初始化是否成功
         """
+        if Settings is None:
+            logger.error("llama_index 未安装，无法初始化 RAG 引擎")
+            return False
+
         with _engine_init_lock:
             old_llm = getattr(Settings, 'llm', None)
             old_embed = getattr(Settings, 'embed_model', None)

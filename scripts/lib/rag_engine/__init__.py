@@ -45,13 +45,32 @@ logging.basicConfig(
 )
 
 from .config import RAGConfig, get_config, HybridQueryConfig
-from .rag_engine import RAGEngine, create_qa_engine, create_audit_engine
-from .doc_parser import RegulationDocParser
-from .index_manager import VectorIndexManager
-from .data_importer import RegulationDataImporter
-from .retrieval import hybrid_search, vector_search, keyword_search
-from .fusion import fuse_results, compute_bm25_score
-from .tokenizer import tokenize_chinese
+
+# Optional RAG engine components (require llama_index)
+try:
+    from .rag_engine import RAGEngine, create_qa_engine, create_audit_engine
+    from .doc_parser import RegulationDocParser
+    from .index_manager import VectorIndexManager
+    from .data_importer import RegulationDataImporter
+    from .retrieval import hybrid_search, vector_search, keyword_search
+    from .fusion import fuse_results, compute_bm25_score
+    from .tokenizer import tokenize_chinese
+
+    _has_rag = True
+except ImportError:
+    RAGEngine = None
+    create_qa_engine = None
+    create_audit_engine = None
+    RegulationDocParser = None
+    VectorIndexManager = None
+    RegulationDataImporter = None
+    hybrid_search = None
+    vector_search = None
+    keyword_search = None
+    fuse_results = None
+    compute_bm25_score = None
+    tokenize_chinese = None
+    _has_rag = False
 
 __all__ = [
     'RAGConfig',
