@@ -6,13 +6,6 @@
 注意：这些测试需要 llama_index 模块。
 如果未安装，这些测试将被跳过。
 """
-import sys
-from pathlib import Path
-
-# 添加 scripts 目录到 Python 路径
-scripts_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(scripts_dir))
-
 import pytest
 
 # Skip entire module if llama_index is not available
