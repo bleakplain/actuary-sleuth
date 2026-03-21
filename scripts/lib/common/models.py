@@ -25,6 +25,13 @@ from lib.preprocessing.models import (
     RegulationProcessingOutcome,
     RegulationDocument,
 )
+from lib.common.constants import DocumentValidation
+
+# Use DocumentValidation constants for validation
+MAX_CLAUSES_COUNT = DocumentValidation.MAX_CLAUSES_COUNT
+MAX_CLAUSE_LENGTH = DocumentValidation.MAX_CLAUSE_LENGTH
+MIN_CLAUSE_LENGTH = DocumentValidation.MIN_CLAUSE_LENGTH
+MAX_TOTAL_TEXT_LENGTH = DocumentValidation.MAX_TOTAL_TEXT_LENGTH
 
 
 # ==================== Preprocessing → Audit 接口模型 ====================
@@ -85,7 +92,7 @@ class Premium:
 class AuditRequest:
     """审核请求：Preprocessing → Audit 接口契约"""
     clauses: List[Dict[str, str]]
-    product: Product = None
+    product: Optional[Product] = None
     coverage: Optional[Coverage] = None
     premium: Optional[Premium] = None
     extra: Dict[str, Any] = field(default_factory=dict)
@@ -103,7 +110,7 @@ class AuditRequest:
             )
 
     @classmethod
-    def from_extract_result(cls, extract_result: 'ExtractResult') -> 'AuditRequest':
+    def from_extract_result(cls, extract_result: Any) -> 'AuditRequest':
         """
         从 ExtractResult 转换为 AuditRequest
 
@@ -180,7 +187,7 @@ class AuditRequest:
             )
 
         # 获取并规范化 clauses
-        clauses_data = _normalize_clauses(data.get('clauses', []))
+        clauses_data = _normalize_clauses(data.get('clauses', []), validate=True)
 
         # 验证 clauses 不为空
         if not clauses_data:
@@ -286,46 +293,85 @@ def _normalize_field(value: Any) -> Optional[str]:
     return None
 
 
-def _normalize_clauses(clauses: Any) -> List[Dict[str, Any]]:
-    """规范化条款列表
+def _validate_clause_text(text: str, clause_index: int) -> str:
+    """验证单个条款文本"""
+    import logging
+    logger = logging.getLogger(__name__)
 
-    确保每个条款包含必需字段，同时保留原始数据。
+    if not text or not text.strip():
+        raise ValueError(f"条款 {clause_index + 1}: 文本为空")
 
-    转换规则：
-    - 如果 text 为空，尝试使用 title
-    - 保留 number, title, content, reference 等字段
-    - 保留原始数据以便后续使用
-    """
+    text = text.strip()
+
+    if len(text) < MIN_CLAUSE_LENGTH:
+        raise ValueError(f"条款 {clause_index + 1}: 文本过短 ({len(text)} < {MIN_CLAUSE_LENGTH})")
+
+    if len(text) > MAX_CLAUSE_LENGTH:
+        logger.warning(f"条款 {clause_index + 1}: 文本过长 ({len(text)} 字符)，已截断到 {MAX_CLAUSE_LENGTH}")
+        return text[:MAX_CLAUSE_LENGTH]
+
+    control_char_ratio = sum(1 for c in text if ord(c) < 32 and c not in '\n\r\t') / len(text)
+    if control_char_ratio > 0.01:
+        bad_chars = [c for c in text[:50] if ord(c) < 32 and c not in '\n\r\t']
+        raise ValueError(
+            f"条款 {clause_index + 1}: 包含过多控制字符 "
+            f"(hex: {[hex(ord(c)) for c in bad_chars[:5]]})"
+        )
+
+    return text
+
+
+def _normalize_clauses(clauses: Any, validate: bool = True) -> List[Dict[str, Any]]:
+    """规范化条款列表"""
+    import logging
+    logger = logging.getLogger(__name__)
+
     if not isinstance(clauses, list):
-        return []
+        raise ValueError(f"clauses 必须是列表，得到: {type(clauses)}")
+
+    if len(clauses) > MAX_CLAUSES_COUNT:
+        raise ValueError(f"条款数量超出限制 ({len(clauses)} > {MAX_CLAUSES_COUNT})")
 
     normalized = []
-    for clause in clauses:
+    total_length = 0
+
+    for idx, clause in enumerate(clauses):
         if not isinstance(clause, dict):
+            logger.warning(f"条款 {idx + 1}: 非字典类型，已跳过")
             continue
 
-        # 提取 text 字段
         text = clause.get('text', '')
         if not text:
-            # 如果 text 为空，尝试使用 title
             title = clause.get('title', '')
             text = title if title else ''
 
-        if not text:
-            continue
+        if validate:
+            try:
+                text = _validate_clause_text(text, idx)
+            except ValueError as e:
+                logger.warning(f"条款 {idx + 1}: {e}")
+                continue
 
-        # 构建规范化的条款，保留所有原始字段
+        total_length += len(text)
+        if total_length > MAX_TOTAL_TEXT_LENGTH:
+            logger.warning(f"条款文本总长度超出限制 ({total_length} > {MAX_TOTAL_TEXT_LENGTH})，停止处理")
+            break
+
         normalized_clause = {
             'text': text,
             'number': clause.get('number', ''),
-            'title': clause.get('title', ''),  # 保留标题
-            'content': clause.get('content', ''),  # 保留详细内容
-            'reference': clause.get('reference', ''),  # 保留引用
-            'original': clause,  # 保留完整的原始数据
+            'title': clause.get('title', ''),
+            'content': clause.get('content', ''),
+            'reference': clause.get('reference', ''),
+            'original': clause,
         }
 
         normalized.append(normalized_clause)
 
+    if not normalized:
+        raise ValueError("没有可审核的条款：所有条款均未通过验证")
+
+    logger.info(f"条款规范化完成: {len(normalized)}/{len(clauses)} 条通过验证")
     return normalized
 
 
@@ -371,11 +417,8 @@ def create_product_from_dict(product_info: Dict[str, Any]) -> Product:
 
     type_str = product_info.get('product_type', '')
 
-    # 尝试从产品类型字符串解析类别
-    # 优先使用中文名称匹配（get_category），如果返回 OTHER 则尝试代码匹配（from_code）
     category = get_category(type_str)
     if category == ProductCategory.OTHER and type_str:
-        # 可能是分类器代码，尝试使用 from_code
         category = from_code(type_str)
 
     return Product(
@@ -391,5 +434,4 @@ def create_product_from_dict(product_info: Dict[str, Any]) -> Product:
     )
 
 
-# 将工厂方法附加到 Product 类
 Product.from_dict = staticmethod(create_product_from_dict)

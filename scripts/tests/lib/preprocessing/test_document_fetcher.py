@@ -5,10 +5,10 @@ from lib.preprocessing.document_fetcher import fetch_feishu_document, DocumentFe
 def test_fetch_feishu_document_invalid_url():
     with pytest.raises(DocumentFetchError) as exc_info:
         fetch_feishu_document("https://example.com/not-a-feishu-url")
-    assert "Invalid Feishu document URL" in str(exc_info.value)
+    assert "不允许的域名" in str(exc_info.value)
 
 
 def test_fetch_feishu_document_missing_docx():
     with pytest.raises(DocumentFetchError) as exc_info:
         fetch_feishu_document("https://feishu.cn/docx/")
-    assert "Invalid Feishu document URL" in str(exc_info.value)
+    assert "无效的飞书 URL 格式" in str(exc_info.value)

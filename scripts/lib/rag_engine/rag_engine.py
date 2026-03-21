@@ -80,7 +80,7 @@ class RAGEngine:
 
     def initialize(self, force_rebuild: bool = False) -> bool:
         """
-        初始化查询引擎
+        初始化查询引擎（资源安全版本）
 
         Args:
             force_rebuild: 是否强制重建索引
@@ -89,21 +89,62 @@ class RAGEngine:
             bool: 初始化是否成功
         """
         with _engine_init_lock:
-            Settings.llm = self._llm
-            Settings.embed_model = self._embed_model
+            old_llm = getattr(Settings, 'llm', None)
+            old_embed = getattr(Settings, 'embed_model', None)
 
-            index = self.index_manager.create_index(
-                documents=None,
-                force_rebuild=force_rebuild
-            )
+            try:
+                Settings.llm = self._llm
+                Settings.embed_model = self._embed_model
 
-            if index is None:
-                logger.error("索引初始化失败")
+                index = self.index_manager.create_index(
+                    documents=None,
+                    force_rebuild=force_rebuild
+                )
+
+                if index is None:
+                    raise RuntimeError("索引初始化失败")
+
+                self._calculate_avg_doc_len(index)
+                self.query_engine = self.index_manager.create_query_engine()
+
+                if self.query_engine is None:
+                    raise RuntimeError("查询引擎创建失败")
+
+                logger.info("RAG 引擎初始化成功")
+                return True
+
+            except Exception as e:
+                logger.error(f"RAG 引擎初始化失败: {e}")
+                self._cleanup_resources(old_llm, old_embed)
+                self.query_engine = None
+                self._avg_doc_len = 100
                 return False
 
-            self._calculate_avg_doc_len(index)
-            self.query_engine = self.index_manager.create_query_engine()
-            return self.query_engine is not None
+    def _cleanup_resources(self, old_llm=None, old_embed=None) -> None:
+        """清理已分配的资源"""
+        try:
+            if old_llm is not None:
+                Settings.llm = old_llm
+            else:
+                if hasattr(Settings, 'llm'):
+                    delattr(Settings, 'llm')
+
+            if old_embed is not None:
+                Settings.embed_model = old_embed
+            else:
+                if hasattr(Settings, 'embed_model'):
+                    delattr(Settings, 'embed_model')
+
+            logger.debug("已清理 RAG 引擎资源")
+        except Exception as e:
+            logger.warning(f"清理资源时出错: {e}")
+
+    def cleanup(self) -> None:
+        """显式清理引擎资源"""
+        with _engine_init_lock:
+            self._cleanup_resources()
+            self.query_engine = None
+            logger.info("RAG 引擎已清理")
 
     def _calculate_avg_doc_len(self, index) -> None:
         doc_lengths = []

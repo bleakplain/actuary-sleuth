@@ -14,8 +14,9 @@ import json
 import os
 import re
 import sys
+import threading
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Tuple
 
 
 # 配置文件路径
@@ -71,6 +72,50 @@ class ReportConfig:
     def default_format(self) -> str:
         """默认报告格式"""
         return self._config.get('default_format', 'feishu')
+
+    @property
+    def grade_thresholds(self) -> List[Tuple[int, str]]:
+        """获取评级阈值"""
+        default_thresholds = [(90, '优秀'), (75, '良好'), (60, '合格')]
+        thresholds_config = self._config.get('grading', {}).get('thresholds', [])
+        if thresholds_config:
+            return [(t.get('score'), t.get('grade')) for t in thresholds_config]
+        return default_thresholds
+
+    @property
+    def default_grade(self) -> str:
+        """获取默认评级"""
+        return self._config.get('grading', {}).get('default_grade', '不合格')
+
+    @property
+    def high_violations_limit(self) -> int:
+        """获取严重违规限制"""
+        return self._config.get('violations', {}).get('high_limit', 20)
+
+    @property
+    def medium_violations_limit(self) -> int:
+        """获取中等违规限制"""
+        return self._config.get('violations', {}).get('medium_limit', 10)
+
+    @property
+    def p1_remediation_limit(self) -> int:
+        """获取 P1 整改限制"""
+        return self._config.get('violations', {}).get('p1_remediation_limit', 5)
+
+    def get_product_thresholds(self, product_category: str) -> Optional[List[Tuple[int, str]]]:
+        """获取产品特定的评级阈值"""
+        product_config = self._config.get('product_specific', {}).get(product_category)
+        if product_config and 'grading' in product_config:
+            thresholds_config = product_config['grading'].get('thresholds', [])
+            return [(t.get('score'), t.get('grade')) for t in thresholds_config]
+        return None
+
+    def get_product_violation_limits(self, product_category: str) -> Optional[Dict[str, int]]:
+        """获取产品特定的违规限制"""
+        product_config = self._config.get('product_specific', {}).get(product_category)
+        if product_config and 'violations' in product_config:
+            return product_config['violations']
+        return None
 
 
 class AuditConfig:
@@ -396,11 +441,12 @@ class Config:
 # ===== 全局配置实例（单例模式）=====
 
 _global_config: Optional[Config] = None
+_config_lock = threading.Lock()
 
 
 def get_config(config_path: Optional[Path] = None) -> Config:
     """
-    获取全局配置实例（单例模式）
+    获取全局配置实例（线程安全单例模式）
 
     Args:
         config_path: 可选的自定义配置路径
@@ -410,16 +456,35 @@ def get_config(config_path: Optional[Path] = None) -> Config:
     """
     global _global_config
 
-    if _global_config is None or config_path is not None:
-        _global_config = Config(config_path)
+    if _global_config is None or (config_path is not None and config_path != _global_config._config_path):
+        with _config_lock:
+            if _global_config is None or config_path is not None:
+                if config_path is not None and _global_config is not None:
+                    if config_path != _global_config._config_path:
+                        _global_config = Config(config_path)
+                else:
+                    _global_config = Config(config_path)
 
     return _global_config
 
 
 def reset_config() -> None:
-    """重置全局配置（主要用于测试）"""
+    """重置全局配置（线程安全）"""
     global _global_config
-    _global_config = None
+    with _config_lock:
+        _global_config = None
+
+
+def reload_config() -> Config:
+    """重新加载配置文件（线程安全）"""
+    global _global_config
+    with _config_lock:
+        if _global_config is not None:
+            config_path = _global_config._config_path
+            _global_config = Config(config_path)
+        else:
+            _global_config = Config()
+    return _global_config
 
 
 def load_config() -> Dict[str, Any]:

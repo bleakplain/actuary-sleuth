@@ -23,28 +23,41 @@ DEFAULT_CATEGORY = "未分类"
 
 
 def _parse_json_response(response: str, context: str = "") -> Dict[str, Any]:
-    """安全解析 LLM JSON 响应"""
-    try:
-        return json.loads(response)
-    except json.JSONDecodeError as e:
-        # 尝试提取 JSON（处理 markdown 代码块）
-        json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
-        if json_match:
-            try:
-                return json.loads(json_match.group(1))
-            except json.JSONDecodeError:
-                pass
+    """安全解析 LLM JSON 响应（增强版）"""
 
-        # 尝试提取第一个 JSON 对象
-        first_brace = response.find('{')
-        last_brace = response.rfind('}')
-        if first_brace != -1 and last_brace != -1:
-            try:
-                return json.loads(response[first_brace:last_brace + 1])
-            except json.JSONDecodeError:
-                pass
+    parsers = [
+        lambda r: json.loads(r),
+        lambda r: json.loads(re.search(r'```json\s*(.*?)\s*```', r, re.DOTALL).group(1)),
+        lambda r: json.loads(re.search(r'```\s*(.*?)\s*```', r, re.DOTALL).group(1)),
+        lambda r: json.loads(r[r.find('{'):r.rfind('}') + 1]),
+        lambda r: json.loads(r[r.find('['):r.rfind(']') + 1]),
+        lambda r: json.loads(_clean_llm_output(r)),
+    ]
 
-        raise ValueError(f"JSON 解析失败: {e}, 上下文: {context[:100]}")
+    errors = []
+
+    for i, parser in enumerate(parsers, 1):
+        try:
+            result = parser(response)
+            if not isinstance(result, dict):
+                raise ValueError(f"解析结果不是字典: {type(result)}")
+            if i > 1:
+                logger.debug(f"使用策略 {i} 成功解析 LLM 响应")
+            return result
+        except Exception as e:
+            errors.append(f"策略{i}: {type(e).__name__}: {str(e)[:100]}")
+            continue
+
+    logger.error(f"JSON 解析失败，尝试了 {len(errors)} 种策略: {errors}")
+    raise ValueError(f"无法解析 LLM 响应为 JSON")
+
+
+def _clean_llm_output(text: str) -> str:
+    """清理 LLM 输出中的常见噪音"""
+    text = re.sub(r'```(?:json)?\s*', '', text)
+    text = re.sub(r'\s*```', '', text)
+    text = text.strip()
+    return text
 
 
 @dataclass

@@ -130,3 +130,8 @@ class EvaluationContext:
             low_violations=low_violations,
             regulation_basis=regulation_basis or []
         )
+
+    @classmethod
+    def from_product(cls, product: Product) -> 'EvaluationContext':
+        """从产品创建上下文"""
+        return cls(product=product)

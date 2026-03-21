@@ -14,7 +14,7 @@ ReportGenerationTemplate类：使用模板方法模式生成审核报告
 4. 生成内容 (_generate_content)
 5. 生成块 (_generate_blocks)
 """
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 
 from lib.config import get_config, Config
@@ -44,22 +44,6 @@ class ReportGenerationTemplate:
     - 使用 audit 的 regulations_used，不再使用硬编码
     """
 
-    # ========== 常量定义 ==========
-
-    # 评级阈值
-    GRADE_THRESHOLDS = [
-        (90, '优秀'),
-        (75, '良好'),
-        (60, '合格')
-    ]
-    GRADE_DEFAULT = '不合格'
-
-    # 严重违规数量限制
-    HIGH_VIOLATIONS_LIMIT = 20
-    MEDIUM_VIOLATIONS_LIMIT = 10
-    P1_REMEDIATION_MEDIUM_LIMIT = 5
-
-    # overall_assessment 到 grade 的映射
     ASSESSMENT_TO_GRADE = {
         '通过': '优秀',
         '有条件通过': '良好',
@@ -76,6 +60,32 @@ class ReportGenerationTemplate:
         self.config = config or get_config()
         self.report_id = None
         self.remediation_strategies = RemediationStrategies()
+        self._load_thresholds()
+
+    def _load_thresholds(self):
+        """从配置加载阈值"""
+        self.GRADE_THRESHOLDS = self.config.report.grade_thresholds
+        self.GRADE_DEFAULT = self.config.report.default_grade
+        self.HIGH_VIOLATIONS_LIMIT = self.config.report.high_violations_limit
+        self.MEDIUM_VIOLATIONS_LIMIT = self.config.report.medium_violations_limit
+        self.P1_REMEDIATION_MEDIUM_LIMIT = self.config.report.p1_remediation_limit
+
+    def _apply_product_config(self, context: EvaluationContext):
+        """应用产品特定配置"""
+        product_category = getattr(context.product, 'category', None)
+        if product_category:
+            product_thresholds = self.config.report.get_product_thresholds(
+                product_category.value if hasattr(product_category, 'value') else product_category
+            )
+            if product_thresholds:
+                self.GRADE_THRESHOLDS = product_thresholds
+
+            product_limits = self.config.report.get_product_violation_limits(
+                product_category.value if hasattr(product_category, 'value') else product_category
+            )
+            if product_limits:
+                self.HIGH_VIOLATIONS_LIMIT = product_limits.get('high_limit', self.HIGH_VIOLATIONS_LIMIT)
+                self.MEDIUM_VIOLATIONS_LIMIT = product_limits.get('medium_limit', self.MEDIUM_VIOLATIONS_LIMIT)
 
     def generate(
         self,
@@ -95,6 +105,9 @@ class ReportGenerationTemplate:
         # 验证输入
         if not isinstance(context, EvaluationContext):
             raise TypeError(f"context must be EvaluationContext, got {type(context)}")
+
+        # 应用产品特定配置
+        self._apply_product_config(context)
 
         # 生成报告ID
         self.report_id = IDGenerator.generate_report()
@@ -390,7 +403,7 @@ class ReportGenerationTemplate:
                 clause_text = v.get('clause_text_preview', v.get('clause_text', '')[:80])
                 description = v.get('description', '未知')
                 # 使用 audit 的 regulation_citation
-                regulation = v.get('regulation_citation', self._get_regulation_basis(v.get('category', '')))
+                regulation = v.get('regulation_citation', self._get_regulation_basis(v))
                 # 合并条款引用和原文
                 if clause_ref and not clause_ref.startswith('段落'):
                     full_clause = f"{clause_ref}:{clause_text}"
@@ -409,7 +422,7 @@ class ReportGenerationTemplate:
                 # 优先使用预览字段，如果没有则回退到完整文本并截断
                 clause_text = v.get('clause_text_preview', v.get('clause_text', '')[:80])
                 description = v.get('description', '未知')
-                regulation = v.get('regulation_citation', self._get_regulation_basis(v.get('category', '')))
+                regulation = v.get('regulation_citation', self._get_regulation_basis(v))
                 # 合并条款引用和原文
                 if clause_ref and not clause_ref.startswith('段落'):
                     full_clause = f"{clause_ref}:{clause_text}"
@@ -568,7 +581,7 @@ class ReportGenerationTemplate:
                 clause_ref = v.get('clause_reference', '')
                 clause_text = v.get('clause_text', '')[:80]
                 description = v.get('description', '未知')
-                regulation = v.get('regulation_citation', self._get_regulation_basis(v.get('category', '')))
+                regulation = v.get('regulation_citation', self._get_regulation_basis(v))
                 # 合并条款引用和原文
                 if clause_ref and not clause_ref.startswith('段落'):
                     full_clause = f"{clause_ref}:{clause_text}"
@@ -589,7 +602,7 @@ class ReportGenerationTemplate:
                 # 优先使用预览字段，如果没有则回退到完整文本并截断
                 clause_text = v.get('clause_text_preview', v.get('clause_text', '')[:80])
                 description = v.get('description', '未知')
-                regulation = v.get('regulation_citation', self._get_regulation_basis(v.get('category', '')))
+                regulation = v.get('regulation_citation', self._get_regulation_basis(v))
                 # 合并条款引用和原文
                 if clause_ref and not clause_ref.startswith('段落'):
                     full_clause = f"{clause_ref}:{clause_text}"
@@ -682,15 +695,25 @@ class ReportGenerationTemplate:
         else:
             return "产品不合格,不建议提交审核"
 
-    def _get_regulation_basis(self, category: str) -> str:
-        """根据违规类别返回法规依据(包含具体条款内容)
+    def _get_regulation_basis(self, violation: Dict[str, Any], category: str = "") -> str:
+        """获取违规的法规依据
 
         Args:
-            category: 违规类别
+            violation: 违规记录
+            category: 违规类别（向后兼容）
 
         Returns:
-            str: 法规依据(法规名称+条款+内容)
+            str: 法规依据
         """
+        if 'regulation_citation' in violation and violation['regulation_citation']:
+            return violation['regulation_citation']
+
+        if 'regulation' in violation and violation['regulation']:
+            return violation['regulation']
+
+        if not category:
+            category = violation.get('category', '')
+
         regulation_map = {
             '合规性': '《保险法》第十七条:订立保险合同,采用保险人提供的格式条款的,保险人向投保人提供的投保单应当附格式条款,保险人应当向投保人说明合同的内容。',
             '信息披露': '《人身保险公司保险条款和保险费率管理办法》第六条:保险条款应当符合下列要求:(一)结构清晰、文字准确、表述严谨、通俗易懂;(二)要素完整、内容完备',
