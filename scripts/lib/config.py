@@ -143,29 +143,20 @@ class LLMConfig:
 
     @property
     def api_key(self) -> Optional[str]:
-        """API 密钥"""
-        # 优先级：配置文件 > 环境变量 > Claude配置文件
-        if self._config.get('api_key'):
-            return self._config.get('api_key')
+        env_key = os.getenv('ZHIPU_API_KEY')
+        if env_key:
+            return env_key
 
-        if os.getenv('ZHIPU_API_KEY'):
-            return os.getenv('ZHIPU_API_KEY')
-
-        # 尝试从 Claude 配置文件读取
-        try:
-            claude_config_path = Path.home() / '.claude' / 'settings.json'
-            if claude_config_path.exists():
-                with open(claude_config_path, 'r', encoding='utf-8') as f:
-                    claude_config = json.load(f)
-                    # Claude 使用 ANTHROPIC_API_KEY 存储 API 密钥
-                    if 'env' in claude_config and 'ANTHROPIC_API_KEY' in claude_config['env']:
-                        api_key = claude_config['env']['ANTHROPIC_API_KEY']
-                        # 智谱API密钥格式：两段字母数字，用"."分隔，总长度>30
-                        if api_key and re.match(r'^[A-Za-z0-9]+\.[A-Za-z0-9]+$', api_key) and len(api_key) > 30:
-                            return api_key
-        except Exception as e:
-            if os.getenv('DEBUG'):
-                print(f"Warning: Failed to read Claude config: {e}")
+        config_key = self._config.get('api_key')
+        if config_key:
+            import warnings
+            warnings.warn(
+                "API key found in config file. "
+                "Please use environment variable ZHIPU_API_KEY instead.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+            return config_key
 
         return None
 

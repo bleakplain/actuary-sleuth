@@ -68,17 +68,41 @@ class AnalyzedResult:
 
 @dataclass(frozen=True)
 class EvaluationResult:
-    """
-    综合评估结果
-
-    最终评分和评级，包含所有前置数据。
-    """
     analyzed: AnalyzedResult
-
-    # 评估输出
     score: int
     grade: str
     summary: Dict[str, Any]
+
+    def get_violations(self) -> List[Dict[str, Any]]:
+        return self.analyzed.checked.violations
+
+    def get_violation_count(self) -> int:
+        return len(self.analyzed.checked.violations)
+
+    def get_violation_summary(self) -> Dict[str, int]:
+        violations = self.analyzed.checked.violations
+        return {
+            'high': sum(1 for v in violations if v.get('severity') == 'high'),
+            'medium': sum(1 for v in violations if v.get('severity') == 'medium'),
+            'low': sum(1 for v in violations if v.get('severity') == 'low'),
+        }
+
+    def to_dict(self) -> Dict[str, Any]:
+        preprocessed = self.analyzed.checked.preprocessed
+        checked = self.analyzed.checked
+        analyzed = self.analyzed
+
+        return {
+            'success': True,
+            'audit_id': preprocessed.audit_id,
+            'violations': checked.violations,
+            'violation_count': self.get_violation_count(),
+            'violation_summary': self.get_violation_summary(),
+            'pricing': analyzed.pricing_analysis,
+            'score': self.score,
+            'grade': self.grade,
+            'summary': self.summary,
+        }
 
 
 # ==================== 工厂函数 ====================

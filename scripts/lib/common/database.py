@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-数据库操作模块
-"""
 import logging
 import sqlite3
 import json
 import inspect
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Any
+from typing import Callable
+from lib.common.exceptions import DatabaseError, RecordNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +70,6 @@ def get_connection():
 
 
 def find_regulation(article_number):
-    """精确查找法规条款"""
     try:
         with get_connection() as conn:
             cur = conn.cursor()
@@ -84,14 +80,13 @@ def find_regulation(article_number):
             row = cur.fetchone()
             if row:
                 return dict(row)
-            return None
+            raise RecordNotFoundError(f"Regulation not found: {article_number}")
     except sqlite3.Error as e:
         logger.error(f"查找法规失败: {e}")
-        return None
+        raise DatabaseError(f"Failed to find regulation: {e}")
 
 
 def search_regulations(keyword):
-    """关键词搜索法规"""
     try:
         with get_connection() as conn:
             cur = conn.cursor()
@@ -104,11 +99,10 @@ def search_regulations(keyword):
             return [dict(row) for row in rows]
     except sqlite3.Error as e:
         logger.error(f"搜索法规失败: {e}")
-        return []
+        raise DatabaseError(f"Failed to search regulations: {e}")
 
 
 def get_negative_list():
-    """获取负面清单"""
     try:
         with get_connection() as conn:
             cur = conn.cursor()
@@ -117,11 +111,10 @@ def get_negative_list():
             return [dict(row) for row in rows]
     except sqlite3.Error as e:
         logger.error(f"获取负面清单失败: {e}")
-        return []
+        raise DatabaseError(f"Failed to get negative list: {e}")
 
 
 def save_audit_record(record):
-    """保存审核记录"""
     try:
         with get_connection() as conn:
             cur = conn.cursor()
@@ -138,11 +131,10 @@ def save_audit_record(record):
             return True
     except sqlite3.Error as e:
         logger.error(f"保存审核记录失败: {e}")
-        return False
+        raise DatabaseError(f"Failed to save audit record: {e}")
 
 
 def add_regulation(regulation_data):
-    """添加法规记录"""
     try:
         with get_connection() as conn:
             cur = conn.cursor()
@@ -162,11 +154,10 @@ def add_regulation(regulation_data):
             return True
     except sqlite3.Error as e:
         logger.error(f"添加法规失败: {e}")
-        return False
+        raise DatabaseError(f"Failed to add regulation: {e}")
 
 
 def add_negative_list_rule(rule_data):
-    """添加负面清单规则"""
     try:
         with get_connection() as conn:
             cur = conn.cursor()
@@ -189,7 +180,7 @@ def add_negative_list_rule(rule_data):
             return True
     except sqlite3.Error as e:
         logger.error(f"添加负面清单规则失败: {e}")
-        return False
+        raise DatabaseError(f"Failed to add negative list rule: {e}")
 
 
 # ========== 数据库连接管理辅助工具（内部使用）==========
