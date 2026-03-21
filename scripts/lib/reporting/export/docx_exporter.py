@@ -14,7 +14,7 @@ from typing import Dict, Any, Optional, TYPE_CHECKING
 from pathlib import Path
 
 from lib.exceptions import ExportException, ValidationException
-from lib.logger import get_logger
+from lib.common.logger import get_logger
 from .docx_generator import _DocxGenerator
 from .feishu_pusher import _FeishuPusher
 from .result import ExportResult, GenerationResult, PushResult

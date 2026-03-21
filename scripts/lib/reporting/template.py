@@ -18,7 +18,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 
 from lib.config import get_config, Config
-from lib.id_generator import IDGenerator
+from lib.common.id_generator import IDGenerator
 from lib.reporting.strategies import RemediationStrategies
 from lib.reporting.model import EvaluationContext
 from lib.common.models import Product

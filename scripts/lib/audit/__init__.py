@@ -7,5 +7,12 @@
 """
 
 from .auditor import ComplianceAuditor, AuditIssue, AuditResult, AuditOutcome
+from .evaluation import calculate_result
 
-__all__ = ['ComplianceAuditor', 'AuditIssue', 'AuditResult', 'AuditOutcome']
+__all__ = [
+    'ComplianceAuditor',
+    'AuditIssue',
+    'AuditResult',
+    'AuditOutcome',
+    'calculate_result',
+]

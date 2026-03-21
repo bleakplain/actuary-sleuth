@@ -20,7 +20,7 @@ from typing import Dict, List, Any, Optional
 from pathlib import Path
 
 from lib.exceptions import ExportException
-from lib.logger import get_logger
+from lib.common.logger import get_logger
 from .constants import DocxConstants
 from .result import GenerationResult
 from .validation import validate_evaluation_context, validate_title

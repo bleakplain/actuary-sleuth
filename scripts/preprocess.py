@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 
 from lib.config import get_config
-from lib.id_generator import IDGenerator
+from lib.common.id_generator import IDGenerator
 from lib.preprocessing import DocumentExtractor
 from lib.llm_client import LLMClientFactory
 

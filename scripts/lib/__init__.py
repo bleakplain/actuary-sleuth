@@ -5,11 +5,15 @@ Infrastructure package init
 """
 from .common.database import get_connection
 from .config import get_config
-from .id_generator import IDGenerator
+from .common.id_generator import IDGenerator
 from .exceptions import *
-from .logger import AuditLogger, AuditStepLogger, get_logger, get_audit_logger
-from .ollama import OllamaClient
-from .vector_store import VectorDB
+from .common.logger import AuditLogger, AuditStepLogger, get_logger, get_audit_logger
+
+# VectorDB - 延迟导入以避免依赖问题
+try:
+    from .rag_engine.vector_store import VectorDB
+except ImportError:
+    VectorDB = None
 
 __all__ = [
     'get_connection',
@@ -37,7 +41,4 @@ __all__ = [
     'AuditStepLogger',
     'get_logger',
     'get_audit_logger',
-    # AI & Vector Store
-    'OllamaClient',
-    'VectorDB'
 ]

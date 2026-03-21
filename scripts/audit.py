@@ -8,9 +8,9 @@ from typing import Dict, Any
 sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
 from lib.preprocessing.document_fetcher import fetch_feishu_document, DocumentFetchError
-from lib.evaluation import calculate_result
-from lib.id_generator import IDGenerator
-from lib.logger import get_audit_logger
+from lib.audit.evaluation import calculate_result
+from lib.common.id_generator import IDGenerator
+from lib.common.logger import get_audit_logger
 from lib.common.date_utils import get_current_timestamp
 from lib.common.database import save_audit_record
 from lib.common.audit import (

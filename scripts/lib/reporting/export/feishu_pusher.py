@@ -18,7 +18,7 @@ from typing import Dict, Any, Optional
 
 from lib.exceptions import ExportException
 from lib.config import get_config
-from lib.logger import get_logger
+from lib.common.logger import get_logger
 from .result import PushResult
 from .validation import validate_file_path
 

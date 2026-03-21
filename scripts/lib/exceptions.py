@@ -130,6 +130,11 @@ class AuditStepException(ProcessingException):
 
 # ========== 数据访问异常 ==========
 
+class DatabaseError(ActuarySleuthException):
+    """数据库错误异常（简化版）"""
+    pass
+
+
 class DatabaseException(ActuarySleuthException):
     """数据库操作异常"""
 
