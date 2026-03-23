@@ -4,7 +4,7 @@ import re
 import subprocess
 from contextlib import contextmanager
 from typing import Generator
-from lib.common.exceptions import DocumentPreprocessException as DocumentFetchError
+from lib.common.exceptions import DocumentFetchError
 
 
 @contextmanager
@@ -30,6 +30,24 @@ ALLOWED_DOMAINS = {
 }
 
 SAFE_URL_TEMPLATE = 'https://feishu.cn/docx/{token}'
+
+FEISHU2MD_CMD = 'feishu2md'
+MAX_SAFE_TIMEOUT = 300
+
+
+def _validate_command_args(url: str, timeout: int) -> None:
+    if not url.startswith('https://'):
+        raise DocumentFetchError(f"URL 必须使用 HTTPS: {url}")
+
+    if not isinstance(timeout, int) or timeout <= 0:
+        raise DocumentFetchError(f"无效的超时值: {timeout}")
+
+    if timeout > MAX_SAFE_TIMEOUT:
+        raise DocumentFetchError(f"超时值过大（最大 {MAX_SAFE_TIMEOUT} 秒）: {timeout}")
+
+    dangerous_chars = [';', '&', '|', '$', '`', '\n', '\r']
+    if any(char in url for char in dangerous_chars):
+        raise DocumentFetchError(f"URL 包含危险字符")
 
 
 def _validate_feishu_url(document_url: str) -> str:
@@ -72,28 +90,30 @@ def fetch_feishu_document(
     output_dir: str = "/tmp",
     timeout: int = 30
 ) -> str:
-    """获取飞书文档内容"""
     doc_token = _validate_feishu_url(document_url)
     safe_url = SAFE_URL_TEMPLATE.format(token=doc_token)
+    _validate_command_args(safe_url, timeout)
     md_filename = f"{doc_token}.md"
+    md_file_path = None
 
     try:
         os.makedirs(output_dir, exist_ok=True)
 
         with _change_directory(output_dir):
             result = subprocess.run(
-                ['feishu2md', 'download', safe_url],
+                [FEISHU2MD_CMD, 'download', safe_url],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                check=False
+                check=False,
+                shell=False
             )
 
             if result.returncode != 0:
                 error_msg = result.stderr or result.stdout or "未知错误"
                 raise subprocess.CalledProcessError(
                     result.returncode,
-                    ['feishu2md', 'download', safe_url],
+                    [FEISHU2MD_CMD, 'download', safe_url],
                     result.stderr,
                     result.stdout
                 )
@@ -122,7 +142,7 @@ def fetch_feishu_document(
     except subprocess.CalledProcessError as e:
         error_msg = f"feishu2md 下载失败 (退出码: {e.returncode})"
         if e.stderr:
-            error_msg += f"\n错误输出: {e.stderr}"
+            error_msg += f"\n错误输出: {e.stderr[:500]}"
         raise DocumentFetchError(error_msg) from e
 
     except subprocess.TimeoutExpired:
@@ -136,3 +156,10 @@ def fetch_feishu_document(
 
     except OSError as e:
         raise DocumentFetchError(f"系统错误: {e}")
+
+    finally:
+        if md_file_path and os.path.exists(md_file_path):
+            try:
+                os.remove(md_file_path)
+            except OSError:
+                pass

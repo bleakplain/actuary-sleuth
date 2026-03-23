@@ -61,7 +61,7 @@ from .models import (
     RegulationDocument,
 )
 
-from .normalizer import Normalizer
+from .normalizer import DocumentNormalizer
 from .classifier import ProductClassifier
 from .extractor_selector import ExtractorSelector
 from .fast_extractor import FastExtractor, FastExtractionFailed
@@ -96,7 +96,7 @@ __all__ = [
     'RegulationDocument',
 
     # Core Components - 产品文档
-    'Normalizer',
+    'DocumentNormalizer',
     'ProductClassifier',
     'ExtractorSelector',
     'FastExtractor',

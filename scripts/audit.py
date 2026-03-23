@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import logging
+import os
 import sys
 from pathlib import Path
 from typing import Dict, Any
@@ -21,6 +23,10 @@ from lib.common.audit import (
 from lib.common.models import Product
 from lib.common.product import map_to_scoring_type
 from lib.common.exceptions import AuditStepException
+from lib.common.error_handling import create_error_response, is_user_error
+
+
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -33,12 +39,28 @@ def main():
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except DocumentFetchError as e:
-        error_result = {"success": False, "error": str(e), "error_type": "DocumentFetchError"}
-        print(json.dumps(error_result, ensure_ascii=False), file=sys.stderr)
+        error_response = create_error_response(e)
+        print(json.dumps(error_response, ensure_ascii=False), file=sys.stderr)
+        logger.warning(f"文档获取失败: {e}")
         return 1
+    except KeyboardInterrupt:
+        error_response = {
+            "success": False,
+            "error_code": "E4999",
+            "error_message": "操作已取消"
+        }
+        print(json.dumps(error_response, ensure_ascii=False), file=sys.stderr)
+        return 130
     except Exception as e:
-        error_result = {"success": False, "error": str(e), "error_type": type(e).__name__}
-        print(json.dumps(error_result, ensure_ascii=False), file=sys.stderr)
+        debug_mode = os.getenv('DEBUG', '').lower() == 'true'
+        error_response = create_error_response(e, include_details=debug_mode)
+        print(json.dumps(error_response, ensure_ascii=False), file=sys.stderr)
+
+        if debug_mode:
+            logger.exception("调试模式：显示详细错误信息")
+        else:
+            logger.error(f"系统错误: {type(e).__name__}")
+
         return 1
 
 

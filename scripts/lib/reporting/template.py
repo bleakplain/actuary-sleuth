@@ -16,6 +16,7 @@ ReportGenerationTemplate类：使用模板方法模式生成审核报告
 """
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
+from dataclasses import replace
 
 from lib.config import get_config, Config
 from lib.common.id_generator import IDGenerator
@@ -113,8 +114,8 @@ class ReportGenerationTemplate:
         self.report_id = IDGenerator.generate_report()
 
         # 步骤2-4: 使用 audit 的 overall_assessment，确定评级，统计摘要
-        self._calculate_grade(context)
-        self._summarize_violations(context)
+        context = self._calculate_grade(context)
+        context = self._summarize_violations(context)
 
         # 步骤5-6: 生成内容
         content = self._generate_content(context)
@@ -131,60 +132,44 @@ class ReportGenerationTemplate:
             'metadata': self._generate_metadata(context)
         }
 
-    def _calculate_grade(self, context: EvaluationContext) -> None:
-        """
-        确定评级（根据 score 计算）
-
-        Args:
-            context: 评估上下文，结果存储到 context.grade
-        """
+    def _calculate_grade(self, context: EvaluationContext) -> EvaluationContext:
+        grade = self.GRADE_DEFAULT
         if context.score is not None:
-            # 根据 score 计算评级
-            for threshold, grade in self.GRADE_THRESHOLDS:
+            for threshold, grade_value in self.GRADE_THRESHOLDS:
                 if context.score >= threshold:
-                    context.grade = grade
+                    grade = grade_value
                     break
-            else:
-                context.grade = self.GRADE_DEFAULT
-        else:
-            context.grade = self.GRADE_DEFAULT
+        return replace(context, grade=grade)
 
-    def _summarize_violations(self, context: EvaluationContext) -> None:
-        """
-        统计违规摘要并分组
+    def _summarize_violations(self, context: EvaluationContext) -> EvaluationContext:
+        high_violations = context.high_violations or [v for v in context.violations if v.get('severity') == 'high']
+        medium_violations = context.medium_violations or [v for v in context.violations if v.get('severity') == 'medium']
+        low_violations = context.low_violations or [v for v in context.violations if v.get('severity') == 'low']
 
-        Args:
-            context: 评估上下文，结果存储到 context.summary 和分组违规项
-        """
-        # 如果已经分组（from_evaluation_result 已处理），直接使用
-        # 否则进行分组
-        if not context.high_violations:
-            context.high_violations = [v for v in context.violations if v.get('severity') == 'high']
-            context.medium_violations = [v for v in context.violations if v.get('severity') == 'medium']
-            context.low_violations = [v for v in context.violations if v.get('severity') == 'low']
-
-        # 统计违规数量（使用分组后的结果，提高性能）
         violation_summary = {
-            'high': len(context.high_violations),
-            'medium': len(context.medium_violations),
-            'low': len(context.low_violations)
+            'high': len(high_violations),
+            'medium': len(medium_violations),
+            'low': len(low_violations)
         }
 
-        # 统计定价问题
         pricing_issues = self._count_pricing_issues(context.pricing_analysis)
 
-        # 使用默认审核依据
-        if not context.regulation_basis:
-            context.regulation_basis = self._generate_default_regulation_basis()
+        regulation_basis = context.regulation_basis or self._generate_default_regulation_basis()
 
-        # 存储摘要
-        context.summary = {
+        summary = {
             'total_violations': len(context.violations),
             'violation_severity': violation_summary,
             'pricing_issues': pricing_issues,
             'has_critical_issues': violation_summary['high'] > 0 or pricing_issues > 1,
             'has_issues': len(context.violations) > 0 or pricing_issues > 0,
         }
+
+        return replace(context,
+                       high_violations=high_violations,
+                       medium_violations=medium_violations,
+                       low_violations=low_violations,
+                       regulation_basis=regulation_basis,
+                       summary=summary)
 
     def _count_pricing_issues(self, pricing_analysis: Dict[str, Any]) -> int:
         """

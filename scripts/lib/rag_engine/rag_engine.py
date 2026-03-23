@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-RAG 查询引擎
+RAG 查询引擎（线程安全版本）
 统一的检索增强生成引擎，通过策略模式支持不同使用场景
 """
 import logging
@@ -22,48 +22,54 @@ from lib.llm import BaseLLMClient, LLMClientFactory
 
 logger = logging.getLogger(__name__)
 
-# 引擎初始化锁，防止并发初始化时的 Settings 竞争
 _engine_init_lock = threading.Lock()
 
 
+class ThreadLocalSettings:
+    """线程本地 Settings 管理"""
+
+    def __init__(self):
+        self._local = threading.local()
+        self._lock = threading.Lock()
+        self._global_backup = {}
+
+    def set(self, llm, embed_model) -> None:
+        """设置当前线程的配置"""
+        with self._lock:
+            if not self._global_backup:
+                self._global_backup['llm'] = getattr(Settings, 'llm', None)
+                self._global_backup['embed_model'] = getattr(Settings, 'embed_model', None)
+
+        if not hasattr(self._local, 'initialized'):
+            self._local.llm = llm
+            self._local.embed_model = embed_model
+            self._local.initialized = True
+
+    def apply(self) -> None:
+        """应用线程配置到全局 Settings"""
+        if hasattr(self._local, 'initialized') and self._local.initialized:
+            Settings.llm = self._local.llm
+            Settings.embed_model = self._local.embed_model
+
+    def reset(self) -> None:
+        """重置为全局默认配置"""
+        with self._lock:
+            if self._global_backup:
+                Settings.llm = self._global_backup['llm']
+                Settings.embed_model = self._global_backup['embed_model']
+
+
+_thread_settings = ThreadLocalSettings()
+
+
 class RAGEngine:
-    """
-    统一的 RAG 查询引擎
-
-    通过策略模式（llm_provider）支持不同场景：
-    - QA 场景：使用快速响应模型 (glm-4-flash)
-    - 审计场景：使用高质量分析模型 (glm-4-plus)
-
-    使用示例:
-        # 方式1: 使用工厂函数（推荐）
-        from lib.rag_engine import create_qa_engine, create_audit_engine
-
-        qa_engine = create_qa_engine()
-        answer = qa_engine.ask("健康保险等待期有什么规定？")
-
-        audit_engine = create_audit_engine()
-        results = audit_engine.search("产品条款是否符合规定")
-
-        # 方式2: 直接构造
-        from lib.rag_engine import RAGEngine
-        from lib.llm import LLMClientFactory
-
-        engine = RAGEngine(llm_provider=LLMClientFactory.get_qa_llm)
-    """
+    """统一的 RAG 查询引擎"""
 
     def __init__(
         self,
         config: RAGConfig = None,
         llm_provider: Callable[[], BaseLLMClient] = None
     ):
-        """
-        初始化 RAG 引擎
-
-        Args:
-            config: RAG 配置，默认使用 RAGConfig()
-            llm_provider: 返回 LLM 客户端的可调用对象
-                         默认使用 QA 场景的 LLM (glm-4-flash)
-        """
         self.config = config or RAGConfig()
         self.llm_provider = llm_provider or LLMClientFactory.get_qa_llm
         self.index_manager = VectorIndexManager(self.config)
@@ -72,6 +78,9 @@ class RAGEngine:
         self._llm = None
         self._embed_model = None
         self._avg_doc_len = 100
+        self._initialized = False
+        self._init_lock = threading.Lock()
+
         self._setup_llm()
 
     def _setup_llm(self):
@@ -82,26 +91,18 @@ class RAGEngine:
         self._embed_model = get_embedding_model(embed_config)
 
     def initialize(self, force_rebuild: bool = False) -> bool:
-        """
-        初始化查询引擎（资源安全版本）
-
-        Args:
-            force_rebuild: 是否强制重建索引
-
-        Returns:
-            bool: 初始化是否成功
-        """
+        """初始化查询引擎（线程安全版本）"""
         if Settings is None:
             logger.error("llama_index 未安装，无法初始化 RAG 引擎")
             return False
 
-        with _engine_init_lock:
-            old_llm = getattr(Settings, 'llm', None)
-            old_embed = getattr(Settings, 'embed_model', None)
+        with self._init_lock:
+            if self._initialized:
+                return True
 
             try:
-                Settings.llm = self._llm
-                Settings.embed_model = self._embed_model
+                _thread_settings.set(self._llm, self._embed_model)
+                _thread_settings.apply()
 
                 index = self.index_manager.create_index(
                     documents=None,
@@ -117,34 +118,17 @@ class RAGEngine:
                 if self.query_engine is None:
                     raise RuntimeError("查询引擎创建失败")
 
+                self._initialized = True
                 logger.info("RAG 引擎初始化成功")
                 return True
 
-            except Exception as e:
+            except (RuntimeError, ValueError, AttributeError) as e:
                 logger.error(f"RAG 引擎初始化失败: {e}")
-                self._cleanup_resources(old_llm, old_embed)
+                _thread_settings.reset()
                 self.query_engine = None
                 self._avg_doc_len = 100
+                self._initialized = False
                 return False
-
-    def _cleanup_resources(self, old_llm=None, old_embed=None) -> None:
-        """清理已分配的资源"""
-        try:
-            if old_llm is not None:
-                Settings.llm = old_llm
-            else:
-                if hasattr(Settings, 'llm'):
-                    delattr(Settings, 'llm')
-
-            if old_embed is not None:
-                Settings.embed_model = old_embed
-            else:
-                if hasattr(Settings, 'embed_model'):
-                    delattr(Settings, 'embed_model')
-
-            logger.debug("已清理 RAG 引擎资源")
-        except Exception as e:
-            logger.warning(f"清理资源时出错: {e}")
 
     def cleanup(self) -> None:
         """显式清理引擎资源"""
@@ -193,7 +177,7 @@ class RAGEngine:
             }
             return result
 
-        except Exception as e:
+        except (RuntimeError, ValueError, AttributeError) as e:
             logger.error(f"问答出错: {e}")
             return {
                 'answer': f'问答出错: {str(e)}',
@@ -227,7 +211,7 @@ class RAGEngine:
             }
             return result
 
-        except Exception as e:
+        except (RuntimeError, ValueError, AttributeError) as e:
             logger.error(f"异步问答出错: {e}")
             return {
                 'answer': f'问答出错: {str(e)}',
@@ -241,30 +225,12 @@ class RAGEngine:
         use_hybrid: bool = True,
         filters: Dict[str, Any] = None
     ) -> List[Dict[str, Any]]:
-        """
-        检索模式：返回结构化法规列表
-
-        适用于审计场景，需要查看原始法规条款时使用。
-        支持混合检索（向量 + 关键词）和元数据过滤。
-
-        Args:
-            query_text: 查询文本（如产品条款内容）
-            top_k: 返回结果数量，默认使用配置中的 top_k_results
-            use_hybrid: 是否使用混合检索，默认 True
-            filters: 元数据过滤条件，如 {'law_name': '保险法', 'category': '未分类'}
-
-        Returns:
-            List[Dict]: [{
-                'law_name': str,        # 法律/法规名称
-                'article_number': str,  # 条款号
-                'category': str,        # 分类
-                'content': str,         # 条款内容
-                'score': float          # 相似度得分
-            }]
-        """
-        if self.query_engine is None:
+        """检索模式：返回结构化法规列表"""
+        if not self._initialized:
             if not self.initialize():
                 return []
+
+        _thread_settings.apply()
 
         try:
             if use_hybrid:
@@ -273,7 +239,6 @@ class RAGEngine:
                 response = self.query_engine.query(query_text)
                 results = self._extract_results_from_response(response)
 
-            # 应用元数据过滤
             if filters:
                 results = self._apply_filters(results, filters)
 
@@ -282,7 +247,7 @@ class RAGEngine:
 
             return results
 
-        except Exception as e:
+        except (RuntimeError, ValueError, KeyError, AttributeError) as e:
             logger.error(f"搜索出错: {e}")
             return []
 

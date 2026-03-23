@@ -26,7 +26,7 @@ from .models import (
     RegulationStatus, RegulationLevel, RegulationRecord,
     RegulationProcessingOutcome,
 )
-from .normalizer import Normalizer
+from .normalizer import DocumentNormalizer
 from .classifier import ProductClassifier
 from .extractor_selector import ExtractorSelector
 from .fast_extractor import FastExtractor, FastExtractionFailed
@@ -55,7 +55,7 @@ class DocumentExtractor:
         self.llm_client = llm_client
 
         # 初始化组件（注意顺序：DynamicExtractor 依赖 classifier）
-        self.normalizer = Normalizer()
+        self.normalizer = DocumentNormalizer()
         self.classifier = ProductClassifier()
         self.fast_extractor = FastExtractor(llm_client)
         self.dynamic_extractor = DynamicExtractor(llm_client, self.classifier)
@@ -164,20 +164,24 @@ class DocumentExtractor:
             # 2. 提取元数据
             extracted_info = self._extract_regulation_metadata(cleaned_content)
 
-            # 3. 更新记录
+            # 3. 更新记录（使用 replace 不可变更新）
+            from dataclasses import replace
+            update_fields = {}
             if extracted_info.get('law_name'):
-                record.law_name = extracted_info['law_name']
+                update_fields['law_name'] = extracted_info['law_name']
             if extracted_info.get('effective_date'):
-                record.effective_date = extracted_info['effective_date']
+                update_fields['effective_date'] = extracted_info['effective_date']
             if extracted_info.get('hierarchy_level'):
-                record.hierarchy_level = RegulationLevel(extracted_info['hierarchy_level'])
+                update_fields['hierarchy_level'] = RegulationLevel(extracted_info['hierarchy_level'])
             if extracted_info.get('issuing_authority'):
-                record.issuing_authority = extracted_info['issuing_authority']
+                update_fields['issuing_authority'] = extracted_info['issuing_authority']
             if extracted_info.get('category'):
-                record.category = extracted_info['category']
+                update_fields['category'] = extracted_info['category']
 
-            record.status = RegulationStatus.EXTRACTED
-            record.quality_score = extracted_info.get('quality_score', 0.5)
+            update_fields['status'] = RegulationStatus.EXTRACTED
+            update_fields['quality_score'] = extracted_info.get('quality_score', 0.5)
+
+            record = replace(record, **update_fields)
 
             return RegulationProcessingOutcome(
                 success=True,
@@ -190,7 +194,8 @@ class DocumentExtractor:
 
         except Exception as e:
             logger.error(f"法规元数据提取失败: {e}")
-            record.status = RegulationStatus.FAILED
+            from dataclasses import replace
+            record = replace(record, status=RegulationStatus.FAILED)
             return RegulationProcessingOutcome(
                 success=False,
                 regulation_id="",

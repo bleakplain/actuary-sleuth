@@ -89,6 +89,17 @@ class DocumentPreprocessException(ProcessingException):
         super().__init__(message, step="preprocessing", details=details)
 
 
+class DocumentFetchError(DocumentPreprocessException):
+    """文档获取失败"""
+
+    def __init__(self, message: str, url: str = "", details: Optional[dict] = None):
+        full_details = details or {}
+        if url:
+            full_details['url'] = url
+        super().__init__(message, details=full_details)
+        self.url = url
+
+
 class NegativeListCheckException(ProcessingException):
     """负面清单检查失败"""
 

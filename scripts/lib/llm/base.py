@@ -4,7 +4,7 @@
 LLM 客户端抽象基类
 """
 from abc import ABC, abstractmethod
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 
 class BaseLLMClient(ABC):
@@ -12,10 +12,11 @@ class BaseLLMClient(ABC):
 
     MAX_PROMPT_LENGTH = 100000
 
-    def __init__(self, model: str, timeout: int = 30):
+    def __init__(self, model: str, timeout: int = 30, use_cache: bool = True):
         self.model = model
         self.timeout = timeout
         self._session = None
+        self._use_cache = use_cache
 
     def _validate_prompt(self, prompt: str) -> None:
         if not prompt or not prompt.strip():
@@ -59,6 +60,32 @@ class BaseLLMClient(ABC):
     @abstractmethod
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         pass
+
+    def chat_with_cache(self, messages: List[Dict[str, str]], **kwargs) -> str:
+        """
+        带缓存的聊天方法
+
+        Args:
+            messages: 消息列表
+            **kwargs: 其他参数
+
+        Returns:
+            str: LLM 响应
+        """
+        if not self._use_cache:
+            return self.chat(messages, **kwargs)
+
+        from lib.llm.cache import get_cache
+        cache = get_cache()
+
+        cached_response = cache.get(messages, self.model)
+        if cached_response is not None:
+            return cached_response
+
+        response = self.chat(messages, **kwargs)
+        cache.set(messages, response, self.model)
+
+        return response
 
     @abstractmethod
     def health_check(self) -> bool:

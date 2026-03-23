@@ -64,7 +64,7 @@ class PremiumTableExtractor:
                 temperature=0.1
             )
             return parse_llm_json_response(response)
-        except Exception as e:
+        except (ValueError, KeyError, json.JSONDecodeError) as e:
             logger.warning(f"费率表提取失败: {e}")
             return {}
 
@@ -219,7 +219,7 @@ class ClauseExtractor:
             clauses = result.get('clauses', [])
             logger.info(f"条款提取完成: 提取到 {len(clauses)} 个条款")
             return clauses
-        except Exception as e:
+        except (ValueError, KeyError, json.JSONDecodeError) as e:
             logger.warning(f"条款提取失败: {e}")
             return []
 
@@ -303,7 +303,7 @@ class DynamicExtractor:
             )
             return parse_llm_json_response(response)
 
-        except Exception as e:
+        except (ValueError, KeyError, json.JSONDecodeError) as e:
             logger.error(f"动态提取失败: {e}")
             return {}
 
@@ -351,7 +351,7 @@ class DynamicExtractor:
             logger.info(f"第 1/{len(chunks)} 块提取完成，得到 {len(result)} 个字段")
             if 'clauses' in result:
                 logger.info(f"  提取到 {len(result.get('clauses', []))} 个条款")
-        except Exception as e:
+        except (ValueError, KeyError, json.JSONDecodeError) as e:
             logger.error(f"第 1 块提取失败: {e}")
             result = {}
 
@@ -420,7 +420,7 @@ class DynamicExtractor:
                 after_clause_count = len(result.get('clauses', []))
                 logger.info(f"第 {i+1}/{len(chunks)} 块提取完成，条款数: {before_clause_count} -> {after_clause_count}")
 
-            except Exception as e:
+            except (ValueError, KeyError, json.JSONDecodeError) as e:
                 logger.warning(f"第 {i+1} 块提取失败: {e}")
                 continue
 

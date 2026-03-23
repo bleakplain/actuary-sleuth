@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-智谱 AI 客户端
+智谱 AI 客户端（资源安全版本）
 """
+import atexit
 import json
 import re
 import logging
 import requests
-from typing import List, Dict
+import threading
+from typing import List, Dict, Optional
 
 from .base import BaseLLMClient
 from .metrics import _track_timing, _with_circuit_breaker, _retry_with_backoff
@@ -19,6 +21,8 @@ logger = logging.getLogger(__name__)
 class ZhipuClient(BaseLLMClient):
     """智谱AI客户端"""
 
+    _shutdown_hooks = []
+
     def __init__(
         self,
         api_key: str,
@@ -26,29 +30,60 @@ class ZhipuClient(BaseLLMClient):
         base_url: str = "https://open.bigmodel.cn/api/paas/v4/",
         timeout: int = 60
     ):
-        """
-        初始化智谱AI客户端
-
-        Args:
-            api_key: 智谱AI API密钥
-            model: 模型名称，默认 glm-z1-air（轻量模型，并发数30）
-                   可选:
-                   - glm-z1-air: 轻量模型，并发数30，适合批量处理
-                   - glm-4-flash: 快速响应，并发数较高
-                   - glm-4-air: 平衡性能
-                   - glm-4-plus: 高质量，并发数2
-                   - glm-4-0520: 旧版本
-            base_url: API基础URL
-            timeout: 请求超时时间（秒）
-        """
         super().__init__(model, timeout)
         self.api_key = api_key
         self.base_url = base_url.rstrip('/')
-        self._session = requests.Session()
-        self._session.headers.update({
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        })
+        self._session = None
+        self._session_lock = threading.Lock()
+
+        self._register_cleanup()
+
+    def _get_session(self) -> requests.Session:
+        """延迟初始化会话（线程安全）"""
+        if self._session is None:
+            with self._session_lock:
+                if self._session is None:
+                    session = requests.Session()
+                    session.headers.update({
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json"
+                    })
+                    adapter = requests.adapters.HTTPAdapter(
+                        pool_connections=10,
+                        pool_maxsize=20,
+                        max_retries=3
+                    )
+                    session.mount('http://', adapter)
+                    session.mount('https://', adapter)
+                    self._session = session
+        return self._session
+
+    def close(self):
+        """显式关闭会话"""
+        with self._session_lock:
+            if self._session is not None:
+                try:
+                    self._session.close()
+                except Exception:
+                    pass
+                self._session = None
+
+    def __del__(self):
+        """析构时确保关闭"""
+        self.close()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
+    def _register_cleanup(self):
+        """注册退出清理"""
+        def cleanup():
+            self.close()
+
+        if cleanup not in ZhipuClient._shutdown_hooks:
+            ZhipuClient._shutdown_hooks.append(cleanup)
+            atexit.register(cleanup)
 
     def _do_generate(self, prompt: str, **kwargs) -> str:
         """
@@ -71,7 +106,8 @@ class ZhipuClient(BaseLLMClient):
             "top_p": kwargs.get('top_p', 0.7)
         }
 
-        response = self._session.post(
+        session = self._get_session()
+        response = session.post(
             url,
             json=data,
             timeout=self.timeout
@@ -128,7 +164,8 @@ class ZhipuClient(BaseLLMClient):
             "top_p": kwargs.get('top_p', 0.7)
         }
 
-        response = self._session.post(url, json=data, timeout=self.timeout)
+        session = self._get_session()
+        response = session.post(url, json=data, timeout=self.timeout)
 
         if response.status_code == 429:
             raise requests.exceptions.RequestException(

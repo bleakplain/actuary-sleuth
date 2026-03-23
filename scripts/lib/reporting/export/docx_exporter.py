@@ -109,7 +109,7 @@ class DocxExporter:
         except ExportException as e:
             logger.error(f"导出失败: {str(e)}", exc_info=True)
             return ExportResult.failure_with(str(e)).to_dict()
-        except Exception as e:
+        except (OSError, IOError, TypeError) as e:
             logger.error(f"导出异常: {str(e)}", exc_info=True)
             return ExportResult.failure_with(f"导出异常: {str(e)}").to_dict()
 
@@ -130,7 +130,7 @@ class DocxExporter:
         """
         try:
             return self._generator.generate(context, title)
-        except Exception as e:
+        except (ValueError, TypeError, OSError) as e:
             logger.error(f"生成文档失败: {str(e)}", exc_info=True)
             return {'success': False, 'error': str(e)}
 
@@ -160,7 +160,7 @@ class DocxExporter:
 
         try:
             return self._pusher.push(file_path, title, message)
-        except Exception as e:
+        except (OSError, IOError, ConnectionError) as e:
             logger.error(f"推送文档失败: {str(e)}", exc_info=True)
             return {'success': False, 'error': str(e)}
 

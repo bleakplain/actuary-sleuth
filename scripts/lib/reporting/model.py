@@ -15,7 +15,7 @@ from lib.common.models import Product, ProductCategory
 __all__ = ['EvaluationContext']
 
 
-@dataclass
+@dataclass(frozen=True)
 class EvaluationContext:
     """
     评估上下文
@@ -51,6 +51,10 @@ class EvaluationContext:
 
     # 法规依据
     regulation_basis: List[str] = field(default_factory=list)
+
+    # 审核结论
+    overall_assessment: str = "不通过"
+    assessment_reason: str = ""
 
     @property
     def has_issues(self) -> bool:

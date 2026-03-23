@@ -57,3 +57,8 @@ package-lock.json
 # Database (runtime data, not source)
 data/actuary.db
 data/lancedb/
+
+# Environment variables (contains sensitive data)
+.env
+.env.local
+.env.*.local

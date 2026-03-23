@@ -19,11 +19,10 @@
   },
   "llm": {
     "provider": "zhipu",
-    "model": "glm-4.7",
-    "api_key": "7d0a2b4545c94ca088f4d869a9e2cbbd.oRxlgkhqRF1rbjNp",
+    "model": "glm-4-flash",
     "base_url": "https://open.bigmodel.cn/api/paas/v4/",
     "timeout": 120,
-    "temperature": 0,
+    "temperature": 0.1,
     "max_tokens": 16384
   },
   "report": {
@@ -32,8 +31,7 @@
     "export_feishu": true
   },
   "feishu": {
-    "app_id": "cli_a900c2ed51335ccd",
-    "app_secret": "xU3udM9Wax1HFwCXFdwwdgXPH0xjb1TT",
+    "app_id": "",
     "target_group_id": "oc_d7b83e1f9eb58c6797b061dcc33d212f"
   },
   "openclaw": {

@@ -5,6 +5,7 @@ LLM 客户端工厂类
 
 提供场景化的 LLM 客户端创建方法。
 """
+import os
 import threading
 from typing import Dict, Any, Optional
 
@@ -12,6 +13,7 @@ from .base import BaseLLMClient
 from .models import ModelName
 from .zhipu import ZhipuClient
 from .ollama import OllamaClient
+from lib.common.config_validator import ConfigValidator
 
 
 class LLMClientFactory:
@@ -27,9 +29,18 @@ class LLMClientFactory:
     @staticmethod
     def _get_base_config() -> tuple:
         """获取基础配置"""
+        api_key = ConfigValidator.validate_zhipu_api_key(
+            os.getenv('ZHIPU_API_KEY')
+        )
+
         from lib.config import get_config
         app_config = get_config()
-        return app_config.llm.api_key, app_config.llm.base_url
+        base_url = ConfigValidator.validate_base_url(
+            app_config.llm.base_url,
+            '智谱'
+        )
+
+        return api_key, base_url
 
     @staticmethod
     def _create_zhipu_client(model: str, timeout: int) -> BaseLLMClient:
@@ -131,25 +142,47 @@ class LLMClientFactory:
 
         Raises:
             ValueError: 不支持的提供商类型
+            ConfigurationError: 配置无效
         """
         provider = config.get('provider', 'zhipu').lower()
 
         if provider == 'zhipu':
-            api_key = config.get('api_key')
-            if not api_key:
-                raise ValueError("ZhipuAI requires 'api_key' in config")
+            api_key = ConfigValidator.validate_zhipu_api_key(
+                config.get('api_key')
+            )
+            model = ConfigValidator.validate_model_name(
+                config.get('model', 'glm-z1-air'),
+                '智谱'
+            )
+            base_url = ConfigValidator.validate_base_url(
+                config.get('base_url', 'https://open.bigmodel.cn/api/paas/v4/'),
+                '智谱'
+            )
+            timeout = ConfigValidator.validate_timeout(
+                config.get('timeout', 60),
+                '智谱'
+            )
             return ZhipuClient(
                 api_key=api_key,
-                model=config.get('model', 'glm-z1-air'),
-                base_url=config.get('base_url', 'https://open.bigmodel.cn/api/paas/v4/'),
-                timeout=config.get('timeout', 60)
+                model=model,
+                base_url=base_url,
+                timeout=timeout
             )
 
         elif provider == 'ollama':
+            host = config.get('host', 'http://localhost:11434')
+            model = ConfigValidator.validate_model_name(
+                config.get('model', 'qwen2:7b'),
+                'Ollama'
+            )
+            timeout = ConfigValidator.validate_timeout(
+                config.get('timeout', 30),
+                'Ollama'
+            )
             return OllamaClient(
-                host=config.get('host', 'http://localhost:11434'),
-                model=config.get('model', 'qwen2:7b'),
-                timeout=config.get('timeout', 30)
+                host=host,
+                model=model,
+                timeout=timeout
             )
 
         else:

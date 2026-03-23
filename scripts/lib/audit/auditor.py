@@ -16,6 +16,7 @@ from typing import List, Dict, Any, Optional
 from lib.common.models import RegulationRecord, RegulationStatus, AuditRequest, Product, ProductCategory, Coverage, Premium
 from lib.llm import BaseLLMClient, LLMClientFactory
 from .prompts import ASSESSMENT_RESULTS, AUDIT_DIMENSIONS, SEVERITY_LEVELS
+from .validator import AuditRequestValidator
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +185,11 @@ class ComplianceAuditor:
         top_k: int = 3,
         filters: Dict[str, Any] = None
     ) -> List[AuditOutcome]:
+        try:
+            AuditRequestValidator.validate_request(request)
+        except Exception as e:
+            return [self._failed_outcome(f"请求验证失败: {e}")]
+
         if not request.clauses:
             return [self._failed_outcome("没有待审核的条款")]
 

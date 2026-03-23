@@ -191,6 +191,57 @@ class EvaluationResult:
     low_violations: List[Dict[str, Any]]
 ```
 
+## 环境变量配置
+
+### 必需的环境变量
+
+系统需要以下环境变量才能正常运行：
+
+```bash
+# 智谱 AI API 密钥（必需）
+ZHIPU_API_KEY=your_zhipu_api_key_here
+
+# 飞书应用配置（必需）
+FEISHU_APP_ID=cli_your_app_id_here
+FEISHU_APP_SECRET=your_app_secret_here
+```
+
+### 设置方式
+
+#### 方式 1: 使用 .env 文件（推荐用于开发）
+
+1. 复制环境变量模板：
+```bash
+cp .env.example .env
+```
+
+2. 编辑 `.env` 文件，填入实际的密钥：
+```bash
+ZHIPU_API_KEY=sk-your-actual-key-here
+FEISHU_APP_ID=cli_your_actual_app_id
+FEISHU_APP_SECRET=your_actual_secret
+```
+
+3. 确保 `.env` 文件已在 `.gitignore` 中，不会被提交到仓库
+
+#### 方式 2: 系统环境变量（推荐用于生产）
+
+在 `~/.bashrc` 或 `~/.zshrc` 中添加：
+```bash
+export ZHIPU_API_KEY="your_key_here"
+export FEISHU_APP_ID="your_app_id"
+export FEISHU_APP_SECRET="your_secret"
+```
+
+### 安全注意事项
+
+- **永远不要**将密钥提交到代码仓库
+- **永远不要**在配置文件中存储实际密钥
+- 生产环境使用独立的密钥
+- 定期轮换 API 密钥（建议每90天）
+
+详细的配置说明请参考 [docs/security.md](docs/security.md)
+
 ## 安装说明
 
 ### 环境要求

@@ -12,7 +12,7 @@ from datetime import datetime
 T = TypeVar('T')
 
 
-@dataclass
+@dataclass(frozen=True)
 class ExportResult:
     """
     导出结果类
@@ -55,7 +55,7 @@ class ExportResult:
         return result
 
 
-@dataclass
+@dataclass(frozen=True)
 class GenerationResult(ExportResult):
     """
     文档生成结果
@@ -91,7 +91,7 @@ class GenerationResult(ExportResult):
         return result
 
 
-@dataclass
+@dataclass(frozen=True)
 class PushResult(ExportResult):
     """
     文档推送结果

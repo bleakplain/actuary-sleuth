@@ -30,16 +30,27 @@ class FeishuConfig:
 
     def __init__(self, config_dict: Dict[str, Any]):
         self._config = config_dict.get('feishu', {})
+        self._validate_no_secrets_in_config()
+
+    def _validate_no_secrets_in_config(self) -> None:
+        if 'app_secret' in self._config and self._config['app_secret']:
+            import warnings
+            warnings.warn(
+                "配置文件中检测到 app_secret。出于安全考虑，飞书应用密钥必须通过环境变量设置。",
+                DeprecationWarning,
+                stacklevel=2
+            )
 
     @property
     def app_id(self) -> Optional[str]:
-        """获取飞书应用 ID"""
-        return self._config.get('app_id') or os.getenv('FEISHU_APP_ID')
+        env_app_id = os.getenv('FEISHU_APP_ID')
+        if env_app_id:
+            return env_app_id
+        return self._config.get('app_id')
 
     @property
     def app_secret(self) -> Optional[str]:
-        """获取飞书应用密钥"""
-        return self._config.get('app_secret') or os.getenv('FEISHU_APP_SECRET')
+        return os.getenv('FEISHU_APP_SECRET')
 
     @property
     def enabled(self) -> bool:
@@ -188,22 +199,7 @@ class LLMConfig:
 
     @property
     def api_key(self) -> Optional[str]:
-        env_key = os.getenv('ZHIPU_API_KEY')
-        if env_key:
-            return env_key
-
-        config_key = self._config.get('api_key')
-        if config_key:
-            import warnings
-            warnings.warn(
-                "API key found in config file. "
-                "Please use environment variable ZHIPU_API_KEY instead.",
-                DeprecationWarning,
-                stacklevel=2
-            )
-            return config_key
-
-        return None
+        return os.getenv('ZHIPU_API_KEY')
 
     @property
     def base_url(self) -> str:

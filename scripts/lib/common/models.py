@@ -37,7 +37,7 @@ class RegulationLevel(str, Enum):
     OTHER = "other"
 
 
-@dataclass
+@dataclass(frozen=True)
 class RegulationRecord:
     """法规基本信息记录"""
     law_name: str
@@ -50,7 +50,7 @@ class RegulationRecord:
     quality_score: Optional[float] = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class RegulationProcessingOutcome:
     """法规处理结果"""
     success: bool
@@ -62,7 +62,7 @@ class RegulationProcessingOutcome:
     processor: str = ""  # 处理器标识，如 "regulation_cleaner" 或 "regulation_extractor"
 
 
-@dataclass
+@dataclass(frozen=True)
 class RegulationDocument:
     """法规文档"""
     content: str
@@ -86,7 +86,7 @@ class ProductCategory(str, Enum):
     OTHER = "other"
 
 
-@dataclass
+@dataclass(frozen=True)
 class Product:
     """产品信息"""
     name: str
@@ -106,7 +106,7 @@ class Product:
         return get_name(self.category) if self.category else '其他保险'
 
 
-@dataclass
+@dataclass(frozen=True)
 class Coverage:
     """保障信息"""
     scope: Optional[str] = None
@@ -116,7 +116,7 @@ class Coverage:
     amount: Optional[str] = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class Premium:
     """费率信息"""
     payment_method: Optional[str] = None
@@ -124,7 +124,7 @@ class Premium:
     table_data: Optional[Dict[str, Any]] = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class AuditRequest:
     """审核请求：Preprocessing → Audit 接口契约"""
     clauses: List[Dict[str, str]]

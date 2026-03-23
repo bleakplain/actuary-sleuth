@@ -12,6 +12,7 @@ _FeishuPusher类：通过OpenClaw推送Docx文档到飞书群组
 
 注意：此模块为内部实现，不直接对外暴露
 """
+import os
 import subprocess
 import re
 from typing import Dict, Any, Optional
@@ -20,7 +21,7 @@ from lib.common.exceptions import ExportException
 from lib.config import get_config
 from lib.common.logger import get_logger
 from .result import PushResult
-from .validation import validate_file_path
+from .validation import validate_file_path, sanitize_message, validate_group_id
 
 
 logger = get_logger('feishu_pusher')
@@ -47,47 +48,40 @@ class _FeishuPusher:
         self,
         openclaw_bin: Optional[str] = None,
         target_group_id: Optional[str] = None,
-        timeout: Optional[int] = None
+        timeout: Optional[int] = None,
+        allowed_output_dir: Optional[str] = None
     ):
-        """
-        初始化飞书导出器
-
-        Args:
-            openclaw_bin: OpenClaw二进制文件路径（默认从配置读取）
-            target_group_id: 飞书目标群组ID（默认从配置读取）
-            timeout: 推送超时时间（秒），默认30秒
-        """
         config = get_config()
         self._openclaw_bin = openclaw_bin or config.get('openclaw.bin', self.DEFAULT_OPENCLAW_BIN)
-        self._target_group_id = target_group_id or config.feishu.target_group_id
         self._timeout = timeout or self.DEFAULT_PUSH_TIMEOUT
+        self._allowed_output_dir = allowed_output_dir
 
-        if not self._target_group_id:
-            raise ExportException(
-                "未配置飞书目标群组ID。"
-                "请在配置文件中设置 feishu.target_group_id "
-                "或通过环境变量 FEISHU_TARGET_GROUP_ID 指定"
-            )
+        raw_group_id = target_group_id or config.feishu.target_group_id
+        if raw_group_id:
+            self._target_group_id = validate_group_id(raw_group_id)
+        else:
+            raise ExportException("未配置飞书目标群组ID。请在配置文件中设置 feishu.target_group_id 或通过环境变量 FEISHU_TARGET_GROUP_ID 指定")
+
+        self._validate_openclaw_binary()
 
         logger.debug(f"初始化推送器: group={self._target_group_id}, openclaw={self._openclaw_bin}, timeout={self._timeout}")
 
+    def _validate_openclaw_binary(self) -> None:
+        if not os.path.exists(self._openclaw_bin):
+            raise ExportException(f"OpenClaw 二进制文件不存在: {self._openclaw_bin}")
+
+        if not os.access(self._openclaw_bin, os.X_OK):
+            raise ExportException(f"OpenClaw 二进制文件不可执行: {self._openclaw_bin}")
+
     def _execute_openclaw_command(self, command_args: list) -> Dict[str, Any]:
-        """
-        执行OpenClaw命令的通用方法
-
-        Args:
-            command_args: 命令参数列表
-
-        Returns:
-            dict: 执行结果
-        """
         try:
             result = subprocess.run(
                 command_args,
                 capture_output=True,
                 text=True,
                 timeout=self._timeout,
-                check=True
+                check=True,
+                shell=False
             )
 
             output = result.stdout
@@ -147,31 +141,21 @@ class _FeishuPusher:
         title: str,
         message: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        推送文档到飞书群组
+        validated_path = validate_file_path(file_path, allowed_dir=self._allowed_output_dir)
 
-        Args:
-            file_path: 文档文件路径
-            title: 文档标题
-            message: 伴随消息（可选）
-
-        Returns:
-            dict: 包含推送结果的字典
-        """
-        # 验证输入
-        validate_file_path(file_path)
-
-        logger.info(f"推送文档到飞书", file=file_path, group=self._target_group_id)
+        logger.info(f"推送文档到飞书", file=validated_path, group=self._target_group_id)
 
         if message is None:
             message = self._build_message(title)
+        else:
+            message = sanitize_message(message)
 
         command_args = [
             self._openclaw_bin,
             'message', 'send',
             '--channel', 'feishu',
             '--target', self._target_group_id,
-            '--media', file_path,
+            '--media', validated_path,
             '--message', message
         ]
 
@@ -181,23 +165,16 @@ class _FeishuPusher:
         self,
         message: str
     ) -> Dict[str, Any]:
-        """
-        推送文本消息到飞书群组
-
-        Args:
-            message: 消息内容
-
-        Returns:
-            dict: 推送结果
-        """
         logger.debug(f"推送文本消息")
+
+        cleaned_message = sanitize_message(message)
 
         command_args = [
             self._openclaw_bin,
             'message', 'send',
             '--channel', 'feishu',
             '--target', self._target_group_id,
-            '--message', message
+            '--message', cleaned_message
         ]
 
         return self._execute_openclaw_command(command_args)
