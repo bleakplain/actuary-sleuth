@@ -1,8 +1,8 @@
 # Actuary Sleuth - 综合修复计划
 
 生成时间: 2026-03-21
-版本: 1.1
-状态: 执行中 (54% 测试覆盖率, 264 测试通过)
+版本: 1.2
+状态: 执行中 (26% 代码覆盖率, 126 测试通过)
 
 ## 已完成任务 (Phase 1)
 - ✅ API 密钥安全验证 (ConfigValidator)
@@ -10,9 +10,10 @@
 - ✅ 请求验证 (AuditRequestValidator)
 - ✅ 错误处理装饰器 (error_handling.py)
 - ✅ LLM 响应缓存 (LLMResponseCache)
-- ✅ 测试用例修复 (264 测试全部通过)
-- ✅ 类型注解修复 (mypy 错误减少)
-- ✅ 测试覆盖率提升 (54%, 从 0% 开始)
+- ✅ 新增测试文件 (connection_pool, config_validator, error_handling, cache, prompts)
+- ✅ 类型注解修复 (result.py, docx_sections.py, docx_executor.py)
+- ✅ 测试用例修复 (126 测试通过)
+- ✅ Git 提交清理 (移除 sys.path 操作)
 
 ---
 
