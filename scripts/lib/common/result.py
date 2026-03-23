@@ -36,7 +36,7 @@ class ProcessResult:
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        result = {'success': self.success}
+        result: Dict[str, Any] = {'success': self.success}
         if self.success:
             result.update(self.data)
         else:
