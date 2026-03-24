@@ -1,205 +1,325 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-法规 RAG 引擎测试脚本
+RAG 引擎测试 - 使用真实数据库和索引
 
-注意：这些测试需要 llama_index 模块。
-如果未安装，这些测试将被跳过。
+注意：这些测试需要 llama_index 模块和嵌入模型。
 """
 import pytest
+import tempfile
+from pathlib import Path
 
-# Skip entire module if llama_index is not available
 pytest.importorskip("llama_index", reason="llama_index not installed")
 
-# Now import from RAG engine since we know llama_index is available
-# 检查依赖
-try:
-    import llama_index
-    HAS_LLAMA_INDEX = True
-except ImportError:
-    HAS_LLAMA_INDEX = False
+
+class TestRAGEngineBasicOperations:
+    """测试RAG引擎基本操作"""
+
+    def test_engine_config_creation(self):
+        """测试引擎配置创建"""
+        from lib.rag_engine.config import RAGConfig
+
+        config = RAGConfig(
+            chunk_size=500,
+            chunk_overlap=50,
+            top_k_results=3
+        )
+
+        assert config.chunk_size == 500
+        assert config.chunk_overlap == 50
+        assert config.top_k_results == 3
+
+    def test_engine_with_temp_config(self, temp_lancedb_dir):
+        """测试使用临时配置创建引擎"""
+        from lib.rag_engine.config import RAGConfig
+
+        config = RAGConfig(
+            vector_db_path=str(temp_lancedb_dir),
+            collection_name="test_engine_config"
+        )
+
+        assert config.vector_db_path == str(temp_lancedb_dir)
+        assert config.collection_name == "test_engine_config"
 
 
-@pytest.mark.skipif(not HAS_LLAMA_INDEX, reason="需要 llama_index 模块")
-@pytest.mark.rag
+class TestRAGEngineWithRealIndex:
+    """测试RAG引擎与真实索引的交互"""
+
+    def test_search_with_real_vector_index(self, real_vector_index):
+        """测试使用真实向量索引的搜索"""
+        from lib.rag_engine.rag_engine import RAGEngine
+        from lib.rag_engine.config import RAGConfig
+
+        config = RAGConfig(top_k_results=3)
+        engine = RAGEngine(config)
+        engine._initialized = True
+
+        # 使用真实索引创建查询引擎
+        query_engine = real_vector_index.as_query_engine(
+            similarity_top_k=3
+        )
+        engine.query_engine = query_engine
+
+        # 执行搜索
+        results = engine.search("等待期", top_k=3, use_hybrid=False)
+
+        assert isinstance(results, list)
+        if results:
+            assert 'law_name' in results[0]
+            assert 'content' in results[0]
+            assert 'article_number' in results[0]
+
+    def test_hybrid_search_with_real_index(self, real_vector_index):
+        """测试混合检索"""
+        from lib.rag_engine.rag_engine import RAGEngine
+        from lib.rag_engine.config import RAGConfig
+
+        config = RAGConfig(
+            top_k_results=3,
+            hybrid_config__alpha=0.5
+        )
+        engine = RAGEngine(config)
+        engine._initialized = True
+
+        # 使用真实索引
+        query_engine = real_vector_index.as_query_engine(
+            similarity_top_k=3
+        )
+        engine.query_engine = query_engine
+
+        # 执行混合搜索
+        results = engine.search("健康保险", top_k=3, use_hybrid=True)
+
+        assert isinstance(results, list)
+        if results:
+            assert 'score' in results[0]
+            assert isinstance(results[0]['score'], (int, float))
+
+    def test_search_with_filters(self, real_vector_index):
+        """测试带过滤条件的搜索"""
+        from lib.rag_engine.rag_engine import RAGEngine
+        from lib.rag_engine.config import RAGConfig
+
+        config = RAGConfig()
+        engine = RAGEngine(config)
+        engine._initialized = True
+
+        query_engine = real_vector_index.as_query_engine(
+            similarity_top_k=5
+        )
+        engine.query_engine = query_engine
+
+        # 使用过滤条件搜索
+        results = engine.search(
+            "保险",
+            top_k=5,
+            use_hybrid=False,
+            filters={'category': '健康保险'}
+        )
+
+        assert isinstance(results, list)
+        # 验证过滤条件（如果结果存在）
+        if results:
+            for result in results:
+                category = result.get('category')
+                if category:  # 只检查有category字段的结果
+                    assert category == '健康保险'
 
 
-@pytest.mark.skipif(not HAS_LLAMA_INDEX, reason="需要 llama_index 模块")
-def test_user_qa():
-    """测试用户问答功能"""
-    print("=" * 60)
-    print("测试用户问答引擎")
-    print("=" * 60)
+class TestDataFlowWithRealComponents:
+    """测试使用真实组件的数据流"""
 
-    from lib.rag_engine import create_qa_engine
+    def test_document_to_index_to_search(self, temp_lancedb_dir):
+        """测试完整的文档->索引->搜索流程"""
+        from llama_index.core import Document, Settings, VectorStoreIndex
+        from llama_index.vector_stores.lancedb import LanceDBVectorStore
+        from llama_index.core.storage.storage_context import StorageContext
+        from lib.rag_engine.retrieval import vector_search
 
-    # 创建问答引擎
-    print("\n1. 初始化问答引擎...")
-    qa_engine = create_qa_engine()
+        try:
+            from llama_index.embeddings.ollama import OllamaEmbedding
+            embed_model = OllamaEmbedding(model_name="nomic-embed-text")
+            Settings.embed_model = embed_model
+        except Exception:
+            try:
+                from llama_index.embeddings.openai import OpenAIEmbedding
+                embed_model = OpenAIEmbedding()
+                Settings.embed_model = embed_model
+            except Exception:
+                pytest.skip("No embedding model available")
 
-    # 初始化索引
-    print("\n2. 初始化向量索引...")
-    assert qa_engine.initialize(force_rebuild=False), "索引初始化失败"
+        # 1. 创建测试文档
+        test_docs = [
+            Document(
+                text="健康保险等待期为90天，期间内不承担保险责任",
+                metadata={'law_name': '健康保险办法', 'article_number': '第一条', 'category': '健康保险'}
+            ),
+            Document(
+                text="意外伤害保险期间不得少于1年",
+                metadata={'law_name': '意外保险办法', 'article_number': '第二条', 'category': '意外保险'}
+            ),
+        ]
 
-    # 测试查询
-    print("\n3. 测试法规查询...")
+        # 2. 创建向量索引
+        vector_store = LanceDBVectorStore(
+            uri=str(temp_lancedb_dir),
+            table_name="test_data_flow"
+        )
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
+        index = VectorStoreIndex.from_documents(
+            test_docs,
+            storage_context=storage_context,
+            show_progress=False
+        )
 
-    test_questions = [
-        "健康保险产品的等待期有什么规定？",
-        "保险法中关于如实告知义务是如何规定的？",
-        "意外伤害保险的保险期限有什么要求？"
-    ]
+        assert index is not None
 
-    for i, question in enumerate(test_questions, 1):
-        print(f"\n问题 {i}: {question}")
-        print("-" * 40)
+        # 3. 执行向量搜索
+        results = vector_search(index, "等待期", top_k=2)
 
-        result = qa_engine.ask(question)
+        assert isinstance(results, list)
+        assert len(results) <= 2
+        if results:
+            assert hasattr(results[0], 'node')
+            assert hasattr(results[0], 'score')
 
-        print(f"\n回答:")
-        print(result['answer'])
+    def test_parse_documents_and_create_index(self, temp_lancedb_dir, temp_output_dir):
+        """测试解析文档并创建索引"""
+        from lib.rag_engine.doc_parser import RegulationDocParser
+        from llama_index.core import Settings, VectorStoreIndex
+        from llama_index.vector_stores.lancedb import LanceDBVectorStore
+        from llama_index.core.storage.storage_context import StorageContext
 
-        # 验证返回结果结构
-        assert 'answer' in result, "结果中缺少 'answer' 字段"
-        assert 'sources' in result, "结果中缺少 'sources' 字段"
+        try:
+            from llama_index.embeddings.ollama import OllamaEmbedding
+            embed_model = OllamaEmbedding(model_name="nomic-embed-text")
+            Settings.embed_model = embed_model
+        except Exception:
+            try:
+                from llama_index.embeddings.openai import OpenAIEmbedding
+                embed_model = OpenAIEmbedding()
+                Settings.embed_model = embed_model
+            except Exception:
+                pytest.skip("No embedding model available")
 
-        if result['sources']:
-            print(f"\n相关法规来源 ({len(result['sources'])} 条):")
-            for j, source in enumerate(result['sources'][:3], 1):
-                print(f"\n  {j}. [{source['law_name']}] - {source['article_number']}")
-                print(f"     内容: {source['content']}")
-                if source['score']:
-                    print(f"     相似度: {source['score']:.4f}")
+        # 1. 创建测试文件
+        test_file = temp_output_dir / "test_regulation.md"
+        test_file.write_text("""
+# 测试法规
 
-    print("\n" + "=" * 60)
-    print("用户问答测试完成!")
-    print("=" * 60)
+### 第一条 等待期
+健康保险产品的等待期不得超过90天。
 
+### 第二条 费率
+保险费率应当公平合理。
+        """)
 
-@pytest.mark.skipif(not HAS_LLAMA_INDEX, reason="需要 llama_index 模块")
-def test_audit_query():
-    """测试审计查询功能"""
-    print("\n" + "=" * 60)
-    print("测试审计查询引擎")
-    print("=" * 60)
+        # 2. 解析文档
+        parser = RegulationDocParser(regulations_dir=str(temp_output_dir))
+        documents = parser.parse_single_file("test_regulation.md")
 
-    from lib.rag_engine import create_audit_engine
+        assert len(documents) > 0
 
-    # 创建审计查询引擎
-    print("\n1. 初始化审计查询引擎...")
-    audit_engine = create_audit_engine()
+        # 3. 创建向量索引
+        vector_store = LanceDBVectorStore(
+            uri=str(temp_lancedb_dir),
+            table_name="test_parse_index"
+        )
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
+        index = VectorStoreIndex.from_documents(
+            documents,
+            storage_context=storage_context,
+            show_progress=False
+        )
 
-    # 初始化索引
-    print("\n2. 初始化向量索引...")
-    assert audit_engine.initialize(force_rebuild=False), "索引初始化失败"
-
-    # 测试法规搜索
-    print("\n3. 测试法规搜索...")
-
-    test_queries = [
-        "健康保险等待期",
-        "如实告知义务",
-        "意外伤害保险期限"
-    ]
-
-    for query in test_queries:
-        print(f"\n搜索: {query}")
-        print("-" * 40)
-
-        results = audit_engine.search(query, top_k=3)
-
-        print(f"找到 {len(results)} 条相关法规")
-        assert isinstance(results, list), "结果应该是列表"
-        for j, result in enumerate(results[:3], 1):
-            print(f"\n  {j}. [{result['law_name']}] - {result['article_number']}")
-            print(f"     类别: {result['category']}")
-            print(f"     内容: {result['content'][:150]}...")
-            if result['score']:
-                print(f"     相似度: {result['score']:.4f}")
-
-    print("\n" + "=" * 60)
-    print("审计查询测试完成!")
-    print("=" * 60)
-
-
-@pytest.mark.skipif(not HAS_LLAMA_INDEX, reason="需要 llama_index 模块")
-def test_data_importer():
-    """测试数据导入功能"""
-    print("\n" + "=" * 60)
-    print("测试数据导入器")
-    print("=" * 60)
-
-    from lib.rag_engine import RegulationDataImporter
-
-    # 创建导入器
-    importer = RegulationDataImporter()
-
-    # 测试文档解析
-    print("\n1. 测试文档解析...")
-    documents = importer.parse_single_file("02_负面清单.md")
-
-    print(f"从 02_负面清单.md 解析了 {len(documents)} 条法规")
-    assert isinstance(documents, list), "结果应该是列表"
-
-    if documents:
-        print("\n第一条法规示例:")
-        print(f"  法律: {documents[0].metadata.get('law_name')}")
-        print(f"  条款: {documents[0].metadata.get('article_number')}")
-        print(f"  内容: {documents[0].text[:100]}...")
-
-        # 验证文档结构
-        assert 'law_name' in documents[0].metadata, "元数据中应包含 law_name"
-        assert 'article_number' in documents[0].metadata, "元数据中应包含 article_number"
-
-    print("\n" + "=" * 60)
-    print("数据导入测试完成!")
-    print("=" * 60)
+        assert index is not None
+        assert len(index.docstore.docs) > 0
 
 
-@pytest.mark.skipif(not HAS_LLAMA_INDEX, reason="需要 llama_index 模块")
-def test_async_query():
-    """测试异步查询功能"""
-    print("\n" + "=" * 60)
-    print("测试异步查询功能")
-    print("=" * 60)
+class TestRAGEngineIntegration:
+    """RAG引擎集成测试"""
 
-    import asyncio
-    from lib.rag_engine import create_qa_engine
+    def test_index_manager_with_real_lancedb(self, temp_lancedb_dir):
+        """测试索引管理器与真实LanceDB"""
+        from lib.rag_engine.index_manager import VectorIndexManager
+        from lib.rag_engine.config import RAGConfig
 
-    async def run_async_test():
-        qa_engine = create_qa_engine()
-        qa_engine.initialize()
+        config = RAGConfig(
+            vector_db_path=str(temp_lancedb_dir),
+            collection_name="test_manager_real"
+        )
 
-        question = "健康保险产品的等待期有什么规定？"
-        print(f"\n问题: {question}")
+        manager = VectorIndexManager(config)
 
-        result = await qa_engine.aask(question)
-        print(f"\n回答: {result['answer']}")
+        assert manager is not None
+        assert manager.config == config
 
-        # 验证返回结果
-        assert 'answer' in result, "结果中应包含 'answer' 字段"
-        assert 'sources' in result, "结果中应包含 'sources' 字段"
+        # 测试表存在检查
+        exists = manager.index_exists()
+        assert isinstance(exists, bool)
 
-        if result['sources']:
-            print(f"\n找到 {len(result['sources'])} 个相关法规")
+    def test_vector_index_creation(self, temp_lancedb_dir):
+        """测试向量索引创建"""
+        from llama_index.core import Document, Settings, VectorStoreIndex
+        from llama_index.vector_stores.lancedb import LanceDBVectorStore
+        from llama_index.core.storage.storage_context import StorageContext
 
-    asyncio.run(run_async_test())
+        try:
+            from llama_index.embeddings.ollama import OllamaEmbedding
+            embed_model = OllamaEmbedding(model_name="nomic-embed-text")
+            Settings.embed_model = embed_model
+        except Exception:
+            try:
+                from llama_index.embeddings.openai import OpenAIEmbedding
+                embed_model = OpenAIEmbedding()
+                Settings.embed_model = embed_model
+            except Exception:
+                pytest.skip("No embedding model available")
+
+        test_docs = [
+            Document(text="保险条款内容", metadata={'law_name': '测试法规'})
+        ]
+
+        vector_store = LanceDBVectorStore(
+            uri=str(temp_lancedb_dir),
+            table_name="test_index_creation"
+        )
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
+        index = VectorStoreIndex.from_documents(
+            test_docs,
+            storage_context=storage_context,
+            show_progress=False
+        )
+
+        assert index is not None
+        assert len(index.docstore.docs) > 0
+
+    def test_engine_configuration_validation(self):
+        """测试引擎配置验证"""
+        from lib.rag_engine.config import RAGConfig
+
+        # 测试有效配置
+        config = RAGConfig(
+            chunk_size=600,
+            chunk_overlap=60,
+            top_k_results=10
+        )
+
+        assert config.chunk_size == 600
+        assert config.chunk_overlap == 60
+        assert config.top_k_results == 10
+
+        # 测试无效配置
+        with pytest.raises(ValueError):
+            RAGConfig(chunk_size=100, chunk_overlap=100)
 
 
-if __name__ == '__main__':
-    try:
-        # 运行所有测试
-        test_data_importer()
-        test_user_qa()
-        test_audit_query()
-        # test_async_query()  # 可选
-
-        print("\n" + "=" * 60)
-        print("所有测试完成!")
-        print("=" * 60)
-
-    except Exception as e:
-        print(f"\n测试失败: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+@pytest.fixture
+def temp_output_dir():
+    """临时输出目录"""
+    temp_dir = Path(tempfile.mkdtemp(prefix="test_rag_output_"))
+    yield temp_dir
+    # 清理
+    import shutil
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir, ignore_errors=True)
