@@ -5,6 +5,7 @@
 
 预处理、审核、RAG 等模块共享的数据结构。
 """
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -104,6 +105,73 @@ class Product:
         """产品类型（中文显示名称）"""
         from lib.common.product import get_name
         return get_name(self.category) if self.category else '其他保险'
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return {
+            'name': self.name,
+            'company': self.company,
+            'category': self.category.value if isinstance(self.category, ProductCategory) else self.category,
+            'period': self.period,
+            'waiting_period': self.waiting_period,
+            'age_min': self.age_min,
+            'age_max': self.age_max,
+            'document_url': self.document_url,
+            'version': self.version
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Product':
+        """
+        从字典创建 Product 对象
+
+        支持多种字段名称映射，增强兼容性。
+        自动解析字符串类型的数字字段（如 "90天" -> 90）。
+        """
+        from lib.common.product import get_category, from_code
+
+        # 字段名称映射 - 支持多种命名风格
+        name = data.get('name') or data.get('product_name', '')
+        company = data.get('company') or data.get('insurance_company', '')
+        period = data.get('period') or data.get('insurance_period', '')
+
+        # Category 转换 - 支持字符串代码和中文名称
+        type_str = data.get('category') or data.get('product_type', '')
+        category = get_category(type_str)
+        if category == ProductCategory.OTHER and type_str:
+            # 尝试通过代码转换
+            try:
+                category = ProductCategory(type_str)
+            except ValueError:
+                category = from_code(type_str)
+
+        # 解析可选字段 - 支持字符串类型的数字
+        def parse_int_field(value: Any) -> Optional[int]:
+            """解析整数字段，支持字符串类型（如 "90天" -> 90）"""
+            if value is None:
+                return None
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str):
+                match = re.search(r'\d+', value)
+                return int(match.group()) if match else None
+            return None
+
+        waiting_period = parse_int_field(data.get('waiting_period'))
+        age_min = parse_int_field(data.get('age_min'))
+        age_max = parse_int_field(data.get('age_max'))
+
+        return cls(
+            name=name,
+            company=company,
+            category=category,
+            period=period,
+            waiting_period=waiting_period,
+            age_min=age_min,
+            age_max=age_max,
+            document_url=data.get('document_url', ''),
+            version=data.get('version', '')
+        )
 
 
 @dataclass(frozen=True)
@@ -420,30 +488,7 @@ def _used_fields() -> set:
 
 
 # ==================== Product 工厂方法 ====================
-
-def create_product_from_dict(product_info: Dict[str, Any]) -> Product:
-    from lib.common.product import get_category, from_code
-
-    type_str = product_info.get('product_type', '')
-
-    category = get_category(type_str)
-    if category == ProductCategory.OTHER and type_str:
-        category = from_code(type_str)
-
-    return Product(
-        name=product_info.get('product_name', ''),
-        company=product_info.get('insurance_company', ''),
-        category=category,
-        period=product_info.get('insurance_period', ''),
-        waiting_period=None,
-        age_min=None,
-        age_max=None,
-        document_url=product_info.get('document_url', ''),
-        version=product_info.get('version', '')
-    )
-
-
-Product.from_dict = staticmethod(create_product_from_dict)
+# 已移除 create_product_from_dict，统一使用 Product.from_dict() 类方法
 
 
 __all__ = [

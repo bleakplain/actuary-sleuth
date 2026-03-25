@@ -1,0 +1,80 @@
+graph TB
+    subgraph AppLayer["应用层调用"]
+        Audit["审核模块 auditor.py"]
+        RAG["RAG引擎 rag_engine.py"]
+        Preprocess["预处理 preprocessing/"]
+    end
+
+    subgraph FactoryLayer["LLM工厂层"]
+        Factory["LLMClientFactory factory.py"]
+
+        S1["法规导入 glm-4-flash timeout=60s"]
+        S2["文档预处理 配置文件模型 timeout=120s"]
+        S3["审核场景 glm-4-plus timeout=120s"]
+        S4["问答场景 glm-4-flash timeout=60s"]
+    end
+
+    subgraph AbstractLayer["LLM抽象层"]
+        Base["BaseLLMClient base.py"]
+
+        M1["generate 单轮生成"]
+        M2["chat 多轮对话"]
+        M3["health_check 健康检查"]
+        M4["chat_with_cache 缓存聊天"]
+
+        D1["@_track_timing 性能监控"]
+        D2["@_circuit_breaker 熔断器"]
+        D3["@_retry_with_backoff 重试机制"]
+    end
+
+    subgraph ImplLayer["LLM提供商实现"]
+        Zhipu["ZhipuClient zhipu.py"]
+        Ollama["OllamaClient ollama.py"]
+    end
+
+    subgraph CacheLayer["缓存层"]
+        Cache["LLMCache cache.py"]
+        Redis["可选 Redis缓存"]
+    end
+
+    subgraph ExternalLayer["外部服务"]
+        ZhipuAPI["智谱AI API open.bigmodel.cn"]
+        OllamaSVC["Ollama服务 localhost:11434"]
+    end
+
+    Audit --> Factory
+    RAG --> Factory
+    Preprocess --> Factory
+
+    Factory --> S1
+    Factory --> S2
+    Factory --> S3
+    Factory --> S4
+
+    S1 --> Base
+    S2 --> Base
+    S3 --> Base
+    S4 --> Base
+
+    Base --> M1
+    Base --> M2
+    Base --> M3
+    Base --> M4
+
+    M1 --> D1
+    M2 --> D1
+    M1 --> D2
+    M2 --> D2
+    M1 --> D3
+    M2 --> D3
+
+    Base --> Zhipu
+    Base --> Ollama
+
+    M4 --> Cache
+    Cache --> Redis
+
+    D1 --> ZhipuAPI
+    D1 --> OllamaSVC
+    Zhipu --> ZhipuAPI
+    Ollama --> OllamaSVC

@@ -1,0 +1,68 @@
+sequenceDiagram
+    participant User as 👤 用户
+    participant CLI as audit.py
+    participant Fetcher as DocumentFetcher
+    participant Preprocess as 预处理模块
+    participant Check as 负面清单检查
+    participant Score as 定价分析
+    participant RAG as RAG引擎
+    participant LLM as LLM客户端
+    participant DB as 数据库
+    participant Report as 报告生成
+
+    User->>CLI: python audit.py --documentUrl <飞书URL>
+
+    Note over CLI: 生成 audit_id<br/>初始化日志
+
+    CLI->>Fetcher: fetch_feishu_document(url)
+
+    Note over Fetcher: 1. 验证 URL 格式<br/>2. 调用 feishu2md 下载<br/>3. 读取 Markdown 内容
+
+    Fetcher-->>CLI: document_content
+
+    CLI->>Preprocess: execute_preprocess(content)
+
+    Note over Preprocess: 1. 文档规范化<br/>2. 产品分类<br/>3. 信息提取<br/>4. 质量验证
+
+    Preprocess-->>CLI: PreprocessedResult<br/>(product, clauses, pricing_params)
+
+    CLI->>Check: execute_check(clauses)
+
+    Note over Check: 负面清单关键词匹配<br/>检测违规条款
+
+    Check-->>CLI: CheckedResult<br/>(violations)
+
+    CLI->>Score: execute_score(pricing_params)
+
+    Note over Score: LLM 分析费率合理性<br/>评估定价结构
+
+    Score->>LLM: chat(pricing_prompt)
+    LLM-->>Score: pricing_analysis
+    Score-->>CLI: AnalyzedResult
+
+    par 并行审核每个条款
+        loop 每个条款
+            CLI->>RAG: search(clause_text, top_k=3)
+
+            Note over RAG: 混合检索<br/>1. 向量检索<br/>2. BM25检索<br/>3. 结果融合
+
+            RAG-->>CLI: regulations[]
+
+            CLI->>LLM: chat(audit_prompt, regulations)
+            LLM-->>CLI: audit_result
+        end
+    end
+
+    CLI->>CLI: calculate_result()
+
+    Note over CLI: 综合评分<br/>0-100分<br/>生成违规清单
+
+    CLI->>DB: save_audit_record()
+    DB-->>CLI: 保存成功
+
+    CLI->>Report: export_docx(result)
+
+    Note over Report: 生成 Word 报告<br/>推送到飞书
+
+    Report-->>CLI: 报告路径
+    CLI-->>User: ✅ 审核完成<br/>返回结果 JSON

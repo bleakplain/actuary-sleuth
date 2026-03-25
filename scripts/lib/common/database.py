@@ -23,7 +23,9 @@ def get_db_path() -> Path:
     rel_path = config.data_paths.sqlite_db
 
     if not Path(rel_path).is_absolute():
-        script_dir = Path(__file__).parent.parent
+        # __file__ 是 lib/common/database.py
+        # parent 是 common/, parent.parent 是 lib/, parent.parent.parent 是 scripts/
+        script_dir = Path(__file__).parent.parent.parent
         return script_dir / rel_path
     return Path(rel_path)
 

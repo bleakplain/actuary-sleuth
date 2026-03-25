@@ -58,6 +58,23 @@ class ExtractResult:
         """获取字段来源"""
         return self.provenance.get(key, 'unknown')
 
+    # 便捷方法 - 对调用方隐藏实现细节
+    def get_product(self) -> Dict[str, Any]:
+        """获取产品信息"""
+        return self.get_field('product_info', {})
+
+    def get_product_info(self) -> Dict[str, Any]:
+        """获取产品信息（别名，保持向后兼容）"""
+        return self.get_product()
+
+    def get_clauses(self) -> List[Dict[str, Any]]:
+        """获取条款列表"""
+        return self.get_field('clauses', [])
+
+    def get_pricing(self) -> Dict[str, Any]:
+        """获取费率参数"""
+        return self.get_field('pricing_params', {})
+
 
 @dataclass
 class ValidationResult:

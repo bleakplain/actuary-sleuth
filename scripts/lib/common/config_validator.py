@@ -50,6 +50,9 @@ class ConfigValidator:
         """
         验证智谱 API 密钥
 
+        Zhipu AI API 密钥格式: <id>.<key>
+        例如: 7d0a2b4545c94ca088f4d869a9e2cbbd.oRxlgkhqRF1rbjNp
+
         Args:
             api_key: API 密钥，如果为 None 则从环境变量读取
 
@@ -62,14 +65,30 @@ class ConfigValidator:
         if api_key is None:
             api_key = ConfigValidator.require_api_key('ZHIPU_API_KEY', '智谱')
 
-        if not api_key.startswith(('sk-', 'SDK')):
+        api_key = api_key.strip()
+
+        # Zhipu AI API 密钥格式: <id>.<secret>
+        # 至少包含一个点号分隔符，且总长度足够
+        if '.' not in api_key:
             raise ConfigurationError(
-                f"智谱 API 密钥格式无效。密钥应以 'sk-' 或 'SDK' 开头"
+                f"智谱 API 密钥格式无效。密钥应为 '<id>.<secret>' 格式"
             )
 
-        if len(api_key) < 20:
+        parts = api_key.split('.')
+        if len(parts) != 2:
             raise ConfigurationError(
-                f"智谱 API 密钥长度不足。密钥长度应至少为 20 个字符"
+                f"智谱 API 密钥格式无效。密钥应只包含一个点号分隔符"
+            )
+
+        id_part, secret_part = parts
+        if not id_part or not secret_part:
+            raise ConfigurationError(
+                f"智谱 API 密钥格式无效。ID 和 Secret 部分都不能为空"
+            )
+
+        if len(id_part) < 10 or len(secret_part) < 10:
+            raise ConfigurationError(
+                f"智谱 API 密钥长度不足。ID 和 Secret 部分都应至少为 10 个字符"
             )
 
         return api_key

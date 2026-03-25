@@ -28,7 +28,7 @@ class ZhipuClient(BaseLLMClient):
         api_key: str,
         model: str = "glm-z1-air",
         base_url: str = "https://open.bigmodel.cn/api/paas/v4/",
-        timeout: int = 60
+        timeout: int = 120
     ):
         super().__init__(model, timeout)
         self.api_key = api_key
@@ -149,7 +149,7 @@ class ZhipuClient(BaseLLMClient):
 
     @_track_timing("zhipu")
     @_with_circuit_breaker("zhipu")
-    @_retry_with_backoff(max_retries=3, base_delay=2, rate_limit_delay_mult=3)
+    @_retry_with_backoff(max_retries=2, base_delay=1, rate_limit_delay_mult=2)
     def generate(self, prompt: str, **kwargs) -> str:
         return self._do_generate(prompt, **kwargs)
 
@@ -190,7 +190,7 @@ class ZhipuClient(BaseLLMClient):
 
     @_track_timing("zhipu")
     @_with_circuit_breaker("zhipu")
-    @_retry_with_backoff(max_retries=3, base_delay=2, rate_limit_delay_mult=3)
+    @_retry_with_backoff(max_retries=2, base_delay=1, rate_limit_delay_mult=2)
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         return self._do_chat(messages, **kwargs)
 

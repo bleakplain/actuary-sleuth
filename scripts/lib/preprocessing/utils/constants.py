@@ -30,9 +30,9 @@ class ExtractionConfig:
     DEFAULT_FAST_CONFIDENCE: float = 0.85
 
     # ========== Dynamic Lane ==========
-    DYNAMIC_CONTENT_MAX_CHARS: int = 15000
-    DYNAMIC_EXTRACTION_MAX_TOKENS: int = 8000  # 提高以支持更多条款提取
-    DYNAMIC_EXTRACTION_MAX_TOKENS_LARGE: int = 16000  # 大文档的条款提取
+    DYNAMIC_CONTENT_MAX_CHARS: int = 20000
+    DYNAMIC_EXTRACTION_MAX_TOKENS: int = 8000
+    DYNAMIC_EXTRACTION_MAX_TOKENS_LARGE: int = 16000
     DEFAULT_DYNAMIC_CONFIDENCE: float = 0.75
 
     # ========== Specialized Extractors ==========

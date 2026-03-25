@@ -21,6 +21,12 @@ except ImportError:
     HAS_LLAMA_INDEX = False
     Document = None
 
+# 真实法规数据目录路径
+# 从scripts/tests/utils/rag_fixtures.py -> 往上3级 -> references
+REAL_REFERENCES_DIR = Path(__file__).parent.parent.parent.parent / "references"
+# 从scripts/tests/utils/rag_fixtures.py -> 往上2级 -> data
+REAL_DATA_DIR = Path(__file__).parent.parent.parent / "data"
+
 
 @pytest.fixture
 def temp_lancedb_dir():
@@ -197,3 +203,126 @@ def create_test_documents(count: int = 10) -> List[Document]:
         ))
 
     return documents
+
+
+@pytest.fixture
+def real_references_dir():
+    """真实的法规文档目录"""
+    if not REAL_REFERENCES_DIR.exists():
+        pytest.skip(f"真实法规目录不存在: {REAL_REFERENCES_DIR}")
+    return REAL_REFERENCES_DIR
+
+
+@pytest.fixture
+def real_lancedb_dir():
+    """真实的LanceDB数据目录（在data目录下）"""
+    lancedb_dir = REAL_DATA_DIR / "lancedb"
+    # 如果不存在，创建它
+    lancedb_dir.mkdir(parents=True, exist_ok=True)
+    return lancedb_dir
+
+
+@pytest.fixture
+def real_regulation_vector_index(real_lancedb_dir, real_references_dir):
+    """
+    使用真实法规文档创建的向量索引
+
+    这个fixture会：
+    1. 读取references目录下的所有法规markdown文件
+    2. 解析成Document对象
+    3. 创建向量索引并存储到data/lancedb
+    """
+    if not HAS_LLAMA_INDEX:
+        pytest.skip("llama_index not installed")
+
+    from lib.rag_engine.doc_parser import RegulationDocParser
+
+    # 配置嵌入模型
+    try:
+        embed_model = OllamaEmbedding(model_name="nomic-embed-text")
+        Settings.embed_model = embed_model
+    except Exception:
+        from llama_index.embeddings.openai import OpenAIEmbedding
+        try:
+            embed_model = OpenAIEmbedding()
+            Settings.embed_model = embed_model
+        except Exception:
+            pytest.skip("No embedding model available")
+
+    # 配置文本分割器
+    Settings.text_splitter = SentenceSplitter(
+        chunk_size=500,
+        chunk_overlap=50,
+        separator="\n\n",
+    )
+
+    # 解析真实法规文档
+    parser = RegulationDocParser(regulations_dir=str(real_references_dir))
+    all_documents = parser.parse_all()
+
+    if not all_documents:
+        pytest.skip(f"未能从 {real_references_dir} 解析出任何法规文档")
+
+    print(f"\n加载了 {len(all_documents)} 条法规文档")
+
+    # 创建或获取向量存储
+    vector_store = LanceDBVectorStore(
+        uri=str(real_lancedb_dir),
+        table_name="regulations",
+    )
+
+    # 创建存储上下文
+    storage_context = StorageContext.from_defaults(vector_store=vector_store)
+
+    # 创建索引
+    index = VectorStoreIndex.from_documents(
+        all_documents,
+        storage_context=storage_context,
+        show_progress=True,
+    )
+
+    yield index
+
+    # 不清理真实数据目录，保留用于后续测试
+
+
+@pytest.fixture
+def production_rag_config():
+    """使用生产环境配置的RAG配置"""
+    if not REAL_REFERENCES_DIR.exists():
+        pytest.skip(f"真实法规目录不存在: {REAL_REFERENCES_DIR}")
+
+    lancedb_dir = REAL_DATA_DIR / "lancedb"
+    lancedb_dir.mkdir(parents=True, exist_ok=True)
+
+    from lib.rag_engine.config import RAGConfig
+
+    return RAGConfig(
+        regulations_dir=str(REAL_REFERENCES_DIR),
+        vector_db_path=str(lancedb_dir),
+        chunk_size=500,
+        chunk_overlap=50,
+        top_k_results=5,
+        collection_name="regulations"
+    )
+
+
+@pytest.fixture
+def production_rag_engine(production_rag_config):
+    """
+    使用生产环境配置和真实法规数据的RAG引擎
+
+    这个fixture会：
+    1. 使用真实的法规文档（references目录）
+    2. 使用真实的LanceDB存储（data/lancedb）
+    3. 创建完整的RAG引擎，可直接用于查询
+    """
+    from lib.rag_engine.engine import RAGEngine
+
+    try:
+        engine = RAGEngine(production_rag_config)
+        # 预加载索引
+        engine.preload_index()
+        return engine
+    except Exception as e:
+        pytest.skip(f"无法创建生产RAG引擎: {e}")
