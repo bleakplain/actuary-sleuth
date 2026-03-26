@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-智谱 AI 客户端（资源安全版本）
-"""
 import atexit
 import json
 import re
@@ -13,6 +10,7 @@ from typing import List, Dict, Optional
 
 from .base import BaseLLMClient
 from .metrics import _track_timing, _with_circuit_breaker, _retry_with_backoff
+from lib.common.constants import LLMConstants
 
 
 logger = logging.getLogger(__name__)
@@ -35,11 +33,9 @@ class ZhipuClient(BaseLLMClient):
         self.base_url = base_url.rstrip('/')
         self._session = None
         self._session_lock = threading.Lock()
-
         self._register_cleanup()
 
     def _get_session(self) -> requests.Session:
-        """延迟初始化会话（线程安全）"""
         if self._session is None:
             with self._session_lock:
                 if self._session is None:
@@ -59,7 +55,6 @@ class ZhipuClient(BaseLLMClient):
         return self._session
 
     def close(self):
-        """显式关闭会话"""
         with self._session_lock:
             if self._session is not None:
                 try:
@@ -69,7 +64,6 @@ class ZhipuClient(BaseLLMClient):
                 self._session = None
 
     def __del__(self):
-        """析构时确保关闭"""
         self.close()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -77,7 +71,6 @@ class ZhipuClient(BaseLLMClient):
         return False
 
     def _register_cleanup(self):
-        """注册退出清理"""
         def cleanup():
             self.close()
 
@@ -86,16 +79,6 @@ class ZhipuClient(BaseLLMClient):
             atexit.register(cleanup)
 
     def _do_generate(self, prompt: str, **kwargs) -> str:
-        """
-        实际执行单次 API 调用
-
-        Args:
-            prompt: 提示词
-            **kwargs: 其他参数
-
-        Returns:
-            str: 生成的文本
-        """
         self._validate_prompt(prompt)
         url = f"{self.base_url}/chat/completions"
         data = {
@@ -107,21 +90,12 @@ class ZhipuClient(BaseLLMClient):
         }
 
         session = self._get_session()
-        response = session.post(
-            url,
-            json=data,
-            timeout=self.timeout
-        )
+        response = session.post(url, json=data, timeout=self.timeout)
 
-        # 对 429 和 5xx 错误抛出包含状态码的异常
         if response.status_code == 429:
-            raise requests.exceptions.RequestException(
-                f"429 Rate limit exceeded: {response.text[:200]}"
-            )
+            raise requests.exceptions.RequestException(f"429 Rate limit exceeded: {response.text[:200]}")
         if response.status_code >= 500:
-            raise requests.exceptions.RequestException(
-                f"{response.status_code} Server error: {response.text[:200]}"
-            )
+            raise requests.exceptions.RequestException(f"{response.status_code} Server error: {response.text[:200]}")
 
         response.raise_for_status()
         result = response.json()
@@ -149,7 +123,11 @@ class ZhipuClient(BaseLLMClient):
 
     @_track_timing("zhipu")
     @_with_circuit_breaker("zhipu")
-    @_retry_with_backoff(max_retries=2, base_delay=1, rate_limit_delay_mult=2)
+    @_retry_with_backoff(
+        max_retries=LLMConstants.MAX_RETRIES,
+        base_delay=LLMConstants.RETRY_BASE_DELAY,
+        rate_limit_delay_mult=LLMConstants.RATE_LIMIT_DELAY_MULT
+    )
     def generate(self, prompt: str, **kwargs) -> str:
         return self._do_generate(prompt, **kwargs)
 
@@ -168,13 +146,9 @@ class ZhipuClient(BaseLLMClient):
         response = session.post(url, json=data, timeout=self.timeout)
 
         if response.status_code == 429:
-            raise requests.exceptions.RequestException(
-                f"429 Rate limit exceeded: {response.text[:200]}"
-            )
+            raise requests.exceptions.RequestException(f"429 Rate limit exceeded: {response.text[:200]}")
         if response.status_code >= 500:
-            raise requests.exceptions.RequestException(
-                f"{response.status_code} Server error: {response.text[:200]}"
-            )
+            raise requests.exceptions.RequestException(f"{response.status_code} Server error: {response.text[:200]}")
 
         response.raise_for_status()
         result = response.json()
@@ -190,17 +164,15 @@ class ZhipuClient(BaseLLMClient):
 
     @_track_timing("zhipu")
     @_with_circuit_breaker("zhipu")
-    @_retry_with_backoff(max_retries=2, base_delay=1, rate_limit_delay_mult=2)
+    @_retry_with_backoff(
+        max_retries=LLMConstants.MAX_RETRIES,
+        base_delay=LLMConstants.RETRY_BASE_DELAY,
+        rate_limit_delay_mult=LLMConstants.RATE_LIMIT_DELAY_MULT
+    )
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         return self._do_chat(messages, **kwargs)
 
     def health_check(self) -> bool:
-        """
-        检查智谱AI服务是否可用
-
-        Returns:
-            bool: 服务可用返回 True
-        """
         try:
             url = f"{self.base_url}/chat/completions"
             data = {
@@ -209,12 +181,58 @@ class ZhipuClient(BaseLLMClient):
                 "max_tokens": 10
             }
 
-            response = self._session.post(
-                url,
-                json=data,
-                timeout=5
-            )
+            session = self._get_session()
+            response = session.post(url, json=data, timeout=5)
             return response.status_code == 200
 
         except requests.exceptions.RequestException:
             return False
+
+    def embed(self, texts: List[str], model: Optional[str] = None) -> List[List[float]]:
+        if not texts:
+            return []
+
+        valid_texts = [t for t in texts if t and t.strip()]
+        if not valid_texts:
+            return []
+
+        embedding_model = model or "embedding-3"
+
+        url = f"{self.base_url}/embeddings"
+        data = {
+            "model": embedding_model,
+            "input": valid_texts
+        }
+
+        session = self._get_session()
+        try:
+            response = session.post(url, json=data, timeout=self.timeout)
+
+            if response.status_code == 429:
+                raise requests.exceptions.RequestException(f"429 Rate limit exceeded: {response.text[:200]}")
+            if response.status_code >= 500:
+                raise requests.exceptions.RequestException(f"{response.status_code} Server error: {response.text[:200]}")
+
+            response.raise_for_status()
+            result = response.json()
+
+            if 'data' not in result:
+                raise ValueError(f"Unexpected response format: 'data' field missing. Response keys: {list(result.keys())}")
+
+            embeddings = [item['embedding'] for item in result['data']]
+
+            result_embeddings = []
+            text_index = 0
+            for text in texts:
+                if text and text.strip():
+                    result_embeddings.append(embeddings[text_index])
+                    text_index += 1
+                else:
+                    result_embeddings.append([0.0] * len(embeddings[0]) if embeddings else [])
+
+            return result_embeddings
+
+        except requests.exceptions.RequestException:
+            raise
+        except (KeyError, IndexError, ValueError) as e:
+            raise ValueError(f"Failed to parse embedding response: {e}")

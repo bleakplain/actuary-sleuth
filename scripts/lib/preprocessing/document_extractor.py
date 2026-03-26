@@ -18,7 +18,7 @@ import os
 import re
 import hashlib
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set
 
 from .models import (
     NormalizedDocument, ExtractResult, ValidationResult,
@@ -26,12 +26,11 @@ from .models import (
     RegulationStatus, RegulationLevel, RegulationRecord,
     RegulationProcessingOutcome,
 )
-from .normalizer import DocumentNormalizer
-from .classifier import ProductClassifier
-from .extractor_selector import ExtractorSelector
-from .fast_extractor import FastExtractor, FastExtractionFailed
-from .dynamic_extractor import DynamicExtractor
-from .validator import ResultValidator
+from .normalizer import Normalizer
+from .classifier import Classifier
+from .hybrid_extractor import HybridExtractor
+from .validator import Validator
+from .utils.constants import config
 
 
 logger = logging.getLogger(__name__)
@@ -41,9 +40,15 @@ DEBUG_MODE = os.getenv('DEBUG', '').lower() in ('true', '1', 'yes')
 
 
 class DocumentExtractor:
-    """文档提取器 - 主入口"""
+    """文档提取器 - 主入口（使用多策略并行提取架构）"""
 
-    def __init__(self, llm_client, config: Dict = None):
+    # 默认必需字段
+    DEFAULT_REQUIRED_FIELDS = {
+        'product_name',
+        'insurance_company',
+    }
+
+    def __init__(self, llm_client, config: Optional[Dict[str, Any]] = None):
         """
         初始化提取器
 
@@ -54,24 +59,28 @@ class DocumentExtractor:
         self.config = config or {}
         self.llm_client = llm_client
 
-        # 初始化组件（注意顺序：DynamicExtractor 依赖 classifier）
-        self.normalizer = DocumentNormalizer()
-        self.classifier = ProductClassifier()
-        self.fast_extractor = FastExtractor(llm_client)
-        self.dynamic_extractor = DynamicExtractor(llm_client, self.classifier)
-        self.extractor_selector = ExtractorSelector(
-            self.fast_extractor,
-            self.dynamic_extractor,
-            self.classifier
-        )
-        self.validator = ResultValidator()
+        # 初始化组件
+        self.normalizer = Normalizer()
+        self.classifier = Classifier()
+        self.hybrid_extractor = HybridExtractor.create_default(llm_client)
+        self.validator = Validator()
+
+        # 确保 LLM 客户端使用正确的超时设置
+        from lib.config import get_config
+        app_config = get_config()
+        if hasattr(llm_client, 'timeout'):
+            current_timeout = llm_client.timeout
+            config_timeout = app_config.llm.timeout
+            if current_timeout < config_timeout:
+                logger.warning(f"LLM 客户端超时 ({current_timeout}s) 小于配置值 ({config_timeout}s)，"
+                               f"大文档处理可能会超时")
 
     def extract(self,
                 document: str,
                 source_type: str = 'text',
                 required_fields: Optional[List[str]] = None) -> ExtractResult:
         """
-        统一提取接口
+        统一提取接口（使用多策略并行提取）
 
         Args:
             document: 原始文档
@@ -83,9 +92,21 @@ class DocumentExtractor:
         """
         # 使用默认必需字段
         if required_fields is None:
-            required_fields = list(ExtractorSelector.get_required_fields())
+            required_fields = list(self.DEFAULT_REQUIRED_FIELDS)
+            # 根据产品类型添加其他必需字段
+            required_fields.extend(['insurance_period', 'waiting_period'])
 
-        logger.info(f"开始文档提取，文档长度: {len(document)} 字符，来源类型: {source_type}")
+        required_fields_set = set(required_fields)
+
+        # 边界情况：文档长度验证
+        doc_length = len(document)
+        if doc_length < 100:
+            from .exceptions import DocumentValidationError
+            raise DocumentValidationError(f"文档过短 ({doc_length} 字符)，无法有效提取")
+        if doc_length > 500000:
+            logger.warning(f"文档过长 ({doc_length} 字符)，可能需要较长处理时间")
+
+        logger.info(f"开始文档提取，文档长度: {doc_length} 字符，来源类型: {source_type}")
 
         # 1. 文档规范化
         normalized = self.normalizer.normalize(document, source_type)
@@ -94,33 +115,31 @@ class DocumentExtractor:
                    f"结构化={normalized.profile.is_structured}, "
                    f"有条款编号={normalized.profile.has_clause_numbers}")
 
-        # 2. 选择提取器
-        extractor = self.extractor_selector.select(normalized)
-        logger.info(f"选择提取器: {extractor.__class__.__name__}")
+        # 2. 多策略并行提取
+        strategy_result = self.hybrid_extractor.extract(
+            normalized.content,
+            required_fields_set
+        )
 
-        # 3. 执行提取
-        try:
-            result = extractor.extract(normalized, required_fields)
-            logger.info(f"{extractor.__class__.__name__} 提取成功: 提取字段={list(result.data.keys())}")
-        except FastExtractionFailed:
-            # 快速通道失败，回退到动态通道
-            logger.warning("快速通道失败，回退到动态通道")
-            result = self.dynamic_extractor.extract(normalized, required_fields)
-            logger.info(f"动态通道回退成功: 提取字段={list(result.data.keys())}")
+        # 3. 转换为 ExtractResult 格式
+        result = ExtractResult(
+            data=strategy_result.data,
+            confidence={k: strategy_result.confidence for k in strategy_result.data},
+            provenance={k: strategy_result.extractor for k in strategy_result.data},
+            metadata={
+                **strategy_result.metadata,
+                'source_type': source_type,
+                'original_length': doc_length,
+                'normalized_length': len(normalized.content),
+            }
+        )
 
         # 4. 验证
         validation = self.validator.validate(result)
         logger.info(f"验证结果: {validation.score}/100, 错误: {len(validation.errors)}, 警告: {len(validation.warnings)}")
 
-        # 5. 确保产品类型存在于元数据中
-        if 'product_type' not in result.metadata:
-            classifications = self.classifier.classify(normalized.content)
-            product_type = classifications[0][0] if classifications else 'life_insurance'
-            result.metadata['product_type'] = product_type
-
-        # 6. 添加元数据
+        # 5. 添加验证元数据
         result.metadata.update({
-            'extraction_mode': 'fast' if isinstance(extractor, FastExtractor) else 'dynamic',
             'validation_score': validation.score,
             'validation_errors': validation.errors,
             'validation_warnings': validation.warnings
@@ -282,6 +301,6 @@ class DocumentExtractor:
         logger.info(f"提取结果已输出: {debug_file}")
 
 
-def create_extractor(llm_client, config: Dict = None) -> DocumentExtractor:
+def create_extractor(llm_client, config: Optional[Dict[str, Any]] = None) -> DocumentExtractor:
     """创建提取器的便捷函数"""
     return DocumentExtractor(llm_client, config)

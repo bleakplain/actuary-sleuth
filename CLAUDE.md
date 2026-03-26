@@ -132,6 +132,7 @@ Located at `scripts/config/settings.json`, overrideable via env vars.
 6. No new service packages, reuse lib/ structure
 7. Tests must pass before commit
 8. Self-documenting code, no redundant comments
+9. Reuse lib/llm error handling, don't implement retry in preprocessing
 10. Avoid unnecessary type conversions
-12. Minimal parameters, use metadata
-13. Constants in `lib/common/constants.py`
+11. Minimal parameters, use metadata
+12. Constants in `lib/common/constants.py`

@@ -52,26 +52,18 @@ class PreprocessingConstants:
     DEFAULT_CHUNK_THRESHOLD = 10000
     DEFAULT_MAX_CONCURRENT = 1
 
-    # 模型并发数推荐
-    MODEL_CONCURRENT_MAP = {
-        'glm-4-flash': 5,
-        'glm-4-air': 3,
-        'glm-4-plus': 2,
-    }
-
-    # LLM 调用限流配置
-    LLM_TARGET_QPS = 1.0
-    LLM_MAX_RETRIES = 2
-    LLM_RETRY_BASE_DELAY = 2.0
-    LLM_RETRY_MAX_DELAY = 60.0
-
     # 文档长度限制
     MAX_DOCUMENT_LENGTH = 12000
     MIN_DOCUMENT_LENGTH = 100
 
-    # LLM 配置
-    LLM_MAX_TOKENS = 16384
-    LLM_DEFAULT_CONFIDENCE = 0.75
+
+class LLMConstants:
+    """LLM 调用配置"""
+
+    MAX_RETRIES = 3
+    RETRY_BASE_DELAY = 5.0
+    RATE_LIMIT_DELAY_MULT = 3
+    RETRY_MAX_DELAY = 60.0
 
     # 分块策略配置
     TABLE_DENSITY_THRESHOLD = 0.5

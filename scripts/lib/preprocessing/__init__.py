@@ -3,21 +3,30 @@
 """
 文档预处理模块
 
-统一的文档预处理框架，支持两类文档：
+基于渐进式多策略架构的文档预处理框架。
 
-1. 保险产品文档预处理:
-   - Normalizer: 文档规范化
-   - ProductClassifier: 产品分类
-   - ExtractorSelector: 提取器选择
-   - FastExtractor: 快速提取器（快速通道）
-   - DynamicExtractor: 动态提取器（动态通道）
-   - ResultValidator: 结果验证器
-   - DocumentExtractor: 统一提取器（主入口）
+核心架构:
+    文档输入
+        ↓
+    规范化 (Normalizer)
+        ↓
+    语义分析 (SemanticAnalyzer)
+        ↓
+    混合提取 (HybridExtractor)
+        ├─ 正则提取 (RegexExtractor)
+        ├─ Few-shot 提取 (FewShotExtractor)
+        ├─ 表格提取 (TableExtractor)
+        └─ 分块 LLM 提取 (ChunkedLLMExtractor)
+        ↓
+    融合 (Fuser)
+        ↓
+    去重 (Deduplicator)
+        ↓
+    验证 (Validator)
+        ↓
+    结构化输出
 
-2. 法规文档元数据提取（用于 RAG 向量库）:
-   - DocumentExtractor.extract_regulation_metadata(): 法规元数据提取
-
-产品文档使用示例:
+使用示例:
     from lib.llm import LLMClientFactory
     from lib.preprocessing import DocumentExtractor
 
@@ -28,22 +37,9 @@
         document=open('policy.txt').read(),
         source_type='text'
     )
-
-法规文档使用示例:
-    from lib.llm import LLMClientFactory
-    from lib.preprocessing import DocumentExtractor
-
-    llm_client = LLMClientFactory.get_doc_preprocess_llm()
-    extractor = DocumentExtractor(llm_client)
-
-    # 提取法规元数据
-    result = extractor.extract_regulation_metadata(
-        content=open('regulation.md').read(),
-        source_file='regulation.md'
-    )
-    # result.record 包含 law_name, article_number, category 等字段
 """
 
+# Models
 from .models import (
     NormalizedDocument,
     DocumentProfile,
@@ -53,7 +49,6 @@ from .models import (
     ProductType,
     ExtractionRequest,
     ExtractionResponse,
-    # 法规文档模型
     RegulationStatus,
     RegulationLevel,
     RegulationRecord,
@@ -61,24 +56,36 @@ from .models import (
     RegulationDocument,
 )
 
-from .normalizer import DocumentNormalizer
-from .classifier import ProductClassifier
-from .extractor_selector import ExtractorSelector
-from .fast_extractor import FastExtractor, FastExtractionFailed
+# Core Components
+from .normalizer import Normalizer
+from .classifier import Classifier
+from .semantic_analyzer import SemanticAnalyzer
+from .parser_engine import ParserEngine, PremiumTableParser, DiseaseListParser
+from .deduplicator import Deduplicator
 from .prompt_builder import PromptBuilder
-from .dynamic_extractor import (
-    PremiumTableExtractor,
-    ClauseExtractor,
-    DynamicExtractor,
-)
-from .validator import ResultValidator
+from .validator import Validator
+
+# New Architecture Components
+from .hybrid_extractor import HybridExtractor
+from .fuser import Fuser
+
+# Extractors
+from .extractors.base import Extractor, ExtractionResult
+from .extractors.regex import RegexExtractor
+from .extractors.fewshot import FewShotExtractor
+from .extractors.table import TableExtractor
+from .extractors.chunked_llm import ChunkedLLMExtractor
+
+# Main Entry
 from .document_extractor import DocumentExtractor, create_extractor
+
+# Utils
 from .utils import parse_llm_json_response, config
 
-__version__ = '1.0.0'
+__version__ = '2.0.0'
 
 __all__ = [
-    # Models - 产品文档
+    # Models
     'NormalizedDocument',
     'DocumentProfile',
     'StructureMarkers',
@@ -87,27 +94,36 @@ __all__ = [
     'ProductType',
     'ExtractionRequest',
     'ExtractionResponse',
-
-    # Models - 法规文档
     'RegulationStatus',
     'RegulationLevel',
     'RegulationRecord',
     'RegulationProcessingOutcome',
     'RegulationDocument',
 
-    # Core Components - 产品文档
-    'DocumentNormalizer',
-    'ProductClassifier',
-    'ExtractorSelector',
-    'FastExtractor',
-    'FastExtractionFailed',
+    # Core Components
+    'Normalizer',
+    'Classifier',
+    'SemanticAnalyzer',
+    'ParserEngine',
+    'PremiumTableParser',
+    'DiseaseListParser',
+    'Deduplicator',
     'PromptBuilder',
-    'DynamicExtractor',
-    'PremiumTableExtractor',
-    'ClauseExtractor',
-    'ResultValidator',
+    'Validator',
 
-    # Main Entry - 产品文档兼法规元数据提取
+    # New Architecture
+    'HybridExtractor',
+    'Fuser',
+
+    # Extractors
+    'Extractor',
+    'ExtractionResult',
+    'RegexExtractor',
+    'FewShotExtractor',
+    'TableExtractor',
+    'ChunkedLLMExtractor',
+
+    # Main Entry
     'DocumentExtractor',
     'create_extractor',
 

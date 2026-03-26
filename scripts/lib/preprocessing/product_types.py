@@ -5,7 +5,7 @@
 
 保险产品类型的完整定义，用于分类和动态 Prompt 生成。
 """
-from typing import List, Dict
+from typing import List, Dict, Any
 from .models import ProductType
 
 
@@ -88,6 +88,88 @@ EXTRACTION_FOCUS_MAP = {
     'accident_insurance': ['意外伤害范围', '赔付比例', '等待期', '责任免除'],
     'life_insurance': ['产品基本信息', '保险责任', '责任免除', '等待期'],
 }
+
+
+# Few-shot 示例映射
+FEW_SHOT_EXAMPLES = {
+    'critical_illness': """
+**示例 1**:
+输入: "# 平安福重大疾病保险\\n平安人寿保险股份有限公司\\n等待期：90天\\n保障120种重疾，赔付基本保额100%"
+输出: {{"product_name": "平安福重大疾病保险", "insurance_company": "平安人寿保险股份有限公司", "waiting_period": 90, "covered_diseases": [{{"disease_name": "恶性肿瘤", "disease_grade": "重症", "payout_ratio": 1.0}}]}}
+
+**示例 2**:
+输入: "产品名称：国寿福终身重疾险\\n等待期180天\\n轻症赔付30%，中症赔付50%，重症赔付100%"
+输出: {{"product_name": "国寿福终身重疾险", "waiting_period": 180, "covered_diseases": [...]}}
+""",
+    'medical_insurance': """
+**示例 1**:
+输入: "# 平安e生保医疗保险\\n免赔额1万元\\n二级医院赔付80%，三级医院赔付90%"
+输出: {{"product_name": "平安e生保医疗保险", "deductible": {{"general": 10000}}, "payout_ratio": {{"by_hospital_grade": {{"grade_b": 0.8, "grade_a": 0.9}}}}}}
+
+**示例 2**:
+输入: "产品名称：好医保长期医疗\\n年度限额200万元"
+输出: {{"product_name": "好医保长期医疗", "limits": {{"annual_limit": "200万元"}}}}
+""",
+    'universal_life': """
+**示例 1**:
+输入: "# 平安万能险\\n保证利率1.75%，当前结算利率4.5%\\n初始保费5000元，最低追加保费1000元"
+output: {{"product_name": "平安万能险", "guaranteed_interest_rate": "1.75%", "current_interest_rate": "4.5%", "account_management": {{"initial_premium": 5000, "minimum_premium": 1000}}}}
+
+**示例 2**:
+输入: "产品名称：国寿鑫尊宝年金保险（万能型）\\n保单账户价值"
+output: {{"product_name": "国寿鑫尊宝年金保险（万能型）", "account_management": {...}}}
+""",
+    'term_life': """
+**示例 1**:
+输入: "# 华夏常青树定期寿险\\n保险期间20年\\n身故赔付基本保额"
+output: {{"product_name": "华夏常青树定期寿险", "insurance_period": "20年", "death_benefit": {{"amount": "基本保额"}}}}
+
+**示例 2**:
+输入: "产品名称：阳光人寿阳光保定期寿险\\n等待期90天"
+output: {{"product_name": "阳光人寿阳光保定期寿险", "waiting_period": 90}}
+""",
+    'whole_life': """
+**示例 1**:
+输入: "# 平安金瑞人生终身寿险\\n保险期间终身\\n现金价值逐年增长"
+output: {{"product_name": "平安金瑞人生终身寿险", "insurance_period": "终身", "cash_value": "逐年增长"}}
+
+**示例 2**:
+输入: "产品名称：国寿鑫享鸿福年金保险\\n缴费方式年交"
+output: {{"product_name": "国寿鑫享鸿福年金保险", "payment_method": "年交"}}
+""",
+    'annuity': """
+**示例 1**:
+输入: "# 平安金瑞人生年金保险\\n60岁开始领取，每月领取2000元"
+output: {{"product_name": "平安金瑞人生年金保险", "annuity_period": "60岁开始", "annuity_amount": "每月2000元"}}
+
+**示例 2**:
+输入: "产品名称：国寿鑫享鸿福年金保险\\n保证领取20年"
+output: {{"product_name": "国寿鑫享鸿福年金保险", "guarantee_period": "20年"}}
+""",
+    'accident_insurance': """
+**示例 1**:
+输入: "# 平安意外伤害保险\\n意外身故赔付100万，意外伤残按比例赔付"
+output: {{"product_name": "平安意外伤害保险", "accident_scope": "意外身故、意外伤残", "payout_ratio": {{"death": 1000000}}}}
+
+**示例 2**:
+输入: "产品名称：小蜜蜂意外险\\n等待期无"
+output: {{"product_name": "小蜜蜂意外险", "waiting_period": 0}}
+""",
+    'life_insurance': """
+**示例 1**:
+输入: "# 平安福终身寿险\\n平安人寿保险股份有限公司\\n保险期间：终身\\n等待期：90天"
+output: {{"product_name": "平安福终身寿险", "insurance_company": "平安人寿保险股份有限公司", "insurance_period": "终身", "waiting_period": 90}}
+
+**示例 2**:
+输入: "产品名称：国寿鑫享鸿福年金保险\\n中国人寿保险股份有限公司\\n保险期间：20年\\n缴费方式：年交"
+output: {{"product_name": "国寿鑫享鸿福年金保险", "insurance_company": "中国人寿保险股份有限公司", "insurance_period": "20年", "payment_method": "年交"}}
+""",
+}
+
+
+def get_few_shot_examples(product_type: str) -> str:
+    """获取产品类型特定的 Few-shot 示例"""
+    return FEW_SHOT_EXAMPLES.get(product_type, FEW_SHOT_EXAMPLES['life_insurance'])
 
 
 # 输出 Schema 模板
@@ -183,6 +265,7 @@ def get_extraction_focus(product_type: str) -> List[str]:
     return EXTRACTION_FOCUS_MAP.get(product_type, ['产品基本信息', '保险责任'])
 
 
-def get_output_schema(product_type: str) -> Dict:
+def get_output_schema(product_type: str) -> Dict[str, Any]:
     """获取输出 Schema"""
-    return OUTPUT_SCHEMA_TEMPLATES.get(product_type, OUTPUT_SCHEMA_TEMPLATES['life_insurance'])
+    schema: Any = OUTPUT_SCHEMA_TEMPLATES.get(product_type, OUTPUT_SCHEMA_TEMPLATES['life_insurance'])
+    return schema

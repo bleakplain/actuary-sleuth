@@ -7,7 +7,7 @@ Prompt 构建器
 """
 import json
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 
 logger = logging.getLogger(__name__)
@@ -143,6 +143,9 @@ class PromptBuilder:
         'hybrid_notice': """
 **注意**: 这是一个组合产品，请分别提取不同产品类型的信息。例如，如果同时包含重疾险和医疗险，请在结果中明确区分。
 """,
+
+        # Few-shot 示例组件（占位符，实际内容由 build() 方法注入）
+        'few_shot_placeholder': '{few_shot_content}',
     }
 
     def build(self,
@@ -150,7 +153,9 @@ class PromptBuilder:
               required_fields: List[str],
               extraction_focus: List[str],
               output_schema: Dict,
-              is_hybrid: bool = False) -> str:
+              is_hybrid: bool = False,
+              include_few_shot: bool = False,
+              few_shot_content: Optional[str] = None) -> str:
         """
         构建 Prompt
 
@@ -160,6 +165,8 @@ class PromptBuilder:
             extraction_focus: 提取重点
             output_schema: 输出 Schema
             is_hybrid: 是否为混合产品
+            include_few_shot: 是否包含 Few-shot 示例
+            few_shot_content: Few-shot 内容（可选，如果不提供则使用默认）
 
         Returns:
             构建好的 Prompt
@@ -173,18 +180,28 @@ class PromptBuilder:
         else:
             prompt = self.COMPONENTS['role_base']
 
-        # 2. 添加字段说明
+        # 2. 添加 Few-shot 示例（可选）
+        if include_few_shot:
+            prompt += "\n"
+            if few_shot_content:
+                # 使用提供的 Few-shot 内容
+                prompt += f"\n{few_shot_content}\n"
+            else:
+                # 使用占位符（由调用方填充）
+                prompt += "\n{few_shot_content}\n"
+
+        # 3. 添加字段说明
         field_components = self._get_field_components(required_fields)
         for component in field_components:
             if component in self.COMPONENTS:
                 prompt += self.COMPONENTS[component]
 
-        # 3. 混合产品特殊说明
+        # 4. 混合产品特殊说明
         if is_hybrid:
             prompt += "\n"
             prompt += self.COMPONENTS['hybrid_notice']
 
-        # 4. 输出格式
+        # 5. 输出格式
         prompt += "\n"
         prompt += self.COMPONENTS['output_structure'].format(
             output_schema=json.dumps(output_schema, ensure_ascii=False, indent=2)

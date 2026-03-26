@@ -10,12 +10,13 @@ import re
 from typing import Optional
 
 from .models import NormalizedDocument, DocumentProfile, StructureMarkers
+from .utils.constants import config
 
 
 logger = logging.getLogger(__name__)
 
 
-class DocumentNormalizer:
+class Normalizer:
     """文档规范化器 - 统一输入格式"""
 
     def __init__(self):
@@ -73,35 +74,25 @@ class DocumentNormalizer:
         """去除噪声"""
         # PDF 转换文档的特殊噪声
         if source_type == 'pdf':
-            # 移除页眉页脚（常见模式）
-            document = re.sub(r'.{0,50}第\s*\d+\s*页.{0,20}\n', '\n', document)
-            # 移除孤立的页码
-            document = re.sub(r'\n\s*\d+\s*\n', '\n', document)
-            # 移除过多的空行
-            document = re.sub(r'\n\s*\n\s*\n+', '\n\n', document)
+            for pattern, replacement in config.PDF_NOISE_PATTERNS:
+                document = re.sub(pattern, replacement, document)
 
         # HTML 转换文档的特殊噪声
         elif source_type == 'html':
             # 优先处理 HTML 表格格式（飞书在线文档）
-            # 将表格中的条款格式转换为更易读的格式
-            # <td>**2.1**</td><td>**标题** 内容</td> -> **2.1** **标题** 内容
             document = re.sub(r'<td>\*\*(\d+\.\d+)\*\*\s*</td><td[^>]*>\*\*([^*]*)\*\*\s*', r'**\1** **\2** ', document)
             document = re.sub(r'<td>\*\*(\d+\.\d+)\*\*\s*</td><td[^>]*>([^<]*)', r'**\1** \2', document)
             document = re.sub(r'<td>\*\*(\d+)\*\*\s*</td><td[^>]*>\*\*([^*]*)\*\*\s*', r'**\1** **\2** ', document)
             # 移除剩余的 HTML 标签
             document = re.sub(r'<[^>]+>', '', document)
-            # 移除多余空白和换行
-            document = re.sub(r'\n\s*\n\s*\n+', '\n\n', document)
-            # 清理 <br/> 残留
-            document = document.replace('<br/>', '\n')
-            document = document.replace('<br>', '\n')
+
+            # 应用 HTML 噪声模式
+            for pattern, replacement in config.HTML_NOISE_PATTERNS:
+                document = re.sub(pattern, replacement, document)
 
         # 通用噪声处理
-        # 移除全角空格
         document = document.replace('\u3000', ' ')
-        # 移除零宽字符
         document = re.sub(r'[\u200b-\u200d\ufeff]', '', document)
-        # 统一引号
         document = document.replace('"', '"').replace('"', '"')
         document = document.replace('\u2018', "'").replace('\u2019', "'")
         document = document.replace('\u201c', '"').replace('\u201d', '"')

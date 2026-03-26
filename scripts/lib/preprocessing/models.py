@@ -64,7 +64,7 @@ class ExtractResult:
         return self.get_field('product_info', {})
 
     def get_product_info(self) -> Dict[str, Any]:
-        """获取产品信息（别名，保持向后兼容）"""
+        """获取产品信息"""
         return self.get_product()
 
     def get_clauses(self) -> List[Dict[str, Any]]:

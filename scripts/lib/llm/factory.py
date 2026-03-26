@@ -115,13 +115,13 @@ class LLMClientFactory:
         }
 
     @staticmethod
-    def get_embedding_llm() -> OllamaClient:
-        from lib.config import get_config
-        app_config = get_config()
-        return OllamaClient(
-            host=app_config.ollama.host,
-            model=app_config.ollama.embed_model,
-            timeout=30
+    def get_embedding_llm() -> ZhipuClient:
+        api_key, base_url = LLMClientFactory._get_base_config()
+        return ZhipuClient(
+            api_key=api_key,
+            model=ModelName.EMBEDDING_3,
+            base_url=base_url,
+            timeout=60
         )
 
     @staticmethod

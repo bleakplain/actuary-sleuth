@@ -16,10 +16,10 @@ from .utils.constants import config
 logger = logging.getLogger(__name__)
 
 
-class ProductClassifier:
+class Classifier:
     """产品分类器 - 多标签支持"""
 
-    def __init__(self, threshold: float = None):
+    def __init__(self, threshold: Optional[float] = None):
         self.threshold = threshold if threshold is not None else config.DEFAULT_CLASSIFICATION_THRESHOLD
         self.types = PRODUCT_TYPES
         # Build O(1) lookup dictionary
@@ -54,7 +54,7 @@ class ProductClassifier:
 
         return classifications[0]
 
-    def is_hybrid_product(self, document: str, classifications: List[Tuple[str, float]] = None) -> bool:
+    def is_hybrid_product(self, document: str, classifications: Optional[List[Tuple[str, float]]] = None) -> bool:
         """
         判断是否为混合产品
 

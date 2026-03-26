@@ -4,7 +4,7 @@
 LLM 客户端抽象基类
 """
 from abc import ABC, abstractmethod
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 
 class BaseLLMClient(ABC):
@@ -36,7 +36,6 @@ class BaseLLMClient(ABC):
                 raise ValueError(f"消息 {i} 的内容不能为空")
 
     def close(self):
-        """显式关闭会话"""
         if hasattr(self, '_session') and self._session is not None:
             self._session.close()
             self._session = None
@@ -62,16 +61,6 @@ class BaseLLMClient(ABC):
         pass
 
     def chat_with_cache(self, messages: List[Dict[str, str]], **kwargs) -> str:
-        """
-        带缓存的聊天方法
-
-        Args:
-            messages: 消息列表
-            **kwargs: 其他参数
-
-        Returns:
-            str: LLM 响应
-        """
         if not self._use_cache:
             return self.chat(messages, **kwargs)
 
@@ -89,4 +78,8 @@ class BaseLLMClient(ABC):
 
     @abstractmethod
     def health_check(self) -> bool:
+        pass
+
+    @abstractmethod
+    def embed(self, texts: List[str]) -> List[List[float]]:
         pass
