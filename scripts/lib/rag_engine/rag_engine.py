@@ -6,6 +6,7 @@ RAG 查询引擎（线程安全版本）
 """
 import logging
 import threading
+from pathlib import Path
 from typing import Callable, Dict, Any, List, Optional
 
 try:
@@ -17,7 +18,7 @@ from .config import RAGConfig
 from .index_manager import VectorIndexManager
 from .llamaindex_adapter import ClientLLMAdapter, get_embedding_model
 from .retrieval import hybrid_search
-from .tokenizer import tokenize_chinese
+from .bm25_index import BM25Index
 from lib.llm import BaseLLMClient, LLMClientFactory
 
 logger = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ class RAGEngine:
 
         self._llm = None
         self._embed_model = None
-        self._avg_doc_len = 100
+        self._bm25_index: Optional[BM25Index] = None
         self._initialized = False
         self._init_lock = threading.Lock()
 
@@ -112,7 +113,7 @@ class RAGEngine:
                 if index is None:
                     raise RuntimeError("索引初始化失败")
 
-                self._calculate_avg_doc_len(index)
+                self._load_bm25_index()
                 self.query_engine = self.index_manager.create_query_engine()
 
                 if self.query_engine is None:
@@ -126,7 +127,7 @@ class RAGEngine:
                 logger.error(f"RAG 引擎初始化失败: {e}")
                 _thread_settings.reset()
                 self.query_engine = None
-                self._avg_doc_len = 100
+                self._bm25_index = None
                 self._initialized = False
                 return False
 
@@ -137,15 +138,15 @@ class RAGEngine:
             self.query_engine = None
             logger.info("RAG 引擎已清理")
 
-    def _calculate_avg_doc_len(self, index) -> None:
-        doc_lengths = []
-        for node in index.docstore.docs.values():
-            tokens = tokenize_chinese(node.text)
-            doc_lengths.append(len(tokens))
-
-        if doc_lengths:
-            self._avg_doc_len = sum(doc_lengths) / len(doc_lengths)
-            logger.info(f"Calculated average document length: {self._avg_doc_len:.1f} tokens")
+    def _load_bm25_index(self) -> None:
+        """加载 BM25 索引"""
+        data_dir = Path(self.config.vector_db_path).parent
+        index_path = data_dir / "bm25_index.pkl"
+        self._bm25_index = BM25Index.load(index_path)
+        if self._bm25_index:
+            logger.info(f"BM25 索引已加载 ({self._bm25_index.doc_count} 个文档)")
+        else:
+            logger.warning("BM25 索引加载失败，混合检索将仅使用向量检索")
 
     def ask(self, question: str, include_sources: bool = True) -> Dict[str, Any]:
         """
@@ -265,10 +266,11 @@ class RAGEngine:
 
         return hybrid_search(
             index=index,
+            bm25_index=self._bm25_index,
             query_text=query_text,
             vector_top_k=config.vector_top_k,
             keyword_top_k=config.keyword_top_k,
-            alpha=config.alpha,
+            k=config.rrf_k,
             filters=filters
         )
 
@@ -288,6 +290,10 @@ class RAGEngine:
                     'article_number': node.node.metadata.get('article_number', '未知'),
                     'category': node.node.metadata.get('category', ''),
                     'content': node.node.text,
+                    'source_file': node.node.metadata.get('source_file', ''),
+                    'section_title': node.node.metadata.get('section_title', ''),
+                    'hierarchy_path': node.node.metadata.get('hierarchy_path', ''),
+                    'content_type': node.node.metadata.get('content_type', ''),
                     'score': node.score if hasattr(node, 'score') else None
                 })
         return results
@@ -313,6 +319,8 @@ class RAGEngine:
                     'law_name': node.node.metadata.get('law_name', '未知'),
                     'article_number': node.node.metadata.get('article_number', '未知'),
                     'content': text_preview,
+                    'source_file': node.node.metadata.get('source_file', ''),
+                    'section_title': node.node.metadata.get('section_title', ''),
                     'score': node.score if hasattr(node, 'score') else None
                 })
         return sources

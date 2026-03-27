@@ -52,11 +52,11 @@ try:
     from .doc_parser import RegulationDocParser
     from .index_manager import VectorIndexManager
     from .data_importer import RegulationDataImporter
-    from .retrieval import hybrid_search, vector_search, keyword_search
-    from .fusion import fuse_results, compute_bm25_score
-    from .tokenizer import tokenize_chinese
+    from .retrieval import hybrid_search, vector_search
+    from .fusion import reciprocal_rank_fusion
+    from .bm25_index import BM25Index
     from .evaluator import RetrievalEvaluator, GenerationEvaluator, RAGEvalReport
-    from .eval_dataset import EvalSample, QuestionType, load_eval_dataset, create_default_eval_dataset
+    from .eval_dataset import EvalSample, QuestionType, load_eval_dataset, create_default_eval_dataset, DEFAULT_DATASET_PATH
 
     _has_rag = True
 except ImportError:
@@ -68,10 +68,8 @@ except ImportError:
     RegulationDataImporter = None
     hybrid_search = None
     vector_search = None
-    keyword_search = None
-    fuse_results = None
-    compute_bm25_score = None
-    tokenize_chinese = None
+    reciprocal_rank_fusion = None
+    BM25Index = None
     RetrievalEvaluator = None
     GenerationEvaluator = None
     RAGEvalReport = None
@@ -79,6 +77,7 @@ except ImportError:
     QuestionType = None
     load_eval_dataset = None
     create_default_eval_dataset = None
+    DEFAULT_DATASET_PATH = None
     _has_rag = False
 
 __all__ = [
@@ -93,10 +92,8 @@ __all__ = [
     'RegulationDataImporter',
     'hybrid_search',
     'vector_search',
-    'keyword_search',
-    'fuse_results',
-    'compute_bm25_score',
-    'tokenize_chinese',
+    'reciprocal_rank_fusion',
+    'BM25Index',
     'RetrievalEvaluator',
     'GenerationEvaluator',
     'RAGEvalReport',
@@ -104,6 +101,7 @@ __all__ = [
     'QuestionType',
     'load_eval_dataset',
     'create_default_eval_dataset',
+    'DEFAULT_DATASET_PATH',
 ]
 
 __version__ = '0.1.0'
