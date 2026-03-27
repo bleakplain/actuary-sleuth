@@ -5,51 +5,52 @@
 
 使用 Reciprocal Rank Fusion (RRF) 融合向量检索和关键词检索的结果。
 """
-import logging
+from collections import defaultdict
 from typing import List, Dict, Any
 
-logger = logging.getLogger(__name__)
+from llama_index.core.schema import NodeWithScore
+
+
+def _chunk_key(scored: NodeWithScore) -> str:
+    """生成 chunk 的稳定标识"""
+    return scored.node.node_id if scored.node.node_id else str(id(scored.node))
 
 
 def reciprocal_rank_fusion(
-    vector_nodes: List,
-    keyword_nodes: List,
+    vector_results: List[NodeWithScore],
+    keyword_results: List[NodeWithScore],
     k: int = 60
 ) -> List[Dict[str, Any]]:
     """Reciprocal Rank Fusion 融合两路检索结果
 
     Args:
-        vector_nodes: 向量检索结果 (NodeWithScore list)
-        keyword_nodes: 关键词检索结果 (NodeWithScore list)
+        vector_results: 向量检索结果
+        keyword_results: 关键词检索结果
         k: RRF 常数，默认 60
 
     Returns:
         List[Dict]: 融合后的结果列表，按 RRF 分数降序
     """
-    if not vector_nodes and not keyword_nodes:
+    if not vector_results and not keyword_results:
         return []
 
-    rrf_scores: Dict[int, float] = {}
-    nodes_map: Dict[int, Any] = {}
+    scores = defaultdict(float)
+    chunks = {}
 
-    for rank, node in enumerate(vector_nodes):
-        node_id = id(node.node)
-        rrf_scores[node_id] = rrf_scores.get(node_id, 0) + 1.0 / (k + rank + 1)
-        nodes_map[node_id] = node.node
-
-    for rank, node in enumerate(keyword_nodes):
-        node_id = id(node.node)
-        rrf_scores[node_id] = rrf_scores.get(node_id, 0) + 1.0 / (k + rank + 1)
-        nodes_map[node_id] = node.node
+    for result_list in (vector_results, keyword_results):
+        for rank, scored in enumerate(result_list):
+            key = _chunk_key(scored)
+            scores[key] += 1.0 / (k + rank + 1)
+            chunks[key] = scored.node
 
     results = []
-    for node_id, rrf_score in rrf_scores.items():
-        node = nodes_map[node_id]
+    for key, rrf_score in scores.items():
+        chunk = chunks[key]
         results.append({
-            'law_name': node.metadata.get('law_name', '未知'),
-            'article_number': node.metadata.get('article_number', '未知'),
-            'category': node.metadata.get('category', ''),
-            'content': node.text,
+            'law_name': chunk.metadata.get('law_name', '未知'),
+            'article_number': chunk.metadata.get('article_number', '未知'),
+            'category': chunk.metadata.get('category', ''),
+            'content': chunk.text,
             'score': rrf_score,
         })
 

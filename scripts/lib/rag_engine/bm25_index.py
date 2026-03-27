@@ -5,6 +5,7 @@ BM25 索引模块
 
 基于 jieba 分词 + rank_bm25 构建、持久化和查询 BM25 索引。
 """
+import heapq
 import logging
 import pickle
 from pathlib import Path
@@ -24,9 +25,8 @@ class BM25Index:
     索引在导入阶段构建并序列化到磁盘，查询时从磁盘加载。
     """
 
-    def __init__(self, bm25: BM25Okapi, doc_ids: List[str], nodes: list):
+    def __init__(self, bm25: BM25Okapi, nodes: list):
         self._bm25 = bm25
-        self._doc_ids = doc_ids
         self._nodes = nodes
 
     @classmethod
@@ -44,7 +44,6 @@ class BM25Index:
             logger.warning("构建 BM25 索引: 文档列表为空")
             index = cls.__new__(cls)
             index._bm25 = None
-            index._doc_ids = []
             index._nodes = []
             cls._save(index, index_path)
             return index
@@ -53,11 +52,9 @@ class BM25Index:
 
         tokenized_corpus = [tokenize_chinese(doc.text) for doc in documents]
         bm25 = BM25Okapi(tokenized_corpus)
-
-        doc_ids = [getattr(doc, 'id_', f'doc_{i}') for i, doc in enumerate(documents)]
         nodes = list(documents)
 
-        index = cls(bm25, doc_ids, nodes)
+        index = cls(bm25, nodes)
         cls._save(index, index_path)
 
         logger.info(f"BM25 索引已保存: {index_path}")
@@ -73,17 +70,15 @@ class BM25Index:
         Returns:
             Optional[BM25Index]: 索引实例，加载失败返回 None
         """
-        index_path = Path(index_path)
-        if not index_path.exists():
-            logger.warning(f"BM25 索引文件不存在: {index_path}")
-            return None
-
         try:
             with open(index_path, 'rb') as f:
                 data = pickle.load(f)
-            index = cls(data['bm25'], data['doc_ids'], data['nodes'])
-            logger.info(f"BM25 索引已加载: {index_path} ({len(data['doc_ids'])} 个文档)")
+            index = cls(data['bm25'], data['nodes'])
+            logger.info(f"BM25 索引已加载: {index_path} ({len(data['nodes'])} 个文档)")
             return index
+        except FileNotFoundError:
+            logger.warning(f"BM25 索引文件不存在: {index_path}")
+            return None
         except Exception as e:
             logger.error(f"加载 BM25 索引失败: {e}")
             return None
@@ -104,21 +99,17 @@ class BM25Index:
         Returns:
             List[Tuple]: [(node, score), ...] 按分数降序
         """
-        if not self._nodes or self._bm25 is None:
+        if not self._nodes:
             return []
 
         query_tokens = tokenize_chinese(query)
         scores = self._bm25.get_scores(query_tokens)
 
-        # 按分数排序取 top_k
-        scored_indices = sorted(
-            range(len(scores)),
-            key=lambda i: scores[i],
-            reverse=True
-        )[:top_k]
+        # O(n log k) 取 top_k
+        top_indices = heapq.nlargest(top_k, range(len(scores)), key=lambda i: scores[i])
 
         results = []
-        for idx in scored_indices:
+        for idx in top_indices:
             if scores[idx] <= 0:
                 continue
 
@@ -140,7 +131,6 @@ class BM25Index:
         with open(path, 'wb') as f:
             pickle.dump({
                 'bm25': index._bm25,
-                'doc_ids': index._doc_ids,
                 'nodes': index._nodes,
             }, f)
 

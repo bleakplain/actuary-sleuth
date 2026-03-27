@@ -8,6 +8,8 @@ from typing import List
 
 import jieba
 
+_WORD_RE = re.compile(r'[\w]')
+
 
 def tokenize_chinese(text: str) -> List[str]:
     """中文分词
@@ -24,5 +26,4 @@ def tokenize_chinese(text: str) -> List[str]:
         return []
 
     tokens = jieba.lcut(text)
-    # 过滤纯空白和纯标点
-    return [t.strip() for t in tokens if t.strip() and re.search(r'[\w]', t)]
+    return [t.strip() for t in tokens if t.strip() and _WORD_RE.search(t)]
