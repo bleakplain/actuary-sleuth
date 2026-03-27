@@ -100,39 +100,6 @@ def close_pool():
         _connection_pool = None
 
 
-def find_regulation(article_number):
-    try:
-        with get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute('''
-                SELECT * FROM regulations
-                WHERE article_number = ?
-            ''', (article_number,))
-            row = cur.fetchone()
-            if row:
-                return dict(row)
-            raise RecordNotFoundError(f"Regulation not found: {article_number}")
-    except sqlite3.Error as e:
-        logger.error(f"查找法规失败: {e}")
-        raise DatabaseError(f"Failed to find regulation: {e}")
-
-
-def search_regulations(keyword):
-    try:
-        with get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute('''
-                SELECT * FROM regulations
-                WHERE content LIKE ? OR article_number LIKE ?
-                LIMIT 20
-            ''', (f'%{keyword}%', f'%{keyword}%'))
-            rows = cur.fetchall()
-            return [dict(row) for row in rows]
-    except sqlite3.Error as e:
-        logger.error(f"搜索法规失败: {e}")
-        raise DatabaseError(f"Failed to search regulations: {e}")
-
-
 def get_negative_list():
     try:
         with get_connection() as conn:
@@ -163,29 +130,6 @@ def save_audit_record(record):
     except sqlite3.Error as e:
         logger.error(f"保存审核记录失败: {e}")
         raise DatabaseError(f"Failed to save audit record: {e}")
-
-
-def add_regulation(regulation_data):
-    try:
-        with get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute('''
-                INSERT OR REPLACE INTO regulations
-                (id, law_name, article_number, content, category, tags, effective_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                regulation_data.get('id'),
-                regulation_data.get('law_name'),
-                regulation_data.get('article_number'),
-                regulation_data.get('content'),
-                regulation_data.get('category', ''),
-                regulation_data.get('tags', ''),
-                regulation_data.get('effective_date', '')
-            ))
-            return True
-    except sqlite3.Error as e:
-        logger.error(f"添加法规失败: {e}")
-        raise DatabaseError(f"Failed to add regulation: {e}")
 
 
 def add_negative_list_rule(rule_data):

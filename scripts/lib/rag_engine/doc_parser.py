@@ -2,16 +2,22 @@
 # -*- coding: utf-8 -*-
 """
 法规文档解析模块
+
+支持两种分块策略:
+1. semantic: 语义感知分块（推荐，保留文档结构和语义完整性）
+2. fixed: 固定长度分块（简单但会破坏语义）
 """
 import re
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List
 
 from llama_index.core import Document
 from llama_index.core.node_parser import NodeParser
 from llama_index.core.readers import SimpleDirectoryReader
 from llama_index.core.schema import TextNode
+
+from .config import RAGConfig, ChunkingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -184,11 +190,32 @@ class RegulationNodeParser(NodeParser):
 
 
 class RegulationDocParser:
-    """保险法规文档解析器"""
+    """保险法规文档解析器
 
-    def __init__(self, regulations_dir: str = "./references"):
+    支持多种分块策略:
+    - semantic: 语义感知分块（推荐）
+    - fixed: 固定长度分块
+    """
+
+    def __init__(
+        self,
+        regulations_dir: str = "./references",
+        config: RAGConfig = None
+    ):
         self.regulations_dir = Path(regulations_dir)
-        self.node_parser = RegulationNodeParser()
+        self.config = config or RAGConfig()
+
+        # 根据配置选择分块策略
+        self.chunking_strategy = self.config.chunking_strategy
+        self.chunking_config = self.config.chunking_config
+
+        if self.chunking_strategy == "semantic":
+            logger.info("使用语义分块策略")
+            from .semantic_chunker import SemanticChunker
+            self.chunker = SemanticChunker(self.chunking_config)
+        else:
+            logger.info("使用传统条款分块策略")
+            self.node_parser = RegulationNodeParser()
 
     def parse_all(self, file_pattern: str = "*.md") -> List[Document]:
         """解析目录下所有法规文档"""
@@ -210,18 +237,37 @@ class RegulationDocParser:
         reader = SimpleDirectoryReader(input_files=file_paths)
         documents = reader.load_data()
 
-        # 使用 NodeParser 解析条款
-        nodes = self.node_parser._parse_nodes(documents)
+        # 根据策略选择解析方式
+        if self.chunking_strategy == "semantic":
+            # 语义分块：直接对文档进行语义分块
+            from .semantic_chunker import SemanticChunker
+            if not hasattr(self, 'chunker'):
+                self.chunker = SemanticChunker(self.chunking_config)
 
-        # 将 TextNode 转换回 Document
-        result_documents = []
-        for node in nodes:
-            result_documents.append(
-                Document(text=node.text, metadata=node.metadata)
-            )
+            text_nodes = self.chunker.chunk(documents)
+
+            # 将 TextNode 转换为 Document
+            result_documents = []
+            for node in text_nodes:
+                result_documents.append(
+                    Document(text=node.text, metadata=node.metadata)
+                )
+        else:
+            # 传统分块：先按条款分割
+            if not hasattr(self, 'node_parser'):
+                self.node_parser = RegulationNodeParser()
+
+            text_nodes = self.node_parser._parse_nodes(documents)
+
+            # 将 TextNode 转换为 Document
+            result_documents = []
+            for node in text_nodes:
+                result_documents.append(
+                    Document(text=node.text, metadata=node.metadata)
+                )
 
         logger.info(f"在 {self.regulations_dir} 中找到 {len(md_files)} 个 markdown 文件")
-        logger.info(f"总共解析了 {len(result_documents)} 条法规条款")
+        logger.info(f"总共解析了 {len(result_documents)} 个文档块")
         return result_documents
 
     def parse_single_file(self, file_name: str) -> List[Document]:
@@ -240,28 +286,21 @@ class RegulationDocParser:
             logger.warning(f"未找到文件: {file_name}")
             return []
 
-        # 使用 NodeParser 解析条款
-        nodes = self.node_parser._parse_nodes(docs)
+        # 根据策略选择解析方式
+        if self.chunking_strategy == "semantic":
+            if not hasattr(self, 'chunker'):
+                from .semantic_chunker import SemanticChunker
+                self.chunker = SemanticChunker(self.chunking_config)
+
+            text_nodes = self.chunker.chunk(docs)
+        else:
+            if not hasattr(self, 'node_parser'):
+                self.node_parser = RegulationNodeParser()
+
+            text_nodes = self.node_parser._parse_nodes(docs)
 
         return [
             Document(text=node.text, metadata=node.metadata)
-            for node in nodes
+            for node in text_nodes
         ]
 
-    def documents_to_sqlite_format(self, documents: List[Document]) -> List[Dict[str, Any]]:
-        """将 LlamaIndex Document 转换为 SQLite 格式"""
-        sqlite_records = []
-
-        for idx, doc in enumerate(documents):
-            record = {
-                'id': f"REG_{idx:06d}",
-                'law_name': doc.metadata.get('law_name', ''),
-                'article_number': doc.metadata.get('article_number', ''),
-                'content': doc.text,
-                'category': doc.metadata.get('category', ''),
-                'tags': '',
-                'effective_date': ''
-            }
-            sqlite_records.append(record)
-
-        return sqlite_records

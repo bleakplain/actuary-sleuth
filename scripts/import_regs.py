@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 导入法规数据到数据库
-从 markdown 文件解析法规条款并导入到 SQLite 和 LanceDB（使用 LlamaIndex RAG 引擎）
+从 markdown 文件解析法规条款并导入到 LanceDB 和 BM25 索引
 """
 import sys
 import argparse
@@ -18,18 +18,15 @@ from lib.rag_engine import RegulationDataImporter, get_config
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(
-        description='导入法规数据到数据库（SQLite + LanceDB）',
+        description='导入法规数据到数据库（LanceDB + BM25）',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  # 导入所有法规（SQLite + 向量数据库）
+  # 导入所有法规
   python import_regs.py
 
-  # 强制重建向量索引
+  # 强制重建索引
   python import_regs.py --rebuild
-
-  # 只导入到 SQLite，不创建向量索引
-  python import_regs.py --sqlite-only
 
   # 导入单个文件
   python import_regs.py --file 01_保险法相关监管规定.md
@@ -54,11 +51,6 @@ def main():
         '--rebuild',
         action='store_true',
         help='强制重建向量索引'
-    )
-    parser.add_argument(
-        '--sqlite-only',
-        action='store_true',
-        help='只导入到 SQLite，不创建向量索引'
     )
     parser.add_argument(
         '--test',
@@ -112,8 +104,6 @@ def main():
     stats = importer.import_all(
         file_pattern=args.pattern,
         force_rebuild=args.rebuild,
-        skip_sqlite=False,  # 始终导入 SQLite
-        skip_vector=args.sqlite_only  # 根据 --sqlite-only 参数决定是否跳过向量
     )
 
     # 显示导入结果
@@ -121,8 +111,8 @@ def main():
     print("导入完成")
     print("=" * 60)
     print(f"解析文档: {stats.get('parsed', 0)} 条")
-    print(f"SQLite: {stats.get('sqlite', 0)} 条")
     print(f"向量索引: {stats.get('vector', 0)} 条")
+    print(f"BM25 索引: {stats.get('bm25', 0)} 条")
     print("=" * 60)
 
     return 0 if stats.get('parsed', 0) > 0 else 1

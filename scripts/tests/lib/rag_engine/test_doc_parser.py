@@ -184,42 +184,6 @@ class TestRegulationDocParser:
         # 应该返回空列表
         assert documents == []
 
-    def test_documents_to_sqlite_format(self):
-        """测试文档转换为SQLite格式"""
-        from llama_index.core import Document
-
-        parser = RegulationDocParser(regulations_dir="./references")
-
-        test_documents = [
-            Document(
-                text="这是第一条的内容",
-                metadata={
-                    'law_name': '保险法',
-                    'article_number': '第一条',
-                    'category': '保险',
-                    'source_file': 'test.md'
-                }
-            ),
-            Document(
-                text="这是第二条的内容",
-                metadata={
-                    'law_name': '保险法',
-                    'article_number': '第二条',
-                    'category': '保险',
-                    'source_file': 'test.md'
-                }
-            )
-        ]
-
-        records = parser.documents_to_sqlite_format(test_documents)
-
-        assert len(records) == 2
-        assert records[0]['law_name'] == '保险法'
-        assert records[0]['article_number'] == '第一条'
-        assert records[1]['article_number'] == '第二条'
-        assert all('id' in r for r in records)
-        assert all('content' in r for r in records)
-
     def test_parse_article_with_different_patterns(self):
         """测试解析不同格式的条款"""
         parser = RegulationNodeParser()

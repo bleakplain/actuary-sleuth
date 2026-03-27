@@ -29,24 +29,6 @@ def init_database():
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
         with sqlite3.connect(db_path) as conn:
-            # 创建法规表
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS regulations (
-                    id TEXT PRIMARY KEY,
-                    law_name TEXT NOT NULL,
-                    article_number TEXT,
-                    content TEXT NOT NULL,
-                    category TEXT,
-                    tags TEXT,
-                    effective_date TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            conn.execute('''
-                CREATE INDEX IF NOT EXISTS idx_article
-                ON regulations(law_name, article_number)
-            ''')
-
             # 创建负面清单表
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS negative_list (
