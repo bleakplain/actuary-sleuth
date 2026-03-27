@@ -13,6 +13,10 @@ llama-index-llms-ollama>=0.1.0
 llama-index-embeddings-ollama>=0.1.0
 llama-index-vector-stores-lancedb>=0.1.0
 
+# Chinese tokenization and BM25 retrieval
+jieba>=0.42.1
+rank-bm25>=0.2.2
+
 # Optional dependencies for enhanced functionality
 # markdown>=3.5.0
 # python-docx>=0.8.11
