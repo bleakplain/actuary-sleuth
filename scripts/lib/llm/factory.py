@@ -24,6 +24,7 @@ class LLMClientFactory:
         'doc_preprocess': {'model': None, 'timeout': None},  # 使用配置文件的值
         'audit': {'model': ModelName.GLM_4_PLUS, 'timeout': 120},
         'qa': {'model': ModelName.GLM_4_FLASH, 'timeout': 60},
+        'eval': {'model': ModelName.GLM_4_FLASH, 'timeout': 180},
     }
 
     @staticmethod
@@ -101,6 +102,11 @@ class LLMClientFactory:
     def get_qa_llm() -> BaseLLMClient:
         """获取问答场景 LLM"""
         return LLMClientFactory._create_scenario_llm('qa')
+
+    @staticmethod
+    def get_eval_llm() -> BaseLLMClient:
+        """获取评估场景 LLM（RAGAS 等评估框架使用，timeout 较长）"""
+        return LLMClientFactory._create_scenario_llm('eval')
 
     @staticmethod
     def get_embedding_config() -> dict:

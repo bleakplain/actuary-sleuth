@@ -55,6 +55,8 @@ try:
     from .retrieval import hybrid_search, vector_search, keyword_search
     from .fusion import fuse_results, compute_bm25_score
     from .tokenizer import tokenize_chinese
+    from .evaluator import RetrievalEvaluator, GenerationEvaluator, RAGEvalReport
+    from .eval_dataset import EvalSample, QuestionType, load_eval_dataset, create_default_eval_dataset
 
     _has_rag = True
 except ImportError:
@@ -70,6 +72,13 @@ except ImportError:
     fuse_results = None
     compute_bm25_score = None
     tokenize_chinese = None
+    RetrievalEvaluator = None
+    GenerationEvaluator = None
+    RAGEvalReport = None
+    EvalSample = None
+    QuestionType = None
+    load_eval_dataset = None
+    create_default_eval_dataset = None
     _has_rag = False
 
 __all__ = [
@@ -88,6 +97,13 @@ __all__ = [
     'fuse_results',
     'compute_bm25_score',
     'tokenize_chinese',
+    'RetrievalEvaluator',
+    'GenerationEvaluator',
+    'RAGEvalReport',
+    'EvalSample',
+    'QuestionType',
+    'load_eval_dataset',
+    'create_default_eval_dataset',
 ]
 
 __version__ = '0.1.0'
