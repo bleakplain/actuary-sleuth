@@ -247,63 +247,32 @@ class TestRAGWithRealData:
     """使用真实数据的RAG测试"""
 
     def test_keyword_search_bm25(self, temp_lancedb_dir):
-        """测试BM25关键词搜索"""
-        from llama_index.core import Document, VectorStoreIndex, Settings
-        from llama_index.vector_stores.lancedb import LanceDBVectorStore
-        from llama_index.core.storage.storage_context import StorageContext
-        from lib.rag_engine.retrieval import keyword_search
+        """测试 BM25 关键词搜索"""
+        from llama_index.core import Document
+        from lib.rag_engine.bm25_index import BM25Index
 
-        try:
-            from llama_index.embeddings.ollama import OllamaEmbedding
-            embed_model = OllamaEmbedding(model_name="nomic-embed-text")
-            Settings.embed_model = embed_model
-        except Exception:
-            try:
-                from llama_index.embeddings.openai import OpenAIEmbedding
-                embed_model = OpenAIEmbedding()
-                Settings.embed_model = embed_model
-            except Exception:
-                pytest.skip("No embedding model available")
-
-        # 创建测试数据
         documents = [
             Document(text="保险等待期为90天，期间内不承担责任"),
             Document(text="保险费率应当公平合理，不得恶性竞争"),
             Document(text="投保人如实告知健康状况，否则保险公司可以解除合同"),
         ]
 
-        # 创建索引
-        vector_store = LanceDBVectorStore(
-            uri=str(temp_lancedb_dir),
-            table_name="test_bm25"
-        )
+        index_path = temp_lancedb_dir / "test_bm25_index.pkl"
+        bm25 = BM25Index.build(documents, index_path)
 
-        storage_context = StorageContext.from_defaults(vector_store=vector_store)
-        index = VectorStoreIndex.from_documents(
-            documents,
-            storage_context=storage_context,
-            show_progress=False
-        )
-
-        # 测试关键词搜索
-        results = keyword_search(
-            index,
-            "等待期",
-            top_k=2,
-            avg_doc_len=20
-        )
-
+        results = bm25.search("等待期", top_k=2)
         assert isinstance(results, list)
-        # 验证相关性
         if results:
-            assert results[0].score >= 0
+            _, score = results[0]
+            assert score >= 0
 
     def test_hybrid_search_fusion(self, temp_lancedb_dir):
-        """测试混合检索融合"""
+        """测试混合检索 RRF 融合"""
         from llama_index.core import Document, VectorStoreIndex, Settings
         from llama_index.vector_stores.lancedb import LanceDBVectorStore
         from llama_index.core.storage.storage_context import StorageContext
         from lib.rag_engine.retrieval import hybrid_search
+        from lib.rag_engine.bm25_index import BM25Index
 
         try:
             from llama_index.embeddings.ollama import OllamaEmbedding
@@ -317,7 +286,6 @@ class TestRAGWithRealData:
             except Exception:
                 pytest.skip("No embedding model available")
 
-        # 创建测试数据
         documents = [
             Document(
                 text="健康保险等待期为90天",
@@ -329,12 +297,11 @@ class TestRAGWithRealData:
             ),
         ]
 
-        # 创建索引
+        # 创建向量索引
         vector_store = LanceDBVectorStore(
             uri=str(temp_lancedb_dir),
             table_name="test_hybrid"
         )
-
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
         index = VectorStoreIndex.from_documents(
             documents,
@@ -342,18 +309,18 @@ class TestRAGWithRealData:
             show_progress=False
         )
 
+        # 创建 BM25 索引
+        bm25_index = BM25Index.build(documents, temp_lancedb_dir / "test_hybrid_bm25.pkl")
+
         # 测试混合检索
         results = hybrid_search(
-            index,
+            index, bm25_index,
             "健康保险等待期",
-            vector_top_k=2,
-            keyword_top_k=2,
-            alpha=0.5
+            vector_top_k=2, keyword_top_k=2
         )
 
         assert isinstance(results, list)
         if results:
-            # 验证结果格式
             assert 'law_name' in results[0]
             assert 'content' in results[0]
             assert 'score' in results[0]
