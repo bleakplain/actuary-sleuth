@@ -326,3 +326,11 @@ def production_rag_engine(production_rag_config):
         return engine
     except Exception as e:
         pytest.skip(f"无法创建生产RAG引擎: {e}")
+
+
+@pytest.fixture
+def temp_bm25_index(sample_regulation_documents, temp_lancedb_dir):
+    """创建临时 BM25 索引用于测试"""
+    from lib.rag_engine.bm25_index import BM25Index
+    index_path = temp_lancedb_dir / "test_bm25_index.pkl"
+    return BM25Index.build(sample_regulation_documents, index_path)

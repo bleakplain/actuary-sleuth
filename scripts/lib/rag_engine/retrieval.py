@@ -3,7 +3,7 @@
 """
 检索模块
 
-负责向量检索和关键词检索。
+负责向量检索和 BM25 关键词检索，以及 RRF 融合。
 """
 import logging
 from typing import List, Dict, Any, Optional
@@ -12,8 +12,7 @@ from llama_index.core import QueryBundle
 from llama_index.core.vector_stores import ExactMatchFilter, MetadataFilters
 from llama_index.core.schema import NodeWithScore
 
-from .fusion import compute_bm25_score, fuse_results
-from .tokenizer import tokenize_chinese
+from .fusion import reciprocal_rank_fusion
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +23,7 @@ def vector_search(
     top_k: int,
     filters: Optional[Dict[str, Any]] = None
 ) -> List:
-    """
-    向量检索
+    """向量检索
 
     Args:
         index: 向量索引
@@ -34,7 +32,7 @@ def vector_search(
         filters: 元数据过滤条件
 
     Returns:
-        List: 向量检索结果
+        List: 向量检索结果 (NodeWithScore)
     """
     metadata_filters = None
     if filters:
@@ -52,79 +50,38 @@ def vector_search(
     return vector_retriever.retrieve(query_bundle)
 
 
-def keyword_search(
-    index,
-    query_text: str,
-    top_k: int,
-    filters: Optional[Dict[str, Any]] = None,
-    avg_doc_len: float = 100
-) -> List:
-    """
-    BM25 关键词检索
-
-    Args:
-        index: 向量索引
-        query_text: 查询文本
-        top_k: 返回结果数量
-        filters: 元数据过滤条件
-        avg_doc_len: 平均文档长度
-
-    Returns:
-        List: 关键词检索结果
-    """
-    all_nodes = list(index.docstore.docs.values())
-
-    if filters:
-        all_nodes = [
-            node for node in all_nodes
-            if all(node.metadata.get(k) == v for k, v in filters.items())
-        ]
-
-    query_tokens = tokenize_chinese(query_text)
-
-    scores = []
-    for node in all_nodes:
-        node_tokens = tokenize_chinese(node.text)
-        score = compute_bm25_score(query_tokens, node_tokens, avg_doc_len)
-        scores.append((node, score))
-
-    scores.sort(key=lambda x: x[1], reverse=True)
-    return [
-        NodeWithScore(node=node, score=score)
-        for node, score in scores[:top_k] if score > 0
-    ]
-
-
 def hybrid_search(
     index,
+    bm25_index,
     query_text: str,
     vector_top_k: int,
     keyword_top_k: int,
-    alpha: float,
+    k: int = 60,
     filters: Optional[Dict[str, Any]] = None
 ) -> List[Dict[str, Any]]:
-    """
-    混合检索（向量 + 关键词）
+    """混合检索（向量 + BM25 关键词，RRF 融合）
 
     Args:
         index: 向量索引
+        bm25_index: BM25Index 实例
         query_text: 查询文本
         vector_top_k: 向量检索返回数量
         keyword_top_k: 关键词检索返回数量
-        alpha: 向量检索权重
+        k: RRF 常数，默认 60
         filters: 元数据过滤条件
 
     Returns:
-        List[Dict]: 融合后的结果列表
+        List[Dict]: RRF 融合后的结果列表
     """
-    if not index:
+    if not index or not bm25_index:
         return []
 
-    # 向量检索
     vector_nodes = vector_search(index, query_text, vector_top_k, filters)
+    keyword_results = bm25_index.search(query_text, top_k=keyword_top_k, filters=filters)
 
-    # 关键词检索
-    keyword_nodes = keyword_search(index, query_text, keyword_top_k, filters)
+    keyword_nodes = [
+        NodeWithScore(node=node, score=score)
+        for node, score in keyword_results
+    ]
 
-    # 融合结果
-    return fuse_results(vector_nodes, keyword_nodes, alpha)
+    return reciprocal_rank_fusion(vector_nodes, keyword_nodes, k=k)
