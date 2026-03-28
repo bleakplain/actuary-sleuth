@@ -118,3 +118,78 @@ class TestReciprocalRankFusion:
         assert 'content' in result[0]
         assert 'score' in result[0]
         assert isinstance(result[0]['score'], float)
+
+    def test_fuse_weighted_vector_heavier(self):
+        from llama_index.core import Document
+        from llama_index.core.schema import NodeWithScore
+
+        doc_v = Document(
+            text="向量结果",
+            metadata={'law_name': '法规A', 'article_number': '第一条', 'category': 'A'}
+        )
+        doc_k = Document(
+            text="关键词结果",
+            metadata={'law_name': '法规B', 'article_number': '第二条', 'category': 'B'}
+        )
+
+        vector_nodes = [NodeWithScore(node=doc_v, score=0.9)]
+        keyword_nodes = [NodeWithScore(node=doc_k, score=0.8)]
+
+        result_balanced = reciprocal_rank_fusion(vector_nodes, keyword_nodes, vector_weight=1.0, keyword_weight=1.0)
+        result_vector_heavy = reciprocal_rank_fusion(vector_nodes, keyword_nodes, vector_weight=2.0, keyword_weight=1.0)
+
+        assert result_vector_heavy[0]['law_name'] == '法规A'
+        assert result_balanced[0]['score'] == result_balanced[1]['score']
+
+    def test_fuse_weighted_keyword_heavier(self):
+        from llama_index.core import Document
+        from llama_index.core.schema import NodeWithScore
+
+        doc_v = Document(
+            text="向量结果",
+            metadata={'law_name': '法规A', 'article_number': '第一条', 'category': 'A'}
+        )
+        doc_k = Document(
+            text="关键词结果",
+            metadata={'law_name': '法规B', 'article_number': '第二条', 'category': 'B'}
+        )
+
+        vector_nodes = [NodeWithScore(node=doc_v, score=0.9)]
+        keyword_nodes = [NodeWithScore(node=doc_k, score=0.8)]
+
+        result_keyword_heavy = reciprocal_rank_fusion(vector_nodes, keyword_nodes, vector_weight=1.0, keyword_weight=2.0)
+
+        assert result_keyword_heavy[0]['law_name'] == '法规B'
+
+    def test_deduplicate_keeps_top_two(self):
+        from llama_index.core import Document
+        from llama_index.core.schema import NodeWithScore
+
+        doc1 = Document(
+            text="等待期90天部分",
+            metadata={'law_name': '健康保险', 'article_number': '第一条', 'category': '健康'}
+        )
+        doc2 = Document(
+            text="等待期例外情况部分",
+            metadata={'law_name': '健康保险', 'article_number': '第一条', 'category': '健康'}
+        )
+        doc3 = Document(
+            text="其他法规内容",
+            metadata={'law_name': '保险法', 'article_number': '第十条', 'category': '通用'}
+        )
+        doc4 = Document(
+            text="等待期第三部分",
+            metadata={'law_name': '健康保险', 'article_number': '第一条', 'category': '健康'}
+        )
+
+        nodes = [
+            NodeWithScore(node=doc1, score=0.9),
+            NodeWithScore(node=doc2, score=0.7),
+            NodeWithScore(node=doc3, score=0.5),
+            NodeWithScore(node=doc4, score=0.3),
+        ]
+
+        result = reciprocal_rank_fusion(nodes, [])
+        same_article = [r for r in result if r['article_number'] == '第一条']
+        assert len(same_article) == 2
+        assert len(result) == 3

@@ -138,3 +138,5 @@ Located at `scripts/config/settings.json`, overrideable via env vars.
 12. Constants in `lib/common/constants.py`
 13. Domain-specific data files (dictionaries, stopwords) in module's `data/` subdirectory (e.g. `scripts/lib/rag_engine/data/`), not embedded in code
 14. No over-engineering: avoid unnecessary config toggles and expansion points
+15. Layered validation: use fast deterministic checks first (structure markers, rules), fall back to expensive probabilistic checks (embedding similarity) only when no structural signal exists
+16. Dead code cleanup: remove unused code paths when default strategy makes them unreachable; delete deprecated modules directly rather than marking deprecated

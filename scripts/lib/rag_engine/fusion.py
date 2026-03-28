@@ -16,20 +16,30 @@ def _chunk_key(scored: NodeWithScore) -> str:
     return scored.node.node_id if scored.node.node_id else str(id(scored.node))
 
 
+_MAX_CHUNKS_PER_ARTICLE = 2
+
+
 def _deduplicate_by_article(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """按法规名称+条款号去重，保留 RRF 分数最高的"""
-    seen: Dict[tuple, Dict[str, Any]] = {}
+    """按法规名称+条款号去重，每条款保留至多 _MAX_CHUNKS_PER_ARTICLE 个 chunk"""
+    grouped: Dict[tuple, List[Dict[str, Any]]] = {}
     for r in results:
         key = (r.get('law_name', ''), r.get('article_number', ''))
-        if key not in seen or r.get('score', 0) > seen[key].get('score', 0):
-            seen[key] = r
-    return list(seen.values())
+        grouped.setdefault(key, []).append(r)
+
+    deduped = []
+    for chunks in grouped.values():
+        chunks.sort(key=lambda x: x.get('score', 0), reverse=True)
+        deduped.extend(chunks[:_MAX_CHUNKS_PER_ARTICLE])
+
+    return deduped
 
 
 def reciprocal_rank_fusion(
     vector_results: List[NodeWithScore],
     keyword_results: List[NodeWithScore],
-    k: int = 60
+    k: int = 60,
+    vector_weight: float = 1.0,
+    keyword_weight: float = 1.0,
 ) -> List[Dict[str, Any]]:
     """Reciprocal Rank Fusion 融合两路检索结果
 
@@ -37,6 +47,8 @@ def reciprocal_rank_fusion(
         vector_results: 向量检索结果
         keyword_results: 关键词检索结果
         k: RRF 常数，默认 60
+        vector_weight: 向量检索权重，默认 1.0
+        keyword_weight: 关键词检索权重，默认 1.0
 
     Returns:
         List[Dict]: 融合后的结果列表，按 RRF 分数降序
@@ -47,11 +59,15 @@ def reciprocal_rank_fusion(
     scores: Dict[str, float] = defaultdict(float)
     chunks = {}
 
-    for result_list in (vector_results, keyword_results):
-        for rank, scored in enumerate(result_list):
-            key = _chunk_key(scored)
-            scores[key] += 1.0 / (k + rank + 1)
-            chunks[key] = scored.node
+    for rank, scored in enumerate(vector_results):
+        key = _chunk_key(scored)
+        scores[key] += vector_weight / (k + rank + 1)
+        chunks[key] = scored.node
+
+    for rank, scored in enumerate(keyword_results):
+        key = _chunk_key(scored)
+        scores[key] += keyword_weight / (k + rank + 1)
+        chunks[key] = scored.node
 
     results = []
     for key, rrf_score in scores.items():

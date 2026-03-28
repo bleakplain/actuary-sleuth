@@ -17,6 +17,8 @@ from .tokenizer import tokenize_chinese
 
 logger = logging.getLogger(__name__)
 
+_RAGAS_METRICS = ('faithfulness', 'answer_relevancy', 'answer_correctness')
+
 
 @dataclass
 class RetrievalEvalReport:
@@ -138,27 +140,40 @@ class RAGEvalReport:
         print("=" * 70 + "\n")
 
 
+def _contains_keyword(content: str, keywords: List[str]) -> bool:
+    return any(kw in content for kw in keywords if len(kw) >= 2)
+
+
 def _is_relevant(
     result: Dict[str, Any],
     evidence_docs: List[str],
     evidence_keywords: List[str],
 ) -> bool:
-    doc_set = set(evidence_docs)
-
-    source_file = result.get('source_file', '')
-    if source_file and source_file in doc_set:
-        return True
-
     content = result.get('content', '')
-    if any(kw in content for kw in evidence_keywords if len(kw) >= 2):
-        return True
-
+    source_file = result.get('source_file', '')
     law_name = result.get('law_name', '')
-    if law_name:
+
+    if evidence_keywords:
+        long_keywords = [kw for kw in evidence_keywords if len(kw) >= 2]
+        matched = sum(1 for kw in long_keywords if kw in content)
+        required = min(2, len(long_keywords))
+        if matched >= required:
+            return True
+
+    doc_set = set(evidence_docs)
+    if source_file and source_file in doc_set and evidence_keywords:
+        if _contains_keyword(content, evidence_keywords):
+            return True
+
+    if law_name and evidence_docs:
         for doc in evidence_docs:
             doc_stem = doc.replace('.md', '').replace('_', '')
-            if doc_stem and doc_stem in law_name:
-                return True
+            if doc_stem and len(doc_stem) >= 4 and doc_stem in law_name:
+                if evidence_keywords:
+                    if _contains_keyword(content, evidence_keywords):
+                        return True
+                else:
+                    return True
 
     return False
 
@@ -464,17 +479,11 @@ class GenerationEvaluator:
 
         report = GenerationEvalReport()
 
-        metric_map = {
-            'faithfulness': 'faithfulness',
-            'answer_relevancy': 'answer_relevancy',
-            'answer_correctness': 'answer_correctness',
-        }
-
-        for ragas_key, attr_name in metric_map.items():
-            if ragas_key in df.columns:
-                values = df[ragas_key].dropna()
+        for column in _RAGAS_METRICS:
+            if column in df.columns:
+                values = df[column].dropna()
                 if len(values) > 0:
-                    setattr(report, attr_name, float(values.mean()))
+                    setattr(report, column, float(values.mean()))
 
         for qtype, type_data in by_type_data.items():
             type_dataset = Dataset.from_dict(type_data)
@@ -487,11 +496,11 @@ class GenerationEvaluator:
             type_df = type_result.to_pandas()
 
             type_metrics = {}
-            for ragas_key, attr_name in metric_map.items():
-                if ragas_key in type_df.columns:
-                    values = type_df[ragas_key].dropna()
+            for column in _RAGAS_METRICS:
+                if column in type_df.columns:
+                    values = type_df[column].dropna()
                     if len(values) > 0:
-                        type_metrics[attr_name] = float(values.mean())
+                        type_metrics[column] = float(values.mean())
 
             if type_metrics:
                 report.by_type[qtype] = type_metrics

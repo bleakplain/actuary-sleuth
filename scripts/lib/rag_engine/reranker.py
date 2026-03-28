@@ -2,30 +2,28 @@
 # -*- coding: utf-8 -*-
 """Rerank 精排模块
 
-使用 LLM-as-Judge 方式做精排，复用现有 LLM 客户端。
-后续可替换为 Cross-Encoder 实现（sentence-transformers）。
+使用 LLM 批量排序方式做精排，单次调用完成所有候选的排序。
 """
 import logging
+import re
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-_RERANK_PROMPT_TEMPLATE = """请评估以下法规条款与用户问题的相关性。
+_BATCH_RERANK_PROMPT = """请根据用户问题，对以下法规条款按相关性从高到低排序。
 
 ## 用户问题
 {query}
 
-## 法规条款
-{content}
+## 法规条款列表
+{candidates}
 
-## 评分标准
-- 3: 直接相关，条款明确回答了用户问题
-- 2: 间接相关，条款包含相关信息但不是直接回答
-- 1: 弱相关，条款仅提及部分关键词
-- 0: 不相关
+## 排序要求
+请直接输出排序后的编号，从最相关到最不相关，用逗号分隔。
+只输出编号，不要输出其他内容。
 
-请只输出一个数字评分（0-3），不要输出其他内容。"""
+示例输出：2,5,1,4,3"""
 
 
 @dataclass(frozen=True)
@@ -53,40 +51,55 @@ class LLMReranker:
         top_k = top_k or self._config.top_k
         candidates = candidates[:self._config.max_candidates]
 
-        scored = []
-        for candidate in candidates:
-            score = self._score_relevance(query, candidate)
-            scored.append((candidate, score))
-
-        scored.sort(key=lambda x: x[1], reverse=True)
+        ranked_indices = self._batch_rank(query, candidates)
+        if not ranked_indices:
+            return candidates[:top_k]
 
         results: List[Dict[str, Any]] = []
-        for candidate, rerank_score in scored[:top_k]:
+        for rank, idx in enumerate(ranked_indices[:top_k]):
+            candidate = candidates[idx]
             result = dict(candidate)
-            result['rerank_score'] = rerank_score
+            result['rerank_score'] = 1.0 / (rank + 1)
             results.append(result)
 
         return results
 
-    def _score_relevance(self, query: str, candidate: Dict[str, Any]) -> float:
-        content = candidate.get('content', '')
-        if len(content) > 500:
-            content = content[:500] + "..."
+    def _batch_rank(self, query: str, candidates: List[Dict[str, Any]]) -> List[int]:
+        parts = []
+        for i, candidate in enumerate(candidates, 1):
+            content = candidate.get('content', '')
+            law_name = candidate.get('law_name', '')
+            article = candidate.get('article_number', '')
+            truncated = content[:800] if len(content) > 800 else content
+            parts.append(f"[{i}] 【{law_name}】{article}\n{truncated}")
 
-        prompt = _RERANK_PROMPT_TEMPLATE.format(query=query, content=content)
+        prompt = _BATCH_RERANK_PROMPT.format(
+            query=query,
+            candidates="\n\n".join(parts),
+        )
 
         try:
             response = self._llm.generate(prompt)
-            score = self._parse_score(str(response).strip())
-            return score
+            return self._parse_ranking(str(response).strip(), len(candidates))
         except Exception as e:
-            logger.warning(f"Rerank 打分失败: {e}")
-            return 0.0
+            logger.warning(f"Rerank 批量排序失败: {e}")
+            return list(range(len(candidates)))
 
     @staticmethod
-    def _parse_score(response: str) -> float:
-        response = response.strip()
-        for char in response:
-            if char in '0123':
-                return float(char)
-        return 0.0
+    def _parse_ranking(response: str, total: int) -> List[int]:
+        numbers = re.findall(r'\d+', response)
+        result: List[int] = []
+        seen: set[int] = set()
+        for num_str in numbers:
+            num = int(num_str)
+            if 1 <= num <= total:
+                idx = num - 1
+                if idx not in seen:
+                    result.append(idx)
+                    seen.add(idx)
+
+        for i in range(total):
+            if i not in seen:
+                result.append(i)
+
+        return result

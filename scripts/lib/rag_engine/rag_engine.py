@@ -21,6 +21,7 @@ from .llamaindex_adapter import ClientLLMAdapter, get_embedding_model
 from .retrieval import hybrid_search
 from .bm25_index import BM25Index
 from .reranker import LLMReranker, RerankConfig
+from .query_preprocessor import QueryPreprocessor
 from .exceptions import EngineInitializationError, RetrievalError
 from lib.llm import BaseLLMClient, LLMClientFactory
 
@@ -79,6 +80,8 @@ class ThreadLocalSettings:
                 Settings.embed_model = self._global_backup['embed_model']
 
 
+_MAX_CONTEXT_CHARS = 4000
+
 _thread_settings = ThreadLocalSettings()
 
 
@@ -98,6 +101,7 @@ class RAGEngine:
         self._llm = None
         self._embed_model = None
         self._llm_client: Optional[BaseLLMClient] = None
+        self._preprocessor: Optional[QueryPreprocessor] = None
         self._reranker: Optional[LLMReranker] = None
         self._bm25_index: Optional[BM25Index] = None
         self._initialized = False
@@ -117,6 +121,7 @@ class RAGEngine:
             top_k=self.config.hybrid_config.rerank_top_k,
         )
         self._reranker = LLMReranker(self._llm_client, rerank_config)
+        self._preprocessor = QueryPreprocessor(llm_client=self._llm_client)
 
     def initialize(self, force_rebuild: bool = False) -> bool:
         """初始化查询引擎（线程安全版本）"""
@@ -168,6 +173,7 @@ class RAGEngine:
         """清理引擎内部资源"""
         self._bm25_index = None
         self._reranker = None
+        self._preprocessor = None
         self._initialized = False
 
     def _load_bm25_index(self) -> None:
@@ -215,13 +221,20 @@ class RAGEngine:
         return await asyncio.to_thread(self._do_ask, question, include_sources)
 
     def _build_qa_prompt(self, question: str, search_results: List[Dict[str, Any]]) -> str:
-        """构建 QA 提示词"""
         context_parts: List[str] = []
+        total_chars = 0
+
         for i, result in enumerate(search_results, 1):
             law_name = result.get('law_name', '未知法规')
             article = result.get('article_number', '')
             content = result.get('content', '')
-            context_parts.append(f"{i}. 【{law_name}】{article}\n{content}")
+            part = f"{i}. 【{law_name}】{article}\n{content}"
+
+            if total_chars + len(part) > _MAX_CONTEXT_CHARS:
+                break
+
+            context_parts.append(part)
+            total_chars += len(part)
 
         context = "\n\n".join(context_parts)
         return _QA_PROMPT_TEMPLATE.format(context=context, question=question)
@@ -278,7 +291,10 @@ class RAGEngine:
             vector_top_k=config.vector_top_k,
             keyword_top_k=config.keyword_top_k,
             k=config.rrf_k,
-            filters=filters
+            filters=filters,
+            preprocessor=self._preprocessor,
+            vector_weight=config.vector_weight,
+            keyword_weight=config.keyword_weight,
         )
 
         if self._reranker:

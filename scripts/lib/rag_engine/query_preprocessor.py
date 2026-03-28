@@ -5,11 +5,12 @@
 对用户 query 进行预处理，提升检索召回质量：
 1. 术语归一化：口语化表达 -> 标准术语
 2. Query 扩写：基于同义词生成变体 query
+3. LLM 重写：由 LLM 改写为规范检索 query
 """
 import json
 import logging
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,10 @@ def _load_synonyms() -> Dict[str, List[str]]:
 
 _INSURANCE_SYNONYMS: Dict[str, List[str]] = _load_synonyms()
 
+_REWRITE_PROMPT = """将以下保险相关的问题改写为更适合检索的规范表述。
+只输出改写后的文本，不要输出其他内容。
+原问题：{query}"""
+
 
 @dataclass(frozen=True)
 class PreprocessedQuery:
@@ -38,10 +43,11 @@ class PreprocessedQuery:
 
 class QueryPreprocessor:
 
-    def __init__(self):
+    def __init__(self, llm_client=None):
         self._synonym_index = self._build_synonym_index()
         self._sorted_synonym_terms = sorted(self._synonym_index.keys(), key=len, reverse=True)
         self._sorted_standard_terms = sorted(_INSURANCE_SYNONYMS.keys(), key=len, reverse=True)
+        self._llm = llm_client
 
     def _build_synonym_index(self) -> Dict[str, str]:
         index: Dict[str, str] = {}
@@ -53,6 +59,11 @@ class QueryPreprocessor:
 
     def preprocess(self, query: str) -> PreprocessedQuery:
         normalized = self._normalize(query)
+
+        rewritten = self._rewrite_with_llm(query)
+        if rewritten and rewritten != normalized:
+            normalized = rewritten
+
         expanded = self._expand(normalized)
         seen = {normalized}
         unique_expanded = [normalized]
@@ -67,6 +78,20 @@ class QueryPreprocessor:
             expanded=unique_expanded,
             did_expand=len(unique_expanded) > 1,
         )
+
+    def _rewrite_with_llm(self, query: str) -> Optional[str]:
+        if not self._llm:
+            return None
+        try:
+            prompt = _REWRITE_PROMPT.format(query=query)
+            response = self._llm.generate(prompt)
+            result = str(response).strip()
+            if result and len(result) > 2:
+                return result
+            return None
+        except Exception as e:
+            logger.warning(f"LLM query 重写失败: {e}")
+            return None
 
     def _normalize(self, query: str) -> str:
         result = query

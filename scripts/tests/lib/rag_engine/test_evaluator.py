@@ -202,29 +202,53 @@ class TestEvalDataset:
 
 class TestRetrievalMetrics:
 
-    def test_is_relevant_source_file_match(self, sample_eval):
+    def test_is_relevant_source_file_needs_keyword(self, sample_eval):
         result = {
             'content': '不相关内容',
             'law_name': '未知',
             'source_file': '05_健康保险产品开发.md',
         }
-        assert _is_relevant(result, sample_eval.evidence_docs, []) is True
+        assert _is_relevant(result, sample_eval.evidence_docs, []) is False
+
+    def test_is_relevant_source_file_with_keyword(self, sample_eval):
+        result = {
+            'content': '等待期规定相关内容',
+            'law_name': '未知',
+            'source_file': '05_健康保险产品开发.md',
+        }
+        assert _is_relevant(result, sample_eval.evidence_docs, sample_eval.evidence_keywords) is True
 
     def test_is_relevant_keyword_match(self, sample_eval):
         result = {
-            'content': '等待期规定相关内容',
+            'content': '等待期规定相关内容，既往症人群',
             'law_name': '未知',
             'source_file': 'other.md',
         }
         assert _is_relevant(result, sample_eval.evidence_docs, sample_eval.evidence_keywords) is True
 
-    def test_is_relevant_law_name_fallback(self, sample_eval):
+    def test_is_relevant_single_keyword_not_enough(self, sample_eval):
+        result = {
+            'content': '等待期相关内容',
+            'law_name': '未知',
+            'source_file': 'other.md',
+        }
+        assert _is_relevant(result, sample_eval.evidence_docs, ['等待期']) is True
+
+    def test_is_relevant_law_name_needs_keyword(self, sample_eval):
         result = {
             'content': '不相关内容',
             'law_name': '05健康保险产品开发',
             'source_file': '',
         }
         assert _is_relevant(result, sample_eval.evidence_docs, []) is True
+
+    def test_is_relevant_law_name_with_keyword(self, sample_eval):
+        result = {
+            'content': '等待期相关内容',
+            'law_name': '05健康保险产品开发',
+            'source_file': '',
+        }
+        assert _is_relevant(result, sample_eval.evidence_docs, sample_eval.evidence_keywords) is True
 
     def test_is_relevant_no_match(self, irrelevant_results, sample_eval):
         assert _is_relevant(irrelevant_results[0], sample_eval.evidence_docs, sample_eval.evidence_keywords) is False

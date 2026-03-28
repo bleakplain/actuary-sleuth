@@ -7,10 +7,10 @@
 import logging
 from typing import List, Optional
 
-from llama_index.core import VectorStoreIndex, Settings
-from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core import VectorStoreIndex
 from llama_index.vector_stores.lancedb import LanceDBVectorStore
 from llama_index.core.storage.storage_context import StorageContext
+from llama_index.core.schema import TextNode
 
 from .config import RAGConfig
 
@@ -24,28 +24,11 @@ class VectorIndexManager:
         self.config = config or RAGConfig()
         self.index: Optional[VectorStoreIndex] = None
 
-        Settings.text_splitter = SentenceSplitter(
-            chunk_size=self.config.chunk_size,
-            chunk_overlap=self.config.chunk_overlap,
-            separator="\n\n",
-        )
-
     def create_index(
         self,
         documents: List,
         force_rebuild: bool = False
     ) -> Optional[VectorStoreIndex]:
-        """
-        创建或加载向量索引
-
-        Args:
-            documents: 文档列表
-            force_rebuild: 是否强制重建索引
-
-        Returns:
-            Optional[VectorStoreIndex]: 向量索引
-        """
-        # 如果不强制重建，尝试加载已有索引
         if not force_rebuild:
             loaded_index = self._load_existing_index()
             if loaded_index:
@@ -57,19 +40,20 @@ class VectorIndexManager:
             logger.warning("没有文档可用于创建索引")
             return None
 
-        # 创建向量存储
         vector_store = LanceDBVectorStore(
             uri=self.config.vector_db_path,
             table_name=self.config.collection_name,
         )
-
-        # 创建存储上下文
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
-        # 创建索引
         logger.info(f"正在使用 {len(documents)} 条法规创建索引...")
-        self.index = VectorStoreIndex.from_documents(
-            documents,
+
+        nodes = [
+            TextNode(text=doc.text, metadata=doc.metadata)
+            for doc in documents
+        ]
+        self.index = VectorStoreIndex(
+            nodes,
             storage_context=storage_context,
             show_progress=True,
         )
@@ -78,46 +62,22 @@ class VectorIndexManager:
         return self.index
 
     def _load_existing_index(self) -> Optional[VectorStoreIndex]:
-        """
-        从已有向量存储加载索引
-
-        Returns:
-            Optional[VectorStoreIndex]: 向量索引，如果加载失败返回 None
-        """
         try:
             vector_store = LanceDBVectorStore(
                 uri=self.config.vector_db_path,
                 table_name=self.config.collection_name,
             )
-
             index = VectorStoreIndex.from_vector_store(vector_store=vector_store)
             logger.info(f"从集合 '{self.config.collection_name}' 加载了已有索引")
             return index
-
         except Exception as e:
             logger.warning(f"加载已有索引失败: {e}")
             return None
 
     def get_index(self) -> Optional[VectorStoreIndex]:
-        """
-        获取当前索引
-
-        Returns:
-            Optional[VectorStoreIndex]: 向量索引
-        """
         return self.index
 
     def create_query_engine(self, top_k: int = None, streaming: bool = None):
-        """
-        从索引创建查询引擎
-
-        Args:
-            top_k: 返回最相关的 K 个结果
-            streaming: 是否使用流式输出
-
-        Returns:
-            查询引擎实例
-        """
         if self.index is None:
             logger.warning("索引未初始化")
             return None
@@ -131,12 +91,6 @@ class VectorIndexManager:
         )
 
     def index_exists(self) -> bool:
-        """
-        检查索引是否存在
-
-        Returns:
-            bool: 索引存在返回 True
-        """
         try:
             import lancedb
             db = lancedb.connect(self.config.vector_db_path)
