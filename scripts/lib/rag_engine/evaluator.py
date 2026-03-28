@@ -171,33 +171,38 @@ def _tokenize_to_set(text: str) -> Optional[Set[str]]:
     return tokens if tokens else None
 
 
-def _compute_token_jaccard(text_a: str, text_b: str) -> float:
-    tokens_a = _tokenize_to_set(text_a)
-    tokens_b = _tokenize_to_set(text_b)
-    if not tokens_a or not tokens_b:
+def _jaccard_similarity(set_a: Set[str], set_b: Set[str]) -> float:
+    if not set_a or not set_b:
         return 0.0
-    intersection = tokens_a & tokens_b
-    union = tokens_a | tokens_b
-    return len(intersection) / len(union) if union else 0.0
+    intersection = set_a & set_b
+    union = set_a | set_b
+    return len(intersection) / len(union)
+
+
+def _compute_token_jaccard(text_a: str, text_b: str) -> float:
+    return _jaccard_similarity(
+        _tokenize_to_set(text_a) or set(),
+        _tokenize_to_set(text_b) or set(),
+    )
 
 
 def _compute_redundancy_rate(results: List[Dict[str, Any]]) -> float:
     if len(results) <= 1:
         return 0.0
 
-    token_sets = [_tokenize_to_set(r.get('content', '')) for r in results]
-    token_sets = [ts for ts in token_sets if ts]
+    valid_sets: List[Set[str]] = [
+        ts for r in results
+        if (ts := _tokenize_to_set(r.get('content', ''))) is not None
+    ]
     redundant_count = 0
-    n = len(token_sets)
+    n = len(valid_sets)
 
     for i in range(n):
         for j in range(i + 1, n):
-            intersection = token_sets[i] & token_sets[j]
-            jaccard = len(intersection) / (len(token_sets[i]) + len(token_sets[j]) - len(intersection))
-            if jaccard > 0.6:
+            if _jaccard_similarity(valid_sets[i], valid_sets[j]) > 0.6:
                 redundant_count += 1
 
-    return redundant_count / len(results)
+    return redundant_count / n
 
 
 class RetrievalEvaluator:

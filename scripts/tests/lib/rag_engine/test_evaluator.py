@@ -535,13 +535,7 @@ class TestGenerationEvaluator:
         except ImportError:
             pytest.skip("langchain_openai not installed")
 
-        from dotenv import load_dotenv
-        from pathlib import Path
         import os
-
-        env_path = Path('/root/.openclaw/workspace/skills/actuary-sleuth/scripts/.env')
-        if env_path.exists():
-            load_dotenv(env_path)
 
         if 'ZHIPU_API_KEY' not in os.environ:
             pytest.skip("ZHIPU_API_KEY not set")
