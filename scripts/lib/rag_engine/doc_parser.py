@@ -21,6 +21,55 @@ from .config import RAGConfig, ChunkingConfig
 
 logger = logging.getLogger(__name__)
 
+_CATEGORY_PATTERN = re.compile(
+    r'^\d+_(.+?)(?:产品开发|管理办法|规定|规则|相关)?$'
+)
+
+
+def _extract_product_category(file_name: str) -> str:
+    if not file_name:
+        return '未分类'
+
+    name = file_name.replace('.md', '').strip()
+    match = _CATEGORY_PATTERN.match(name)
+    if match:
+        return match.group(1).strip()
+
+    return '未分类'
+
+
+def extract_law_name(text: str, metadata: dict) -> str:
+    """从文档文本和元数据中提取法规名称
+
+    优先使用 metadata 中的 law_name，其次从 Markdown 标题中提取，
+    最后回退到文件名。
+    """
+    if 'law_name' in metadata:
+        return metadata['law_name']
+
+    for line in text.split('\n'):
+        match = re.match(r'^#\s+(.+)$', line.strip())
+        if match:
+            title = match.group(1).strip()
+            if re.match(r'^第[一二三四五六七八九十百千\d]+部分', title):
+                continue
+            if re.match(r'^[一二三四五六七八九十]+、', title):
+                continue
+            title = re.split(r'\d{4}年', title)[0].strip()
+            for sep in ['(', '（']:
+                if sep in title:
+                    title = title.split(sep)[0].strip()
+            if len(title) > 5:
+                return title
+
+    file_name = metadata.get('file_name', '未知法规')
+    if file_name.endswith('.md'):
+        name = file_name[:-3]
+        if name and name[0].isdigit():
+            name = '_'.join(name.split('_')[1:])
+            return name
+    return file_name
+
 
 class RegulationNodeParser(NodeParser):
     """法规条款节点解析器
@@ -60,31 +109,7 @@ class RegulationNodeParser(NodeParser):
         return result_nodes
 
     def _extract_law_name(self, content: str, metadata: dict) -> str:
-        if 'law_name' in metadata:
-            return metadata['law_name']
-
-        matches = re.findall(r'^#\s+(.+)$', content, re.MULTILINE)
-        if matches:
-            for match in matches:
-                title = match.strip()
-                if not re.match(r'^第[一二三四五六七八九十百千\d]+部分', title):
-                    if not re.match(r'^[一二三四五六七八九十]+、', title):
-                        title = re.split(r'\d{4}年', title)[0].strip()
-                        if '(' in title:
-                            title = re.split(r'\(', title)[0].strip()
-                        elif '（' in title:
-                            title = re.split(r'（', title)[0].strip()
-
-                        if title and len(title) > 5:
-                            return title
-
-        file_name = metadata.get('file_name', '未知法规')
-        if file_name.endswith('.md'):
-            name = file_name[:-3]
-            if name[0].isdigit():
-                name = '_'.join(name.split('_')[1:])
-            return name
-        return file_name
+        return extract_law_name(content, metadata)
 
     def _parse_article_nodes(
         self,
@@ -162,9 +187,6 @@ class RegulationNodeParser(NodeParser):
         law_name: str,
         source_metadata: dict
     ):
-        """创建条款节点"""
-
-        # 清理内容
         full_content = '\n'.join(content_lines).strip()
         full_content = re.sub(r'^#{1,3}\s*', '', full_content, flags=re.MULTILINE)
         full_content = full_content.strip()
@@ -172,19 +194,16 @@ class RegulationNodeParser(NodeParser):
         if len(full_content) <= 20:
             return None
 
-        # 提取条款编号
-        article_num = article_title.split()[0] if article_title else article_title
+        source_file = source_metadata.get('file_name', '')
+        category = _extract_product_category(source_file)
 
-        from llama_index.core.schema import TextNode
         return TextNode(
             text=full_content,
             metadata={
                 'law_name': law_name,
                 'article_number': article_title,
-                'article_num_only': article_num,
-                'category': '未分类',
-                'source_file': source_metadata.get('file_name', ''),
-                **source_metadata  # 保留原始元数据
+                'category': category,
+                'source_file': source_file,
             }
         )
 

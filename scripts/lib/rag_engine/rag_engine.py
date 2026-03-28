@@ -4,6 +4,7 @@
 RAG 查询引擎（线程安全版本）
 统一的检索增强生成引擎，通过策略模式支持不同使用场景
 """
+import asyncio
 import logging
 import threading
 from pathlib import Path
@@ -19,11 +20,29 @@ from .index_manager import VectorIndexManager
 from .llamaindex_adapter import ClientLLMAdapter, get_embedding_model
 from .retrieval import hybrid_search
 from .bm25_index import BM25Index
+from .reranker import LLMReranker, RerankConfig
+from .exceptions import EngineInitializationError, RetrievalError
 from lib.llm import BaseLLMClient, LLMClientFactory
 
 logger = logging.getLogger(__name__)
 
 _engine_init_lock = threading.Lock()
+
+_QA_PROMPT_TEMPLATE = """请根据以下法规条款回答用户的问题。
+
+## 法规条款
+
+{context}
+
+## 用户问题
+
+{question}
+
+## 回答要求
+1. 基于上述法规条款回答，不要编造信息
+2. 如果法规条款不足以回答问题，请说明并建议查阅相关法规
+3. 引用具体条款时请注明法规名称和条款号
+4. 回答简洁专业"""
 
 
 class ThreadLocalSettings:
@@ -78,6 +97,8 @@ class RAGEngine:
 
         self._llm = None
         self._embed_model = None
+        self._llm_client: Optional[BaseLLMClient] = None
+        self._reranker: Optional[LLMReranker] = None
         self._bm25_index: Optional[BM25Index] = None
         self._initialized = False
         self._init_lock = threading.Lock()
@@ -85,11 +106,17 @@ class RAGEngine:
         self._setup_llm()
 
     def _setup_llm(self):
-        llm_client = self.llm_provider()
+        self._llm_client = self.llm_provider()
         embed_config = LLMClientFactory.get_embedding_config()
 
-        self._llm = ClientLLMAdapter(llm_client)
+        self._llm = ClientLLMAdapter(self._llm_client)
         self._embed_model = get_embedding_model(embed_config)
+
+        rerank_config = RerankConfig(
+            enabled=self.config.hybrid_config.enable_rerank,
+            top_k=self.config.hybrid_config.rerank_top_k,
+        )
+        self._reranker = LLMReranker(self._llm_client, rerank_config)
 
     def initialize(self, force_rebuild: bool = False) -> bool:
         """初始化查询引擎（线程安全版本）"""
@@ -127,8 +154,7 @@ class RAGEngine:
                 logger.error(f"RAG 引擎初始化失败: {e}")
                 _thread_settings.reset()
                 self.query_engine = None
-                self._bm25_index = None
-                self._initialized = False
+                self._cleanup_resources()
                 return False
 
     def cleanup(self) -> None:
@@ -137,6 +163,12 @@ class RAGEngine:
             self._cleanup_resources()
             self.query_engine = None
             logger.info("RAG 引擎已清理")
+
+    def _cleanup_resources(self) -> None:
+        """清理引擎内部资源"""
+        self._bm25_index = None
+        self._reranker = None
+        self._initialized = False
 
     def _load_bm25_index(self) -> None:
         """加载 BM25 索引"""
@@ -148,76 +180,51 @@ class RAGEngine:
         else:
             logger.warning("BM25 索引加载失败，混合检索将仅使用向量检索")
 
-    def ask(self, question: str, include_sources: bool = True) -> Dict[str, Any]:
-        """
-        问答模式：返回自然语言答案
-
-        Args:
-            question: 用户问题
-            include_sources: 是否在结果中包含相关法规来源
-
-        Returns:
-            Dict: {
-                'answer': str,  # LLM 生成的答案
-                'sources': List[Dict]  # 相关法规来源
-            }
-        """
-        if self.query_engine is None:
+    def _do_ask(self, question: str, include_sources: bool) -> Dict[str, Any]:
+        if not self._initialized:
             if not self.initialize():
-                return {
-                    'answer': '引擎初始化失败',
-                    'sources': []
-                }
+                raise EngineInitializationError("RAG 引擎初始化失败")
+
+        _thread_settings.apply()
 
         try:
-            response = self.query_engine.query(question)
+            search_results = self._hybrid_search(question, top_k=self.config.top_k_results)
+            if not search_results:
+                return {'answer': '未找到相关法规条款，请尝试换个描述方式。', 'sources': []}
 
-            result = {
-                'answer': str(response),
-                'sources': self._extract_sources(response) if include_sources else []
-            }
-            return result
+            prompt = self._build_qa_prompt(question, search_results)
+            assert self._llm_client is not None
+            answer = self._llm_client.generate(prompt)
 
-        except (RuntimeError, ValueError, AttributeError) as e:
-            logger.error(f"问答出错: {e}")
             return {
-                'answer': f'问答出错: {str(e)}',
-                'sources': []
+                'answer': str(answer),
+                'sources': search_results if include_sources else [],
             }
+
+        except EngineInitializationError:
+            raise
+        except Exception as e:
+            raise RetrievalError(f"问答出错: {e}") from e
+
+    def ask(self, question: str, include_sources: bool = True) -> Dict[str, Any]:
+        """问答模式：返回自然语言答案"""
+        return self._do_ask(question, include_sources)
 
     async def aask(self, question: str, include_sources: bool = True) -> Dict[str, Any]:
-        """
-        异步问答模式
+        """异步问答模式"""
+        return await asyncio.to_thread(self._do_ask, question, include_sources)
 
-        Args:
-            question: 用户问题
-            include_sources: 是否在结果中包含相关法规来源
+    def _build_qa_prompt(self, question: str, search_results: List[Dict[str, Any]]) -> str:
+        """构建 QA 提示词"""
+        context_parts: List[str] = []
+        for i, result in enumerate(search_results, 1):
+            law_name = result.get('law_name', '未知法规')
+            article = result.get('article_number', '')
+            content = result.get('content', '')
+            context_parts.append(f"{i}. 【{law_name}】{article}\n{content}")
 
-        Returns:
-            Dict: 同 ask() 方法
-        """
-        if self.query_engine is None:
-            if not self.initialize():
-                return {
-                    'answer': '引擎初始化失败',
-                    'sources': []
-                }
-
-        try:
-            response = await self.query_engine.aquery(question)
-
-            result = {
-                'answer': str(response),
-                'sources': self._extract_sources(response) if include_sources else []
-            }
-            return result
-
-        except (RuntimeError, ValueError, AttributeError) as e:
-            logger.error(f"异步问答出错: {e}")
-            return {
-                'answer': f'问答出错: {str(e)}',
-                'sources': []
-            }
+        context = "\n\n".join(context_parts)
+        return _QA_PROMPT_TEMPLATE.format(context=context, question=question)
 
     def search(
         self,
@@ -258,13 +265,13 @@ class RAGEngine:
         top_k: int = None,
         filters: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
-        """混合检索（向量 + 关键词）"""
+        """混合检索（向量 + BM25 关键词 + RRF 融合 + Rerank）"""
         config = self.config.hybrid_config
         index = self.index_manager.get_index()
         if not index:
             return []
 
-        return hybrid_search(
+        results = hybrid_search(
             index=index,
             bm25_index=self._bm25_index,
             query_text=query_text,
@@ -274,6 +281,11 @@ class RAGEngine:
             filters=filters
         )
 
+        if self._reranker:
+            results = self._reranker.rerank(query_text, results, top_k=top_k)
+
+        return results
+
     def _apply_filters(self, results: List[Dict[str, Any]], filters: Dict[str, Any]) -> List[Dict[str, Any]]:
         return [
             r for r in results
@@ -281,7 +293,6 @@ class RAGEngine:
         ]
 
     def _extract_results_from_response(self, response) -> List[Dict[str, Any]]:
-        """从响应中提取结果"""
         results = []
         if hasattr(response, 'source_nodes'):
             for node in response.source_nodes:
@@ -291,39 +302,10 @@ class RAGEngine:
                     'category': node.node.metadata.get('category', ''),
                     'content': node.node.text,
                     'source_file': node.node.metadata.get('source_file', ''),
-                    'section_title': node.node.metadata.get('section_title', ''),
                     'hierarchy_path': node.node.metadata.get('hierarchy_path', ''),
-                    'content_type': node.node.metadata.get('content_type', ''),
                     'score': node.score if hasattr(node, 'score') else None
                 })
         return results
-
-    def _extract_sources(self, response) -> List[Dict[str, Any]]:
-        """
-        从 LlamaIndex 响应中提取源信息
-
-        Args:
-            response: LlamaIndex 查询响应对象
-
-        Returns:
-            List[Dict]: 源信息列表
-        """
-        sources = []
-        if hasattr(response, 'source_nodes'):
-            for node in response.source_nodes:
-                text_preview = node.node.text
-                if len(text_preview) > 200:
-                    text_preview = text_preview[:200] + '...'
-
-                sources.append({
-                    'law_name': node.node.metadata.get('law_name', '未知'),
-                    'article_number': node.node.metadata.get('article_number', '未知'),
-                    'content': text_preview,
-                    'source_file': node.node.metadata.get('source_file', ''),
-                    'section_title': node.node.metadata.get('section_title', ''),
-                    'score': node.score if hasattr(node, 'score') else None
-                })
-        return sources
 
     def chat(self, message: str) -> str:
         """

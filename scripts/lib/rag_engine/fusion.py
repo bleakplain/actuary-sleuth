@@ -16,6 +16,16 @@ def _chunk_key(scored: NodeWithScore) -> str:
     return scored.node.node_id if scored.node.node_id else str(id(scored.node))
 
 
+def _deduplicate_by_article(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """按法规名称+条款号去重，保留 RRF 分数最高的"""
+    seen: Dict[tuple, Dict[str, Any]] = {}
+    for r in results:
+        key = (r.get('law_name', ''), r.get('article_number', ''))
+        if key not in seen or r.get('score', 0) > seen[key].get('score', 0):
+            seen[key] = r
+    return list(seen.values())
+
+
 def reciprocal_rank_fusion(
     vector_results: List[NodeWithScore],
     keyword_results: List[NodeWithScore],
@@ -34,7 +44,7 @@ def reciprocal_rank_fusion(
     if not vector_results and not keyword_results:
         return []
 
-    scores = defaultdict(float)
+    scores: Dict[str, float] = defaultdict(float)
     chunks = {}
 
     for result_list in (vector_results, keyword_results):
@@ -51,7 +61,10 @@ def reciprocal_rank_fusion(
             'article_number': chunk.metadata.get('article_number', '未知'),
             'category': chunk.metadata.get('category', ''),
             'content': chunk.text,
+            'source_file': chunk.metadata.get('source_file', ''),
+            'hierarchy_path': chunk.metadata.get('hierarchy_path', ''),
             'score': rrf_score,
         })
 
+    results = _deduplicate_by_article(results)
     return sorted(results, key=lambda x: x['score'], reverse=True)

@@ -11,6 +11,8 @@ class HybridQueryConfig:
     vector_top_k: int = 5
     keyword_top_k: int = 5
     rrf_k: int = 60
+    enable_rerank: bool = True
+    rerank_top_k: int = 5
 
     def __post_init__(self):
         if self.vector_top_k < 1:
@@ -19,6 +21,8 @@ class HybridQueryConfig:
             raise ValueError(f"keyword_top_k must be >= 1, got {self.keyword_top_k}")
         if self.rrf_k < 1:
             raise ValueError(f"rrf_k must be >= 1, got {self.rrf_k}")
+        if self.rerank_top_k < 1:
+            raise ValueError(f"rerank_top_k must be >= 1, got {self.rerank_top_k}")
 
 
 @dataclass

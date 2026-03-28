@@ -5,14 +5,15 @@ RAG 量化评估器
 
 分层评估体系：
 - RetrievalEvaluator: 独立检索评估（Precision@K, Recall@K, MRR, NDCG, 冗余率）
-- GenerationEvaluator: 独立生成评估（RAGAS 可用时使用，否则跳过）
+- GenerationEvaluator: 独立生成评估（RAGAS 可用时使用 RAGAS，否则使用轻量级 token 覆盖率指标）
 """
 import math
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set, Tuple
 from dataclasses import dataclass, field
 
 from .eval_dataset import EvalSample, QuestionType
+from .tokenizer import tokenize_chinese
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ class GenerationEvalReport:
             print(f"  Answer Correctness:{self.answer_correctness:.3f}")
 
         if not any([self.faithfulness, self.answer_relevancy, self.answer_correctness]):
-            print("  RAGAS 不可用，跳过生成质量评估")
+            print("  无生成评估结果")
 
         if self.by_type:
             print("\n  按题型分组:")
@@ -142,69 +143,59 @@ def _is_relevant(
     evidence_docs: List[str],
     evidence_keywords: List[str],
 ) -> bool:
-    """判断检索结果是否与期望证据相关
+    doc_set = set(evidence_docs)
 
-    匹配逻辑：
-    1. 检查 content 是否包含 evidence_keywords 中的关键词
-    2. 检查 law_name/category 是否与 evidence_docs 近似匹配
-    """
-    content = result.get('content', '').lower()
-
-    # 关键词匹配：content 中包含至少一个 evidence_keyword
-    keyword_match = any(
-        kw.lower() in content
-        for kw in evidence_keywords
-        if len(kw) >= 2  # 忽略单字关键词
-    )
-
-    if keyword_match:
+    source_file = result.get('source_file', '')
+    if source_file and source_file in doc_set:
         return True
 
-    # 文档来源匹配：law_name 或 category 与 evidence_docs 近似匹配
-    law_name = result.get('law_name', '').lower()
-    category = result.get('category', '').lower()
+    content = result.get('content', '')
+    if any(kw in content for kw in evidence_keywords if len(kw) >= 2):
+        return True
 
-    for doc in evidence_docs:
-        doc_stem = doc.lower().replace('.md', '').replace('_', '')
-        if doc_stem in law_name or doc_stem in category:
-            return True
-        # 反向：law_name 中的关键部分出现在 doc 中
-        if any(part in doc_stem for part in law_name.split() if len(part) >= 2):
-            return True
+    law_name = result.get('law_name', '')
+    if law_name:
+        for doc in evidence_docs:
+            doc_stem = doc.replace('.md', '').replace('_', '')
+            if doc_stem and doc_stem in law_name:
+                return True
 
     return False
 
 
-def _compute_jaccard(text_a: str, text_b: str) -> float:
-    """计算两段文本的 Jaccard 相似度（基于字符集合）"""
-    if not text_a or not text_b:
+def _tokenize_to_set(text: str) -> Optional[Set[str]]:
+    """分词并返回 token 集合，空文本返回 None"""
+    if not text:
+        return None
+    tokens = set(tokenize_chinese(text))
+    return tokens if tokens else None
+
+
+def _compute_token_jaccard(text_a: str, text_b: str) -> float:
+    tokens_a = _tokenize_to_set(text_a)
+    tokens_b = _tokenize_to_set(text_b)
+    if not tokens_a or not tokens_b:
         return 0.0
-    set_a = set(text_a)
-    set_b = set(text_b)
-    intersection = set_a & set_b
-    union = set_a | set_b
+    intersection = tokens_a & tokens_b
+    union = tokens_a | tokens_b
     return len(intersection) / len(union) if union else 0.0
 
 
 def _compute_redundancy_rate(results: List[Dict[str, Any]]) -> float:
-    """计算检索结果中的冗余率
-
-    基于 Jaccard 相似度 > 0.8 视为冗余
-    """
     if len(results) <= 1:
         return 0.0
 
-    contents = [r.get('content', '') for r in results]
+    token_sets = [_tokenize_to_set(r.get('content', '')) for r in results]
+    token_sets = [ts for ts in token_sets if ts]
     redundant_count = 0
-    compared = set()
+    n = len(token_sets)
 
-    for i in range(len(contents)):
-        for j in range(i + 1, len(contents)):
-            if _compute_jaccard(contents[i], contents[j]) > 0.8:
-                pair = (i, j)
-                if pair not in compared:
-                    compared.add(pair)
-                    redundant_count += 1
+    for i in range(n):
+        for j in range(i + 1, n):
+            intersection = token_sets[i] & token_sets[j]
+            jaccard = len(intersection) / (len(token_sets[i]) + len(token_sets[j]) - len(intersection))
+            if jaccard > 0.6:
+                redundant_count += 1
 
     return redundant_count / len(results)
 
@@ -292,13 +283,13 @@ class RetrievalEvaluator:
         self,
         samples: List[EvalSample],
         top_k: int = 5,
-    ) -> RetrievalEvalReport:
+    ) -> Tuple[RetrievalEvalReport, List[Dict[str, Any]]]:
         """批量评估检索质量
 
         Returns:
-            RetrievalEvalReport: 汇总报告
+            (RetrievalEvalReport, List[Dict]) — 汇总报告和每条样本的评估结果
         """
-        all_results = []
+        all_results: List[Dict[str, Any]] = []
         by_type_results: Dict[str, List[Dict[str, Any]]] = {}
 
         for sample in samples:
@@ -309,7 +300,7 @@ class RetrievalEvaluator:
             by_type_results.setdefault(qtype, []).append(result)
 
         if not all_results:
-            return RetrievalEvalReport()
+            return RetrievalEvalReport(), []
 
         n = len(all_results)
         report = RetrievalEvalReport(
@@ -320,7 +311,6 @@ class RetrievalEvaluator:
             redundancy_rate=sum(r['redundancy_rate'] for r in all_results) / n,
         )
 
-        # 按题型分组统计
         for qtype, type_results in by_type_results.items():
             tn = len(type_results)
             report.by_type[qtype] = {
@@ -330,13 +320,13 @@ class RetrievalEvaluator:
                 'ndcg': sum(r['ndcg'] for r in type_results) / tn,
             }
 
-        return report
+        return report, all_results
 
 
 class GenerationEvaluator:
     """生成质量评估器
 
-    RAGAS 可用时使用 RAGAS 批量评估，不可用时跳过生成质量评估。
+    RAGAS 可用时使用 RAGAS 批量评估，不可用时使用轻量级 token 覆盖率指标。
 
     Args:
         rag_engine: 用于生成答案的 RAG 引擎
@@ -362,7 +352,7 @@ class GenerationEvaluator:
             self._ragas_metrics = [faithfulness, answer_relevancy, answer_correctness]
         except ImportError:
             logger.info(
-                "RAGAS 未安装，将跳过生成质量评估。"
+                "RAGAS 未安装，将使用轻量级指标进行生成评估。"
                 "安装: pip install ragas"
             )
 
@@ -378,10 +368,10 @@ class GenerationEvaluator:
     ) -> Dict[str, float]:
         """评估单条样本的生成质量
 
-        仅在 RAGAS 可用时返回有效结果。
+        RAGAS 可用时使用 RAGAS 评估，否则使用轻量级指标。
         """
         if not self._ragas_available:
-            return {}
+            return self._lightweight_evaluate(sample, contexts, answer)
 
         from datasets import Dataset
 
@@ -421,8 +411,8 @@ class GenerationEvaluator:
             return GenerationEvalReport()
 
         if not self._ragas_available:
-            logger.info("RAGAS 不可用，跳过生成质量评估")
-            return GenerationEvalReport()
+            logger.info("RAGAS 不可用，使用轻量级指标进行生成评估")
+            return self._lightweight_evaluate_batch(engine, samples)
 
         from datasets import Dataset
 
@@ -481,7 +471,6 @@ class GenerationEvaluator:
                 if len(values) > 0:
                     setattr(report, attr_name, float(values.mean()))
 
-        # 按题型分组评估
         for qtype, type_data in by_type_data.items():
             type_dataset = Dataset.from_dict(type_data)
             type_result = self._ragas_evaluate(
@@ -504,6 +493,90 @@ class GenerationEvaluator:
 
         return report
 
+    def _lightweight_evaluate(
+        self,
+        sample: EvalSample,
+        contexts: List[str],
+        answer: str,
+    ) -> Dict[str, float]:
+        """轻量级单条生成质量评估（无需 LLM）
+
+        - faithfulness: 答案 token 对检索上下文 token 的覆盖率
+        - answer_relevancy: 答案与标准答案的 token Jaccard 相似度
+        - answer_correctness: 答案关键 token 与标准答案的覆盖率
+        """
+        faithfulness = self._compute_faithfulness(contexts, answer)
+        relevancy = _compute_token_jaccard(answer, sample.ground_truth)
+        correctness = self._compute_correctness(answer, sample.ground_truth)
+
+        return {
+            'faithfulness': faithfulness,
+            'answer_relevancy': relevancy,
+            'answer_correctness': correctness,
+        }
+
+    def _lightweight_evaluate_batch(
+        self,
+        engine,
+        samples: List[EvalSample],
+    ) -> GenerationEvalReport:
+        """轻量级批量生成质量评估"""
+        all_metrics: List[Dict[str, float]] = []
+        by_type_metrics: Dict[str, List[Dict[str, float]]] = {}
+
+        for sample in samples:
+            result = engine.ask(sample.question, include_sources=True)
+            answer = result.get('answer', '')
+            contexts = [s.get('content', '') for s in result.get('sources', [])]
+
+            metrics = self._lightweight_evaluate(sample, contexts, answer)
+            all_metrics.append(metrics)
+
+            qtype = sample.question_type.value
+            by_type_metrics.setdefault(qtype, []).append(metrics)
+
+        if not all_metrics:
+            return GenerationEvalReport()
+
+        n = len(all_metrics)
+        report = GenerationEvalReport(
+            faithfulness=sum(m['faithfulness'] for m in all_metrics) / n,
+            answer_relevancy=sum(m['answer_relevancy'] for m in all_metrics) / n,
+            answer_correctness=sum(m['answer_correctness'] for m in all_metrics) / n,
+        )
+
+        for qtype, type_metrics_list in by_type_metrics.items():
+            tn = len(type_metrics_list)
+            report.by_type[qtype] = {
+                'faithfulness': sum(m['faithfulness'] for m in type_metrics_list) / tn,
+                'answer_relevancy': sum(m['answer_relevancy'] for m in type_metrics_list) / tn,
+                'answer_correctness': sum(m['answer_correctness'] for m in type_metrics_list) / tn,
+            }
+
+        return report
+
+    @staticmethod
+    def _token_overlap(text_a: str, text_b: str) -> float:
+        """计算 text_a 对 text_b 的 token 覆盖率"""
+        tokens_a = _tokenize_to_set(text_a)
+        tokens_b = _tokenize_to_set(text_b)
+        if not tokens_a or not tokens_b:
+            return 0.0
+        covered = tokens_a & tokens_b
+        return len(covered) / len(tokens_b)
+
+    @staticmethod
+    def _compute_faithfulness(contexts: List[str], answer: str) -> float:
+        """答案 token 对检索上下文 token 的覆盖率"""
+        if not contexts:
+            return 0.0
+        return GenerationEvaluator._token_overlap(' '.join(contexts), answer)
+
+    @staticmethod
+    def _compute_correctness(answer: str, ground_truth: str) -> float:
+        """答案关键 token 对标准答案关键 token 的覆盖率"""
+        return GenerationEvaluator._token_overlap(answer, ground_truth)
+
 
 def run_retrieval_evaluation(
     rag_engine,
@@ -516,47 +589,14 @@ def run_retrieval_evaluation(
         (RetrievalEvalReport, failed_samples)
     """
     evaluator = RetrievalEvaluator(rag_engine)
-    all_results = []
+    report, all_results = evaluator.evaluate_batch(samples, top_k=top_k)
 
-    for sample in samples:
-        result = evaluator.evaluate(sample, top_k=top_k)
-        result['_sample'] = sample
-        all_results.append(result)
-
-    # 汇总报告
-    report = RetrievalEvalReport()
-    if all_results:
-        n = len(all_results)
-        report.precision_at_k = sum(r['precision'] for r in all_results) / n
-        report.recall_at_k = sum(r['recall'] for r in all_results) / n
-        report.mrr = sum(r['mrr'] for r in all_results) / n
-        report.ndcg = sum(r['ndcg'] for r in all_results) / n
-        report.redundancy_rate = sum(r['redundancy_rate'] for r in all_results) / n
-
-        # 按题型分组
-        by_type: Dict[str, List[Dict]] = {}
-        for r in all_results:
-            qtype = r['_sample'].question_type.value
-            by_type.setdefault(qtype, []).append(r)
-
-        for qtype, type_results in by_type.items():
-            tn = len(type_results)
-            report.by_type[qtype] = {
-                'precision_at_k': sum(r['precision'] for r in type_results) / tn,
-                'recall_at_k': sum(r['recall'] for r in type_results) / tn,
-                'mrr': sum(r['mrr'] for r in type_results) / tn,
-                'ndcg': sum(r['ndcg'] for r in type_results) / tn,
-            }
-
-    # 失败案例分析
     failed = []
-    for r in all_results:
-        sample = r['_sample']
-        if r['recall'] < 0.5:
-            # 分类失败原因
-            if r['num_results'] == 0:
+    for sample, result in zip(samples, all_results):
+        if result['recall'] < 0.5:
+            if result['num_results'] == 0:
                 reason = '检索无结果'
-            elif r['precision'] == 0.0:
+            elif result['precision'] == 0.0:
                 reason = '结果不相关'
             else:
                 reason = '排序错误（相关文档排名靠后）'
@@ -568,9 +608,9 @@ def run_retrieval_evaluation(
                 'difficulty': sample.difficulty,
                 'evidence_docs': sample.evidence_docs,
                 'failure_reason': reason,
-                'recall': r['recall'],
-                'precision': r['precision'],
-                'first_relevant_rank': r['first_relevant_rank'],
+                'recall': result['recall'],
+                'precision': result['precision'],
+                'first_relevant_rank': result['first_relevant_rank'],
             })
 
     return report, failed

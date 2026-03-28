@@ -317,7 +317,7 @@ def production_rag_engine(production_rag_config):
     2. 使用真实的LanceDB存储（data/lancedb）
     3. 创建完整的RAG引擎，可直接用于查询
     """
-    from lib.rag_engine.engine import RAGEngine
+    from lib.rag_engine import RAGEngine
 
     try:
         engine = RAGEngine(production_rag_config)

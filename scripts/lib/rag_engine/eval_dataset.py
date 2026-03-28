@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-RAG 评估数据集模块
-
-定义评估数据结构和默认测试集，覆盖四种题型：
-- 简单事实题 (FACTUAL)
-- 多跳推理题 (MULTI_HOP)
-- 否定性查询 (NEGATIVE)
-- 口语化查询 (COLLOQUIAL)
+RAG 评估数据集模块，覆盖事实题、多跳推理题、否定性查询、口语化查询四种题型。
 """
 import json
 import logging
@@ -17,6 +11,10 @@ from pathlib import Path
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_DATASET_PATH = str(
+    Path(__file__).parent / 'data' / 'eval_dataset.json'
+)
 
 
 class QuestionType(Enum):
@@ -49,10 +47,17 @@ class EvalSample:
         return cls(**d)
 
 
-def load_eval_dataset(path: str) -> List[EvalSample]:
-    """从 JSON 文件加载评估数据集"""
-    with open(path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+def load_eval_dataset(path: Optional[str] = None) -> List[EvalSample]:
+    """从 JSON 文件加载评估数据集。默认路径不存在时回退到内置数据集。"""
+    if path is None:
+        path = DEFAULT_DATASET_PATH
+
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        logger.info(f"评估数据集文件不存在: {path}，使用默认数据集")
+        return create_default_eval_dataset()
 
     if isinstance(data, list):
         items = data
@@ -64,13 +69,27 @@ def load_eval_dataset(path: str) -> List[EvalSample]:
     return [EvalSample.from_dict(item) for item in items]
 
 
-def create_default_eval_dataset() -> List[EvalSample]:
-    """创建默认评估数据集（30 条，覆盖四种题型）
+def save_eval_dataset(samples: List[EvalSample], path: Optional[str] = None) -> None:
+    """将评估数据集保存为 JSON 文件。"""
+    if path is None:
+        path = DEFAULT_DATASET_PATH
 
-    基于 references/ 下 14 个法规文件的真实内容编写。
-    """
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+    data = {
+        'samples': [s.to_dict() for s in samples],
+        'total': len(samples),
+    }
+
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    logger.info(f"评估数据集已保存: {path} ({len(samples)} 条)")
+
+
+def create_default_eval_dataset() -> List[EvalSample]:
+    """创建默认评估数据集（30 条，覆盖四种题型）。"""
     return [
-        # ===== 简单事实题 FACTUAL (~12 条) =====
         EvalSample(
             id="f001",
             question="健康保险的等待期有什么规定？",
@@ -192,7 +211,6 @@ def create_default_eval_dataset() -> List[EvalSample]:
             topic="健康保险",
         ),
 
-        # ===== 多跳推理题 MULTI_HOP (~8 条) =====
         EvalSample(
             id="m001",
             question="买了两份意外险，发生意外后都能赔吗？",
@@ -274,7 +292,6 @@ def create_default_eval_dataset() -> List[EvalSample]:
             topic="两全保险",
         ),
 
-        # ===== 否定性查询 NEGATIVE (~6 条) =====
         EvalSample(
             id="n001",
             question="保险公司可以销售已停售的产品吗？",
@@ -336,7 +353,6 @@ def create_default_eval_dataset() -> List[EvalSample]:
             topic="信息披露",
         ),
 
-        # ===== 口语化查询 COLLOQUIAL (~4 条) =====
         EvalSample(
             id="c001",
             question="孩子在学校摔了能报不？",

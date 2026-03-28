@@ -120,7 +120,7 @@ class TestRegulationDocParser:
         parser = RegulationDocParser(regulations_dir="./references")
         assert parser is not None
         assert parser.regulations_dir.name == "references"
-        assert parser.node_parser is not None
+        assert parser.chunker is not None
 
     def test_parser_with_nonexistent_dir(self):
         """测试不存在的目录"""

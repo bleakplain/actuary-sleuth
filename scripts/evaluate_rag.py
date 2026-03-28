@@ -35,6 +35,7 @@ from lib.rag_engine.eval_dataset import (
     QuestionType,
     create_default_eval_dataset,
     load_eval_dataset,
+    DEFAULT_DATASET_PATH,
 )
 from lib.rag_engine.llamaindex_adapter import get_embedding_model, ClientLLMAdapter
 from lib.llm import LLMClientFactory

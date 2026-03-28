@@ -136,3 +136,5 @@ Located at `scripts/config/settings.json`, overrideable via env vars.
 10. Avoid unnecessary type conversions
 11. Minimal parameters, use metadata
 12. Constants in `lib/common/constants.py`
+13. Domain-specific data files (dictionaries, stopwords) in module's `data/` subdirectory (e.g. `scripts/lib/rag_engine/data/`), not embedded in code
+14. No over-engineering: avoid unnecessary config toggles and expansion points

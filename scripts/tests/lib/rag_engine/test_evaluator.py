@@ -15,8 +15,10 @@ import pytest
 from lib.rag_engine.eval_dataset import (
     EvalSample,
     QuestionType,
+    DEFAULT_DATASET_PATH,
     create_default_eval_dataset,
     load_eval_dataset,
+    save_eval_dataset,
 )
 from lib.rag_engine.evaluator import (
     RetrievalEvaluator,
@@ -25,7 +27,7 @@ from lib.rag_engine.evaluator import (
     GenerationEvalReport,
     RAGEvalReport,
     _is_relevant,
-    _compute_jaccard,
+    _compute_token_jaccard,
     _compute_redundancy_rate,
     run_retrieval_evaluation,
 )
@@ -58,18 +60,19 @@ def mock_rag_engine():
 
 @pytest.fixture
 def relevant_results():
-    """与 sample_eval 相关的检索结果"""
     return [
         {
             'content': '等待期规定：既往症人群的等待期不应与健康人群有过大差距',
             'law_name': '健康保险产品开发',
             'category': '健康保险',
+            'source_file': '05_健康保险产品开发.md',
             'score': 0.95,
         },
         {
             'content': '对于既往症严重程度的区分，相关定义需明确',
             'law_name': '健康保险产品开发',
             'category': '健康保险',
+            'source_file': '05_健康保险产品开发.md',
             'score': 0.85,
         },
     ]
@@ -77,18 +80,19 @@ def relevant_results():
 
 @pytest.fixture
 def irrelevant_results():
-    """与 sample_eval 不相关的检索结果"""
     return [
         {
             'content': '分红型保险的分红水平不确定',
             'law_name': '分红型人身保险',
             'category': '分红保险',
+            'source_file': '07_分红型人身保险.md',
             'score': 0.5,
         },
         {
             'content': '互联网保险业务需要网络安全保护',
             'law_name': '互联网保险产品',
             'category': '互联网保险',
+            'source_file': '10_互联网保险产品.md',
             'score': 0.3,
         },
     ]
@@ -170,51 +174,93 @@ class TestEvalDataset:
         with pytest.raises(AttributeError):
             sample_eval.id = "other"
 
+    def test_default_dataset_path_defined(self):
+        assert DEFAULT_DATASET_PATH is not None
+        assert DEFAULT_DATASET_PATH.endswith('eval_dataset.json')
+
+    def test_load_eval_dataset_default_path_fallback(self):
+        dataset = load_eval_dataset()
+        assert len(dataset) == 30
+
+    def test_save_and_load_roundtrip(self, tmp_path):
+        samples = create_default_eval_dataset()[:3]
+        path = tmp_path / "test_eval.json"
+        save_eval_dataset(samples, str(path))
+
+        loaded = load_eval_dataset(str(path))
+        assert len(loaded) == 3
+        assert loaded[0] == samples[0]
+
+    def test_save_creates_parent_dirs(self, tmp_path):
+        nested_path = tmp_path / "sub" / "dir" / "eval.json"
+        save_eval_dataset(create_default_eval_dataset()[:1], str(nested_path))
+        assert nested_path.exists()
+
 
 # ===== TestRetrievalMetrics =====
 
 
 class TestRetrievalMetrics:
 
-    def test_is_relevant_keyword_match(self, relevant_results, sample_eval):
-        result = relevant_results[0]
-        assert _is_relevant(result, sample_eval.evidence_docs, sample_eval.evidence_keywords) is True
-
-    def test_is_relevant_no_match(self, irrelevant_results, sample_eval):
-        result = irrelevant_results[0]
-        assert _is_relevant(result, sample_eval.evidence_docs, sample_eval.evidence_keywords) is False
-
-    def test_is_relevant_doc_name_match(self, sample_eval):
+    def test_is_relevant_source_file_match(self, sample_eval):
         result = {
-            'content': '一些不相关的内容',
-            'law_name': '健康保险产品开发',
-            'category': '健康',
-            'score': 0.5,
+            'content': '不相关内容',
+            'law_name': '未知',
+            'source_file': '05_健康保险产品开发.md',
         }
         assert _is_relevant(result, sample_eval.evidence_docs, []) is True
 
+    def test_is_relevant_keyword_match(self, sample_eval):
+        result = {
+            'content': '等待期规定相关内容',
+            'law_name': '未知',
+            'source_file': 'other.md',
+        }
+        assert _is_relevant(result, sample_eval.evidence_docs, sample_eval.evidence_keywords) is True
+
+    def test_is_relevant_law_name_fallback(self, sample_eval):
+        result = {
+            'content': '不相关内容',
+            'law_name': '05健康保险产品开发',
+            'source_file': '',
+        }
+        assert _is_relevant(result, sample_eval.evidence_docs, []) is True
+
+    def test_is_relevant_no_match(self, irrelevant_results, sample_eval):
+        assert _is_relevant(irrelevant_results[0], sample_eval.evidence_docs, sample_eval.evidence_keywords) is False
+
+    def test_is_relevant_substring_no_false_positive(self):
+        result = {
+            'content': '无关内容',
+            'law_name': '健康保险产品开发',
+            'source_file': '',
+        }
+        assert _is_relevant(result, ["07_分红型人身保险.md"], []) is False
+
     def test_is_relevant_empty_keywords_and_docs(self, sample_eval):
-        result = {'content': '任意内容', 'law_name': '未知', 'category': '', 'score': 0.1}
+        result = {'content': '任意内容', 'law_name': '未知', 'source_file': ''}
         assert _is_relevant(result, [], []) is False
 
-    def test_compute_jaccard_identical(self):
-        assert _compute_jaccard("hello world", "hello world") == 1.0
+    def test_token_jaccard_identical(self):
+        assert _compute_token_jaccard(
+            "保险合同是投保人与保险人约定保险权利义务关系的协议",
+            "保险合同是投保人与保险人约定保险权利义务关系的协议",
+        ) == 1.0
 
-    def test_compute_jaccard_disjoint(self):
-        text_a = "abc"
-        text_b = "xyz"
-        assert _compute_jaccard(text_a, text_b) == 0.0
+    def test_token_jaccard_disjoint(self):
+        jaccard = _compute_token_jaccard("保险公司应当按照规定提取保证金", "意外伤害保险属于定额给付型")
+        assert jaccard < 0.3
 
-    def test_compute_jaccard_partial(self):
-        text_a = "hello"
-        text_b = "hallo"
-        # 'h', 'l', 'o' overlap; 'e' and 'a' differ
-        jaccard = _compute_jaccard(text_a, text_b)
-        assert 0.0 < jaccard < 1.0
+    def test_token_jaccard_partial(self):
+        jaccard = _compute_token_jaccard(
+            "保险公司应当按照国务院保险监督管理机构的规定提取保证金",
+            "保险公司应当提取保证金用于保障被保险人利益",
+        )
+        assert 0.2 < jaccard < 0.8
 
-    def test_compute_jaccard_empty(self):
-        assert _compute_jaccard("", "hello") == 0.0
-        assert _compute_jaccard("hello", "") == 0.0
+    def test_token_jaccard_empty(self):
+        assert _compute_token_jaccard("", "保险合同") == 0.0
+        assert _compute_token_jaccard("保险合同", "") == 0.0
 
     def test_redundancy_rate_no_redundancy(self):
         results = [
@@ -306,9 +352,9 @@ class TestRetrievalEvaluator:
 
     def test_mrr_third_position(self, mock_rag_engine, sample_eval):
         results = [
-            {'content': '不相关内容一', 'law_name': '分红', 'category': '分红', 'score': 0.5},
-            {'content': '不相关内容二', 'law_name': '互联网', 'category': '互联网', 'score': 0.4},
-            {'content': '等待期规定相关内容', 'law_name': '健康', 'category': '健康', 'score': 0.9},
+            {'content': '不相关内容一', 'law_name': '分红', 'category': '分红', 'source_file': '07_分红型人身保险.md', 'score': 0.5},
+            {'content': '不相关内容二', 'law_name': '互联网', 'category': '互联网', 'source_file': '10_互联网保险产品.md', 'score': 0.4},
+            {'content': '等待期规定相关内容', 'law_name': '健康', 'category': '健康', 'source_file': '05_健康保险产品开发.md', 'score': 0.9},
         ]
         mock_rag_engine.search.return_value = results
 
@@ -319,12 +365,11 @@ class TestRetrievalEvaluator:
         assert result['first_relevant_rank'] == 3
 
     def test_ndcg_imperfect_ranking(self, mock_rag_engine, sample_eval):
-        # 2 个相关结果排在第 2 和第 4 位
         results = [
-            {'content': '不相关一', 'law_name': '分红', 'category': '分红', 'score': 0.5},
-            {'content': '等待期相关', 'law_name': '健康', 'category': '健康', 'score': 0.9},
-            {'content': '不相关二', 'law_name': '互联网', 'category': '互联网', 'score': 0.3},
-            {'content': '既往症相关', 'law_name': '健康', 'category': '健康', 'score': 0.8},
+            {'content': '不相关一', 'law_name': '分红', 'category': '分红', 'source_file': '07_分红型人身保险.md', 'score': 0.5},
+            {'content': '等待期相关', 'law_name': '健康', 'category': '健康', 'source_file': '05_健康保险产品开发.md', 'score': 0.9},
+            {'content': '不相关二', 'law_name': '互联网', 'category': '互联网', 'source_file': '10_互联网保险产品.md', 'score': 0.3},
+            {'content': '既往症相关', 'law_name': '健康', 'category': '健康', 'source_file': '05_健康保险产品开发.md', 'score': 0.8},
         ]
         mock_rag_engine.search.return_value = results
 
@@ -337,24 +382,25 @@ class TestRetrievalEvaluator:
     def test_evaluate_batch(self, mock_rag_engine):
         samples = create_default_eval_dataset()[:5]
 
-        # 为每个查询返回一些结果
         mock_rag_engine.search.return_value = [
             {
                 'content': '健康保险等待期相关内容',
                 'law_name': '健康保险',
                 'category': '健康保险',
+                'source_file': '05_健康保险产品开发.md',
                 'score': 0.9,
             },
             {
                 'content': '等待期不应有过大差距',
                 'law_name': '健康保险产品开发',
                 'category': '健康',
+                'source_file': '05_健康保险产品开发.md',
                 'score': 0.85,
             },
         ]
 
         evaluator = RetrievalEvaluator(mock_rag_engine)
-        report = evaluator.evaluate_batch(samples, top_k=2)
+        report, _ = evaluator.evaluate_batch(samples, top_k=2)
 
         assert isinstance(report, RetrievalEvalReport)
         assert report.precision_at_k >= 0.0
@@ -367,18 +413,18 @@ class TestRetrievalEvaluator:
     def test_by_type_breakdown(self, mock_rag_engine):
         dataset = create_default_eval_dataset()
 
-        # 所有查询返回相关结果
         mock_rag_engine.search.return_value = [
             {
                 'content': '等待期规定相关内容',
                 'law_name': '健康保险产品开发',
                 'category': '健康保险',
+                'source_file': '05_健康保险产品开发.md',
                 'score': 0.9,
             },
         ]
 
         evaluator = RetrievalEvaluator(mock_rag_engine)
-        report = evaluator.evaluate_batch(dataset, top_k=1)
+        report, _ = evaluator.evaluate_batch(dataset, top_k=1)
 
         assert 'factual' in report.by_type
         assert 'multi_hop' in report.by_type
@@ -393,7 +439,7 @@ class TestRetrievalEvaluator:
 
     def test_evaluate_batch_empty(self, mock_rag_engine):
         evaluator = RetrievalEvaluator(mock_rag_engine)
-        report = evaluator.evaluate_batch([], top_k=5)
+        report, _ = evaluator.evaluate_batch([], top_k=5)
 
         assert report.precision_at_k == 0.0
         assert report.recall_at_k == 0.0
@@ -407,24 +453,37 @@ class TestRetrievalEvaluator:
 class TestGenerationEvaluator:
 
     def test_evaluate_without_ragas(self, mock_rag_engine, sample_eval):
-        """RAGAS 不可用时不崩溃"""
+        """RAGAS 不可用时使用轻量级指标"""
         with patch.dict('sys.modules', {'ragas': None, 'datasets': None}):
             evaluator = GenerationEvaluator()
             assert evaluator.ragas_available is False
 
-            result = evaluator.evaluate(sample_eval, [], "some answer")
-            assert result == {}
+            contexts = ['等待期规定：既往症人群的等待期不应与健康人群有过大差距']
+            answer = '健康保险等待期不应与健康人群有过大差距'
+            result = evaluator.evaluate(sample_eval, contexts, answer)
+
+            assert 'faithfulness' in result
+            assert 'answer_relevancy' in result
+            assert 'answer_correctness' in result
+            assert 0.0 <= result['faithfulness'] <= 1.0
 
     def test_evaluate_batch_without_ragas(self, mock_rag_engine):
-        """RAGAS 不可用时批量评估返回空报告"""
+        """RAGAS 不可用时批量评估返回轻量级指标"""
+        mock_rag_engine.ask.return_value = {
+            'answer': '等待期不应与健康人群有过大差距',
+            'sources': [{'content': '等待期规定：既往症人群的等待期不应与健康人群有过大差距'}],
+        }
+        samples = create_default_eval_dataset()[:3]
+
         with patch.dict('sys.modules', {'ragas': None, 'datasets': None}):
             evaluator = GenerationEvaluator()
-            report = evaluator.evaluate_batch([], mock_rag_engine)
+            report = evaluator.evaluate_batch(samples, mock_rag_engine)
 
             assert isinstance(report, GenerationEvalReport)
-            assert report.faithfulness is None
-            assert report.answer_relevancy is None
-            assert report.answer_correctness is None
+            assert report.faithfulness is not None
+            assert report.answer_relevancy is not None
+            assert report.answer_correctness is not None
+            assert 0.0 <= report.faithfulness <= 1.0
 
     def test_evaluate_batch_no_engine(self):
         """未提供 RAG 引擎时返回空报告"""
@@ -433,6 +492,41 @@ class TestGenerationEvaluator:
 
         assert isinstance(report, GenerationEvalReport)
         assert report.faithfulness is None
+
+    def test_lightweight_faithfulness_high(self):
+        """答案 token 全部出现在上下文中时 faithfulness 接近 1.0"""
+        contexts = ['保险合同是投保人与保险人约定保险权利义务关系的协议']
+        answer = '保险合同是投保人与保险人约定权利义务关系的协议'
+        score = GenerationEvaluator._compute_faithfulness(contexts, answer)
+        assert score > 0.8
+
+    def test_lightweight_faithfulness_low(self):
+        """答案包含上下文中没有的 token 时 faithfulness 较低"""
+        contexts = ['保险合同是投保人与保险人约定的协议']
+        answer = '万能保险的结算利率根据账户价值确定'
+        score = GenerationEvaluator._compute_faithfulness(contexts, answer)
+        assert score < 0.5
+
+    def test_lightweight_faithfulness_empty(self):
+        assert GenerationEvaluator._compute_faithfulness([], '保险合同') == 0.0
+        assert GenerationEvaluator._compute_faithfulness(['上下文'], '') == 0.0
+
+    def test_lightweight_correctness_high(self):
+        """答案与标准答案 token 重叠度高时 correctness 接近 1.0"""
+        truth = '保险公司应当提取保证金用于保障被保险人利益'
+        answer = '保险公司应当提取保证金保障被保险人利益'
+        score = GenerationEvaluator._compute_correctness(answer, truth)
+        assert score > 0.8
+
+    def test_lightweight_correctness_low(self):
+        truth = '保险公司应当按照规定提取保证金'
+        answer = '万能保险结算利率根据账户价值确定'
+        score = GenerationEvaluator._compute_correctness(answer, truth)
+        assert score < 0.3
+
+    def test_lightweight_correctness_empty(self):
+        assert GenerationEvaluator._compute_correctness('', '保险合同') == 0.0
+        assert GenerationEvaluator._compute_correctness('保险合同', '') == 0.0
 
     def test_evaluate_with_ragas(self, mock_rag_engine, sample_eval):
         """RAGAS 真实评估：验证 GenerationEvaluator 能正确调用 RAGAS 并返回指标"""

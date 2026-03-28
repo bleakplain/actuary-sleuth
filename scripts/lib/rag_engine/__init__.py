@@ -45,6 +45,9 @@ logging.basicConfig(
 )
 
 from .config import RAGConfig, get_config, HybridQueryConfig
+from .exceptions import RAGEngineError, EngineInitializationError, RetrievalError
+from .query_preprocessor import QueryPreprocessor, PreprocessedQuery
+from .reranker import LLMReranker, RerankConfig
 
 # Optional RAG engine components (require llama_index)
 try:
@@ -55,8 +58,9 @@ try:
     from .retrieval import hybrid_search, vector_search
     from .fusion import reciprocal_rank_fusion
     from .bm25_index import BM25Index
+    from .semantic_chunker import SemanticChunker
     from .evaluator import RetrievalEvaluator, GenerationEvaluator, RAGEvalReport
-    from .eval_dataset import EvalSample, QuestionType, load_eval_dataset, create_default_eval_dataset, DEFAULT_DATASET_PATH
+    from .eval_dataset import EvalSample, QuestionType, load_eval_dataset, create_default_eval_dataset, save_eval_dataset, DEFAULT_DATASET_PATH
 
     _has_rag = True
 except ImportError:
@@ -70,6 +74,7 @@ except ImportError:
     vector_search = None
     reciprocal_rank_fusion = None
     BM25Index = None
+    SemanticChunker = None
     RetrievalEvaluator = None
     GenerationEvaluator = None
     RAGEvalReport = None
@@ -77,6 +82,7 @@ except ImportError:
     QuestionType = None
     load_eval_dataset = None
     create_default_eval_dataset = None
+    save_eval_dataset = None
     DEFAULT_DATASET_PATH = None
     _has_rag = False
 
@@ -84,6 +90,13 @@ __all__ = [
     'RAGConfig',
     'get_config',
     'HybridQueryConfig',
+    'RAGEngineError',
+    'EngineInitializationError',
+    'RetrievalError',
+    'QueryPreprocessor',
+    'PreprocessedQuery',
+    'LLMReranker',
+    'RerankConfig',
     'RAGEngine',
     'create_qa_engine',
     'create_audit_engine',
@@ -94,6 +107,7 @@ __all__ = [
     'vector_search',
     'reciprocal_rank_fusion',
     'BM25Index',
+    'SemanticChunker',
     'RetrievalEvaluator',
     'GenerationEvaluator',
     'RAGEvalReport',
@@ -101,6 +115,7 @@ __all__ = [
     'QuestionType',
     'load_eval_dataset',
     'create_default_eval_dataset',
+    'save_eval_dataset',
     'DEFAULT_DATASET_PATH',
 ]
 

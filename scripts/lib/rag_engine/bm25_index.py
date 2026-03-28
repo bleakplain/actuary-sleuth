@@ -105,22 +105,22 @@ class BM25Index:
         query_tokens = tokenize_chinese(query)
         scores = self._bm25.get_scores(query_tokens)
 
-        # O(n log k) 取 top_k
-        top_indices = heapq.nlargest(top_k, range(len(scores)), key=lambda i: scores[i])
+        if not filters:
+            top_indices = heapq.nlargest(top_k, range(len(scores)), key=lambda i: scores[i])
+            return [
+                (self._nodes[idx], float(scores[idx]))
+                for idx in top_indices if scores[idx] > 0
+            ]
 
-        results = []
-        for idx in top_indices:
-            if scores[idx] <= 0:
-                continue
-
-            node = self._nodes[idx]
-            if filters:
-                if not all(node.metadata.get(k) == v for k, v in filters.items()):
-                    continue
-
-            results.append((node, float(scores[idx])))
-
-        return results
+        candidates = [
+            (idx, float(scores[idx]))
+            for idx in range(len(scores))
+            if scores[idx] > 0 and all(
+                self._nodes[idx].metadata.get(k) == v for k, v in filters.items()
+            )
+        ]
+        top_candidates = heapq.nlargest(top_k, candidates, key=lambda x: x[1])
+        return [(self._nodes[idx], score) for idx, score in top_candidates]
 
     @classmethod
     def _save(cls, index: 'BM25Index', path: Path) -> None:

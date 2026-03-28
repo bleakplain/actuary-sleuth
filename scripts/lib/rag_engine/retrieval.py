@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-检索模块
+"""检索模块
 
 负责向量检索和 BM25 关键词检索，以及 RRF 融合。
 """
 import logging
 from typing import List, Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor
 
 from llama_index.core import QueryBundle
 from llama_index.core.vector_stores import ExactMatchFilter, MetadataFilters
 from llama_index.core.schema import NodeWithScore
 
 from .fusion import reciprocal_rank_fusion
+from .query_preprocessor import QueryPreprocessor
 
 logger = logging.getLogger(__name__)
+
+_default_preprocessor = QueryPreprocessor()
 
 
 def vector_search(
@@ -23,17 +26,7 @@ def vector_search(
     top_k: int,
     filters: Optional[Dict[str, Any]] = None
 ) -> List:
-    """向量检索
-
-    Args:
-        index: 向量索引
-        query_text: 查询文本
-        top_k: 返回结果数量
-        filters: 元数据过滤条件
-
-    Returns:
-        List: 向量检索结果 (NodeWithScore)
-    """
+    """向量检索"""
     metadata_filters = None
     if filters:
         filter_list = [
@@ -57,31 +50,53 @@ def hybrid_search(
     vector_top_k: int,
     keyword_top_k: int,
     k: int = 60,
-    filters: Optional[Dict[str, Any]] = None
+    filters: Optional[Dict[str, Any]] = None,
+    preprocessor: QueryPreprocessor = None,
 ) -> List[Dict[str, Any]]:
-    """混合检索（向量 + BM25 关键词，RRF 融合）
-
-    Args:
-        index: 向量索引
-        bm25_index: BM25Index 实例
-        query_text: 查询文本
-        vector_top_k: 向量检索返回数量
-        keyword_top_k: 关键词检索返回数量
-        k: RRF 常数，默认 60
-        filters: 元数据过滤条件
-
-    Returns:
-        List[Dict]: RRF 融合后的结果列表
-    """
+    """混合检索（向量 + BM25 关键词，RRF 融合 + Query 预处理）"""
     if not index or not bm25_index:
         return []
 
-    vector_nodes = vector_search(index, query_text, vector_top_k, filters)
-    keyword_results = bm25_index.search(query_text, top_k=keyword_top_k, filters=filters)
+    pp = preprocessor or _default_preprocessor
+    preprocessed = pp.preprocess(query_text)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_vector = executor.submit(
+            vector_search, index, preprocessed.normalized, vector_top_k, filters
+        )
+        future_keyword = executor.submit(
+            bm25_index.search, preprocessed.normalized, top_k=keyword_top_k, filters=filters
+        )
+
+        vector_nodes = future_vector.result()
+        keyword_results = future_keyword.result()
 
     keyword_nodes = [
         NodeWithScore(node=node, score=score)
         for node, score in keyword_results
     ]
+
+    if preprocessed.did_expand:
+        expanded_queries = preprocessed.expanded[1:]
+        if not expanded_queries:
+            return reciprocal_rank_fusion(vector_nodes, keyword_nodes, k=k)
+
+        vector_futures = []
+        keyword_futures = []
+        with ThreadPoolExecutor(max_workers=min(8, 2 * len(expanded_queries))) as executor:
+            for expanded_query in expanded_queries:
+                vector_futures.append(
+                    executor.submit(vector_search, index, expanded_query, vector_top_k, filters)
+                )
+                keyword_futures.append(
+                    executor.submit(bm25_index.search, expanded_query, top_k=keyword_top_k, filters=filters)
+                )
+        for fv in vector_futures:
+            vector_nodes.extend(fv.result())
+        for fk in keyword_futures:
+            keyword_nodes.extend(
+                NodeWithScore(node=node, score=score)
+                for node, score in fk.result()
+            )
 
     return reciprocal_rank_fusion(vector_nodes, keyword_nodes, k=k)
