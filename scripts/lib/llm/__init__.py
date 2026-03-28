@@ -56,6 +56,9 @@ from .factory import (
     reset_client,
 )
 
+# LangChain 适配器
+from .langchain_adapter import ChatAdapter, EmbeddingAdapter
+
 __all__ = [
     # 基础
     'ModelName',
@@ -75,6 +78,10 @@ __all__ = [
     'LLMClientFactory',
     'get_client',
     'reset_client',
+
+    # LangChain 适配器
+    'ChatAdapter',
+    'EmbeddingAdapter',
 ]
 
 __version__ = '2.0.0'

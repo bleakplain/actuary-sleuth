@@ -188,7 +188,7 @@ class ZhipuClient(BaseLLMClient):
         except requests.exceptions.RequestException:
             return False
 
-    def embed(self, texts: List[str], model: Optional[str] = None) -> List[List[float]]:
+    def _do_embed(self, texts: List[str], model: Optional[str] = None) -> List[List[float]]:
         if not texts:
             return []
 
@@ -236,3 +236,13 @@ class ZhipuClient(BaseLLMClient):
             raise
         except (KeyError, IndexError, ValueError) as e:
             raise ValueError(f"Failed to parse embedding response: {e}")
+
+    @_track_timing("zhipu")
+    @_with_circuit_breaker("zhipu")
+    @_retry_with_backoff(
+        max_retries=LLMConstants.MAX_RETRIES,
+        base_delay=LLMConstants.RETRY_BASE_DELAY,
+        rate_limit_delay_mult=LLMConstants.RATE_LIMIT_DELAY_MULT
+    )
+    def embed(self, texts: List[str], model: Optional[str] = None) -> List[List[float]]:
+        return self._do_embed(texts, model)

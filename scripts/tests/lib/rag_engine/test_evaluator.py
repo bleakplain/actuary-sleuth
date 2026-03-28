@@ -530,32 +530,16 @@ class TestGenerationEvaluator:
 
     def test_evaluate_with_ragas(self, mock_rag_engine, sample_eval):
         """RAGAS 真实评估：验证 GenerationEvaluator 能正确调用 RAGAS 并返回指标"""
-        try:
-            from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-        except ImportError:
-            pytest.skip("langchain_openai not installed")
-
         import os
 
         if 'ZHIPU_API_KEY' not in os.environ:
             pytest.skip("ZHIPU_API_KEY not set")
 
-        import httpx
+        from lib.llm import LLMClientFactory
+        from lib.llm.langchain_adapter import ChatAdapter, EmbeddingAdapter
 
-        ragas_llm = ChatOpenAI(
-            model='glm-4-flash',
-            api_key=os.environ['ZHIPU_API_KEY'],
-            base_url='https://open.bigmodel.cn/api/paas/v4/',
-            timeout=60,
-            temperature=0.1,
-            http_client=httpx.Client(proxy=None),
-        )
-        ragas_embeddings = OpenAIEmbeddings(
-            model='embedding-3',
-            openai_api_key=os.environ['ZHIPU_API_KEY'],
-            openai_api_base='https://open.bigmodel.cn/api/paas/v4/',
-            http_client=httpx.Client(proxy=None),
-        )
+        ragas_llm = ChatAdapter(client=LLMClientFactory.get_eval_llm())
+        ragas_embeddings = EmbeddingAdapter(client=LLMClientFactory.get_embedding_llm())
 
         mock_rag_engine.ask.return_value = {
             'answer': '健康保险等待期不应与健康人群有过大差距',

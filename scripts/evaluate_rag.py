@@ -39,6 +39,7 @@ from lib.rag_engine.eval_dataset import (
 )
 from lib.rag_engine.llamaindex_adapter import get_embedding_model, ClientLLMAdapter
 from lib.llm import LLMClientFactory
+from lib.llm.langchain_adapter import ChatAdapter, EmbeddingAdapter
 from llama_index.core import Settings
 
 logging.basicConfig(
@@ -86,35 +87,13 @@ def setup_rag_engine(config: RAGConfig) -> 'RAGEngine':
 def create_ragas_llm():
     """创建 RAGAS 评估用的 Langchain LLM"""
     _ensure_env()
-    eval_client = LLMClientFactory.get_eval_llm()
-
-    from langchain_openai import ChatOpenAI
-    import httpx
-
-    return ChatOpenAI(
-        model=eval_client.model,
-        api_key=eval_client.api_key,
-        base_url=eval_client.base_url,
-        timeout=eval_client.timeout,
-        temperature=0.1,
-        http_client=httpx.Client(proxy=None),
-    )
+    return ChatAdapter(client=LLMClientFactory.get_eval_llm())
 
 
 def create_ragas_embeddings():
     """创建 RAGAS 评估用的 Langchain Embedding"""
     _ensure_env()
-    embed_config = LLMClientFactory.get_embedding_config()
-
-    from langchain_openai import OpenAIEmbeddings
-    import httpx
-
-    return OpenAIEmbeddings(
-        model=embed_config['model'],
-        openai_api_key=embed_config['api_key'],
-        openai_api_base=embed_config['base_url'],
-        http_client=httpx.Client(proxy=None),
-    )
+    return EmbeddingAdapter(client=LLMClientFactory.get_embedding_llm())
 
 
 def export_report(report: RAGEvalReport, output_path: str):
