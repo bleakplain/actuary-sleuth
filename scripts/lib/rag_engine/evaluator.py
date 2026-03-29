@@ -8,6 +8,7 @@ RAG 量化评估器
 - GenerationEvaluator: 独立生成评估（RAGAS 可用时使用 RAGAS，否则使用轻量级 token 覆盖率指标）
 """
 import math
+import re
 import logging
 from typing import List, Dict, Any, Optional, Set, Tuple
 from dataclasses import dataclass, field
@@ -19,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 _RAGAS_METRICS = ('faithfulness', 'answer_relevancy', 'answer_correctness')
 
+_ANSWER_SENTENCE_PATTERN = re.compile(r'[^。！？\n]+[。！？\n]?')
+
 
 @dataclass
 class RetrievalEvalReport:
@@ -28,6 +31,7 @@ class RetrievalEvalReport:
     mrr: float = 0.0
     ndcg: float = 0.0
     redundancy_rate: float = 0.0
+    context_relevance: float = 0.0
     by_type: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -37,6 +41,7 @@ class RetrievalEvalReport:
             'mrr': self.mrr,
             'ndcg': self.ndcg,
             'redundancy_rate': self.redundancy_rate,
+            'context_relevance': self.context_relevance,
             'by_type': self.by_type,
         }
 
@@ -49,6 +54,7 @@ class RetrievalEvalReport:
         print(f"  MRR:             {self.mrr:.3f}")
         print(f"  NDCG:            {self.ndcg:.3f}")
         print(f"  Redundancy Rate: {self.redundancy_rate:.3f}")
+        print(f"  Context Relevance: {self.context_relevance:.3f}")
 
         if self.by_type:
             print("\n  按题型分组:")
@@ -172,7 +178,7 @@ def _is_relevant(
                 if evidence_keywords:
                     if _contains_keyword(content, evidence_keywords):
                         return True
-                else:
+                elif source_file and source_file in doc_set:
                     return True
 
     return False
@@ -223,6 +229,21 @@ def _compute_redundancy_rate(results: List[Dict[str, Any]]) -> float:
     return redundant_count / (n * (n - 1) / 2)
 
 
+def _compute_context_relevance(query: str, results: List[Dict[str, Any]]) -> float:
+    """计算检索上下文中与问题 query 的 bigram 重叠度"""
+    if not query or not results:
+        return 0.0
+    query_bigrams = GenerationEvaluator._token_bigrams(query)
+    if not query_bigrams:
+        return 0.0
+    context_text = ' '.join(r.get('content', '') for r in results)
+    context_bigrams = GenerationEvaluator._token_bigrams(context_text)
+    if not context_bigrams:
+        return 0.0
+    matched = query_bigrams & context_bigrams
+    return len(matched) / len(query_bigrams)
+
+
 class RetrievalEvaluator:
     """检索质量评估器
 
@@ -252,6 +273,7 @@ class RetrievalEvaluator:
                 'mrr': 0.0,
                 'ndcg': 0.0,
                 'redundancy_rate': 0.0,
+                'context_relevance': 0.0,
                 'first_relevant_rank': None,
                 'num_results': 0,
             }
@@ -291,6 +313,9 @@ class RetrievalEvaluator:
         # 冗余率
         redundancy = _compute_redundancy_rate(results)
 
+        # Context Relevance
+        context_relevance = _compute_context_relevance(sample.question, results)
+
         return {
             'sample_id': sample.id,
             'precision': precision,
@@ -298,6 +323,7 @@ class RetrievalEvaluator:
             'mrr': mrr,
             'ndcg': ndcg,
             'redundancy_rate': redundancy,
+            'context_relevance': context_relevance,
             'first_relevant_rank': first_relevant_rank,
             'num_results': len(results),
         }
@@ -332,6 +358,7 @@ class RetrievalEvaluator:
             mrr=sum(r['mrr'] for r in all_results) / n,
             ndcg=sum(r['ndcg'] for r in all_results) / n,
             redundancy_rate=sum(r['redundancy_rate'] for r in all_results) / n,
+            context_relevance=sum(r['context_relevance'] for r in all_results) / n,
         )
 
         for qtype, type_results in by_type_results.items():
@@ -573,26 +600,50 @@ class GenerationEvaluator:
         return report
 
     @staticmethod
-    def _token_overlap(text_a: str, text_b: str) -> float:
-        """计算 text_a 对 text_b 的 token 覆盖率"""
-        tokens_a = _tokenize_to_set(text_a)
-        tokens_b = _tokenize_to_set(text_b)
-        if not tokens_a or not tokens_b:
+    def _token_bigrams(text: str) -> Set[str]:
+        tokens = tokenize_chinese(text)
+        return {tokens[i] + tokens[i + 1] for i in range(len(tokens) - 1)} if len(tokens) >= 2 else set()
+
+    @staticmethod
+    def _bigram_overlap(text_a: str, text_b: str) -> float:
+        bigrams_a = GenerationEvaluator._token_bigrams(text_a)
+        bigrams_b = GenerationEvaluator._token_bigrams(text_b)
+        if not bigrams_a or not bigrams_b:
             return 0.0
-        covered = tokens_a & tokens_b
-        return len(covered) / len(tokens_b)
+        covered = bigrams_a & bigrams_b
+        return len(covered) / len(bigrams_a)
 
     @staticmethod
     def _compute_faithfulness(contexts: List[str], answer: str) -> float:
-        """答案 token 对检索上下文 token 的覆盖率"""
-        if not contexts:
+        if not contexts or not answer:
             return 0.0
-        return GenerationEvaluator._token_overlap(' '.join(contexts), answer)
+
+        context_text = ' '.join(contexts)
+        context_bigrams = GenerationEvaluator._token_bigrams(context_text)
+
+        sentences = _ANSWER_SENTENCE_PATTERN.findall(answer)
+        sentences = [s.strip() for s in sentences if len(s.strip()) > 3]
+        if not sentences:
+            return GenerationEvaluator._bigram_overlap(answer, context_text)
+
+        supported_count = 0
+        for sentence in sentences:
+            sentence_bigrams = GenerationEvaluator._token_bigrams(sentence)
+            if not sentence_bigrams:
+                continue
+            covered = sentence_bigrams & context_bigrams
+            if len(covered) / len(sentence_bigrams) >= 0.3:
+                supported_count += 1
+
+        sentence_coverage = supported_count / len(sentences)
+        bigram_overlap = GenerationEvaluator._bigram_overlap(answer, context_text)
+        return 0.6 * sentence_coverage + 0.4 * bigram_overlap
 
     @staticmethod
     def _compute_correctness(answer: str, ground_truth: str) -> float:
-        """答案关键 token 对标准答案关键 token 的覆盖率"""
-        return GenerationEvaluator._token_overlap(answer, ground_truth)
+        if not answer or not ground_truth:
+            return 0.0
+        return GenerationEvaluator._bigram_overlap(ground_truth, answer)
 
 
 def run_retrieval_evaluation(

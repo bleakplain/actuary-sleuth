@@ -1,0 +1,88 @@
+{
+  "timestamp": "2026-03-29T14:11:19.603187",
+  "report": {
+    "retrieval": {
+      "precision_at_k": 0.6733333333333333,
+      "recall_at_k": 0.8833333333333333,
+      "mrr": 0.7833333333333333,
+      "ndcg": 0.805948136445959,
+      "redundancy_rate": 0.07333333333333333,
+      "context_relevance": 0.2206084656084656,
+      "by_type": {
+        "factual": {
+          "precision_at_k": 0.7000000000000001,
+          "recall_at_k": 0.9166666666666666,
+          "mrr": 0.875,
+          "ndcg": 0.8804462628931818
+        },
+        "multi_hop": {
+          "precision_at_k": 0.75,
+          "recall_at_k": 0.875,
+          "mrr": 0.7916666666666666,
+          "ndcg": 0.8146930185601619
+        },
+        "negative": {
+          "precision_at_k": 0.6333333333333334,
+          "recall_at_k": 0.9166666666666666,
+          "mrr": 0.7777777777777778,
+          "ndcg": 0.7998055740289759
+        },
+        "colloquial": {
+          "precision_at_k": 0.5,
+          "recall_at_k": 0.75,
+          "mrr": 0.5,
+          "ndcg": 0.5741778365013592
+        }
+      }
+    },
+    "generation": {
+      "faithfulness": null,
+      "answer_relevancy": null,
+      "answer_correctness": null,
+      "by_type": {}
+    },
+    "total_samples": 30,
+    "failed_samples": [
+      {
+        "sample_id": "f011",
+        "question": "负面清单中关于已停售产品有什么规定？",
+        "question_type": "factual",
+        "difficulty": "easy",
+        "evidence_docs": [
+          "02_负面清单.md"
+        ],
+        "failure_reason": "结果不相关",
+        "recall": 0.0,
+        "precision": 0.0,
+        "first_relevant_rank": null
+      },
+      {
+        "sample_id": "m006",
+        "question": "保险公司如何同时遵守负面清单和条款费率管理办法？",
+        "question_type": "multi_hop",
+        "difficulty": "hard",
+        "evidence_docs": [
+          "02_负面清单.md",
+          "03_条款费率管理办法.md"
+        ],
+        "failure_reason": "结果不相关",
+        "recall": 0.0,
+        "precision": 0.0,
+        "first_relevant_rank": null
+      },
+      {
+        "sample_id": "c001",
+        "question": "孩子在学校摔了能报不？",
+        "question_type": "colloquial",
+        "difficulty": "medium",
+        "evidence_docs": [
+          "09_意外伤害保险.md"
+        ],
+        "failure_reason": "结果不相关",
+        "recall": 0.0,
+        "precision": 0.0,
+        "first_relevant_rank": null
+      }
+    ]
+  }
+}
