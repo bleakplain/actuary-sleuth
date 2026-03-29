@@ -123,22 +123,52 @@ DELETE /api/kb/documents/{name}         # 删除文档并更新索引
 
 ## 模块三：测试数据集管理
 
+### 现有实现
+
+当前 30 个评测问题硬编码在 `eval_dataset.py` 的 `create_default_eval_dataset()` 中，持久化到 `data/eval_dataset.json`。数据结构：
+
+```python
+@dataclass(frozen=True)
+class EvalSample:
+    id: str                        # 唯一标识 (e.g., "f001")
+    question: str                  # 问题文本
+    ground_truth: str              # 期望答案
+    evidence_docs: List[str]       # 相关文档文件名列表
+    evidence_keywords: List[str]   # 检索关键词
+    question_type: QuestionType    # FACTUAL / MULTI_HOP / NEGATIVE / COLLOQUIAL
+    difficulty: str                # easy / medium / hard
+    topic: str                     # 主题分类 (e.g., "健康保险")
+
+class QuestionType(Enum):
+    FACTUAL = "factual"
+    MULTI_HOP = "multi_hop"
+    NEGATIVE = "negative"
+    COLLOQUIAL = "colloquial"
+```
+
+**现有局限**：
+- 无版本管理，无法追踪数据集演进
+- 无筛选能力（按类型/难度/主题）
+- 无创建时间、作者等元数据
+- 30 题覆盖面有限，需要扩展
+
 ### 功能
 
 - 查看/编辑/新增/删除评测问题
-- 批量导入（JSON/YAML 格式）
+- 批量导入（JSON 格式，兼容现有 `eval_dataset.json` 格式 `{"samples": [...], "total": N}`）
 - 按类型筛选（FACTUAL / MULTI_HOP / NEGATIVE / COLLOQUIAL）
 - 按难度、主题筛选
 - 版本快照：保存当前数据集为命名版本，支持回滚对比
+- 初始化时自动导入现有 `data/eval_dataset.json` 中的 30 题
 
 ### API 设计
 
 ```
-GET    /api/eval/dataset                        # 问题列表（支持筛选参数）
+GET    /api/eval/dataset                        # 问题列表（支持 ?type=&difficulty=&topic= 筛选）
 POST   /api/eval/dataset/samples                # 新增问题
 PUT    /api/eval/dataset/samples/{id}           # 编辑问题
 DELETE /api/eval/dataset/samples/{id}           # 删除问题
-POST   /api/eval/dataset/import                 # 批量导入
+POST   /api/eval/dataset/import                 # 批量导入（JSON，兼容现有格式）
 POST   /api/eval/dataset/snapshots              # 创建版本快照
 GET    /api/eval/dataset/snapshots              # 快照列表
 POST   /api/eval/dataset/snapshots/{id}/restore # 回滚到指定快照
@@ -146,36 +176,84 @@ POST   /api/eval/dataset/snapshots/{id}/restore # 回滚到指定快照
 
 ### 后端实现要点
 
-- 复用 `eval_dataset.py` 的 `EvalSample` 数据结构
-- 数据集持久化从代码内硬编码迁移到 SQLite
-- 快照为数据集的完整拷贝，存储在 SQLite 中
+- 复用 `EvalSample` 数据结构和 `QuestionType` 枚举，在 SQLite 中新增 `created_at`、`updated_at` 字段
+- 首次启动时检测 SQLite 中无数据，自动从 `data/eval_dataset.json` 导入
+- 快照为 `eval_samples` 表的完整时间点拷贝（`eval_snapshot_items` 关联表）
+- 批量导入格式与现有 JSON 保持兼容，同时支持仅传入 samples 数组
 
 ## 模块四：评估结果展示
 
+### 现有实现
+
+`evaluator.py` 提供两类评估器：
+
+**RetrievalEvaluator** — 检索质量评估：
+- Precision@K、Recall@K、MRR、NDCG、Redundancy Rate
+- 相关性判断：`_is_relevant()` 基于文档文件名 + 关键词匹配
+- 按问题类型分组的分项指标（`by_type`）
+
+**GenerationEvaluator** — 生成质量评估：
+- RAGAS 模式（需安装）：Faithfulness、Answer Relevancy、Answer Correctness
+- 轻量模式（默认）：Token overlap 计算的近似指标
+- 同样支持按类型分组
+
+**报告结构**（`RAGEvalReport`）：
+```python
+@dataclass
+class RAGEvalReport:
+    retrieval: RetrievalEvalReport
+    generation: GenerationEvalReport
+    total_samples: int
+    failed_samples: List[Dict[str, Any]]
+```
+
+**现有局限**：
+- 无逐题详情持久化（只有聚合指标）
+- 无评估运行历史记录
+- 对比功能仅限命令行，输出文本表格
+- 无法查看单个问题的检索结果和生成回答
+
 ### 功能
 
-- 触发评估运行（retrieval / generation / full）
-- 指标仪表盘：Precision@K、Recall@K、MRR、NDCG、Faithfulness 等
-- 逐题详情：每个问题的检索结果、生成回答、评分
-- 版本对比：选择两个评估报告进行指标对比
-- 导出评估报告（JSON / Markdown）
+- 触发评估运行，支持三种模式（与现有 `evaluate_rag.py` 一致）：
+  - `retrieval`：仅检索评估（快速，无 LLM 调用）
+  - `generation`：仅生成评估（需 LLM）
+  - `full`：完整评估（默认）
+- 指标仪表盘：Precision@K、Recall@K、MRR、NDCG、Redundancy Rate、Faithfulness、Answer Relevancy、Answer Correctness
+- 按问题类型分组指标（FACTUAL / MULTI_HOP / NEGATIVE / COLLOQUIAL）
+- 逐题详情：每个问题的检索结果列表、生成回答、与 ground_truth 对比、各项评分
+- 失败样本高亮：Recall < 0.5 的样本重点标注
+- 版本对比：选择两个评估报告，展示指标变化（绝对值 + 百分比变化）
+- 导出评估报告（JSON / Markdown），JSON 格式与现有 `evaluate_rag.py --export` 兼容
 
 ### API 设计
 
 ```
 POST /api/eval/runs                              # 触发评估
-GET  /api/eval/runs/{id}/status                  # 运行状态（异步）
-GET  /api/eval/runs/{id}/report                  # 评估报告
+  请求: { mode: "retrieval"|"generation"|"full", top_k?: int, chunking?: str }
+  响应: { run_id: str, status: "pending" }
+
+GET  /api/eval/runs/{id}/status                  # 运行状态
+  响应: { status: "running"|"completed"|"failed", progress: int, total: int }
+
+GET  /api/eval/runs/{id}/report                  # 评估报告（聚合指标）
+GET  /api/eval/runs/{id}/details                 # 逐题详情
 GET  /api/eval/runs                              # 历史评估列表
-POST /api/eval/runs/compare                      # 版本对比
+POST /api/eval/runs/compare                      # 版本对比（传入两个 run_id）
+  请求: { baseline_id: str, compare_id: str }
+  响应: { metrics_diff: {...}, improved: [...], regressed: [...] }
+
 GET  /api/eval/runs/{id}/export?format=json|md   # 导出报告
 ```
 
 ### 后端实现要点
 
-- 复用 `evaluator.py`（RetrievalEvaluator、GenerationEvaluator）
-- 评估运行为异步任务，前端轮询 `/api/eval/runs/{id}/status` 获取进度
-- 评估报告复用现有 `evaluate_rag.py` 的输出格式
+- 复用 `RetrievalEvaluator` 和 `GenerationEvaluator`，不修改评估逻辑
+- 每次评估运行记录：`eval_runs`（模式、配置、时间戳、状态）
+- 新增 `eval_sample_results` 表存储逐题详情：检索结果列表、生成回答、各项指标
+- 评估运行为异步任务（asyncio），前端轮询 status
+- 导出 JSON 格式与现有 `{"timestamp": ..., "report": {...}}` 保持兼容
+- 对比逻辑复用 `evaluate_rag.py` 中的 `_print_comparison()` 计算逻辑
 
 ## 模块五：合规检查助手
 
@@ -266,11 +344,11 @@ GET  /api/compliance/reports/{id}     # 合规报告详情
 conversations        - 对话记录 (id, title, created_at)
 messages             - 消息 (id, conversation_id, role, content, citations_json, sources_json, timestamp)
 documents            - 法规文档元信息 (name, file_path, clause_count, file_size, indexed_at, status)
-eval_samples         - 评测问题 (id, question, ground_truth, evidence_docs_json, evidence_keywords_json, question_type, difficulty, topic)
+eval_samples         - 评测问题 (id, question, ground_truth, evidence_docs_json, evidence_keywords_json, question_type, difficulty, topic, created_at, updated_at)
 eval_snapshots       - 数据集版本快照 (id, name, description, sample_count, created_at)
 eval_snapshot_items  - 快照中的问题条目 (snapshot_id, eval_sample_id)
-eval_runs            - 评估运行记录 (id, mode, status, started_at, finished_at, config_json)
-eval_results         - 评估结果详情 (run_id, sample_id, metrics_json, retrieved_docs_json, generated_answer)
+eval_runs            - 评估运行记录 (id, mode, status, progress, total, started_at, finished_at, config_json)
+eval_sample_results  - 逐题评估详情 (run_id, sample_id, retrieved_docs_json, generated_answer, retrieval_metrics_json, generation_metrics_json)
 compliance_reports   - 合规报告 (id, product_name, category, mode, result_json, created_at)
 ```
 
