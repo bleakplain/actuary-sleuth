@@ -229,15 +229,30 @@ def _compute_redundancy_rate(results: List[Dict[str, Any]]) -> float:
     return redundant_count / (n * (n - 1) / 2)
 
 
+def _token_bigrams(text: str) -> Set[str]:
+    tokens = tokenize_chinese(text)
+    return {tokens[i] + tokens[i + 1] for i in range(len(tokens) - 1)} if len(tokens) >= 2 else set()
+
+
+def _bigram_overlap(bigrams_a: Set[str], bigrams_b: Set[str]) -> float:
+    if not bigrams_a or not bigrams_b:
+        return 0.0
+    covered = bigrams_a & bigrams_b
+    return len(covered) / len(bigrams_a)
+
+
 def _compute_context_relevance(query: str, results: List[Dict[str, Any]]) -> float:
     """计算检索上下文中与问题 query 的 bigram 重叠度"""
     if not query or not results:
         return 0.0
-    query_bigrams = GenerationEvaluator._token_bigrams(query)
+    query_bigrams = _token_bigrams(query)
     if not query_bigrams:
         return 0.0
-    context_text = ' '.join(r.get('content', '') for r in results)
-    context_bigrams = GenerationEvaluator._token_bigrams(context_text)
+    context_bigrams: Set[str] = set()
+    for r in results:
+        content = r.get('content', '')
+        if content:
+            context_bigrams |= _token_bigrams(content)
     if not context_bigrams:
         return 0.0
     matched = query_bigrams & context_bigrams
@@ -284,13 +299,10 @@ class RetrievalEvaluator:
             for r in results
         ]
 
-        # Precision@K
         precision = sum(relevance) / len(relevance)
 
-        # Recall@K (capped at 1.0: can't recall more than 100% of evidence docs)
         recall = min(sum(relevance) / len(sample.evidence_docs), 1.0) if sample.evidence_docs else 0.0
 
-        # MRR
         mrr = 0.0
         first_relevant_rank = None
         for rank, rel in enumerate(relevance, 1):
@@ -299,7 +311,7 @@ class RetrievalEvaluator:
                 first_relevant_rank = rank
                 break
 
-        # NDCG (二值相关性)
+        # NDCG: 二值相关性下 DCG = IDCG，所以 NDCG = DCG / IDCG
         dcg = sum(rel / math.log2(rank + 1) for rank, rel in enumerate(relevance, 1))
         # Ideal DCG: 所有相关结果排在最前
         n_relevant = min(sum(relevance), len(relevance))
@@ -310,10 +322,8 @@ class RetrievalEvaluator:
         )
         ndcg = dcg / idcg if idcg > 0 else 0.0
 
-        # 冗余率
         redundancy = _compute_redundancy_rate(results)
 
-        # Context Relevance
         context_relevance = _compute_context_relevance(sample.question, results)
 
         return {
@@ -600,35 +610,22 @@ class GenerationEvaluator:
         return report
 
     @staticmethod
-    def _token_bigrams(text: str) -> Set[str]:
-        tokens = tokenize_chinese(text)
-        return {tokens[i] + tokens[i + 1] for i in range(len(tokens) - 1)} if len(tokens) >= 2 else set()
-
-    @staticmethod
-    def _bigram_overlap(text_a: str, text_b: str) -> float:
-        bigrams_a = GenerationEvaluator._token_bigrams(text_a)
-        bigrams_b = GenerationEvaluator._token_bigrams(text_b)
-        if not bigrams_a or not bigrams_b:
-            return 0.0
-        covered = bigrams_a & bigrams_b
-        return len(covered) / len(bigrams_a)
-
-    @staticmethod
     def _compute_faithfulness(contexts: List[str], answer: str) -> float:
         if not contexts or not answer:
             return 0.0
 
         context_text = ' '.join(contexts)
-        context_bigrams = GenerationEvaluator._token_bigrams(context_text)
+        context_bigrams = _token_bigrams(context_text)
+        answer_bigrams = _token_bigrams(answer)
 
         sentences = _ANSWER_SENTENCE_PATTERN.findall(answer)
         sentences = [s.strip() for s in sentences if len(s.strip()) > 3]
         if not sentences:
-            return GenerationEvaluator._bigram_overlap(answer, context_text)
+            return _bigram_overlap(answer_bigrams, context_bigrams)
 
         supported_count = 0
         for sentence in sentences:
-            sentence_bigrams = GenerationEvaluator._token_bigrams(sentence)
+            sentence_bigrams = _token_bigrams(sentence)
             if not sentence_bigrams:
                 continue
             covered = sentence_bigrams & context_bigrams
@@ -636,14 +633,14 @@ class GenerationEvaluator:
                 supported_count += 1
 
         sentence_coverage = supported_count / len(sentences)
-        bigram_overlap = GenerationEvaluator._bigram_overlap(answer, context_text)
+        bigram_overlap = _bigram_overlap(answer_bigrams, context_bigrams)
         return 0.6 * sentence_coverage + 0.4 * bigram_overlap
 
     @staticmethod
     def _compute_correctness(answer: str, ground_truth: str) -> float:
         if not answer or not ground_truth:
             return 0.0
-        return GenerationEvaluator._bigram_overlap(ground_truth, answer)
+        return _bigram_overlap(_token_bigrams(ground_truth), _token_bigrams(answer))
 
 
 def run_retrieval_evaluation(

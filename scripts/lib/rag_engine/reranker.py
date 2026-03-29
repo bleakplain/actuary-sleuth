@@ -92,12 +92,7 @@ class LLMReranker:
 
     @staticmethod
     def _parse_ranking(response: str, total: int) -> List[int]:
-        clean = response.strip()
-        clean_pattern = re.compile(r'^[\d,，\s]+$')
-        if clean_pattern.match(clean):
-            numbers = re.findall(r'\d+', response)
-        else:
-            numbers = re.findall(r'\d+', clean)
+        numbers = re.findall(r'\d+', response.strip())
 
         result: List[int] = []
         seen: set[int] = set()

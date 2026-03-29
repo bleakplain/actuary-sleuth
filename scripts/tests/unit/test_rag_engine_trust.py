@@ -71,7 +71,7 @@ class TestBuildQaPrompt:
         from lib.rag_engine.rag_engine import RAGEngine
         from lib.rag_engine.config import RAGConfig
         engine = RAGEngine.__new__(RAGEngine)
-        engine.config = RAGConfig()
+        engine.config = RAGConfig(max_context_chars=200)
 
         results = [
             {
@@ -86,7 +86,7 @@ class TestBuildQaPrompt:
             },
         ]
 
-        prompt = engine._build_qa_prompt('测试问题', results)
+        prompt, count = engine._build_qa_prompt('测试问题', results)
         assert '……' in prompt
 
     def test_short_content_not_truncated(self):
@@ -103,7 +103,7 @@ class TestBuildQaPrompt:
             },
         ]
 
-        prompt = engine._build_qa_prompt('测试问题', results)
+        prompt, count = engine._build_qa_prompt('测试问题', results)
         assert '……' not in prompt
 
     def test_empty_results(self):
@@ -112,7 +112,7 @@ class TestBuildQaPrompt:
         engine = RAGEngine.__new__(RAGEngine)
         engine.config = RAGConfig()
 
-        prompt = engine._build_qa_prompt('测试问题', [])
+        prompt, count = engine._build_qa_prompt('测试问题', [])
         assert '用户问题' in prompt
         assert '测试问题' in prompt
 
@@ -135,6 +135,6 @@ class TestBuildQaPrompt:
             },
         ]
 
-        prompt = engine._build_qa_prompt('测试', results)
+        prompt, count = engine._build_qa_prompt('测试', results)
         assert '1. 【法规A】第一条' in prompt
         assert '2. 【法规B】第二条' in prompt
