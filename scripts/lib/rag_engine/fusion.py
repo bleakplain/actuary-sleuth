@@ -16,30 +16,13 @@ def _chunk_key(scored: NodeWithScore) -> str:
     return scored.node.node_id if scored.node.node_id else str(id(scored.node))
 
 
-_MAX_CHUNKS_PER_ARTICLE = 2
-
-
-def _deduplicate_by_article(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """按法规名称+条款号去重，每条款保留至多 _MAX_CHUNKS_PER_ARTICLE 个 chunk"""
-    grouped: Dict[tuple, List[Dict[str, Any]]] = {}
-    for r in results:
-        key = (r.get('law_name', ''), r.get('article_number', ''))
-        grouped.setdefault(key, []).append(r)
-
-    deduped = []
-    for chunks in grouped.values():
-        chunks.sort(key=lambda x: x.get('score', 0), reverse=True)
-        deduped.extend(chunks[:_MAX_CHUNKS_PER_ARTICLE])
-
-    return deduped
-
-
 def reciprocal_rank_fusion(
     vector_results: List[NodeWithScore],
     keyword_results: List[NodeWithScore],
     k: int = 60,
     vector_weight: float = 1.0,
     keyword_weight: float = 1.0,
+    max_chunks_per_article: int = 3,
 ) -> List[Dict[str, Any]]:
     """Reciprocal Rank Fusion 融合两路检索结果
 
@@ -49,6 +32,7 @@ def reciprocal_rank_fusion(
         k: RRF 常数，默认 60
         vector_weight: 向量检索权重，默认 1.0
         keyword_weight: 关键词检索权重，默认 1.0
+        max_chunks_per_article: 每条款最大 chunk 数，默认 3
 
     Returns:
         List[Dict]: 融合后的结果列表，按 RRF 分数降序
@@ -82,5 +66,26 @@ def reciprocal_rank_fusion(
             'score': rrf_score,
         })
 
-    results = _deduplicate_by_article(results)
+    results = _deduplicate_by_article(results, max_chunks_per_article)
     return sorted(results, key=lambda x: x['score'], reverse=True)
+
+
+def _deduplicate_by_article(
+    results: List[Dict[str, Any]],
+    max_chunks: int = 3,
+) -> List[Dict[str, Any]]:
+    """按法规名称+条款号去重，每条款保留至多 max_chunks 个 chunk"""
+    grouped: Dict[tuple, List[Dict[str, Any]]] = {}
+    for r in results:
+        key = (r.get('law_name', ''), r.get('article_number', ''))
+        grouped.setdefault(key, []).append(r)
+
+    deduped = []
+    for chunks in grouped.values():
+        chunks.sort(key=lambda x: x.get('score', 0), reverse=True)
+        if max_chunks > 0:
+            deduped.extend(chunks[:max_chunks])
+        else:
+            deduped.extend(chunks)
+
+    return deduped

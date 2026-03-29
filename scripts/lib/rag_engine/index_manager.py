@@ -5,7 +5,7 @@
 负责创建、加载和管理法规向量索引
 """
 import logging
-from typing import List, Optional
+from typing import Dict, Any, List, Optional
 
 from llama_index.core import VectorStoreIndex
 from llama_index.vector_stores.lancedb import LanceDBVectorStore
@@ -89,6 +89,24 @@ class VectorIndexManager:
             similarity_top_k=top_k,
             streaming=streaming,
         )
+
+    def get_index_stats(self) -> Dict[str, Any]:
+        """获取索引统计信息"""
+        if self.index is None:
+            return {'status': 'not_initialized'}
+
+        try:
+            vector_store = self.index.vector_store
+            table = vector_store.get_table(self.config.collection_name)
+            count = len(table)
+            return {
+                'status': 'ok',
+                'doc_count': count,
+                'collection': self.config.collection_name,
+            }
+        except Exception as e:
+            logger.warning(f"获取索引统计失败: {e}")
+            return {'status': 'error', 'message': str(e)}
 
     def index_exists(self) -> bool:
         try:

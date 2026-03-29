@@ -14,14 +14,16 @@ from llama_index.core import Document
 from llama_index.core.schema import TextNode
 
 from .config import ChunkingConfig
-from .doc_parser import _extract_product_category, extract_law_name
+from .doc_parser import _extract_product_category, extract_law_name, _HEADING_PATTERN
 
 logger = logging.getLogger(__name__)
 
 _ARTICLE_PATTERN = re.compile(
     r'^#{1,3}\s*第([一二三四五六七八九十百千\d]+)条\s*(.*?)$'
 )
-_HEADING_PATTERN = re.compile(r'^(#{1,3})\s+(.+)$')
+_PLAIN_ARTICLE_PATTERN = re.compile(
+    r'^第([一二三四五六七八九十百千\d]+)条\s*(.*?)$'
+)
 _SENTENCE_PATTERN = re.compile(r'(?<=[。；！？\n])\s*')
 
 
@@ -32,7 +34,7 @@ class SemanticChunker:
     1. 按标题层级和条款标记进行结构分割
     2. 对每个结构块内部使用 SemanticSplitterNodeParser 做语义精调
     3. 对过短/过长 chunk 做合并/拆分处理
-    4. 保留 overlap 重叠窗口
+    4. 保留 overlap 重叠窗口（在语义精调之后添加）
     5. 附加 hierarchy_path 层级元数据
     """
 
@@ -59,10 +61,13 @@ class SemanticChunker:
         segments = self._merge_short_segments(segments)
         segments = self._split_long_segments(segments)
 
-        nodes = self._build_nodes_with_overlap(segments, law_name, source_file)
+        nodes = self._build_nodes(segments, law_name, source_file)
 
         if self._use_semantic_split:
             nodes = self._semantic_refine(nodes)
+
+        if self._overlap_sentences > 0:
+            nodes = self._add_overlap(nodes)
 
         return nodes
 
@@ -114,17 +119,24 @@ class SemanticChunker:
 
     @staticmethod
     def _flush_lines(
-        current_lines: List[str], current_heading: str, current_article: str, heading_level: int
+        current_lines: List[str],
+        heading_stack: List[str],
+        current_article: str,
     ) -> List[dict]:
         """将当前缓冲行刷新为 segment"""
         segments = []
         text = '\n'.join(current_lines).strip()
         if text:
+            hierarchy_parts = list(heading_stack)
+            if current_article:
+                hierarchy_parts.append(current_article)
+            hierarchy_path = ' > '.join(hierarchy_parts) if hierarchy_parts else ''
+
             segments.append({
                 'text': text,
-                'heading': current_heading,
+                'heading': heading_stack[-1] if heading_stack else '',
                 'article': current_article,
-                'heading_level': heading_level,
+                'hierarchy_path': hierarchy_path,
             })
         return segments
 
@@ -136,33 +148,35 @@ class SemanticChunker:
     ) -> List[dict]:
         segments: List[dict] = []
         current_lines: List[str] = []
-        current_heading = ''
         current_article = ''
-        heading_level = 0
+        heading_stack: List[str] = []
 
         for line in lines:
             stripped = line.strip()
 
             heading_match = _HEADING_PATTERN.match(stripped)
             if heading_match:
-                segments.extend(self._flush_lines(current_lines, current_heading, current_article, heading_level))
+                segments.extend(self._flush_lines(
+                    current_lines, heading_stack, current_article
+                ))
                 current_lines = []
 
                 level = len(heading_match.group(1))
                 title = heading_match.group(2).strip()
 
-                if level == 1 and not current_heading:
-                    current_heading = title
-                    heading_level = level
-                    continue
+                heading_stack = heading_stack[:level - 1]
+                heading_stack.append(title)
 
-                current_heading = title
-                heading_level = level
                 continue
 
             article_match = _ARTICLE_PATTERN.match(stripped)
+            if not article_match:
+                article_match = _PLAIN_ARTICLE_PATTERN.match(stripped)
+
             if article_match:
-                segments.extend(self._flush_lines(current_lines, current_heading, current_article, heading_level))
+                segments.extend(self._flush_lines(
+                    current_lines, heading_stack, current_article
+                ))
                 current_lines = []
 
                 article_num = article_match.group(1)
@@ -173,7 +187,9 @@ class SemanticChunker:
 
             current_lines.append(line)
 
-        segments.extend(self._flush_lines(current_lines, current_heading, current_article, heading_level))
+        segments.extend(self._flush_lines(
+            current_lines, heading_stack, current_article
+        ))
         return segments
 
     def _merge_short_segments(self, segments: List[dict]) -> List[dict]:
@@ -185,8 +201,15 @@ class SemanticChunker:
         buffer_text = ''
 
         for seg in segments:
+            new_text = buffer_text + ('\n\n' if buffer_text else '') + seg['text']
+
+            if len(new_text) > self._max_size and buffer_segments:
+                merged.append(self._combine_segments(buffer_segments, buffer_text))
+                buffer_segments = []
+                buffer_text = ''
+
             buffer_segments.append(seg)
-            buffer_text += ('\n\n' if buffer_text else '') + seg['text']
+            buffer_text = buffer_text + ('\n\n' if buffer_text else '') + seg['text']
 
             if len(buffer_text) >= self.config.merge_short_threshold:
                 merged.append(self._combine_segments(buffer_segments, buffer_text))
@@ -205,7 +228,7 @@ class SemanticChunker:
             'text': combined_text.strip(),
             'heading': first['heading'] or last['heading'],
             'article': first['article'] or last['article'],
-            'heading_level': first['heading_level'],
+            'hierarchy_path': first.get('hierarchy_path', '') or last.get('hierarchy_path', ''),
         }
 
     def _split_long_segments(self, segments: List[dict]) -> List[dict]:
@@ -236,7 +259,7 @@ class SemanticChunker:
                     'text': current.strip(),
                     'heading': seg['heading'],
                     'article': seg['article'],
-                    'heading_level': seg['heading_level'],
+                    'hierarchy_path': seg.get('hierarchy_path', ''),
                 })
                 current = sentence
             else:
@@ -247,47 +270,56 @@ class SemanticChunker:
                 'text': current.strip(),
                 'heading': seg['heading'],
                 'article': seg['article'],
-                'heading_level': seg['heading_level'],
+                'hierarchy_path': seg.get('hierarchy_path', ''),
             })
 
         return chunks
 
-    def _build_nodes_with_overlap(
-        self, segments: List[dict], law_name: str, source_file: str
+    @staticmethod
+    def _build_nodes(
+        segments: List[dict], law_name: str, source_file: str
     ) -> List[TextNode]:
+        """构建不含 overlap 的 TextNode 列表"""
         nodes: List[TextNode] = []
         category = _extract_product_category(source_file)
 
-        for i, seg in enumerate(segments):
-            overlap_text = ''
-            if self._overlap_sentences > 0 and i > 0:
-                prev_text = segments[i - 1]['text']
-                prev_sentences = _SENTENCE_PATTERN.split(prev_text)
-                prev_sentences = [s.strip() for s in prev_sentences if s.strip()]
-                overlap_sentences = prev_sentences[-self._overlap_sentences:]
-                overlap_text = ''.join(overlap_sentences)
-
-            hierarchy_parts: List[str] = []
-            if seg['heading']:
-                hierarchy_parts.append(seg['heading'])
-            if seg['article']:
-                hierarchy_parts.append(seg['article'])
-            hierarchy_path = ' > '.join(hierarchy_parts) if hierarchy_parts else ''
-
-            full_text = seg['text']
-            if overlap_text:
-                full_text = overlap_text + full_text
-
+        for seg in segments:
             node = TextNode(
-                text=full_text,
+                text=seg['text'],
                 metadata={
                     'law_name': law_name,
                     'article_number': seg['article'] or '未知',
                     'category': category,
-                    'hierarchy_path': hierarchy_path,
+                    'hierarchy_path': seg.get('hierarchy_path', ''),
                     'source_file': source_file,
                 }
             )
             nodes.append(node)
 
         return nodes
+
+    def _add_overlap(self, nodes: List[TextNode]) -> List[TextNode]:
+        """为节点列表添加 overlap 重叠窗口"""
+        if self._overlap_sentences <= 0 or len(nodes) <= 1:
+            return nodes
+
+        result: List[TextNode] = []
+        for i, node in enumerate(nodes):
+            if i == 0:
+                result.append(node)
+                continue
+
+            prev_text = nodes[i - 1].text
+            prev_sentences = _SENTENCE_PATTERN.split(prev_text)
+            prev_sentences = [s.strip() for s in prev_sentences if s.strip()]
+            overlap_sentences = prev_sentences[-self._overlap_sentences:]
+            overlap_text = ''.join(overlap_sentences)
+
+            new_text = overlap_text + node.text
+            overlapped_node = TextNode(
+                text=new_text,
+                metadata=dict(node.metadata),
+            )
+            result.append(overlapped_node)
+
+        return result

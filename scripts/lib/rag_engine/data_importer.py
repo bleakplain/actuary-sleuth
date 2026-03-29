@@ -138,8 +138,20 @@ class RegulationDataImporter:
         from .bm25_index import BM25Index
         data_dir = Path(self.config.vector_db_path).parent
         bm25_path = data_dir / "bm25_index.pkl"
-        BM25Index.build(documents, bm25_path)
-        stats['bm25'] = len(documents)
+        try:
+            BM25Index.build(documents, bm25_path)
+            stats['bm25'] = len(documents)
+        except Exception as e:
+            logger.error(f"BM25 索引构建失败: {e}")
+            stats['bm25_error'] = str(e)
+
+        # 一致性校验
+        if not skip_vector and stats['vector'] > 0 and stats['bm25'] > 0:
+            if stats['vector'] != stats['bm25']:
+                logger.warning(
+                    f"索引一致性检查失败: 向量索引 {stats['vector']} 条, "
+                    f"BM25 索引 {stats['bm25']} 条, 建议重新构建"
+                )
 
         logger.info("=" * 60)
         logger.info("导入完成")

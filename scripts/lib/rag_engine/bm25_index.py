@@ -7,15 +7,17 @@ BM25 索引模块
 """
 import heapq
 import logging
-import pickle
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
+import joblib
 from rank_bm25 import BM25Okapi
 
 from .tokenizer import tokenize_chinese
 
 logger = logging.getLogger(__name__)
+
+_INDEX_VERSION = "1.0"
 
 
 class BM25Index:
@@ -72,9 +74,22 @@ class BM25Index:
         """
         try:
             with open(index_path, 'rb') as f:
-                data = pickle.load(f)
-            index = cls(data['bm25'], data['nodes'])
-            logger.info(f"BM25 索引已加载: {index_path} ({len(data['nodes'])} 个文档)")
+                payload = joblib.load(f)
+
+            if not isinstance(payload, dict) or 'version' not in payload:
+                logger.warning(f"BM25 索引格式无效: {index_path}")
+                return None
+
+            version = payload['version']
+            if version != _INDEX_VERSION:
+                logger.warning(
+                    f"BM25 索引版本不匹配: 期望 {_INDEX_VERSION}, 实际 {version}, "
+                    f"请重新构建索引"
+                )
+                return None
+
+            index = cls(payload['bm25'], payload['nodes'])
+            logger.info(f"BM25 索引已加载: {index_path} ({len(payload['nodes'])} 个文档)")
             return index
         except FileNotFoundError:
             logger.warning(f"BM25 索引文件不存在: {index_path}")
@@ -128,11 +143,13 @@ class BM25Index:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(path, 'wb') as f:
-            pickle.dump({
-                'bm25': index._bm25,
-                'nodes': index._nodes,
-            }, f)
+        payload = {
+            'version': _INDEX_VERSION,
+            'bm25': index._bm25,
+            'nodes': index._nodes,
+        }
+        joblib.dump(payload, path, compress=3)
+        logger.info(f"BM25 索引已保存: {path}")
 
     @property
     def doc_count(self) -> int:

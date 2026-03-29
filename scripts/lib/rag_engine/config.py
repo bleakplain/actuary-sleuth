@@ -15,6 +15,7 @@ class HybridQueryConfig:
     keyword_weight: float = 1.0
     enable_rerank: bool = True
     rerank_top_k: int = 5
+    max_chunks_per_article: int = 3
 
     def __post_init__(self):
         if self.vector_top_k < 1:

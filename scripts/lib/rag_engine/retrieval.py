@@ -65,6 +65,7 @@ def hybrid_search(
     preprocessor: QueryPreprocessor = None,
     vector_weight: float = 1.0,
     keyword_weight: float = 1.0,
+    max_chunks_per_article: int = 3,
 ) -> List[Dict[str, Any]]:
     """混合检索（向量 + BM25 关键词，RRF 融合 + Query 预处理）"""
     if not index or not bm25_index:
@@ -107,4 +108,5 @@ def hybrid_search(
     return reciprocal_rank_fusion(
         vector_nodes, keyword_nodes, k=k,
         vector_weight=vector_weight, keyword_weight=keyword_weight,
+        max_chunks_per_article=max_chunks_per_article,
     )

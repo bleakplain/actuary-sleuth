@@ -110,3 +110,35 @@ class TestBM25IndexSearch:
         if results:
             for node, _ in results:
                 assert node.metadata.get('law_name') == '保险法'
+
+
+class TestBM25IndexVersionValidation:
+    """测试 BM25 索引版本校验"""
+
+    def test_load_invalid_format_returns_none(self, temp_index_path):
+        import joblib
+        joblib.dump({'not_version': True, 'data': []}, temp_index_path, compress=3)
+        idx = BM25Index.load(temp_index_path)
+        assert idx is None
+
+    def test_load_version_mismatch_returns_none(self, sample_documents, temp_index_path):
+        import joblib
+        joblib.dump({
+            'version': '0.9',
+            'bm25': None,
+            'nodes': [],
+        }, temp_index_path, compress=3)
+        idx = BM25Index.load(temp_index_path)
+        assert idx is None
+
+    def test_doc_count_property(self, sample_documents, temp_index_path):
+        BM25Index.build(sample_documents, temp_index_path)
+        idx = BM25Index.load(temp_index_path)
+        assert idx is not None
+        assert idx.doc_count == len(sample_documents)
+
+    def test_doc_count_empty_index(self, temp_index_path):
+        BM25Index.build([], temp_index_path)
+        idx = BM25Index.load(temp_index_path)
+        assert idx is not None
+        assert idx.doc_count == 0

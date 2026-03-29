@@ -127,9 +127,15 @@ class ZhipuEmbeddingAdapter(BaseEmbedding):
         self._model = model
         self._session = requests.Session()
 
-    def _get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def _get_embeddings(
+        self, texts: List[str], encoding_type: str = "document"
+    ) -> List[List[float]]:
         if not texts:
             return []
+
+        payload = {"model": self._model, "input": texts}
+        if encoding_type:
+            payload["encoding_type"] = encoding_type
 
         response = self._session.post(
             f"{self._base_url}/embeddings",
@@ -137,7 +143,7 @@ class ZhipuEmbeddingAdapter(BaseEmbedding):
                 "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",
             },
-            json={"model": self._model, "input": texts},
+            json=payload,
             timeout=120,
         )
         response.raise_for_status()
@@ -153,7 +159,8 @@ class ZhipuEmbeddingAdapter(BaseEmbedding):
         return result[0] if result else []
 
     def _get_query_embedding(self, query: str) -> List[float]:
-        return self._get_embedding(query)
+        result = self._get_embeddings([query], encoding_type="query")
+        return result[0] if result else []
 
     def _get_text_embedding(self, text: str) -> List[float]:
         return self._get_embedding(text)

@@ -6,12 +6,6 @@
 import argparse
 import json
 import sys
-from pathlib import Path
-from typing import Dict, List, Any
-
-from lib.config import get_config
-from lib import vector_store
-from lib import ollama
 
 
 def main():
@@ -22,24 +16,19 @@ def main():
                        help='搜索类型：semantic(语义)、hybrid(混合)，默认semantic')
     args = parser.parse_args()
 
-    # 验证必填参数
     if not args.query:
         parser.error("--query is required")
 
-    # 构建参数
     params = {
         'query': args.query,
         'searchType': args.searchType
     }
 
-    # 执行业务逻辑
     try:
         result = execute(params)
-        # 输出结果（JSON格式）
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except Exception as e:
-        # 错误输出
         error_result = {
             "success": False,
             "error": str(e),
@@ -59,27 +48,13 @@ def execute(params):
             "error": "Missing required parameter: query"
         }
 
-    results = []
+    from lib.rag_engine import RAGEngine, RAGConfig
 
-    # 语义检索
-    if search_type in ['semantic', 'hybrid']:
-        try:
-            query_vec = ollama.embed(query_text)
-            semantic = vector_store.VectorDB.search(query_vec, top_k=5)
-            for item in semantic:
-                results.append({
-                    'type': 'semantic',
-                    'content': item.get('content', ''),
-                    'law_name': item.get('metadata', {}).get('law_name', ''),
-                    'article_number': item.get('metadata', {}).get('article_number', ''),
-                    'score': item.get('score', 0)
-                })
-        except Exception as e:
-            # 语义检索失败，记录错误但继续
-            pass
+    config = RAGConfig()
+    engine = RAGEngine(config)
+    use_hybrid = search_type == 'hybrid'
 
-    # 排序返回
-    results.sort(key=lambda x: x.get('score', 0), reverse=True)
+    results = engine.search(query_text, top_k=5, use_hybrid=use_hybrid)
 
     return {
         'success': True,

@@ -189,7 +189,40 @@ class TestReciprocalRankFusion:
             NodeWithScore(node=doc4, score=0.3),
         ]
 
-        result = reciprocal_rank_fusion(nodes, [])
+        result = reciprocal_rank_fusion(nodes, [], max_chunks_per_article=2)
         same_article = [r for r in result if r['article_number'] == '第一条']
         assert len(same_article) == 2
+        assert len(result) == 3
+
+    def test_max_chunks_per_article_custom_limit(self):
+        from llama_index.core import Document
+        from llama_index.core.schema import NodeWithScore
+
+        docs = [
+            Document(
+                text=f"内容{i}",
+                metadata={'law_name': '保险法', 'article_number': '第十条', 'category': '通用'}
+            )
+            for i in range(5)
+        ]
+        nodes = [NodeWithScore(node=d, score=1.0 - i * 0.1) for i, d in enumerate(docs)]
+
+        result = reciprocal_rank_fusion(nodes, [], max_chunks_per_article=1)
+        same_article = [r for r in result if r['article_number'] == '第十条']
+        assert len(same_article) == 1
+
+    def test_max_chunks_per_article_zero_keeps_all(self):
+        from llama_index.core import Document
+        from llama_index.core.schema import NodeWithScore
+
+        docs = [
+            Document(
+                text=f"内容{i}",
+                metadata={'law_name': '保险法', 'article_number': '第十条', 'category': '通用'}
+            )
+            for i in range(3)
+        ]
+        nodes = [NodeWithScore(node=d, score=1.0 - i * 0.1) for i, d in enumerate(docs)]
+
+        result = reciprocal_rank_fusion(nodes, [], max_chunks_per_article=0)
         assert len(result) == 3

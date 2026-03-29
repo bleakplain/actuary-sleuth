@@ -25,6 +25,61 @@ _CATEGORY_PATTERN = re.compile(
     r'^\d+_(.+?)(?:产品开发|管理办法|规定|规则|相关)?$'
 )
 
+_TOC_PATTERN = re.compile(
+    r'^#{1,4}\s*(目录|目\s*录|TABLE\s+OF\s+CONTENTS)',
+    re.IGNORECASE,
+)
+_EMPTY_OR_SEPARATOR = re.compile(r'^[\s\-=_*]{3,}$')
+_HEADING_PATTERN = re.compile(r'^(#{1,3})\s+(.+)$')
+
+
+def _clean_documents(documents: List[Document]) -> List[Document]:
+    return [
+        Document(text=_clean_content(doc.text), metadata=doc.metadata)
+        for doc in documents
+    ]
+
+
+def _nodes_to_documents(text_nodes) -> List[Document]:
+    return [Document(text=node.text, metadata=node.metadata) for node in text_nodes]
+
+
+def _clean_content(text: str) -> str:
+    """清洗文档内容：去除目录、空行、分隔符等噪音"""
+    lines = text.split('\n')
+    cleaned: List[str] = []
+    in_toc = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        if _TOC_PATTERN.match(stripped):
+            in_toc = True
+            continue
+
+        if in_toc:
+            if _HEADING_PATTERN.match(stripped):
+                in_toc = False
+            else:
+                continue
+
+        if _EMPTY_OR_SEPARATOR.match(stripped):
+            continue
+
+        if not stripped:
+            if cleaned and cleaned[-1] != '':
+                cleaned.append('')
+            continue
+
+        cleaned.append(line)
+
+    while cleaned and not cleaned[0].strip():
+        cleaned.pop(0)
+    while cleaned and not cleaned[-1].strip():
+        cleaned.pop()
+
+    return '\n'.join(cleaned)
+
 
 def _extract_product_category(file_name: str) -> str:
     if not file_name:
@@ -203,6 +258,7 @@ class RegulationNodeParser(NodeParser):
                 'law_name': law_name,
                 'article_number': article_title,
                 'category': category,
+                'hierarchy_path': f"{law_name} > {article_title}",
                 'source_file': source_file,
             }
         )
@@ -256,6 +312,8 @@ class RegulationDocParser:
         reader = SimpleDirectoryReader(input_files=file_paths)
         documents = reader.load_data()
 
+        documents = _clean_documents(documents)
+
         # 根据策略选择解析方式
         if self.chunking_strategy == "semantic":
             # 语义分块：直接对文档进行语义分块
@@ -265,12 +323,7 @@ class RegulationDocParser:
 
             text_nodes = self.chunker.chunk(documents)
 
-            # 将 TextNode 转换为 Document
-            result_documents = []
-            for node in text_nodes:
-                result_documents.append(
-                    Document(text=node.text, metadata=node.metadata)
-                )
+            result_documents = _nodes_to_documents(text_nodes)
         else:
             # 传统分块：先按条款分割
             if not hasattr(self, 'node_parser'):
@@ -278,12 +331,7 @@ class RegulationDocParser:
 
             text_nodes = self.node_parser._parse_nodes(documents)
 
-            # 将 TextNode 转换为 Document
-            result_documents = []
-            for node in text_nodes:
-                result_documents.append(
-                    Document(text=node.text, metadata=node.metadata)
-                )
+            result_documents = _nodes_to_documents(text_nodes)
 
         logger.info(f"在 {self.regulations_dir} 中找到 {len(md_files)} 个 markdown 文件")
         logger.info(f"总共解析了 {len(result_documents)} 个文档块")
@@ -305,6 +353,8 @@ class RegulationDocParser:
             logger.warning(f"未找到文件: {file_name}")
             return []
 
+        docs = _clean_documents(docs)
+
         # 根据策略选择解析方式
         if self.chunking_strategy == "semantic":
             if not hasattr(self, 'chunker'):
@@ -318,8 +368,5 @@ class RegulationDocParser:
 
             text_nodes = self.node_parser._parse_nodes(docs)
 
-        return [
-            Document(text=node.text, metadata=node.metadata)
-            for node in text_nodes
-        ]
+        return _nodes_to_documents(text_nodes)
 

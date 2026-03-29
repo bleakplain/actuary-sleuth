@@ -240,6 +240,50 @@ class TestRegulationDocParser:
         assert len(law_name) > 0
 
 
+class TestCleanContent:
+    """测试文档内容清洗"""
+
+    def test_removes_toc(self):
+        from lib.rag_engine.doc_parser import _clean_content
+        text = "# 目录\n\n第一条 测试\n第二条 测试\n\n## 第一章\n正文内容"
+        cleaned = _clean_content(text)
+        assert "第一条 测试" not in cleaned
+        assert "正文内容" in cleaned
+
+    def test_removes_separators(self):
+        from lib.rag_engine.doc_parser import _clean_content
+        text = "正文内容\n---\n更多内容\n===\n结尾"
+        cleaned = _clean_content(text)
+        assert "---" not in cleaned
+        assert "更多内容" in cleaned
+
+    def test_preserves_headings_after_toc(self):
+        from lib.rag_engine.doc_parser import _clean_content
+        text = "# 目录\n\n条目1\n条目2\n\n## 第一章 总则\n正文"
+        cleaned = _clean_content(text)
+        assert "第一章 总则" in cleaned
+        assert "正文" in cleaned
+
+    def test_removes_leading_trailing_blank_lines(self):
+        from lib.rag_engine.doc_parser import _clean_content
+        text = "\n\n\n正文内容\n\n"
+        cleaned = _clean_content(text)
+        assert cleaned == "正文内容"
+
+
+class TestHierarchyPathInNodes:
+    """测试节点包含 hierarchy_path 元数据"""
+
+    def test_node_parser_includes_hierarchy_path(self):
+        parser = RegulationNodeParser()
+        content = "# 测试法规\n\n### 第一条 测试\n条款内容。保险公司应当遵守法律、行政法规，遵循自愿和诚实信用原则。"
+        metadata = {'file_name': 'test.md'}
+        nodes = parser._parse_article_nodes(content, '测试法规', metadata)
+        assert len(nodes) == 1
+        assert 'hierarchy_path' in nodes[0].metadata
+        assert nodes[0].metadata['hierarchy_path'] != ''
+
+
 @pytest.fixture
 def temp_output_dir():
     """临时输出目录"""

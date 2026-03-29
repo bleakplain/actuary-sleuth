@@ -1,397 +1,988 @@
-# RAG 引擎检索质量深度分析报告
+# Actuary Sleuth RAG Engine - 知识库建设深度研究报告
 
-## 一、分析背景
-
-参考《字节面试官怒怼："你的 RAG 系统召回了一堆垃圾，怎么优化？"》一文的 RAG 召回优化全链路方案，从四个维度——Query 理解、离线解析、在线召回、上下文生成——对当前 `scripts/lib/rag_engine/` 模块的检索实现进行全面评估。
-
-当前系统架构：
-
-```
-RAGEngine._hybrid_search()
-  ├── QueryPreprocessor.preprocess()     ← Query 理解
-  ├── vector_search()                    ← 在线召回（向量）
-  ├── bm25_index.search()                ← 在线召回（关键词）
-  ├── reciprocal_rank_fusion()           ← 结果融合（RRF）
-  └── LLMReranker.rerank()               ← 精排
-```
-
-## 二、逐模块评估
-
-### 模块一：Query 理解
-
-#### 当前实现
-
-`query_preprocessor.py` 实现了两个功能：
-
-1. **术语归一化** (`_normalize`): 基于 `synonyms.json` 同义词表，将口语化表达替换为标准术语
-2. **Query 扩写** (`_expand`): 将标准术语替换为其同义词变体，生成多个 query
-
-#### 发现的问题
-
-##### 问题 1.1: 缺少意图识别 [高优先级]
-
-当前系统完全没有意图识别机制。所有 query 都走同一条检索链路，无法区分：
-- **知识库检索类** query（如"等待期有什么规定"）
-- **计算类** query（如"帮我算一下赔付金额"）
-- **流程操作类** query（如"如何退保"）
-
-文章建议使用三级组合（规则兜底 + ML 主力 + LLM 兜底），当前系统连最简单的规则方法都没有。
-
-**影响**：非检索类 query 会返回低质量的检索结果，浪费计算资源并影响用户体验。
-
-##### 问题 1.2: Query 扩写策略过于简单 [中优先级]
-
-`_expand()` 仅通过简单的字符串替换生成变体（标准术语 → 同义词），缺少：
-
-- **LLM 驱动的 query 重写**：将口语化/模糊的 query 改写为更规范的检索 query
-  - 例：用户输入"他们家理赔咋整的"，当前系统无法有效处理
-  - 当前系统只能处理已有同义词映射的已知术语
-- **指代消解**：多轮对话场景下的指代解析（当前系统没有多轮对话支持）
-- **Query 分解**：复杂 query 拆分为多个子 query 分别检索
-
-**当前扩写逻辑的局限**：
-```python
-# query_preprocessor.py:80-94
-def _expand(self, query: str) -> List[str]:
-    variants = [query]
-    # 仅对 query 中出现的标准术语做同义词替换
-    # 无法处理 query 本身就是口语化表达的情况
-    # 例如 "学校摔了能报不" 无法被扩写为 "意外伤害保险保障范围"
-```
-
-##### 问题 1.3: 停用词过于激进 [中优先级]
-
-`stopwords.txt` 和 `tokenizer.py` 中的停用词列表包含了大量在法规检索场景中可能有意义的词：
-
-- **"规定"、"依照"、"按照"、"根据"、"符合"、"具备"** 被作为停用词过滤
-- 这些词在法规文本中频繁出现，作为 query 中的限定条件时（如"**根据**保险法的规定"）是有意义的
-
-同时，`_BUILTIN_STOPWORDS` 中还包含：
-- **"怎么"、"如何"** — 这些词在意图识别中有用
-- **"应该"、"需要"、"必须"** — 法规中常见的义务性表述
-
-##### 问题 1.4: 没有 HyDE（假设文档增强）[低优先级]
-
-文章提到 HyDE 可以有效改善短 query 的检索质量——通过 LLM 生成假设答案文档，用其 embedding 去检索而非用短 query embedding。当前系统没有此机制。
-
-**影响**：对于"报销制度"这类极短 query，向量检索精度有限。
+生成时间: 2026-03-28
+分析范围: `scripts/lib/rag_engine/` — 聚焦知识库构建链路
 
 ---
 
-### 模块二：离线解析
+## 执行摘要
 
-#### 当前实现
+本报告深度分析 Actuary Sleuth 项目的 RAG 引擎知识库建设流程，并以微信公众号文章《5000份文档扔进去就算建好知识库了？》提出的五步最佳实践为参照进行评估。
 
-- `doc_parser.py`: 支持 Markdown 文档解析，有两种分块策略（`semantic` 和 `fixed`）
-- `semantic_chunker.py`: 两阶段分块——结构分块 + 语义精调
-- `tokenizer.py`: jieba 分词 + 自定义词典 + 停用词过滤
+**核心发现：**
 
-#### 发现的问题
+- 知识库构建链路为 **Markdown → Parse → Chunk → Embed → Index（LanceDB + BM25）**，架构设计合理，采用两阶段语义分块和混合检索策略
+- **已修复的重大问题**：批量 Reranker（消除 20 次串行 LLM 调用）、消除双重分块、提升评估严格度、完善停用词、加权 RRF 融合
+- **仍存在 3 个 P0 问题**：Overlap 语义失效、层级路径仅记录当前标题、RegulationNodeParser 未匹配纯文本条款标记
+- **5 个 P1 问题**：BM25 pickle 安全风险、`get_index_stats()` 方法不存在、向量/BM25 索引一致性无保障、Embedding 不区分 query/text 模式、`_MAX_CHUNKS_PER_ARTICLE=2` 过于激进
+- **总体评价**：知识库建设的「骨架」已搭建完成，但在**内容清洗、层级元数据、索引一致性**三个环节仍需加固
 
-##### 问题 2.1: VectorIndexManager 中 SentenceSplitter 与 SemanticChunker 冲突 [高优先级]
+---
 
-`index_manager.py:27-31` 中：
+## 一、项目概览
+
+### 1.1 模块简介
+
+`scripts/lib/rag_engine/` 是 Actuary Sleuth 项目的法规检索增强生成引擎，提供：
+
+- 知识库构建：法规 Markdown 文档 → 向量索引 + BM25 关键词索引
+- 混合检索：向量语义检索 + BM25 关键词检索，RRF 融合 + LLM Rerank
+- 问答生成：基于检索结果的 LLM 生成答案
+- 评估体系：检索评估 + 生成评估 + 端到端评估
+
+技术栈：LlamaIndex + LanceDB + rank_bm25 + jieba + 智谱 AI (GLM 系列)
+
+### 1.2 目录结构
+
+```
+scripts/lib/rag_engine/
+├── __init__.py                 # 模块入口，统一导出
+├── config.py                   # 配置定义 (RAGConfig, ChunkingConfig, HybridQueryConfig)
+├── exceptions.py               # 异常定义
+├── data_importer.py            # 数据导入编排（构建入口）
+├── doc_parser.py               # 文档解析（策略分发）
+├── semantic_chunker.py         # 语义感知分块（核心）
+├── index_manager.py            # 向量索引管理
+├── vector_store.py             # LanceDB 封装（旧代码，已被 index_manager 取代）
+├── bm25_index.py               # BM25 索引管理
+├── fusion.py                   # RRF 结果融合
+├── retrieval.py                # 检索逻辑（向量+BM25+扩展查询）
+├── query_preprocessor.py       # Query 预处理（归一化+扩展+LLM重写）
+├── reranker.py                 # LLM 精排
+├── tokenizer.py                # 中文分词（jieba + 自定义词典）
+├── rag_engine.py               # 统一 RAG 引擎（查询入口）
+├── llamaindex_adapter.py       # LLM/Embedding 适配器
+├── evaluator.py                # 评估模块
+├── eval_dataset.py             # 评估数据集
+└── data/
+    ├── insurance_dict.txt      # 46 个保险领域术语
+    ├── stopwords.txt           # 8 行停用词
+    └── synonyms.json           # 20 组同义词映射
+```
+
+### 1.3 模块依赖关系
+
+```
+data_importer.py (构建入口)
+├── doc_parser.py (文档解析)
+│   ├── semantic_chunker.py (语义分块)
+│   │   └── llamaindex_adapter.py (SemanticSplitterNodeParser)
+│   └── RegulationNodeParser (条款分块 - fixed 策略)
+├── index_manager.py (向量索引)
+│   └── llamaindex_adapter.py (Embedding 模型)
+│       └── ZhipuEmbeddingAdapter / OllamaEmbedding
+└── bm25_index.py (BM25 索引)
+    └── tokenizer.py (jieba 分词)
+        └── data/insurance_dict.txt
+        └── data/stopwords.txt
+```
+
+---
+
+## 二、知识库建设链路分析
+
+### 2.1 完整构建流程
+
+```
+references/*.md (14 份法规文档)
+       │
+       ▼
+RegulationDataImporter.import_all()
+       │
+       ├── Step 1: RegulationDocParser.parse_all()
+       │       │
+       │       ├── SimpleDirectoryReader.load_data()  → List[Document]
+       │       │
+       │       └── SemanticChunker.chunk(documents)   → List[TextNode]
+       │               │
+       │               ├── _split_by_structure()      → 结构分割
+       │               ├── _merge_short_segments()    → 短段合并
+       │               ├── _split_long_segments()     → 长段拆分
+       │               ├── _build_nodes_with_overlap() → Overlap + 元数据
+       │               └── _semantic_refine()         → 语义精调 (可选)
+       │
+       ├── Step 2: VectorIndexManager.create_index()
+       │       │
+       │       └── VectorStoreIndex(nodes, storage_context)
+       │               │
+       │               └── LanceDBVectorStore → 持久化到磁盘
+       │
+       └── Step 3: BM25Index.build(documents, path)
+               │
+               ├── tokenize_chinese(doc.text) × N  → 分词语料
+               ├── BM25Okapi(tokenized_corpus)      → BM25 模型
+               └── pickle.dump() → bm25_index.pkl  → 持久化到磁盘
+```
+
+### 2.2 构建入口：data_importer.py
+
+`RegulationDataImporter.import_all()` 是知识库构建的编排入口：
+
 ```python
-Settings.text_splitter = SentenceSplitter(
-    chunk_size=self.config.chunk_size,  # 默认 1000
-    chunk_overlap=self.config.chunk_overlap,  # 默认 100
-    separator="\n\n",
+# data_importer.py:70-152
+def import_all(self, file_pattern="*.md", force_rebuild=False, skip_vector=False):
+    # Step 1: 解析文档
+    documents = self.parse_documents(file_pattern)
+    # Step 2: 向量索引
+    if not skip_vector:
+        self.import_to_vector_db(documents, force_rebuild)
+    # Step 3: BM25 索引
+    BM25Index.build(documents, bm25_path)
+```
+
+**问题**：向量索引和 BM25 索引使用同一份 `documents` 列表，但创建过程是串行的，如果向量索引创建成功但 BM25 索引创建失败，会导致两个索引不一致。
+
+---
+
+## 三、参考文章五步框架评估
+
+参考文章提出的知识库建设最佳实践五步框架：
+
+| 步骤 | 最佳实践 | 当前实现 | 评估 |
+|------|---------|---------|------|
+| 1. 多格式解析 | PDF/Word/HTML/Markdown 统一解析 | 仅支持 Markdown | **P2 - 功能局限** |
+| 2. 内容清洗 | 去噪、去格式、标准化 | 无清洗步骤 | **P0 - 缺失关键环节** |
+| 3. 三层分块 | 结构分块 + 语义分块 + 长度平衡 | 已实现 | **已覆盖** |
+| 4. 层级标签 | 完整层级路径 + 元数据 | 实现有缺陷 | **P0 - 层级路径不完整** |
+| 5. 模块协调 | 解析-分块-索引的协调一致 | 部分实现 | **P1 - 一致性保障不足** |
+
+---
+
+## 四、核心模块详解
+
+### 4.1 语义分块器 — semantic_chunker.py
+
+**职责**：将法规文档切分为语义完整的 chunk，保留文档结构和层级信息。
+
+#### 两阶段分块策略
+
+**第一阶段：结构分块** `_split_by_structure()`
+
+```python
+# semantic_chunker.py:131-177
+# 按 #{1,3} 标题和 第X条 条款标记分割
+_HEADING_PATTERN = re.compile(r'^(#{1,3})\s+(.+)$')
+_ARTICLE_PATTERN = re.compile(r'^#{1,3}\s*第([一二三四五六七八九十百千\d]+)条\s*(.*?)$')
+```
+
+结构分割逻辑：
+1. 遇到 `#{1,3}` 标题行 → 刷新当前缓冲，记录新标题
+2. 遇到 `第X条` 条款行 → 刷新当前缓冲，记录新条款号
+3. 非特殊行 → 追加到当前缓冲
+
+**第二阶段：语义精调** `_semantic_refine()`
+
+```python
+# semantic_chunker.py:77-106
+splitter = SemanticSplitterNodeParser(
+    buffer_size=1,
+    breakpoint_percentile_threshold=95,
+    embed_model=embed_model,
 )
 ```
 
-当使用 `semantic` 分块策略时，`RegulationDataImporter` 先用 `SemanticChunker` 将文档分好块（Document 级别），然后传给 `VectorIndexManager.create_index()`。但 `VectorIndexManager.__init__` 会设置全局 `Settings.text_splitter = SentenceSplitter`。
+对超过 `max_chunk_size`（1500 字符）的 chunk 使用 LlamaIndex 的 SemanticSplitterNodeParser 进行语义边界切分。
 
-LlamaIndex 的 `VectorStoreIndex.from_documents()` 在构建索引时，如果检测到文档是 Document 类型，可能会再次使用 `Settings.text_splitter` 进行二次分块，导致已经精心切分的语义 chunk 被再次切割。
+#### 后处理管线
 
-**影响**：离线阶段精心设计的语义分块可能被二次破坏，chunk 质量下降。
-
-##### 问题 2.2: 语义分块器中的 embedding 调用开销 [中优先级]
-
-`SemanticChunker._semantically_similar()` 和 `_semantic_refine()` 都会调用 embedding 模型：
-
-- **合并判断** (`_merge_short_segments`): 每对相邻 segment 都做一次 embedding + 余弦相似度计算
-- **语义精调** (`_semantic_refine`): 对超过 `_max_size` 的节点用 `SemanticSplitterNodeParser` 分割
-
-**问题**：
-1. 合并判断阶段对每对 segment 分别调用 `get_text_embedding`（单条请求），没有利用批量 API
-2. 如果 embedding 服务是远程 API（如智谱 embedding-3），大量单条请求会导致严重延迟
-3. `_semantic_refine` 依赖 `SemanticSplitterNodeParser`，它内部也需要大量 embedding 调用
-
-##### 问题 2.3: overlap 仅在同一章节内生效 [低优先级]
-
-`semantic_chunker.py:330-331`：
-```python
-if self._overlap_sentences > 0 and i > 0:
-    if self._same_section(segments[i - 1], seg):
-        # 仅在同一章节内才添加 overlap
+```
+_split_by_structure()      # 结构分割
+       ↓
+_merge_short_segments()     # 短段合并 (< 300 字符)
+       ↓
+_split_long_segments()      # 长段拆分 (> 1500 字符)
+       ↓
+_build_nodes_with_overlap() # Overlap + 元数据构建
+       ↓
+_semantic_refine()          # 语义精调 (可选)
 ```
 
-章节边界处没有 overlap，可能导致跨章节的语义断裂。
+#### 配置参数
 
-##### 问题 2.4: 仅支持 Markdown 格式 [中优先级]
-
-当前系统只解析 `*.md` 文件。如果法规来源包含 PDF、Word 等格式，需要先手动转换为 Markdown。对于 PDF 多栏排版、扫描件 OCR 等问题完全没有处理能力。
-
-**注意**：这可能是当前项目的有意设计选择（法规文档已全部转换为 Markdown），但如果未来需要接入更多数据源，将成为瓶颈。
-
-##### 问题 2.5: 层级信息保留不完整 [低优先级]
-
-`hierarchy_path` 元数据格式为 `法规名 > 章节 > 标题 > 条款号`，但：
-- 没有保存层级深度信息（level）
-- chunk 中没有保存其在原文中的位置信息（字符偏移量）
-- 无法支持"定位到原文"的功能
+```python
+# config.py:31-75
+@dataclass
+class ChunkingConfig:
+    min_chunk_size: int = 200
+    max_chunk_size: int = 1500
+    target_chunk_size: int = 800
+    overlap_sentences: int = 3
+    enable_semantic_merge: bool = True
+    merge_short_threshold: int = 300
+    split_long_chunks: bool = True
+```
 
 ---
 
-### 模块三：在线召回
+### 4.2 文档解析器 — doc_parser.py
 
-#### 当前实现
+**职责**：加载法规文档并按策略分发到不同分块器。
 
-- `retrieval.py`: 混合检索（向量 + BM25），使用 `ThreadPoolExecutor` 并行执行
-- `fusion.py`: RRF (Reciprocal Rank Fusion) 融合，按 `(law_name, article_number)` 去重
-- `reranker.py`: LLM-as-Judge 精排，4 级评分（0-3）
-
-#### 发现的问题
-
-##### 问题 3.1: Reranker 使用 LLM 而非 Cross-Encoder [高优先级]
-
-`reranker.py` 使用 LLM (generate API) 做精排，存在严重问题：
-
-1. **延迟极高**：每个候选文档都需要一次 LLM 调用（串行执行），假设 20 个候选文档，LLM 调用需要 20 × 2-5s = 40-100s
-2. **评分粒度粗糙**：仅 4 级评分（0-3），区分度不足
-3. **评分解析脆弱**：`_parse_score` 只取第一个数字字符，如果 LLM 返回 "3分，因为..." 会得到 3，但如果返回 "相关性评分为 3" 会得到 3（第一个数字字符），如果返回 "这个条款是 1 分" 也会得到 1
-4. **截断丢失信息**：content 超过 500 字符会被截断 (`content[:500] + "..."`)，可能丢失关键信息
-5. **没有批量推理**：串行处理每个候选，无法利用 batch 推理
-
-代码中已标注 `后续可替换为 Cross-Encoder 实现（sentence-transformers）`，说明开发者已意识到此问题。
-
-**文章建议**：使用 Cross-Encoder（如 BGE-reranker-base）做精排，精度更高且延迟更低。
-
-##### 问题 3.2: RRF 融合没有加权 [中优先级]
-
-`fusion.py` 的 RRF 实现对向量和 BM25 两路结果给相同权重：
+**策略模式**：
+- `semantic`（默认）：使用 `SemanticChunker`
+- `fixed`：使用 `RegulationNodeParser`
 
 ```python
-for result_list in (vector_results, keyword_results):
-    for rank, scored in enumerate(result_list):
-        scores[key] += 1.0 / (k + rank + 1)
+# doc_parser.py:259-266
+if self.chunking_strategy == "semantic":
+    text_nodes = self.chunker.chunk(documents)
+else:
+    text_nodes = self.node_parser._parse_nodes(documents)
 ```
 
-文章建议根据场景调整权重（如短 query 场景下关键词更重要，可设向量 0.3、文本 0.7）。当前实现不支持加权 RRF。
+两种策略都最终返回 `List[Document]`（通过 TextNode → Document 转换）。
 
-**影响**：对于"车险理赔流程"这类 query，BM25 的精确匹配应给更高权重，但当前无法调节。
+#### extract_law_name()
 
-##### 问题 3.3: 检索候选集太小 [中优先级]
-
-`HybridQueryConfig` 默认值：
-- `vector_top_k = 5`
-- `keyword_top_k = 5`
-
-文章建议粗召回阶段取 Top 50-100，精排后取 Top 5-10。当前系统直接从 Top 5 的候选集中做精排，精排的优化空间非常有限。
-
-**影响**：如果真正相关的文档排在第 6-10 位，精排根本无法将其提上来。
-
-##### 问题 3.4: 去重策略过于激进 [高优先级]
-
-`fusion.py:19-26`：
 ```python
-def _deduplicate_by_article(results):
-    seen = {}
-    for r in results:
-        key = (r.get('law_name', ''), r.get('article_number', '未知'))
-        if key not in seen or r.get('score', 0) > seen[key].get('score', 0):
-            seen[key] = r
-    return list(seen.values())
+# doc_parser.py:41-71
+def extract_law_name(text: str, metadata: dict) -> str:
 ```
 
-按 `(law_name, article_number)` 去重，只保留 RRF 分数最高的一个 chunk。问题：
-
-1. **同一法规同一条款可能被分成多个 chunk**（语义分块后），去重会丢弃其他 chunk
-2. **长条款的不同部分可能各自包含不同关键信息**，去重后只保留一个可能丢失信息
-3. **RRF 分数最高的不一定是最相关的 chunk**（RRF 分数反映的是在两路检索中的排名，不直接反映相关性）
-
-##### 问题 3.5: BM25 索引的 query 预处理与文档预处理不对称 [中优先级]
-
-BM25 搜索时，query 的分词使用 `tokenize_chinese(query)`（`bm25_index.py:107`），但 query 在进入 BM25 搜索前已经被 `QueryPreprocessor._normalize()` 处理过（术语归一化）。
-
-问题在于：**文档侧的分词是在索引构建时完成的**，使用的是原始文档文本。如果 query 被归一化后的术语与文档中的原始术语不一致（虽然同义词替换应该向标准术语看齐），可能导致 BM25 匹配失败。
-
-例如：
-- 文档中有"保险销售"（原始文本）
-- query "怎么推销保险" → 归一化后变成 "怎么保险销售保险"（"推销"→"保险销售"）
-- 但 BM25 搜索时会对归一化后的 query 再分词，可能产生不同的 token
-
-##### 问题 3.6: 向量检索没有 metadata pre-filtering 优化 [低优先级]
-
-`vector_search()` 使用 LlamaIndex 的 `ExactMatchFilter`，但向量检索时 filter 是作为 post-filter 还是 pre-filter 取决于底层实现。如果 LanceDB 不支持高效的 pre-filtering，所有 top_k 结果都在全量向量上搜索后再过滤，效率较低。
-
-##### 问题 3.7: 扩写 query 的检索结果直接合并，没有 score 衰减 [低优先级]
-
-`retrieval.py:94-100`：扩写 query 的检索结果直接 extend 到原始结果列表中，所有结果在 RRF 中平等竞争排名。这意味着扩写 query 返回的不相关结果可能干扰原始 query 的排序。
-
-**文章建议**：对扩写 query 的结果应给予较低权重或做 score 衰减。
+法规名称提取优先级：`metadata['law_name']` > Markdown 标题 > 文件名。包含多条启发式规则：
+- 跳过「第X部分」和序号标题
+- 按「(」「（」「YYYY年」截断
+- 长度 > 5 字符才采纳
 
 ---
 
-### 模块四：上下文生成
+### 4.3 向量索引 — index_manager.py
 
-#### 当前实现
-
-`rag_engine.py` 中的 `_build_qa_prompt()` 构建简单的 prompt，将检索结果格式化为上下文。
-
-#### 发现的问题
-
-##### 问题 4.1: 上下文窗口没有长度控制 [中优先级]
+**职责**：创建和管理 LanceDB 向量索引。
 
 ```python
-def _build_qa_prompt(self, question, search_results):
-    context_parts = []
-    for i, result in enumerate(search_results, 1):
-        # 没有对 context 总长度做限制
-        context_parts.append(f"{i}. 【{law_name}】{article}\n{content}")
-    context = "\n\n".join(context_parts)
-    return _QA_PROMPT_TEMPLATE.format(context=context, question=question)
+# index_manager.py:27-62
+def create_index(self, documents, force_rebuild=False):
+    if not force_rebuild:
+        loaded_index = self._load_existing_index()
+        if loaded_index:
+            return loaded_index
+
+    nodes = [TextNode(text=doc.text, metadata=doc.metadata) for doc in documents]
+    self.index = VectorStoreIndex(nodes, storage_context=storage_context)
+    return self.index
 ```
 
-如果检索返回 5 个长 chunk，总 context 可能超过 LLM 的有效处理窗口，导致：
-- LLM 无法充分利用所有上下文
-- 响应延迟增加
-- Token 费用增加
-
-**建议**：添加 context 总长度上限，超过时截断或减少 chunk 数量。
-
-##### 问题 4.2: Prompt 模板缺少 few-shot 示例 [低优先级]
-
-当前 QA prompt 模板是简单的指令式，没有 few-shot 示例。对于复杂的多跳推理问题（如评估数据集中的 MULTI_HOP 类型），few-shot 示例可以显著提升答案质量。
+**关键设计**：Document → TextNode 转换后直接传入 `VectorStoreIndex(nodes, ...)`，避免 LlamaIndex 默认的 SentenceSplitter 二次分块（此前已修复的 P0 bug）。
 
 ---
 
-### 模块五：评估体系
+### 4.4 BM25 索引 — bm25_index.py
 
-#### 当前实现
-
-- `evaluator.py`: 支持 Precision@K, Recall@K, MRR, NDCG, 冗余率
-- `eval_dataset.py`: 30 条评估样本，覆盖 factual/multi_hop/negative/colloquial 四种题型
-
-#### 发现的问题
-
-##### 问题 5.1: 相关性判断过于宽松 [高优先级]
-
-`evaluator.py:141-163` 的 `_is_relevant()` 函数：
+**职责**：构建、持久化和查询 BM25 关键词索引。
 
 ```python
-def _is_relevant(result, evidence_docs, evidence_keywords):
-    # 1. source_file 匹配 → 相关
-    if source_file and source_file in doc_set:
-        return True
-    # 2. 关键词匹配 → 相关（仅要求 len(kw) >= 2）
-    if any(kw in content for kw in evidence_keywords if len(kw) >= 2):
-        return True
-    # 3. law_name 子串匹配 → 相关
-    if law_name:
-        for doc in evidence_docs:
-            doc_stem = doc.replace('.md', '').replace('_', '')
-            if doc_stem and doc_stem in law_name:
-                return True
+# bm25_index.py:32-61
+@classmethod
+def build(cls, documents, index_path):
+    tokenized_corpus = [tokenize_chinese(doc.text) for doc in documents]
+    bm25 = BM25Okapi(tokenized_corpus)
+    nodes = list(documents)
+    cls._save(index, index_path)
 ```
 
-问题：
-1. **source_file 匹配过于粗粒度**：只要 chunk 来自正确的文件就判定为相关，但一个文件可能包含几百个 chunk，大部分可能与具体问题无关
-2. **关键词子串匹配过于宽松**：`"的"` 被过滤了但 `"规定"`（2 字符）不会被过滤，而"规定"在法规文档中几乎每段都有
-3. **没有考虑相关性程度**：只做二值判断（相关/不相关），对排序质量评估不敏感
+**检索流程**：query → tokenize_chinese → BM25Okapi.get_scores → top_k 过滤
 
-##### 问题 5.2: 评估数据集覆盖不足 [中优先级]
-
-当前评估数据集 30 条样本，对于正式评估来说样本量偏小。且缺少：
-- **时效性查询**（如"最新的理赔流程"）— 文章特别提到的问题
-- **数值精确匹配**（如"免赔额 5000 元"）
-- **专有名词/编号查询**（如"国寿福条款"）
+支持元数据过滤：`filters={'law_name': 'xxx'}` 直接在 BM25 结果上过滤。
 
 ---
 
-### 模块六：架构与工程问题
+### 4.5 中文分词 — tokenizer.py
 
-##### 问题 6.1: VectorDB 类存在但未在主流程中使用 [低优先级]
-
-`vector_store.py` 实现了独立的 `VectorDB` 类（直接操作 LanceDB），但主流程通过 LlamaIndex 的 `LanceDBVectorStore` 间接使用 LanceDB。`VectorDB` 类看起来是早期的独立实现，目前已冗余。
-
-##### 问题 6.2: Reranker 串行调用 LLM [高优先级 - 性能]
+**职责**：基于 jieba 的中文分词，支持保险领域自定义词典和停用词。
 
 ```python
-# reranker.py:56-59
-for candidate in candidates:
-    score = self._score_relevance(query, candidate)
-    scored.append((candidate, score))
+# tokenizer.py:60-80
+def tokenize_chinese(text: str) -> List[str]:
+    tokens = jieba.lcut(text)
+    for t in tokens:
+        if t in stopwords: continue
+        if len(t) == 1 and t not in _SINGLE_CHAR_WHITELIST: continue
+        result.append(t)
 ```
 
-串行调用 LLM 对每个候选打分，是系统最大的性能瓶颈。
+**自定义词典**：46 个保险领域术语（`data/insurance_dict.txt`），如「现金价值」「保证续保」「犹豫期」等。
 
-##### 问题 6.3: ThreadLocalSettings 的全局状态管理复杂 [低优先级]
+**停用词**：从 `data/stopwords.txt` 加载（约 150 个），回退到内置最小集（约 45 个）。
 
-`rag_engine.py` 中的 `ThreadLocalSettings` 试图解决 LlamaIndex 全局 `Settings` 的线程安全问题，但实现复杂且容易出错。如果多个 RAGEngine 实例使用不同的 LLM 配置，可能出现状态混乱。
-
-##### 问题 6.4: embedding 模型选择有限 [中优先级]
-
-`llamaindex_adapter.py` 仅支持两种 embedding provider：
-- `zhipu` (embedding-3)
-- `ollama` (nomic-embed-text)
-
-文章建议中文场景优先使用 BGE-M3，当前系统不支持。对于保险领域这种垂直场景，通用 embedding 模型对专业术语的理解可能不够准确。
-
-##### 问题 6.5: 没有 embedding 缓存 [中优先级]
-
-无论是离线阶段（分块 embedding）还是在线阶段（query embedding），都没有缓存机制。文章建议对常见 query 的 embedding 结果缓存到 Redis，避免重复 API 调用。
+**单字白名单**：`{'险', '保', '赔', '费', '额', '期', '率', '金'}` — 保险领域高频单字。
 
 ---
 
-## 三、问题优先级总结
+### 4.6 Embedding 适配 — llamaindex_adapter.py
 
-### P0 - 必须修复（直接影响检索质量）
+**职责**：将自定义 LLM/Embedding 客户端适配到 LlamaIndex 接口。
 
-| # | 问题 | 模块 | 影响 |
-|---|------|------|------|
-| 1 | SentenceSplitter 与 SemanticChunker 冲突导致二次分块 | 离线解析 | 精心设计的语义 chunk 被破坏 |
-| 2 | Reranker 使用 LLM 串行精排，延迟极高且评分粗糙 | 在线召回 | 检索端到端延迟 40-100s |
-| 3 | 检索候选集太小（vector_top_k=5, keyword_top_k=5） | 在线召回 | 精排优化空间有限 |
-| 4 | 去重策略过于激进（按法规+条款号去重） | 在线召回 | 相关 chunk 被丢弃 |
+支持两个 Embedding 提供者：
+- **智谱 AI**：`embedding-3` 模型，通过 HTTP API 调用
+- **Ollama**：`nomic-embed-text` 模型，本地推理
 
-### P1 - 建议修复（显著影响检索质量）
+```python
+# llamaindex_adapter.py:155-159
+def _get_query_embedding(self, query: str) -> List[float]:
+    return self._get_embedding(query)
 
-| # | 问题 | 模块 | 影响 |
-|---|------|------|------|
-| 5 | 停用词包含法规检索中有意义的词 | Query 理解 | 关键检索词被过滤 |
-| 6 | 缺少意图识别 | Query 理解 | 非 query 类型无法正确路由 |
-| 7 | Query 扩写策略过于简单 | Query 理解 | 口语化 query 检索效果差 |
-| 8 | RRF 融合不支持加权 | 在线召回 | 无法根据场景调整检索策略 |
-| 9 | 评估相关性判断过于宽松 | 评估 | 评估结果不准确，无法指导优化 |
-| 10 | 上下文窗口没有长度控制 | 生成 | 长 context 浪费 token 并降低质量 |
+def _get_text_embedding(self, text: str) -> List[float]:
+    return self._get_embedding(query)
+```
 
-### P2 - 可选优化
+**两个方法实现完全相同**，不区分 query 和 text 模式。
 
-| # | 问题 | 模块 | 影响 |
-|---|------|------|------|
-| 11 | 语义分块器 embedding 调用未批量化 | 离线解析 | 索引构建速度慢 |
-| 12 | 没有 HyDE | Query 理解 | 短 query 向量检索精度有限 |
-| 13 | 仅支持 Markdown | 离线解析 | 数据源扩展受限 |
-| 14 | embedding 模型选择有限 | 架构 | 领域术语理解不足 |
-| 15 | 没有 embedding 缓存 | 架构 | 重复 API 调用浪费资源 |
-| 16 | 扩写 query 结果无 score 衰减 | 在线召回 | 扩写噪声干扰排序 |
-| 17 | VectorDB 类冗余 | 架构 | 代码维护负担 |
+---
 
-## 四、与文章最佳实践对照
+### 4.7 数据文件
 
-| 文章建议 | 当前状态 | 差距 |
-|---------|---------|------|
-| 混合检索（向量+BM25） | ✅ 已实现 | - |
-| RRF 融合 | ✅ 已实现 | 不支持加权 |
-| Rerank 精排 | ⚠️ 用 LLM 替代 Cross-Encoder | 精度低、延迟高 |
-| Query 意图识别 | ❌ 未实现 | 完全缺失 |
-| Query 重写（LLM 驱动） | ❌ 未实现 | 仅有同义词替换 |
-| Query 扩写 | ⚠️ 部分实现 | 仅基于同义词，无 LLM 驱动 |
-| HyDE | ❌ 未实现 | - |
-| 语义分块 | ✅ 已实现 | 有二次分块 bug |
-| 重叠窗口 | ✅ 已实现 | 仅同章节内 |
-| 层级信息保留 | ⚠️ 部分实现 | 缺少位置信息 |
-| Embedding 缓存 | ❌ 未实现 | - |
-| 全链路异步流水线 | ❌ 未实现 | 有部分 ThreadPoolExecutor |
-| 量化评估（MRR/NDCG） | ✅ 已实现 | 相关性判断不够准确 |
+| 文件 | 内容 | 用途 |
+|------|------|------|
+| `insurance_dict.txt` | 46 个保险术语 + 词频 | jieba 自定义词典 |
+| `stopwords.txt` | ~150 个停用词（8 行） | 分词过滤 |
+| `synonyms.json` | 20 组同义词映射 | Query 预处理（归一化+扩展） |
+
+---
+
+## 五、潜在问题分析
+
+### 5.1 问题分类汇总
+
+| 类型 | 数量 | 严重性分布 |
+|------|------|-----------|
+| 🔴 P0 Bug | 3 | 影响检索质量 |
+| ⚠️ P1 问题 | 5 | 影响稳定性/安全性 |
+| 🟡 P2 问题 | 4 | 影响功能完整性 |
+| 🔵 P3 问题 | 2 | 代码质量 |
+
+---
+
+### 5.2 P0 级问题
+
+#### 问题 5.2.1: Overlap 在语义精调阶段被破坏
+
+- **文件**: `semantic_chunker.py:62-65`
+- **类型**: 🔴 Bug
+- **严重程度**: P0
+
+**问题描述**:
+
+构建管线中，overlap 在语义精调**之前**添加，但语义精调会**重新切分** chunk，导致 overlap 被破坏或失效。
+
+```python
+# semantic_chunker.py:53-67 — 执行顺序
+def _chunk_single_document(self, doc):
+    segments = self._split_by_structure(lines, ...)   # 1. 结构分割
+    segments = self._merge_short_segments(segments)     # 2. 短段合并
+    segments = self._split_long_segments(segments)      # 3. 长段拆分
+
+    nodes = self._build_nodes_with_overlap(segments, ...)  # 4. 添加 overlap ← 在这里
+
+    if self._use_semantic_split:
+        nodes = self._semantic_refine(nodes)               # 5. 语义精调 ← 重新切分，破坏 overlap
+```
+
+在步骤 4 中，每个 chunk 前面被拼接了前一个 chunk 的最后 3 句话。但步骤 5 的 `SemanticSplitterNodeParser` 会基于嵌入相似度重新切分这些已经加了 overlap 的文本，导致：
+1. Overlap 句子可能被切到新的子 chunk 中间，而非位于边界
+2. Overlap 区域被重复嵌入，可能影响检索排序
+3. 如果精调产生 3+ 个子 chunk，中间的 chunk 不包含任何原始 overlap 信息
+
+**影响分析**:
+- Overlap 的设计初衷是保留上下文连续性，但被语义精调破坏后效果不可预测
+- 可能导致跨 chunk 边界的信息丢失，影响检索召回率
+
+**建议修复**:
+将 overlap 移到语义精调**之后**执行，或者在 `_semantic_refine()` 内部处理 overlap。
+
+---
+
+#### 问题 5.2.2: hierarchy_path 仅记录当前标题，不保留完整层级路径
+
+- **文件**: `semantic_chunker.py:270-275`
+- **类型**: 🔴 Bug
+- **严重程度**: P0
+
+**问题描述**:
+
+`hierarchy_path` 元数据只记录当前 segment 所属的标题和条款号，不保留标题的层级栈。当一个法规文档有多层标题（如「第一章 > 第二节 > 第X条」）时，level-1 标题会被 level-2/3 标题覆盖。
+
+```python
+# semantic_chunker.py:270-275
+hierarchy_parts: List[str] = []
+if seg['heading']:
+    hierarchy_parts.append(seg['heading'])    # 只有当前 heading
+if seg['article']:
+    hierarchy_parts.append(seg['article'])    # 只有当前条款号
+hierarchy_path = ' > '.join(hierarchy_parts)
+```
+
+而 `_split_by_structure()` 中，`current_heading` 在每次遇到新标题时被直接覆盖：
+
+```python
+# semantic_chunker.py:154-161
+if level == 1 and not current_heading:
+    current_heading = title     # 第一个 level-1 标题
+    continue
+
+current_heading = title          # ← 后续标题直接覆盖！
+```
+
+**影响分析**:
+- 对于「保险法 > 第二章 > 第二节 > 第X条」这种多层结构，检索结果中的 `hierarchy_path` 可能只显示「第二节 > 第X条」，丢失了「保险法 > 第二章」
+- 参考文章强调「层级标签是知识库的导航系统」，不完整的层级路径会影响定位和上下文理解
+
+**建议修复**:
+维护一个标题栈 `heading_stack`，每遇到新标题时 push/pop，`hierarchy_path` 使用完整栈路径。
+
+---
+
+#### 问题 5.2.3: SemanticChunker 不匹配纯文本条款标记
+
+- **文件**: `semantic_chunker.py:21-23`
+- **类型**: 🔴 Bug
+- **严重程度**: P0
+
+**问题描述**:
+
+`SemanticChunker`（默认 semantic 策略）的条款匹配模式要求 `第X条` 前必须有 `#{1,3}` Markdown 标题前缀：
+
+```python
+# semantic_chunker.py:21-23
+_ARTICLE_PATTERN = re.compile(
+    r'^#{1,3}\s*第([一二三四五六七八九十百千\d]+)条\s*(.*?)$'
+)
+```
+
+这意味着 semantic 策略下，**没有 Markdown 标题前缀的纯文本「第X条」不会被识别为条款标记**，它们会被合并到前一个 segment 中。
+
+相比之下，`RegulationNodeParser`（fixed 策略）的第三个模式可以匹配纯文本 `第X条`：
+
+```python
+# doc_parser.py:131
+r'^第([一二三四五六七八九十百千\d]+)[条条]\s*(.+?)(?:\s|$)',
+```
+
+两个分块器对条款标记的识别能力不一致。
+
+**影响分析**:
+- 如果法规文档的条款标记没有 `#` 前缀（如纯文本格式），semantic 策略会将整段文本作为一个大 chunk
+- 实际数据（14 份 `references/*.md`）需要确认是否所有条款都有 `#` 前缀
+
+**建议修复**:
+在 `_split_by_structure()` 中增加对纯文本 `第X条` 的匹配，与 `RegulationNodeParser` 保持一致。
+
+---
+
+### 5.3 P1 级问题
+
+#### 问题 5.3.1: BM25 索引使用 pickle 持久化，存在安全风险
+
+- **文件**: `bm25_index.py:74-75, 131-135`
+- **类型**: ⚠️ 安全
+- **严重程度**: P1
+
+```python
+# bm25_index.py:74-75
+with open(index_path, 'rb') as f:
+    data = pickle.load(f)
+
+# bm25_index.py:131-135
+with open(path, 'wb') as f:
+    pickle.dump({'bm25': index._bm25, 'nodes': index._nodes}, f)
+```
+
+`pickle.load()` 反序列化不受信任的数据可导致任意代码执行。虽然此处文件是系统自建的，但如果攻击者能替换 `bm25_index.pkl` 文件，即可实现 RCE。
+
+此外，pickle 不保证跨版本兼容性。`rank_bm25` 或 Python 升级后，旧索引文件可能无法加载。
+
+**建议修复**:
+使用更安全的序列化方式（如 `safetensors`、`joblib`），或至少对 pickle 文件做完整性校验。
+
+---
+
+#### 问题 5.3.2: `get_index_stats()` 方法不存在
+
+- **文件**: `data_importer.py:130`
+- **类型**: ⚠️ Bug
+- **严重程度**: P1
+
+```python
+# data_importer.py:130
+index_stats = self.index_manager.get_index_stats()
+logger.info(f"索引统计: {index_stats}")
+```
+
+`VectorIndexManager` 类（`index_manager.py`）中没有定义 `get_index_stats()` 方法。调用时会抛出 `AttributeError`，但被外层 `import_to_vector_db` 的返回值逻辑吞掉（`stats['vector'] = len(documents)` 已经在此之前执行）。
+
+**影响分析**:
+- 每次构建知识库时这行代码都会抛异常，但由于 `import_to_vector_db` 返回 True，不会阻断流程
+- 实际上可能被 try-except 捕获，导致静默失败
+
+**建议修复**:
+在 `VectorIndexManager` 中添加 `get_index_stats()` 方法，或删除此调用。
+
+---
+
+#### 问题 5.3.3: 向量索引与 BM25 索引无一致性保障
+
+- **文件**: `data_importer.py:122-142`
+- **类型**: ⚠️ 设计
+- **严重程度**: P1
+
+```python
+# data_importer.py:122-142
+if not skip_vector:
+    if self.import_to_vector_db(documents, force_rebuild):
+        stats['vector'] = len(documents)
+
+# BM25 索引独立构建
+BM25Index.build(documents, bm25_path)
+stats['bm25'] = len(documents)
+```
+
+两个索引使用同一份 `documents` 列表，但：
+1. 如果向量索引创建成功、BM25 创建失败 → 两个索引不同步
+2. 如果部分重建（`force_rebuild=True` 但 BM25 路径写入失败） → 不一致
+3. 没有事务性保障或原子性检查
+
+**建议修复**:
+在 `import_all()` 结束时校验两个索引的文档数量是否一致，不一致时告警或自动回滚。
+
+---
+
+#### 问题 5.3.4: Embedding 不区分 query 和 text 模式
+
+- **文件**: `llamaindex_adapter.py:155-159`
+- **类型**: ⚠️ 性能
+- **严重程度**: P1
+
+```python
+# llamaindex_adapter.py:155-159
+def _get_query_embedding(self, query: str) -> List[float]:
+    return self._get_embedding(query)
+
+def _get_text_embedding(self, text: str) -> List[float]:
+    return self._get_embedding(query)  # ← 同一个实现
+```
+
+智谱 `embedding-3` 模型支持 query/text 两种嵌入模式，通过 API 参数区分。当前实现未利用此特性。
+
+**影响分析**:
+- 索引构建时的 text embedding 和查询时的 query embedding 使用相同模式，可能降低检索相关性
+- 这是 RAG 系统的常见优化点，区分两种模式通常能显著提升检索质量
+
+**建议修复**:
+在 API 调用中添加 `encoding_type` 参数区分 query 和 text 模式。
+
+---
+
+#### 问题 5.3.5: `_MAX_CHUNKS_PER_ARTICLE=2` 去重过于激进
+
+- **文件**: `fusion.py:19`
+- **类型**: ⚠️ 设计
+- **严重程度**: P1
+
+```python
+# fusion.py:19
+_MAX_CHUNKS_PER_ARTICLE = 2
+```
+
+RRF 融合后按 `(law_name, article_number)` 去重，每条款最多保留 2 个 chunk。
+
+**影响分析**:
+- 对于长条款（如超过 1500 字符被拆分为 3+ 个 chunk），第 3 个及之后的 chunk 永远无法出现在结果中
+- 如果一个长条款的关键信息恰好在第 3 个 chunk 中，检索将完全遗漏
+
+**建议修复**:
+考虑增大到 3-5，或基于 chunk 总长度动态调整。
+
+---
+
+### 5.4 P2 级问题
+
+#### 问题 5.4.1: 无内容清洗步骤
+
+- **文件**: `semantic_chunker.py`, `doc_parser.py`
+- **类型**: 🟡 功能缺失
+- **严重程度**: P2
+
+参考文章强调「内容清洗是知识库质量的基础」，包括：
+- 去除页眉页脚、目录、编号等噪音
+- 标准化格式（全角/半角、繁简转换）
+- 处理表格、列表等特殊格式
+
+当前实现直接将 Markdown 原文传入分块器，没有任何清洗步骤。如果法规文档中包含目录、页眉页脚等噪音，这些内容会被原样索引。
+
+**建议修复**:
+在 `doc_parser.py` 或 `semantic_chunker.py` 中添加预处理步骤，过滤目录、空行、页眉页脚等。
+
+---
+
+#### 问题 5.4.2: 仅支持 Markdown 格式
+
+- **文件**: `doc_parser.py:239-257`
+- **类型**: 🟡 功能局限
+- **严重程度**: P2
+
+```python
+# doc_parser.py:248
+md_files = sorted(self.regulations_dir.glob(file_pattern))  # 默认 "*.md"
+```
+
+当前仅支持 Markdown 格式的法规文档。实际业务中，法规可能以 PDF、Word、HTML 等格式存在。
+
+**建议修复**:
+集成 Unstructured 或 MarkItDown 等多格式解析库。
+
+---
+
+#### 问题 5.4.3: fixed 策略下 chunk 缺少 hierarchy_path 元数据
+
+- **文件**: `doc_parser.py:200-208`
+- **类型**: 🟡 功能缺失
+- **严重程度**: P2
+
+```python
+# doc_parser.py:200-208
+return TextNode(
+    text=full_content,
+    metadata={
+        'law_name': law_name,
+        'article_number': article_title,
+        'category': category,
+        'source_file': source_file,
+        # ← 缺少 hierarchy_path
+    }
+)
+```
+
+`RegulationNodeParser._create_node()` 构建的 metadata 中没有 `hierarchy_path` 字段。如果使用 fixed 策略构建知识库，检索结果中将缺少层级路径信息。
+
+**建议修复**:
+在 `_create_node()` 中添加 `hierarchy_path` 元数据。
+
+---
+
+#### 问题 5.4.4: vector_store.py 是遗留代码，未被主链路使用
+
+- **文件**: `vector_store.py` (376 行)
+- **类型**: 🟡 技术债务
+- **严重程度**: P2
+
+`VectorDB` 类是一个独立的 LanceDB 封装，使用 `print()` 而非 `logger`，接口设计与 LlamaIndex 不兼容。当前主链路使用 `index_manager.py` + `LlamaIndex LanceDBVectorStore`，`vector_store.py` 已无调用方。
+
+**建议修复**:
+标记为废弃或直接删除，减少维护负担。
+
+---
+
+### 5.5 P3 级问题
+
+#### 问题 5.5.1: vector_store.py 全部使用 print() 而非 logger
+
+- **文件**: `vector_store.py` 全文
+- **类型**: 🔵 代码质量
+- **严重程度**: P3
+
+整个 `vector_store.py` 文件（376 行）中使用 `print()` 输出日志信息，不符合项目日志规范。其他模块均使用 `logging.getLogger(__name__)`。
+
+---
+
+#### 问题 5.5.2: `_merge_short_segments()` 不检查合并后上限
+
+- **文件**: `semantic_chunker.py:179-199`
+- **类型**: 🔵 代码质量
+- **严重程度**: P3
+
+```python
+# semantic_chunker.py:179-199
+def _merge_short_segments(self, segments):
+    for seg in segments:
+        buffer_segments.append(seg)
+        buffer_text += ('\n\n' if buffer_text else '') + seg['text']
+
+        if len(buffer_text) >= self.config.merge_short_threshold:
+            merged.append(self._combine_segments(buffer_segments, buffer_text))
+            buffer_segments = []
+            buffer_text = ''
+```
+
+合并只检查了下限（`>= merge_short_threshold`），但没有检查合并后是否超过 `max_chunk_size`。如果多个短段连续累积，可能产生超大 chunk。
+
+虽然有后续的 `_split_long_segments()` 兜底，但如果 `split_long_chunks=False`（配置可关闭），则可能产生超大 chunk。
+
+---
+
+## 六、系统流程走查
+
+### 6.1 知识库构建完整流程
+
+```
+用户执行 import_all(force_rebuild=True)
+       │
+       ▼
+Step 1: SimpleDirectoryReader.load_data()
+  │  读取 references/*.md → 14 个 Document
+  │  每个 Document = {text: 完整文档, metadata: {file_name: ...}}
+  │
+  ▼
+Step 2: SemanticChunker.chunk(documents)
+  │
+  ├── _split_by_structure(lines)
+  │    按 #{1,3} 标题 + #{1,3}第X条 切分
+  │    输出: List[{text, heading, article, heading_level}]
+  │
+  ├── _merge_short_segments(segments)
+  │    合并 < 300 字符的连续短段
+  │
+  ├── _split_long_segments(segments)
+  │    拆分 > 1500 字符的长段（按句号/分号分割）
+  │
+  ├── _build_nodes_with_overlap(segments)
+  │    为每个 segment 创建 TextNode
+  │    拼接前一个 segment 的最后 3 句话作为 overlap
+  │    附加元数据: law_name, article_number, category, hierarchy_path, source_file
+  │
+  └── _semantic_refine(nodes)
+       对 > 1500 字符的 node 使用 SemanticSplitterNodeParser 精调
+       ⚠️ 此步骤会破坏已添加的 overlap
+  │
+  ▼
+Step 3: VectorIndexManager.create_index(nodes)
+  │
+  ├── Document → TextNode 转换 (避免双重分块)
+  ├── LanceDBVectorStore(uri, table_name)
+  ├── VectorStoreIndex(nodes, storage_context)
+  │    → 对每个 node 调用 embed_model 获取向量
+  │    → 存入 LanceDB
+  │
+  ▼
+Step 4: BM25Index.build(nodes, path)
+  │
+  ├── 对每个 node 调用 tokenize_chinese(text)
+  │    → jieba.lcut + 停用词过滤 + 单字过滤
+  ├── BM25Okapi(tokenized_corpus)
+  ├── pickle.dump({bm25, nodes}) → bm25_index.pkl
+  │
+  ▼
+完成: stats = {parsed: N, vector: N, bm25: N}
+```
+
+### 6.2 关键代码路径
+
+| 步骤 | 文件:行号 | 作用 |
+|------|----------|------|
+| 文档加载 | `doc_parser.py:248-257` | SimpleDirectoryReader 加载 Markdown |
+| 法规名提取 | `doc_parser.py:41-71` | 启发式提取法规名称 |
+| 结构分割 | `semantic_chunker.py:131-177` | 按标题/条款分割 |
+| 短段合并 | `semantic_chunker.py:179-199` | 合并 < 300 字符短段 |
+| 长段拆分 | `semantic_chunker.py:211-253` | 按句子拆分 > 1500 字符长段 |
+| Overlap 构建 | `semantic_chunker.py:255-293` | 3 句 overlap + 元数据 |
+| 语义精调 | `semantic_chunker.py:77-106` | SemanticSplitterNodeParser |
+| 向量索引 | `index_manager.py:27-62` | LanceDB VectorStoreIndex |
+| BM25 索引 | `bm25_index.py:32-61` | BM25Okapi + pickle |
+| 中文分词 | `tokenizer.py:60-80` | jieba + 自定义词典 |
+
+---
+
+## 七、测试覆盖分析
+
+### 7.1 测试文件清单
+
+| 测试文件 | 覆盖模块 |
+|---------|---------|
+| `test_semantic_chunker.py` | SemanticChunker |
+| `test_doc_parser.py` | RegulationDocParser, RegulationNodeParser |
+| `test_bm25_index.py` | BM25Index |
+| `test_tokenizer.py` | tokenize_chinese |
+| `test_fusion.py` | reciprocal_rank_fusion, _deduplicate |
+| `test_reranker.py` | LLMReranker |
+| `test_query_preprocessor.py` | QueryPreprocessor |
+| `test_config.py` | RAGConfig, ChunkingConfig |
+| `test_retrieval.py` | hybrid_search, vector_search |
+| `test_evaluator.py` | RetrievalEvaluator |
+| `test_rag_engine.py` | RAGEngine |
+| `test_index_manager.py` | VectorIndexManager |
+| `test_data_importer.py` | RegulationDataImporter |
+
+### 7.2 测试覆盖率估算
+
+| 模块 | 覆盖率 | 备注 |
+|------|--------|------|
+| semantic_chunker.py | ~70% | 核心分块逻辑有覆盖，但 overlap+semantic_refine 的交互未测试 |
+| doc_parser.py | ~60% | 法规名提取有测试，但 fixed 策略缺少 hierarchy_path 测试 |
+| bm25_index.py | ~80% | build/load/search 有覆盖 |
+| tokenizer.py | ~75% | 分词和过滤有测试 |
+| fusion.py | ~85% | RRF 融合和去重有覆盖 |
+| index_manager.py | ~50% | 基本创建有测试，但异常路径覆盖不足 |
+| data_importer.py | ~40% | 缺少索引一致性测试 |
+
+### 7.3 测试建议
+
+1. **添加 overlap + semantic_refine 交互测试**：验证 overlap 在精调后是否仍有效
+2. **添加层级路径完整性测试**：验证多层标题文档的 `hierarchy_path`
+3. **添加索引一致性测试**：验证向量索引和 BM25 索引的文档数量匹配
+4. **添加大文档边界测试**：验证超长文档（> 10000 字符）的分块行为
+
+---
+
+## 八、技术债务
+
+| 优先级 | 债务描述 | 位置 | 建议处理 |
+|--------|---------|------|---------|
+| P0 | Overlap 在语义精调后失效 | `semantic_chunker.py:62-65` | 调整执行顺序 |
+| P0 | hierarchy_path 不完整 | `semantic_chunker.py:270-275` | 维护标题栈 |
+| P0 | 纯文本第X条不被识别 | `semantic_chunker.py:21-23` | 增加无前缀匹配 |
+| P1 | pickle 安全/兼容性 | `bm25_index.py:74` | 替换序列化方案 |
+| P1 | get_index_stats() 不存在 | `data_importer.py:130` | 添加方法或删除调用 |
+| P1 | 索引一致性无保障 | `data_importer.py:122-142` | 添加校验逻辑 |
+| P1 | Embedding 不分 query/text | `llamaindex_adapter.py:155-159` | 添加模式区分 |
+| P1 | 去重阈值过于激进 | `fusion.py:19` | 增大到 3-5 |
+| P2 | 无内容清洗 | `doc_parser.py` | 添加预处理 |
+| P2 | 仅支持 Markdown | `doc_parser.py:248` | 集成多格式解析 |
+| P2 | fixed 策略缺 hierarchy_path | `doc_parser.py:200-208` | 补充元数据 |
+| P2 | 遗留 vector_store.py | `vector_store.py` | 删除或标记废弃 |
+
+---
+
+## 九、改进建议
+
+### 9.1 知识库构建质量提升
+
+1. **添加内容清洗层**（对应参考文章 Step 2）
+   - 在 `doc_parser.py` 中增加 `_clean_content()` 方法
+   - 过滤目录行（如「目录」「第一章」）、空行、页眉页脚
+   - 标准化全角/半角字符
+
+2. **完善层级元数据**（对应参考文章 Step 4）
+   - 维护标题栈而非单一变量
+   - `hierarchy_path` 应包含完整路径，如「保险法 > 第二章 > 第二节 > 第X条」
+   - 添加 `hierarchy_level` 元数据（1=法规, 2=章, 3=节, 4=条）
+
+3. **保障索引一致性**（对应参考文章 Step 5）
+   - `import_all()` 结束时校验向量索引和 BM25 索引的文档数量
+   - 添加构建版本号，检测索引版本与代码版本是否匹配
+   - 失败时自动回滚（删除不完整的索引）
+
+### 9.2 分块策略优化
+
+1. **修复 Overlap 与语义精调的交互**
+   - 方案 A：将 overlap 移到语义精调之后
+   - 方案 B：在 `_semantic_refine()` 中为子 chunk 保留 overlap
+
+2. **增加纯文本条款匹配**
+   - 在 `_split_by_structure()` 中添加对无 `#` 前缀的 `第X条` 的匹配
+   - 与 `RegulationNodeParser` 的匹配逻辑保持一致
+
+3. **动态调整去重阈值**
+   - 将 `_MAX_CHUNKS_PER_ARTICLE` 改为可配置参数
+   - 基于条款长度动态调整（短条款保留 1 个，长条款保留 3-5 个）
+
+### 9.3 安全与稳定性
+
+1. **替换 pickle 序列化**
+   - 使用 `joblib` 或 `safetensors` 替代
+   - 或对 pickle 文件添加 hash 校验
+
+2. **添加构建健康检查**
+   - 构建完成后输出统计报告：chunk 数量、平均长度、长度分布
+   - 异常检测：空 chunk、超大 chunk、缺失元数据的 chunk
+
+---
+
+## 十、总结
+
+### 10.1 主要发现
+
+Actuary Sleuth 的 RAG 知识库建设链路整体设计合理，采用了业界推荐的两阶段分块（结构 + 语义）和混合检索（向量 + BM25 + RRF）策略。近期修复的批量 Reranker、消除双重分块等问题显著提升了系统质量。
+
+但仍存在三个核心短板：
+
+1. **内容清洗缺失**：参考文章五步框架中，第二步「内容清洗」完全未实现，文档中的噪音内容会被原样索引
+2. **层级元数据不完整**：`hierarchy_path` 只记录当前标题，丢失了上层标题信息，影响检索结果的定位能力
+3. **Overlap 与语义精调冲突**：两个机制的执行顺序导致 overlap 被破坏，降低了跨 chunk 边界的信息连续性
+
+### 10.2 关键风险
+
+| 风险 | 影响 | 缓解措施 |
+|------|------|---------|
+| Overlap 失效 | 跨 chunk 边界信息丢失，影响召回率 | 调整执行顺序 |
+| 层级路径不完整 | 检索结果无法精确定位到章节 | 维护标题栈 |
+| 索引不一致 | 向量和 BM25 结果不匹配 | 添加一致性校验 |
+| pickle 安全 | 潜在 RCE 风险 | 替换序列化方案 |
+
+### 10.3 下一步行动
+
+**立即修复（P0）**：
+1. 调整 `_chunk_single_document()` 中 overlap 和 semantic_refine 的执行顺序
+2. 在 `_split_by_structure()` 中维护标题栈，构建完整 hierarchy_path
+3. 在 `_ARTICLE_PATTERN` 中增加对纯文本 `第X条` 的匹配
+
+**短期改进（P1）**：
+4. 替换 pickle 序列化方案
+5. 修复/删除 `get_index_stats()` 调用
+6. 添加索引一致性校验
+7. 区分 query/text embedding 模式
+8. 增大 `_MAX_CHUNKS_PER_ARTICLE` 阈值
+
+**中期优化（P2）**：
+9. 添加内容清洗预处理层
+10. 集成多格式文档解析（PDF/Word）
+11. 清理遗留的 `vector_store.py`
+
+---
+
+## 附录
+
+### A. 参考文章五步框架对照
+
+| 步骤 | 参考文章要求 | 当前实现 | 差距 |
+|------|------------|---------|------|
+| 1. 多格式解析 | PDF/Word/HTML/Markdown | 仅 Markdown | 需扩展 |
+| 2. 内容清洗 | 去噪、去格式、标准化 | 无 | 需新增 |
+| 3. 三层分块 | 结构+语义+长度平衡 | 已实现 | ✅ |
+| 4. 层级标签 | 完整路径+元数据 | 有缺陷 | 需修复 |
+| 5. 模块协调 | 一致性保障 | 部分实现 | 需加强 |
+
+### B. 关键配置项
+
+```python
+# ChunkingConfig (config.py:31-75)
+min_chunk_size = 200
+max_chunk_size = 1500
+target_chunk_size = 800
+overlap_sentences = 3
+merge_short_threshold = 300
+
+# HybridQueryConfig (config.py:9-27)
+vector_top_k = 20
+keyword_top_k = 20
+rrf_k = 60
+vector_weight = 1.0
+keyword_weight = 1.0
+rerank_top_k = 5
+
+# RAGConfig (config.py:78-143)
+chunking_strategy = "semantic"
+collection_name = "regulations_vectors"
+```
+
+### C. 外部依赖
+
+| 库 | 版本要求 | 用途 |
+|----|---------|------|
+| llama-index-core | - | RAG 框架 |
+| llama-index-vector-stores-lancedb | - | 向量存储 |
+| lancedb | - | 嵌入式向量数据库 |
+| rank_bm25 | - | BM25 关键词检索 |
+| jieba | - | 中文分词 |
+| requests | - | HTTP API 调用 |
+| pyarrow | - | LanceDB 依赖 |
+
+### D. 数据文件
+
+| 文件 | 行数 | 内容 |
+|------|------|------|
+| `data/insurance_dict.txt` | 46 行 | 保险领域术语词典 |
+| `data/stopwords.txt` | 8 行 | ~150 个停用词 |
+| `data/synonyms.json` | 21 行 | 20 组同义词映射 |
+
+### E. 法规文档数据源
+
+`references/` 目录下 14 份 Markdown 格式的保险法规文件（`01_*.md` 至 `14_*.md`），是知识库的原始数据源。
