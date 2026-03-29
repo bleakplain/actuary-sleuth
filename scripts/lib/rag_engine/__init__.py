@@ -48,6 +48,7 @@ from .config import RAGConfig, get_config, HybridQueryConfig
 from .exceptions import RAGEngineError, EngineInitializationError, RetrievalError
 from .query_preprocessor import QueryPreprocessor, PreprocessedQuery
 from .reranker import LLMReranker, RerankConfig
+from .attribution import parse_citations, AttributionResult, Citation
 
 # Optional RAG engine components (require llama_index)
 try:
@@ -97,6 +98,9 @@ __all__ = [
     'PreprocessedQuery',
     'LLMReranker',
     'RerankConfig',
+    'parse_citations',
+    'AttributionResult',
+    'Citation',
     'RAGEngine',
     'create_qa_engine',
     'create_audit_engine',

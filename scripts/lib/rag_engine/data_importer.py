@@ -125,10 +125,7 @@ class RegulationDataImporter:
             logger.info("=" * 60)
             if self.import_to_vector_db(documents, force_rebuild):
                 stats['vector'] = len(documents)
-
-                # 显示索引统计
-                index_stats = self.index_manager.get_index_stats()
-                logger.info(f"索引统计: {index_stats}")
+                logger.info(f"向量索引已创建，共 {len(documents)} 个文档块")
             step_num += 1
 
         # 构建 BM25 索引

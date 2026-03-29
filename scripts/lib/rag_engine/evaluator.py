@@ -209,15 +209,18 @@ def _compute_redundancy_rate(results: List[Dict[str, Any]]) -> float:
         ts for r in results
         if (ts := _tokenize_to_set(r.get('content', ''))) is not None
     ]
-    redundant_count = 0
     n = len(valid_sets)
+    if n <= 1:
+        return 0.0
+
+    redundant_count = 0
 
     for i in range(n):
         for j in range(i + 1, n):
             if _jaccard_similarity(valid_sets[i], valid_sets[j]) > 0.6:
                 redundant_count += 1
 
-    return redundant_count / n
+    return redundant_count / (n * (n - 1) / 2)
 
 
 class RetrievalEvaluator:

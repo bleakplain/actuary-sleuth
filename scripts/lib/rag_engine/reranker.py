@@ -51,20 +51,25 @@ class LLMReranker:
         top_k = top_k or self._config.top_k
         candidates = candidates[:self._config.max_candidates]
 
-        ranked_indices = self._batch_rank(query, candidates)
-        if not ranked_indices:
-            return candidates[:top_k]
+        ranked_indices, did_rerank = self._batch_rank(query, candidates)
+        if not did_rerank:
+            fallback: List[Dict[str, Any]] = candidates[:top_k]
+            for r in fallback:
+                r['reranked'] = False
+            return fallback
 
         results: List[Dict[str, Any]] = []
         for rank, idx in enumerate(ranked_indices[:top_k]):
             candidate = candidates[idx]
             result = dict(candidate)
             result['rerank_score'] = 1.0 / (rank + 1)
+            result['reranked'] = True
             results.append(result)
 
         return results
 
-    def _batch_rank(self, query: str, candidates: List[Dict[str, Any]]) -> List[int]:
+    def _batch_rank(self, query: str, candidates: List[Dict[str, Any]]) -> tuple:
+        """返回 (ranked_indices, did_rerank)"""
         parts = []
         for i, candidate in enumerate(candidates, 1):
             content = candidate.get('content', '')
@@ -80,18 +85,27 @@ class LLMReranker:
 
         try:
             response = self._llm.generate(prompt)
-            return self._parse_ranking(str(response).strip(), len(candidates))
+            return self._parse_ranking(str(response).strip(), len(candidates)), True
         except Exception as e:
             logger.warning(f"Rerank 批量排序失败: {e}")
-            return list(range(len(candidates)))
+            return list(range(len(candidates))), False
 
     @staticmethod
     def _parse_ranking(response: str, total: int) -> List[int]:
-        numbers = re.findall(r'\d+', response)
+        clean = response.strip()
+        clean_pattern = re.compile(r'^[\d,，\s]+$')
+        if clean_pattern.match(clean):
+            numbers = re.findall(r'\d+', response)
+        else:
+            numbers = re.findall(r'\d+', clean)
+
         result: List[int] = []
         seen: set[int] = set()
         for num_str in numbers:
-            num = int(num_str)
+            try:
+                num = int(num_str)
+            except ValueError:
+                continue
             if 1 <= num <= total:
                 idx = num - 1
                 if idx not in seen:

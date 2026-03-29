@@ -321,8 +321,7 @@ def production_rag_engine(production_rag_config):
 
     try:
         engine = RAGEngine(production_rag_config)
-        # 预加载索引
-        engine.preload_index()
+        engine.initialize()
         return engine
     except Exception as e:
         pytest.skip(f"无法创建生产RAG引擎: {e}")

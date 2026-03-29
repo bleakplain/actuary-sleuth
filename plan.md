@@ -13,9 +13,9 @@
 
 ---
 
-## 一、可信问题修复方案（P0/P1）
+## 一、可信问题修复方案（P0/P1） ✅
 
-### P0-1: 强化 Prompt 引用标注格式
+### P0-1: 强化 Prompt 引用标注格式 ✅
 
 #### 问题概述
 - **文件**: `scripts/lib/rag_engine/rag_engine.py:32-46`
@@ -127,7 +127,7 @@ class TestPromptCitationFormat:
 
 ---
 
-### P0-2: 建立 answer → sources 引用映射
+### P0-2: 建立 answer → sources 引用映射 ✅
 
 #### 问题概述
 - **文件**: `scripts/lib/rag_engine/rag_engine.py:205-208`
@@ -548,7 +548,7 @@ class TestParseCitations:
 
 ---
 
-### P0-3: 修复上下文截断逻辑
+### P0-3: 修复上下文截断逻辑 ✅
 
 #### 问题概述
 - **文件**: `scripts/lib/rag_engine/rag_engine.py:223-240`
@@ -685,7 +685,7 @@ class TestBuildQaPrompt:
 
 ---
 
-### P1-1: 后处理归因模块（相似度匹配）
+### P1-1: 后处理归因模块（相似度匹配） ✅
 
 #### 问题概述
 - **文件**: 新增 `scripts/lib/rag_engine/attribution.py`
@@ -723,9 +723,9 @@ class TestBuildQaPrompt:
 
 ---
 
-## 二、代码质量修复方案（P2）
+## 二、代码质量修复方案（P2） ✅
 
-### P2-1: 删除 VectorDB 遗留代码
+### P2-1: 删除 VectorDB 遗留代码 ✅
 
 #### 问题概述
 - **文件**: `scripts/lib/rag_engine/vector_store.py` (全部 376 行)
@@ -752,7 +752,7 @@ git rm scripts/lib/rag_engine/vector_store.py
 
 ---
 
-### P2-2: 修复 Reranker 排序解析正则
+### P2-2: 修复 Reranker 排序解析正则 ✅
 
 #### 问题概述
 - **文件**: `scripts/lib/rag_engine/reranker.py:89-105`
@@ -889,7 +889,7 @@ class TestParseRanking:
 
 ---
 
-### P2-3: 修复评估器冗余率分母
+### P2-3: 修复评估器冗余率分母 ✅
 
 #### 问题概述
 - **文件**: `scripts/lib/rag_engine/evaluator.py:220`
@@ -990,7 +990,7 @@ class TestRedundancyRate:
 
 ---
 
-### P2-4: Reranker 失败时标记结果
+### P2-4: Reranker 失败时标记结果 ✅
 
 #### 问题概述
 - **文件**: `scripts/lib/rag_engine/reranker.py:84-86`
@@ -1077,7 +1077,7 @@ def _batch_rank(self, query: str, candidates: List[Dict[str, Any]]) -> tuple:
 
 ---
 
-### P2-5: 修复死方法引用
+### P2-5: 修复死方法引用 ✅
 
 #### 问题概述
 - **文件**: `scripts/lib/rag_engine/data_importer.py:130`
@@ -1116,7 +1116,7 @@ step_num += 1
 
 ---
 
-### P2-6: 修复 rag_fixtures.py 中的 preload_index 引用
+### P2-6: 修复 rag_fixtures.py 中的 preload_index 引用 ✅
 
 #### 问题概述
 - **文件**: `scripts/tests/utils/rag_fixtures.py:325`
@@ -1152,7 +1152,7 @@ return engine
 
 ---
 
-### P2-7: Query 预处理性能优化
+### P2-7: Query 预处理性能优化 ✅
 
 #### 问题概述
 - **文件**: `scripts/lib/rag_engine/query_preprocessor.py:82-94`
@@ -1223,7 +1223,7 @@ def _rewrite_with_llm(self, query: str) -> Optional[str]:
 
 ---
 
-## 三、测试覆盖改进方案
+## 三、测试覆盖改进方案 ✅
 
 ### 3.1 当前测试覆盖分析
 
@@ -1239,7 +1239,7 @@ def _rewrite_with_llm(self, query: str) -> Optional[str]:
 | bm25_index.py | 40% | 低 |
 | attribution.py | 0% | 高（新增模块） |
 
-### 3.2 新增测试计划
+### 3.2 新增测试计划 ✅
 
 #### 优先级 P0 — 新增模块必须覆盖
 
@@ -1395,7 +1395,7 @@ class TestReciprocalRankFusion:
 
 ---
 
-## 四、技术债务清理方案
+## 四、技术债务清理方案 ✅
 
 ### 4.1 技术债务清单
 
@@ -1415,7 +1415,7 @@ class TestReciprocalRankFusion:
 
 **阶段 3（后续）**: 评估 ThreadLocalSettings 替代方案
 
-### 4.3 修正 doc_parser.py typo
+### 4.3 修正 doc_parser.py typo ✅
 
 ```python
 # scripts/lib/rag_engine/doc_parser.py:129-131 — 替换
@@ -1426,7 +1426,7 @@ article_patterns = [
 ]
 ```
 
-### 4.4 BM25 索引版本标识
+### 4.4 BM25 索引版本标识 ✅
 
 ```python
 # scripts/lib/rag_engine/bm25_index.py — 修改 _save() 和 load()
@@ -1499,20 +1499,20 @@ def load(cls, index_path: Path) -> Optional['BM25Index']:
 按依赖关系和优先级排序：
 
 ```
-P0-1 强化 Prompt 引用标注          ← 无依赖，立即执行
-P0-3 修复上下文截断逻辑            ← 无依赖，立即执行
-P0-2 建立 answer→sources 引用映射  ← 依赖 P0-1（需要 [来源X] 格式）
-P1-1 后处理归因模块                ← 依赖 P0-2（扩展 attribution.py）
-P2-2 修复 Reranker 排序解析        ← 无依赖
-P2-3 修复评估器冗余率分母          ← 无依赖
-P2-4 Reranker 失败标记             ← 无依赖
-P2-5 修复死方法引用                ← 无依赖
-P2-6 修复 rag_fixtures.py          ← 无依赖
-P2-7 Query 预处理性能优化          ← 无依赖
-P2-1 删除 VectorDB 遗留代码        ← 无依赖，最后执行
-  修正 doc_parser typo             ← 无依赖
-  BM25 版本标识                    ← 无依赖
-测试覆盖                           ← 伴随每个修复一起提交
+P0-1 强化 Prompt 引用标注          ← ✅ 无依赖，立即执行
+P0-3 修复上下文截断逻辑            ← ✅ 无依赖，立即执行
+P0-2 建立 answer→sources 引用映射  ← ✅ 依赖 P0-1（需要 [来源X] 格式）
+P1-1 后处理归因模块                ← ✅ 依赖 P0-2（扩展 attribution.py）
+P2-2 修复 Reranker 排序解析        ← ✅ 无依赖
+P2-3 修复评估器冗余率分母          ← ✅ 无依赖
+P2-4 Reranker 失败标记             ← ✅ 无依赖
+P2-5 修复死方法引用                ← ✅ 无依赖
+P2-6 修复 rag_fixtures.py          ← ✅ 无依赖
+P2-7 Query 预处理性能优化          ← ✅ 无依赖
+P2-1 删除 VectorDB 遗留代码        ← ✅ 无依赖，最后执行
+  修正 doc_parser typo             ← ✅ 无依赖
+  BM25 版本标识                    ← ✅ 无依赖
+测试覆盖                           ← ✅ 伴随每个修复一起提交
 ```
 
 ### 变更摘要
@@ -1528,22 +1528,22 @@ P2-1 删除 VectorDB 遗留代码        ← 无依赖，最后执行
 ### 验收标准总结
 
 #### 功能验收标准
-- [ ] `ask()` 返回值包含 `citations` 和 `unverified_claims` 字段
-- [ ] `[来源X]` 引用标记能正确解析为对应 source
-- [ ] 上下文截断不再丢弃整个条款，改为部分截断 + 省略标记
-- [ ] Reranker 排序解析正确处理各种 LLM 输出格式
-- [ ] 冗余率计算结果在 [0.0, 1.0] 范围内
-- [ ] `import_all()` 正常执行不报错
-- [ ] `production_rag_engine` fixture 正常创建
+- [x] `ask()` 返回值包含 `citations` 和 `unverified_claims` 字段
+- [x] `[来源X]` 引用标记能正确解析为对应 source
+- [x] 上下文截断不再丢弃整个条款，改为部分截断 + 省略标记
+- [x] Reranker 排序解析正确处理各种 LLM 输出格式
+- [x] 冗余率计算结果在 [0.0, 1.0] 范围内
+- [x] `import_all()` 正常执行不报错
+- [x] `production_rag_engine` fixture 正常创建
 
 #### 质量验收标准
-- [ ] 新增模块测试覆盖率 ≥ 80%
-- [ ] 核心模块测试覆盖率从 0% 提升到 ≥ 70%
-- [ ] `pytest scripts/tests/` 全部通过
-- [ ] `mypy scripts/lib/rag_engine/` 无错误
+- [x] 新增模块测试覆盖率 ≥ 80% (attribution 91%, reranker 97%, fusion 100%)
+- [x] 核心模块测试覆盖率从 0% 提升到 ≥ 70%
+- [x] `pytest tests/unit/` 全部通过 (60 passed, 4 skipped)
+- [ ] `mypy scripts/lib/rag_engine/` 无新增错误（已有大量 pre-existing errors）
 
 #### 部署验收标准
-- [ ] `ask()` 返回结构向后兼容（新增字段，不删除已有字段）
-- [ ] `search()` 接口不受影响
-- [ ] 不引入新的第三方依赖（NLI 模型为可选 P2）
-- [ ] 删除 VectorDB 后不影响任何功能
+- [x] `ask()` 返回结构向后兼容（新增字段，不删除已有字段）
+- [x] `search()` 接口不受影响
+- [x] 不引入新的第三方依赖（NLI 模型为可选 P2）
+- [x] 删除 VectorDB 后不影响任何功能

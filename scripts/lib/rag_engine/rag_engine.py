@@ -23,6 +23,7 @@ from .bm25_index import BM25Index
 from .reranker import LLMReranker, RerankConfig
 from .query_preprocessor import QueryPreprocessor
 from .exceptions import EngineInitializationError, RetrievalError
+from .attribution import parse_citations, AttributionResult
 from lib.llm import BaseLLMClient, LLMClientFactory
 
 logger = logging.getLogger(__name__)
@@ -40,10 +41,14 @@ _QA_PROMPT_TEMPLATE = """请根据以下法规条款回答用户的问题。
 {question}
 
 ## 回答要求
-1. 基于上述法规条款回答，不要编造信息
-2. 如果法规条款不足以回答问题，请说明并建议查阅相关法规
-3. 引用具体条款时请注明法规名称和条款号
-4. 回答简洁专业"""
+1. 仅基于上述法规条款回答，不得编造信息
+2. 每个事实性陈述（数字、条款规定、法律要求）必须在句末用 [来源X] 标注来源编号
+3. 如果法规条款不足以回答问题，明确说明"以上法规条款未涉及此问题"，不要猜测
+4. 不得包含法规条款中不存在的信息（包括但不限于条款号、数字、日期）
+5. 回答简洁专业
+
+## 回答示例
+健康保险的等待期有明确限制。根据规定，等待期不得超过90天 [来源1]。等待期内发生保险事故的，保险公司不承担保险责任 [来源1]。"""
 
 
 class ThreadLocalSettings:
@@ -81,6 +86,7 @@ class ThreadLocalSettings:
 
 
 _MAX_CONTEXT_CHARS = 4000
+_HEADER_OVERHEAD = 50
 
 _thread_settings = ThreadLocalSettings()
 
@@ -196,15 +202,33 @@ class RAGEngine:
         try:
             search_results = self._hybrid_search(question, top_k=self.config.top_k_results)
             if not search_results:
-                return {'answer': '未找到相关法规条款，请尝试换个描述方式。', 'sources': []}
+                return {
+                    'answer': '未找到相关法规条款，请尝试换个描述方式。',
+                    'sources': [],
+                    'citations': [],
+                    'unverified_claims': [],
+                }
 
             prompt = self._build_qa_prompt(question, search_results)
             assert self._llm_client is not None
             answer = self._llm_client.generate(prompt)
+            answer_str = str(answer)
+
+            attribution = parse_citations(answer_str, search_results) if include_sources else AttributionResult()
 
             return {
-                'answer': str(answer),
+                'answer': answer_str,
                 'sources': search_results if include_sources else [],
+                'citations': [
+                    {
+                        'source_idx': c.source_idx,
+                        'law_name': c.law_name,
+                        'article_number': c.article_number,
+                        'content': c.content,
+                    }
+                    for c in attribution.citations
+                ],
+                'unverified_claims': attribution.unverified_claims,
             }
 
         except EngineInitializationError:
@@ -228,13 +252,18 @@ class RAGEngine:
             law_name = result.get('law_name', '未知法规')
             article = result.get('article_number', '')
             content = result.get('content', '')
-            part = f"{i}. 【{law_name}】{article}\n{content}"
+            header = f"{i}. 【{law_name}】{article}\n"
+            full_part = header + content
 
-            if total_chars + len(part) > _MAX_CONTEXT_CHARS:
+            if total_chars + len(full_part) > _MAX_CONTEXT_CHARS:
+                remaining = _MAX_CONTEXT_CHARS - total_chars - _HEADER_OVERHEAD
+                if remaining > 100:
+                    truncated_content = content[:remaining] + '……'
+                    context_parts.append(header + truncated_content)
                 break
 
-            context_parts.append(part)
-            total_chars += len(part)
+            context_parts.append(full_part)
+            total_chars += len(full_part)
 
         context = "\n\n".join(context_parts)
         return _QA_PROMPT_TEMPLATE.format(context=context, question=question)
