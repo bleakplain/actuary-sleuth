@@ -3,1492 +3,1117 @@
 生成时间: 2026-03-29
 源文档: research.md
 
-本方案基于 research.md 的分析内容生成，包含以下章节：
-
-- 一、可信问题修复方案（P0/P1 — 必须修复）
-- 二、代码质量修复方案（P2 — 尽快修复）
-- 三、测试覆盖改进方案
-- 四、技术债务清理方案
-- 五、架构和代码质量改进
+本方案基于 research.md 的全面分析内容生成，包含 16 个问题的修复方案、测试改进计划、技术债务清理方案。
 
 ---
 
-## 一、可信问题修复方案（P0/P1） ✅
+## 一、问题修复方案
 
-### P0-1: 强化 Prompt 引用标注格式 ✅
+---
 
-#### 问题概述
-- **文件**: `scripts/lib/rag_engine/rag_engine.py:32-46`
-- **函数**: `_QA_PROMPT_TEMPLATE`
-- **严重程度**: P0
-- **影响范围**: 所有 `ask()` 问答请求，影响答案可信度
+### 🔴 运行时 Bug (P0/P1 - 必须修复) ✅
 
-#### 当前代码
+---
+
+#### 问题 1.1: [P0] `get_index_stats()` 方法不存在 — 知识库重建崩溃 ✅
+
+##### 问题概述
+- **文件**: `scripts/lib/rag_engine/data_importer.py:130`
+- **函数**: `RegulationDataImporter.import_all()`
+- **严重程度**: 🔴 P0
+- **影响范围**: 任何通过 `import_all(skip_vector=False)` 的数据导入都会触发 `AttributeError`，知识库重建管线完全不可用
+
+##### 当前代码
 ```python
-# scripts/lib/rag_engine/rag_engine.py:32-46
-_QA_PROMPT_TEMPLATE = """请根据以下法规条款回答用户的问题。
-
-## 法规条款
-
-{context}
-
-## 用户问题
-
-{question}
-
-## 回答要求
-1. 基于上述法规条款回答，不要编造信息
-2. 如果法规条款不足以回答问题，请说明并建议查阅相关法规
-3. 引用具体条款时请注明法规名称和条款号
-4. 回答简洁专业"""
+# data_importer.py:128-131
+if not skip_vector:
+    index_stats = self.index_manager.get_index_stats()
+    logger.info(f"向量索引统计: {index_stats}")
 ```
 
-#### 修复方案
-将模糊的"请注明"改为强制性引用格式 `[来源X]`，并添加 few-shot 示例。这是三层防护体系的第一层（Prompt 引用标注），成本最低但效果显著。
+##### 修复方案
+在 `VectorIndexManager` 中添加 `get_index_stats()` 方法，返回索引的文档数量和向量维度信息。同时在 `data_importer.py` 的 `import_all()` 中激活 `_ensure_embedding_setup()` 调用。
 
-**解决思路**:
-1. 明确引用格式：每个事实性陈述后必须标注 `[来源X]`
-2. 添加 few-shot 示例引导 LLM 输出格式
-3. 明确"无法回答"时的处理方式
+##### 代码变更
 
-#### 代码变更
+**文件 1: `scripts/lib/rag_engine/index_manager.py`** — 新增方法
+
 ```python
-# scripts/lib/rag_engine/rag_engine.py — 替换 _QA_PROMPT_TEMPLATE
-_QA_PROMPT_TEMPLATE = """请根据以下法规条款回答用户的问题。
-
-## 法规条款
-
-{context}
-
-## 用户问题
-
-{question}
-
-## 回答要求
-1. 仅基于上述法规条款回答，不得编造信息
-2. 每个事实性陈述（数字、条款规定、法律要求）必须在句末用 [来源X] 标注来源编号
-3. 如果法规条款不足以回答问题，明确说明"以上法规条款未涉及此问题"，不要猜测
-4. 不得包含法规条款中不存在的信息（包括但不限于条款号、数字、日期）
-5. 回答简洁专业
-
-## 回答示例
-健康保险的等待期有明确限制。根据规定，等待期不得超过90天 [来源1]。等待期内发生保险事故的，保险公司不承担保险责任 [来源1]。"""
+# index_manager.py — 在 VectorIndexManager 类末尾添加
+    def get_index_stats(self) -> Dict[str, Any]:
+        """获取索引统计信息"""
+        stats: Dict[str, Any] = {}
+        if self.index is not None:
+            try:
+                from llama_index.core import VectorStoreIndex
+                if isinstance(self.index, VectorStoreIndex):
+                    stats['index_type'] = 'VectorStoreIndex'
+                    stats['storage_context'] = str(type(self.index.storage_context).__name__)
+            except Exception:
+                pass
+            stats['initialized'] = True
+        else:
+            stats['initialized'] = False
+        return stats
 ```
 
-#### 涉及文件
-| 操作 | 文件 |
-|------|------|
-| 修改 | `scripts/lib/rag_engine/rag_engine.py` |
+**文件 2: `scripts/lib/rag_engine/data_importer.py`** — 修复 import_all()
 
-#### 权衡考虑
+```python
+# data_importer.py — 修复 import_all() 方法中的两个问题
+        if not skip_vector:
+            self._ensure_embedding_setup()
+            index = self.import_to_vector_db(documents, force_rebuild)
+            if index is not None:
+                stats['vector'] = len(documents)
+                index_stats = self.index_manager.get_index_stats()
+                logger.info(f"向量索引统计: {index_stats}")
+```
+
+##### 涉及文件
+| 操作 | 文件路径 |
+|------|---------|
+| 修改 | `scripts/lib/rag_engine/index_manager.py` |
+| 修改 | `scripts/lib/rag_engine/data_importer.py` |
+
+##### 权衡考虑
 | 方案 | 优点 | 缺点 | 选择 |
 |------|------|------|------|
-| A. 强制引用 + few-shot | 引用率高，格式规范，无需额外依赖 | 增加 prompt 长度约 100 token | ✅ |
-| B. 结构化 JSON 输出 | 引用关系精确，方便后处理解析 | 需要 LLM 支持 JSON mode，兼容性风险 | ⏳ |
-| C. 仅改措辞不加示例 | 改动最小 | 效果不确定，LLM 可能不遵循 | ❌ |
+| A: 在 VectorIndexManager 中添加 get_index_stats() | 完整实现，可扩展 | 需要了解 LlamaIndex 内部结构 | ✅ |
+| B: 删除 data_importer.py 中的调用 | 最简单 | 丢失索引统计信息 | ❌ |
+| C: 用 try-except 包裹调用 | 容错性好 | 隐藏潜在问题 | ❌ |
 
-#### 测试建议
+##### 测试建议
 ```python
-# scripts/tests/unit/test_rag_engine_trust.py
-import pytest
-from unittest.mock import MagicMock, patch
-
-from lib.rag_engine.rag_engine import RAGEngine, _QA_PROMPT_TEMPLATE
-
-
-class TestPromptCitationFormat:
-    """验证 Prompt 引用标注格式"""
-
-    def test_prompt_requires_source_tags(self):
-        """Prompt 必须要求 [来源X] 格式标注"""
-        assert '[来源X]' in _QA_PROMPT_TEMPLATE
-        assert '事实性陈述' in _QA_PROMPT_TEMPLATE
-
-    def test_prompt_has_few_shot_example(self):
-        """Prompt 必须包含 few-shot 示例"""
-        assert '回答示例' in _QA_PROMPT_TEMPLATE
-        assert '[来源1]' in _QA_PROMPT_TEMPLATE
-
-    def test_prompt_requires_no_fabrication(self):
-        """Prompt 必须禁止编造"""
-        assert '不得编造' in _QA_PROMPT_TEMPLATE or '不要编造' in _QA_PROMPT_TEMPLATE
-
-    def test_prompt_has_unknown_handling(self):
-        """Prompt 必须定义无法回答时的行为"""
-        assert '未涉及' in _QA_PROMPT_TEMPLATE or '不足' in _QA_PROMPT_TEMPLATE
+def test_get_index_stats_returns_dict():
+    manager = VectorIndexManager(RAGConfig())
+    stats = manager.get_index_stats()
+    assert isinstance(stats, dict)
+    assert 'initialized' in stats
 ```
 
-#### 验收标准
-- [ ] Prompt 中包含 `[来源X]` 格式要求
-- [ ] Prompt 中包含至少 1 个 few-shot 示例
-- [ ] Prompt 中包含"不得编造"的明确禁止
-- [ ] Prompt 中定义了无法回答时的处理方式
-- [ ] 手动测试 10 个问题，引用标注率 ≥ 90%
+##### 验收标准
+- [ ] `import_all(skip_vector=False)` 不再抛出 `AttributeError`
+- [ ] `get_index_stats()` 返回包含 `initialized` 键的字典
+- [ ] 日志输出包含索引统计信息
 
 ---
 
-### P0-2: 建立 answer → sources 引用映射 ✅
+#### 问题 1.2: [P1] `_ensure_embedding_setup()` 死代码 — 独立使用时 Embedding 未初始化 ✅
 
-#### 问题概述
-- **文件**: `scripts/lib/rag_engine/rag_engine.py:205-208`
-- **函数**: `ask()` / `_do_ask()`
-- **严重程度**: P0
-- **影响范围**: 所有 `ask()` 返回值，用户无法验证答案来源
+##### 问题概述
+- **文件**: `scripts/lib/rag_engine/data_importer.py:43-48`
+- **函数**: `RegulationDataImporter._ensure_embedding_setup()`
+- **严重程度**: 🔴 P1
+- **影响范围**: 独立使用 `RegulationDataImporter` 时（如 `evaluate_rag.py`），向量索引使用未配置的 embedding 模型
 
-#### 当前代码
+##### 修复方案
+此问题与问题 1.1 合并修复。在 `import_all()` 的向量索引构建前添加 `self._ensure_embedding_setup()` 调用。代码变更见问题 1.1 的文件 2 修改。
+
+##### 验收标准
+- [ ] `import_all()` 在创建向量索引前调用 `_ensure_embedding_setup()`
+- [ ] 独立使用 `RegulationDataImporter` 时 `Settings.embed_model` 被正确设置
+- [ ] `_ensure_embedding_setup()` 只执行一次（幂等性）
+
+---
+
+### ⚠️ 检索质量问题 (P1/P2 - 尽快修复) ✅
+
+---
+
+#### 问题 2.1: [P1] 上下文窗口硬编码过小 — 检索结果信息丢失 ✅
+
+##### 问题概述
+- **文件**: `scripts/lib/rag_engine/rag_engine.py:256-279`
+- **函数**: `RAGEngine._build_qa_prompt()`
+- **严重程度**: ⚠️ P1
+- **评估维度**: Context Relevance
+- **影响范围**: 复杂问题（multi_hop）的回答质量，高质量检索结果被静默丢弃
+
+##### 当前代码
 ```python
-# scripts/lib/rag_engine/rag_engine.py:205-208
-return {
-    'answer': str(answer),
-    'sources': search_results if include_sources else [],
-}
+# rag_engine.py:259
+max_chars = self.config.max_context_chars  # 默认 4000
 ```
-`answer` 和 `sources` 之间没有引用映射关系。
-
-#### 修复方案
-在 `_do_ask()` 中解析 LLM 输出的 `[来源X]` 标记，建立句子→来源的映射关系，添加到返回结构中。
-
-**解决思路**:
-1. 使用正则提取 LLM 输出中的 `[来源X]` 标记
-2. 将标记映射到对应的 source 文档
-3. 在返回结构中新增 `citations` 字段
-4. 检测未被引用的 source 和未被验证的事实性陈述
-
-#### 代码变更
-
-**步骤 1**: 新增引用解析模块
 
 ```python
-# scripts/lib/rag_engine/attribution.py — 新增文件
-"""引用解析和归因模块
+# config.py — RAGConfig 中的默认值
+max_context_chars: int = 4000
+```
 
-解析 LLM 回答中的引用标注，建立句子→来源映射。
-"""
-import re
-import logging
-from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass, field
+##### 修复方案
+将 `max_context_chars` 默认值从 4000 提升到 8000，并在 `_build_qa_prompt()` 中添加截断日志。
 
-logger = logging.getLogger(__name__)
+##### 代码变更
 
-_SOURCE_TAG_PATTERN = re.compile(r'\[来源(\d+)\]')
+**文件 1: `scripts/lib/rag_engine/config.py`** — 修改默认值
 
-_FACTUAL_PATTERNS = [
-    re.compile(r'\d+天'),                # 等待期天数
-    re.compile(r'\d+年'),                # 保险期间
-    re.compile(r'\d+个月'),              # 期限月份
-    re.compile(r'\d+%'),                 # 费率比例
-    re.compile(r'\d+元'),                # 限额金额
-    re.compile(r'\d+万元'),              # 大额限额
-    re.compile(r'\d+周岁'),              # 年龄限制
-    re.compile(r'第[一二三四五六七八九十百千\d]+条'),  # 条款号
-    re.compile(r'《[^》]+》'),            # 法规名称引用
-    re.compile(r'(必须|应当|不得|禁止|严禁|不得以)'),  # 强断言
-    re.compile(r'(有权|无权|免除|承担)'),              # 权利义务
-    re.compile(r'\d{4}年\d{1,2}月'),      # 完整日期
-    re.compile(r'\d{4}年'),               # 年份
-    re.compile(r'(赔偿|赔付|给付|退还|返还)\s*\d+'),  # 赔付数字
-]
+```python
+# config.py:77-143 — RAGConfig 类
+@dataclass
+class RAGConfig:
+    regulations_dir: str = "./references"
+    vector_db_path: Optional[str] = None
+    chunk_size: int = 1000
+    chunk_overlap: int = 100
+    chunking_strategy: str = "semantic"
+    chunking_config: Optional[ChunkingConfig] = None
+    top_k_results: int = 5
+    enable_streaming: bool = False
+    hybrid_config: HybridQueryConfig = None
+    collection_name: str = "regulations_vectors"
+    max_context_chars: int = 8000  # 从 4000 提升到 8000
+    enable_faithfulness: bool = True
+```
 
+**文件 2: `scripts/lib/rag_engine/rag_engine.py`** — 添加截断日志
 
-@dataclass(frozen=True)
-class Citation:
-    """单条引用"""
-    source_idx: int
-    law_name: str
-    article_number: str
-    content: str
-    confidence: str = 'tagged'  # tagged | similarity | nli
+```python
+# rag_engine.py:256-279 — 修改 _build_qa_prompt 方法
+    def _build_qa_prompt(self, question: str, search_results: List[Dict[str, Any]]) -> tuple[str, int]:
+        context_parts: List[str] = []
+        total_chars = 0
+        max_chars = self.config.max_context_chars
 
+        for i, result in enumerate(search_results, 1):
+            law_name = result.get('law_name', '未知法规')
+            article = result.get('article_number', '')
+            content = result.get('content', '')
+            header = f"{i}. 【{law_name}】{article}\n"
+            full_part = header + content
 
-@dataclass(frozen=True)
-class AttributionResult:
-    """归因分析结果"""
-    citations: List[Citation] = field(default_factory=list)
-    unverified_claims: List[str] = field(default_factory=list)
-    uncited_sources: List[int] = field(default_factory=list)
+            if total_chars + len(full_part) > max_chars:
+                remaining = max_chars - total_chars - 50
+                if remaining > 100:
+                    truncated_content = content[:remaining] + '……'
+                    context_parts.append(header + truncated_content)
+                    logger.info(
+                        f"上下文截断: 条款 [{law_name}]{article} 从 {len(content)} 字符截断到 {remaining} 字符, "
+                        f"丢弃后续 {len(search_results) - i} 条结果"
+                    )
+                else:
+                    logger.info(
+                        f"上下文空间不足，丢弃条款 [{law_name}]{article} 及后续 {len(search_results) - i} 条结果"
+                    )
+                break
 
+            context_parts.append(full_part)
+            total_chars += len(full_part)
 
-def parse_citations(
-    answer: str,
-    sources: List[Dict[str, Any]],
-) -> AttributionResult:
-    """解析 LLM 回答中的引用标注
+        context = "\n\n".join(context_parts)
+        return _QA_PROMPT_TEMPLATE.format(context=context, question=question), len(context_parts)
+```
 
-    Args:
-        answer: LLM 生成的回答文本
-        sources: 检索阶段返回的来源列表
+##### 涉及文件
+| 操作 | 文件路径 |
+|------|---------|
+| 修改 | `scripts/lib/rag_engine/config.py` |
+| 修改 | `scripts/lib/rag_engine/rag_engine.py` |
 
-    Returns:
-        AttributionResult: 包含引用映射和未验证声明
-    """
-    if not answer or not sources:
-        return AttributionResult()
+##### 权衡考虑
+| 方案 | 优点 | 缺点 | 选择 |
+|------|------|------|------|
+| A: 提升默认值到 8000 | 简单直接，兼容现有配置 | 可能增加 token 消耗 | ✅ |
+| B: 动态预算（根据模型上下文窗口） | 自适应 | 复杂，需获取模型配置 | ⏳ |
+| C: 按 top_k 结果数自动调整 | 无需配置 | 不可预测，可能超出窗口 | ❌ |
 
-    # 1. 提取所有引用标记
-    cited_indices: set = set()
-    citations: List[Citation] = []
+##### 注意事项
+- GLM-4-flash 支持 128K 上下文，8000 字符远在安全范围内
+- 已有 Rerank 限制 `rerank_top_k=5`，实际进入 prompt 的结果通常不超过 5 条
+- 用户可通过 `RAGConfig(max_context_chars=...)` 覆盖默认值
 
-    for match in _SOURCE_TAG_PATTERN.finditer(answer):
-        idx = int(match.group(1)) - 1  # [来源1] → index 0
-        if 0 <= idx < len(sources):
-            cited_indices.add(idx)
-            source = sources[idx]
-            citations.append(Citation(
-                source_idx=idx,
-                law_name=source.get('law_name', '未知'),
-                article_number=source.get('article_number', '未知'),
-                content=source.get('content', ''),
-            ))
+##### 验收标准
+- [ ] `max_context_chars` 默认值为 8000
+- [ ] 截断发生时输出 INFO 级别日志，包含被截断的法规名和条款号
+- [ ] 5 条平均长度的法规条款（每条约 1000 字符）可以完整放入上下文
+- [ ] 已有测试不受影响
 
-    # 2. 检测未被引用的来源
-    all_indices = set(range(len(sources)))
-    uncited = sorted(all_indices - cited_indices)
+---
 
-    # 3. 检测未验证的事实性陈述（未被 [来源X] 覆盖的句子）
-    unverified = _detect_unverified_claims(answer, cited_indices)
+#### 问题 2.2: [P1] `_is_relevant()` 相关性判断逻辑缺陷 — 评估指标失真 ✅
 
-    return AttributionResult(
-        citations=citations,
-        unverified_claims=unverified,
-        uncited_sources=uncited,
+##### 问题概述
+- **文件**: `scripts/lib/rag_engine/evaluator.py:168-176`
+- **函数**: `_is_relevant()`
+- **严重程度**: ⚠️ P1
+- **评估维度**: Precision@K, Recall@K
+- **影响范围**: 当评估样本的 `evidence_keywords` 为空时，Precision/Recall 虚高
+
+##### 当前代码
+```python
+# evaluator.py:168-176
+if law_name and evidence_docs:
+    for doc in evidence_docs:
+        doc_stem = doc.replace('.md', '').replace('_', '')
+        if doc_stem and len(doc_stem) >= 4 and doc_stem in law_name:
+            if evidence_keywords:
+                if _contains_keyword(content, evidence_keywords):
+                    return True
+            else:
+                return True  # ← 无关键词时直接返回 True
+```
+
+##### 修复方案
+移除 `else: return True` 分支。当无关键词且 law_name 匹配时，要求 `source_file` 也匹配才算相关。
+
+##### 代码变更
+
+**文件: `scripts/lib/rag_engine/evaluator.py`** — 修改 `_is_relevant()` 函数
+
+```python
+# evaluator.py:147-178 — 替换整个函数
+def _is_relevant(
+    result: Dict[str, Any],
+    evidence_docs: List[str],
+    evidence_keywords: List[str],
+) -> bool:
+    content = result.get('content', '')
+    source_file = result.get('source_file', '')
+    law_name = result.get('law_name', '')
+
+    if evidence_keywords:
+        long_keywords = [kw for kw in evidence_keywords if len(kw) >= 2]
+        matched = sum(1 for kw in long_keywords if kw in content)
+        required = min(2, len(long_keywords))
+        if matched >= required:
+            return True
+
+    doc_set = set(evidence_docs)
+    if source_file and source_file in doc_set and evidence_keywords:
+        if _contains_keyword(content, evidence_keywords):
+            return True
+
+    if law_name and evidence_docs:
+        for doc in evidence_docs:
+            doc_stem = doc.replace('.md', '').replace('_', '')
+            if doc_stem and len(doc_stem) >= 4 and doc_stem in law_name:
+                if evidence_keywords:
+                    if _contains_keyword(content, evidence_keywords):
+                        return True
+                elif source_file and source_file in doc_set:
+                    return True
+
+    return False
+```
+
+##### 涉及文件
+| 操作 | 文件路径 |
+|------|---------|
+| 修改 | `scripts/lib/rag_engine/evaluator.py` |
+
+##### 权衡考虑
+| 方案 | 优点 | 缺点 | 选择 |
+|------|------|------|------|
+| A: 移除 else 分支，要求 source_file 也匹配 | 严格，避免误判 | 可能漏判无关键词但确实相关的结果 | ✅ |
+| B: 保留 else 但增加条款号匹配要求 | 更灵活 | 复杂度增加 | ❌ |
+| C: 对无关键词样本跳过评估 | 简单 | 丢失评估覆盖 | ❌ |
+
+##### 验收标准
+- [ ] 当 `evidence_keywords` 为空时，仅 `law_name` 匹配不再返回 True
+- [ ] 当 `evidence_keywords` 为空且 `source_file` 匹配时，返回 True
+- [ ] 当 `evidence_keywords` 非空时，行为不变
+- [ ] 已有测试通过
+
+---
+
+#### 问题 2.3: [P1] 轻量级 Faithfulness 评估方式过于粗糙 ✅
+
+##### 问题概述
+- **文件**: `scripts/lib/rag_engine/evaluator.py:576-590`
+- **函数**: `GenerationEvaluator._compute_faithfulness()`
+- **严重程度**: ⚠️ P1
+- **评估维度**: Faithfulness
+- **影响范围**: RAGAS 不可用时的离线评估几乎无效
+
+##### 当前代码
+```python
+# evaluator.py:586-590
+@staticmethod
+def _compute_faithfulness(contexts: List[str], answer: str) -> float:
+    """答案 token 对检索上下文 token 的覆盖率"""
+    if not contexts:
+        return 0.0
+    return GenerationEvaluator._token_overlap(' '.join(contexts), answer)
+```
+
+##### 修复方案
+将 token 级覆盖率改为 bigram 级覆盖率。bigram 比 unigram 更能捕捉事实性陈述（如 "90天"、"等待期"），且计算成本仍然很低。
+
+##### 代码变更
+
+**文件: `scripts/lib/rag_engine/evaluator.py`** — 替换三个方法
+
+```python
+# evaluator.py — 替换 _token_overlap, _compute_faithfulness, _compute_correctness
+    @staticmethod
+    def _token_bigrams(text: str) -> Set[str]:
+        """提取文本的 bigram 集合"""
+        tokens = tokenize_chinese(text)
+        return {tokens[i] + tokens[i + 1] for i in range(len(tokens) - 1)} if len(tokens) >= 2 else set()
+
+    @staticmethod
+    def _bigram_overlap(text_a: str, text_b: str) -> float:
+        """计算 text_a 的 bigram 对 text_b 的覆盖率"""
+        bigrams_a = GenerationEvaluator._token_bigrams(text_a)
+        bigrams_b = GenerationEvaluator._token_bigrams(text_b)
+        if not bigrams_a or not bigrams_b:
+            return 0.0
+        covered = bigrams_a & bigrams_b
+        return len(covered) / len(bigrams_a)
+
+    @staticmethod
+    def _compute_faithfulness(contexts: List[str], answer: str) -> float:
+        """答案 bigram 对检索上下文 bigram 的覆盖率"""
+        if not contexts or not answer:
+            return 0.0
+        return GenerationEvaluator._bigram_overlap(answer, ' '.join(contexts))
+
+    @staticmethod
+    def _compute_correctness(answer: str, ground_truth: str) -> float:
+        """标准答案 bigram 对答案 bigram 的覆盖率"""
+        if not answer or not ground_truth:
+            return 0.0
+        return GenerationEvaluator._bigram_overlap(ground_truth, answer)
+```
+
+##### 涉及文件
+| 操作 | 文件路径 |
+|------|---------|
+| 修改 | `scripts/lib/rag_engine/evaluator.py` |
+
+##### 权衡考虑
+| 方案 | 优点 | 缺点 | 选择 |
+|------|------|------|------|
+| A: bigram 覆盖率 | 比 unigram 更精确，计算快 | 仍非 claim 级验证 | ✅ |
+| B: 句子级相似度验证 | 更接近 claim-based | 需要调用 embedding，成本高 | ❌ |
+| C: NLI 模型判断 | 最准确 | 需要额外模型，复杂度高 | ❌ |
+
+##### 验收标准
+- [ ] `_compute_faithfulness()` 使用 bigram 而非 unigram
+- [ ] 幻觉内容（如 "180天" vs "90天"）的 bigram 覆盖率明显低于原文内容
+- [ ] 空输入返回 0.0
+- [ ] `_compute_correctness()` 同步使用 bigram
+- [ ] 已有测试通过（轻量级评估的测试如有）
+
+---
+
+#### 问题 2.4: [P2] 检索后过滤导致 Top-K 结果不足 ✅
+
+##### 问题概述
+- **文件**: `scripts/lib/rag_engine/rag_engine.py:309-313`
+- **函数**: `RAGEngine.search()`
+- **严重程度**: ⚠️ P2
+- **评估维度**: Recall@K
+
+##### 修复方案
+当使用混合检索时，`_hybrid_search()` 内部已经将 filters 传递给向量检索和 BM25 检索。因此 `search()` 中的后置过滤是重复的。移除 `search()` 中的后置过滤，仅依赖检索层内部的过滤。
+
+##### 代码变更
+
+**文件: `scripts/lib/rag_engine/rag_engine.py`** — 修改 search() 方法
+
+```python
+# rag_engine.py:288-319 — 替换 search() 方法
+    def search(
+        self,
+        query_text: str,
+        top_k: int = None,
+        use_hybrid: bool = True,
+        filters: Dict[str, Any] = None
+    ) -> List[Dict[str, Any]]:
+        """检索模式：返回结构化法规列表"""
+        if not self._initialized:
+            if not self.initialize():
+                return []
+
+        _thread_settings.apply()
+
+        try:
+            if use_hybrid:
+                results = self._hybrid_search(query_text, top_k, filters)
+            else:
+                response = self.query_engine.query(query_text)
+                results = self._extract_results_from_response(response)
+
+            if top_k:
+                results = results[:top_k]
+
+            return results
+
+        except (RuntimeError, ValueError, KeyError, AttributeError) as e:
+            logger.error(f"搜索出错: {e}")
+            return []
+```
+
+同时删除 `_apply_filters` 方法（已无调用方）。
+
+##### 涉及文件
+| 操作 | 文件路径 |
+|------|---------|
+| 修改 | `scripts/lib/rag_engine/rag_engine.py` |
+
+##### 权衡考虑
+| 方案 | 优点 | 缺点 | 选择 |
+|------|------|------|------|
+| A: 移除后置过滤，依赖检索层过滤 | 消除重复，结果更可预测 | 纯向量检索模式可能不受过滤 | ✅ |
+| B: 后置过滤后回溯补充 | 结果数量稳定 | 实现复杂，增加延迟 | ❌ |
+| C: 保持现状 | 无改动 | 重复过滤导致结果不足 | ❌ |
+
+##### 验收标准
+- [ ] `search(filters=...)` 的过滤行为由检索层内部处理
+- [ ] 移除重复过滤后，测试通过
+- [ ] `search_by_metadata()` 行为不变
+
+---
+
+#### 问题 2.5: [P2] 查询扩展导致 RRF 分数膨胀 ✅
+
+##### 问题概述
+- **文件**: `scripts/lib/rag_engine/retrieval.py:90-106`
+- **函数**: `hybrid_search()`
+- **严重程度**: ⚠️ P2
+- **评估维度**: NDCG, MRR
+
+##### 当前代码
+```python
+# retrieval.py:103-106
+for fv in vector_futures:
+    vector_nodes.extend(fv.result())  # 直接 extend，无去重
+for fk in keyword_futures:
+    keyword_nodes.extend(_to_node_with_scores(fk.result()))
+```
+
+##### 修复方案
+在 `fusion.py` 中添加 `num_queries` 参数，对来自扩展 query 的结果应用衰减权重（除以总 query 数量），使原始 query 的分数权重高于扩展 query。
+
+##### 代码变更
+
+**文件 1: `scripts/lib/rag_engine/retrieval.py`** — 传递 num_queries
+
+```python
+# retrieval.py:108-112 — 修改 hybrid_search 返回调用
+    total_queries = 1 + (len(preprocessed.expanded) - 1 if preprocessed.did_expand else 0)
+    return reciprocal_rank_fusion(
+        vector_nodes, keyword_nodes, k=k,
+        vector_weight=vector_weight, keyword_weight=keyword_weight,
+        max_chunks_per_article=max_chunks_per_article,
+        num_queries=total_queries,
     )
+```
 
+**文件 2: `scripts/lib/rag_engine/fusion.py`** — 添加衰减权重
 
+```python
+# fusion.py:19-70 — 替换 reciprocal_rank_fusion 函数签名和实现
+def reciprocal_rank_fusion(
+    vector_results: List[NodeWithScore],
+    keyword_results: List[NodeWithScore],
+    k: int = 60,
+    vector_weight: float = 1.0,
+    keyword_weight: float = 1.0,
+    max_chunks_per_article: int = 3,
+    num_queries: int = 1,
+) -> List[Dict[str, Any]]:
+    """Reciprocal Rank Fusion 融合两路检索结果"""
+    if not vector_results and not keyword_results:
+        return []
+
+    scores: Dict[str, float] = defaultdict(float)
+    chunks = {}
+
+    expansion_decay = 1.0 / num_queries if num_queries > 1 else 1.0
+
+    for rank, scored in enumerate(vector_results):
+        key = _chunk_key(scored)
+        scores[key] += vector_weight / (k + rank + 1) * expansion_decay
+        chunks[key] = scored.node
+
+    for rank, scored in enumerate(keyword_results):
+        key = _chunk_key(scored)
+        scores[key] += keyword_weight / (k + rank + 1) * expansion_decay
+        chunks[key] = scored.node
+
+    results = []
+    for key, rrf_score in scores.items():
+        chunk = chunks[key]
+        results.append({
+            'law_name': chunk.metadata.get('law_name', '未知'),
+            'article_number': chunk.metadata.get('article_number', '未知'),
+            'category': chunk.metadata.get('category', ''),
+            'content': chunk.text,
+            'source_file': chunk.metadata.get('source_file', ''),
+            'hierarchy_path': chunk.metadata.get('hierarchy_path', ''),
+            'score': rrf_score,
+        })
+
+    results = _deduplicate_by_article(results, max_chunks_per_article)
+    return sorted(results, key=lambda x: x['score'], reverse=True)
+```
+
+##### 涉及文件
+| 操作 | 文件路径 |
+|------|---------|
+| 修改 | `scripts/lib/rag_engine/retrieval.py` |
+| 修改 | `scripts/lib/rag_engine/fusion.py` |
+
+##### 权衡考虑
+| 方案 | 优点 | 缺点 | 选择 |
+|------|------|------|------|
+| A: 扩展结果分数除以总 query 数 | 简单有效，防止膨胀 | 降低扩展结果的区分度 | ✅ |
+| B: 扩展结果使用独立权重参数 | 灵活可调 | 增加配置复杂度 | ❌ |
+| C: 不做处理 | 最简单 | 分数膨胀导致排序偏差 | ❌ |
+
+##### 注意事项
+- `num_queries` 默认为 1，不启用查询扩展时行为不变
+- 衰减应用于所有结果（包括原始 query 的结果），确保公平性
+
+##### 验收标准
+- [ ] 不启用查询扩展时，RRF 分数与之前一致
+- [ ] 启用查询扩展时，同一 chunk 在多个 query 中出现不会导致分数不成比例膨胀
+- [ ] `reciprocal_rank_fusion()` 签名向后兼容（`num_queries` 有默认值）
+
+---
+
+#### 问题 2.6: [P2] LLM Rerank 内容截断丢失关键信息 ✅
+
+##### 问题概述
+- **文件**: `scripts/lib/rag_engine/reranker.py:78`
+- **函数**: `LLMReranker._batch_rank()`
+- **严重程度**: ⚠️ P2
+- **评估维度**: NDCG, Precision@K
+
+##### 当前代码
+```python
+# reranker.py:78
+truncated = content[:800] if len(content) > 800 else content
+```
+
+##### 修复方案
+将截断长度从 800 提升到 1500 字符，并在截断时添加标记。
+
+##### 代码变更
+
+**文件: `scripts/lib/rag_engine/reranker.py`** — 修改 _batch_rank 方法
+
+```python
+# reranker.py:73-79 — 替换内容截断逻辑
+    def _batch_rank(self, query: str, candidates: List[Dict[str, Any]]) -> tuple:
+        """返回 (ranked_indices, did_rerank)"""
+        parts = []
+        for i, candidate in enumerate(candidates, 1):
+            content = candidate.get('content', '')
+            law_name = candidate.get('law_name', '')
+            article = candidate.get('article_number', '')
+            truncated = content[:1500] if len(content) > 1500 else content
+            if len(content) > 1500:
+                truncated += '\n[内容已截断]'
+            parts.append(f"[{i}] 【{law_name}】{article}\n{truncated}")
+```
+
+##### 涉及文件
+| 操作 | 文件路径 |
+|------|---------|
+| 修改 | `scripts/lib/rag_engine/reranker.py` |
+
+##### 验收标准
+- [ ] 截断长度为 1500 字符
+- [ ] 截断时附加 `[内容已截断]` 标记
+- [ ] 未截断的内容不受影响
+
+---
+
+#### 问题 2.7: [P2] 评估缺少 Context Relevance 指标 ✅
+
+##### 问题概述
+- **文件**: `scripts/lib/rag_engine/evaluator.py`
+- **严重程度**: ⚠️ P2
+- **评估维度**: Context Relevance
+
+##### 修复方案
+添加 `_compute_context_relevance()` 函数，计算检索上下文中与问题 query 的 bigram 重叠度。在 `RetrievalEvalReport` 中添加字段，在 `evaluate()` 中计算，在 `evaluate_batch()` 中聚合。
+
+##### 代码变更
+
+**文件: `scripts/lib/rag_engine/evaluator.py`**
+
+1. 在 `RetrievalEvalReport` 中添加字段：
+```python
+@dataclass
+class RetrievalEvalReport:
+    precision_at_k: float = 0.0
+    recall_at_k: float = 0.0
+    mrr: float = 0.0
+    ndcg: float = 0.0
+    redundancy_rate: float = 0.0
+    context_relevance: float = 0.0  # 新增
+    by_type: Dict[str, Dict[str, float]] = field(default_factory=dict)
+```
+
+2. 在 `to_dict()` 和 `print_report()` 中添加 `context_relevance`。
+
+3. 添加计算函数：
+```python
+# evaluator.py — 在 _compute_redundancy_rate 后面添加
+def _compute_context_relevance(query: str, results: List[Dict[str, Any]]) -> float:
+    """计算检索上下文中与问题 query 的 bigram 重叠度"""
+    if not query or not results:
+        return 0.0
+    query_bigrams = GenerationEvaluator._token_bigrams(query)
+    if not query_bigrams:
+        return 0.0
+    context_text = ' '.join(r.get('content', '') for r in results)
+    context_bigrams = GenerationEvaluator._token_bigrams(context_text)
+    if not context_bigrams:
+        return 0.0
+    matched = query_bigrams & context_bigrams
+    return len(matched) / len(query_bigrams)
+```
+
+4. 在 `RetrievalEvaluator.evaluate()` 返回值中添加 `'context_relevance': context_relevance`。
+
+5. 在 `evaluate_batch()` 聚合中添加 `context_relevance`。
+
+##### 涉及文件
+| 操作 | 文件路径 |
+|------|---------|
+| 修改 | `scripts/lib/rag_engine/evaluator.py` |
+
+##### 验收标准
+- [ ] `RetrievalEvalReport` 包含 `context_relevance` 字段
+- [ ] `context_relevance` 值在 0.0-1.0 范围内
+- [ ] 检索结果与问题高度相关时 `context_relevance` 较高
+- [ ] `print_report()` 输出包含新指标
+
+---
+
+### ⚡ 代码质量问题 (P2/P3) ✅
+
+---
+
+#### 问题 3.1: [P2] `_detect_unverified_claims()` 覆盖检测逻辑错误 ✅
+
+##### 问题概述
+- **文件**: `scripts/lib/rag_engine/attribution.py:106-127`
+- **函数**: `_detect_unverified_claims()`
+- **严重程度**: ⚡ P2
+- **评估维度**: Faithfulness
+
+##### 修复方案
+使用 `re.finditer` 计算字符级覆盖范围，替代不可靠的 split 索引判断。移除死代码 `pos` 变量。
+
+##### 代码变更
+
+**文件: `scripts/lib/rag_engine/attribution.py`** — 替换 _detect_unverified_claims 函数
+
+```python
+# attribution.py:88-129 — 替换整个函数
 def _detect_unverified_claims(
     answer: str,
-    cited_indices: set,
+    cited_indices: set[int],
 ) -> List[str]:
-    """检测未被引用标注覆盖的事实性陈述
-
-    将 answer 按 [来源X] 标记分割为段落，
-    对不含标记的段落检测事实性陈述。
-    """
+    """检测未被引用标注覆盖的事实性陈述"""
     if not answer:
         return []
 
-    # 按 [来源X] 分割，得到不含标记的文本段
+    covered_spans: List[Tuple[int, int]] = []
+    for match in _SOURCE_TAG_PATTERN.finditer(answer):
+        covered_spans.append((match.start(), match.end()))
+
     segments = _SOURCE_TAG_PATTERN.split(answer)
     unverified: List[str] = []
 
     for segment in segments:
         segment = segment.strip()
-        if not segment or segment[-1].isdigit():
-            # 跳过引用编号残留（纯数字）
+        if not segment:
             continue
+
+        if len(segment) <= 2:
+            continue
+
+        if segment.isdigit():
+            continue
+
+        start_pos = answer.find(segment)
+        is_covered = False
+        for cov_start, cov_end in covered_spans:
+            if cov_start - 5 <= start_pos <= cov_end + 5:
+                is_covered = True
+                break
+
+        if is_covered:
+            continue
+
         for pattern in _FACTUAL_PATTERNS:
             if pattern.search(segment):
                 unverified.append(segment)
                 break
 
     return unverified
-
-
-def _split_sentences(text: str) -> List[str]:
-    """按中文句号分割"""
-    parts = re.split(r'(?<=[。！？\n])\s*', text)
-    return [p.strip() for p in parts if p.strip()]
-
-
-def _cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
-    """计算余弦相似度"""
-    import math
-    dot = sum(a * b for a, b in zip(vec_a, vec_b))
-    norm_a = math.sqrt(sum(a * a for a in vec_a))
-    norm_b = math.sqrt(sum(b * b for b in vec_b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
-
-
-def _contains_factual_pattern(text: str) -> bool:
-    """检测文本是否包含事实性陈述模式"""
-    for pattern in _FACTUAL_PATTERNS:
-        if pattern.search(text):
-            return True
-    return False
-
-
-def attribute_by_similarity(
-    answer: str,
-    sources: List[Dict[str, Any]],
-    embed_func: callable = None,
-    threshold: float = 0.6,
-) -> AttributionResult:
-    """基于 embedding 相似度的逐句归因
-
-    对 answer 中的每个句子，找到最相似的 source。
-    适用于 LLM 未输出 [来源X] 标记或需要交叉验证的场景。
-
-    Args:
-        answer: LLM 生成的回答文本
-        sources: 检索阶段返回的来源列表
-        embed_func: embedding 函数，签名 embed_func(text) -> List[float]
-        threshold: 相似度阈值，低于此值视为未验证
-
-    Returns:
-        AttributionResult: 归因结果
-    """
-    if not answer or not sources or not embed_func:
-        return AttributionResult()
-
-    sentences = _split_sentences(answer)
-    citations: List[Citation] = []
-    unverified: List[str] = []
-
-    # 预计算 source embeddings
-    source_texts = [s.get('content', '') for s in sources]
-
-    try:
-        source_embeds = [embed_func(t) for t in source_texts]
-    except Exception as e:
-        logger.warning(f"Embedding 计算失败: {e}")
-        return AttributionResult()
-
-    for sentence in sentences:
-        sentence = sentence.strip()
-        if not sentence or len(sentence) < 5:
-            continue
-
-        try:
-            sentence_embed = embed_func(sentence)
-        except Exception:
-            continue
-
-        best_idx = -1
-        best_score = -1.0
-        for idx, src_embed in enumerate(source_embeds):
-            score = _cosine_similarity(sentence_embed, src_embed)
-            if score > best_score:
-                best_score = score
-                best_idx = idx
-
-        if best_score >= threshold and best_idx >= 0:
-            source = sources[best_idx]
-            citations.append(Citation(
-                source_idx=best_idx,
-                law_name=source.get('law_name', '未知'),
-                article_number=source.get('article_number', '未知'),
-                content=source.get('content', ''),
-                confidence='similarity',
-            ))
-        elif _contains_factual_pattern(sentence):
-            unverified.append(sentence)
-
-    # 检测未被引用的 source
-    cited_indices = {c.source_idx for c in citations}
-    uncited = sorted(set(range(len(sources))) - cited_indices)
-
-    return AttributionResult(
-        citations=citations,
-        unverified_claims=unverified,
-        uncited_sources=uncited,
-    )
 ```
 
-**步骤 2**: 修改 `_do_ask()` 返回结构
+##### 涉及文件
+| 操作 | 文件路径 |
+|------|---------|
+| 修改 | `scripts/lib/rag_engine/attribution.py` |
 
-```python
-# scripts/lib/rag_engine/rag_engine.py — 修改 _do_ask() 方法
-
-# 在文件顶部 import 区域添加:
-from .attribution import parse_citations, AttributionResult
-
-# 修改 _do_ask() 方法 (约 line 189-213):
-def _do_ask(self, question: str, include_sources: bool) -> Dict[str, Any]:
-    if not self._initialized:
-        if not self.initialize():
-            raise EngineInitializationError("RAG 引擎初始化失败")
-
-    _thread_settings.apply()
-
-    try:
-        search_results = self._hybrid_search(question, top_k=self.config.top_k_results)
-        if not search_results:
-            return {
-                'answer': '未找到相关法规条款，请尝试换个描述方式。',
-                'sources': [],
-                'citations': [],
-                'unverified_claims': [],
-            }
-
-        prompt = self._build_qa_prompt(question, search_results)
-        assert self._llm_client is not None
-        answer = self._llm_client.generate(prompt)
-        answer_str = str(answer)
-
-        # 解析引用映射
-        attribution = parse_citations(answer_str, search_results) if include_sources else AttributionResult()
-
-        return {
-            'answer': answer_str,
-            'sources': search_results if include_sources else [],
-            'citations': [
-                {
-                    'source_idx': c.source_idx,
-                    'law_name': c.law_name,
-                    'article_number': c.article_number,
-                    'content': c.content,
-                }
-                for c in attribution.citations
-            ],
-            'unverified_claims': attribution.unverified_claims,
-        }
-
-    except EngineInitializationError:
-        raise
-    except Exception as e:
-        raise RetrievalError(f"问答出错: {e}") from e
-```
-
-#### 涉及文件
-| 操作 | 文件 |
-|------|------|
-| 新增 | `scripts/lib/rag_engine/attribution.py` |
-| 修改 | `scripts/lib/rag_engine/rag_engine.py` |
-| 修改 | `scripts/lib/rag_engine/__init__.py` — 添加 attribution 导出 |
-
-#### 权衡考虑
-| 方案 | 优点 | 缺点 | 选择 |
-|------|------|------|------|
-| A. 正则解析 [来源X] 标记 | 实现简单，零额外延迟 | 依赖 LLM 正确输出标记 | ✅ |
-| B. 语义相似度匹配归因 | 不依赖标记格式 | 增加计算延迟，需要 embedding | ⏳ |
-| C. LLM 自引用 JSON 结构化输出 | 引用关系精确 | 需要 JSON mode 支持，兼容性风险 | ❌ |
-
-#### 测试建议
-```python
-# scripts/tests/unit/test_attribution.py
-import pytest
-from lib.rag_engine.attribution import parse_citations, Citation
-
-
-class TestParseCitations:
-    """引用解析测试"""
-
-    def _make_sources(self, count=3):
-        return [
-            {
-                'law_name': f'法规{i+1}',
-                'article_number': f'第{i+1}条',
-                'content': f'这是第{i+1}条法规的内容。',
-                'source_file': f'test_{i+1}.md',
-            }
-            for i in range(count)
-        ]
-
-    def test_single_citation(self):
-        answer = '等待期不得超过90天 [来源1]。'
-        sources = self._make_sources(1)
-        result = parse_citations(answer, sources)
-
-        assert len(result.citations) == 1
-        assert result.citations[0].law_name == '法规1'
-
-    def test_multiple_citations(self):
-        answer = '等待期不得超过90天 [来源1]。投保人应如实告知 [来源2]。'
-        sources = self._make_sources(3)
-        result = parse_citations(answer, sources)
-
-        assert len(result.citations) == 2
-        assert result.citations[0].source_idx == 0
-        assert result.citations[1].source_idx == 1
-
-    def test_uncited_sources(self):
-        answer = '等待期不得超过90天 [来源1]。'
-        sources = self._make_sources(3)
-        result = parse_citations(answer, sources)
-
-        assert result.uncited_sources == [1, 2]
-
-    def test_unverified_factual_claim(self):
-        """未被引用覆盖的含数字句子应被标记"""
-        answer = '保险期间为5年，等待期不超过180天。'
-        sources = self._make_sources(1)
-        result = parse_citations(answer, sources)
-
-        assert len(result.unverified_claims) > 0
-
-    def test_verified_claim_not_flagged(self):
-        """被引用覆盖的事实性陈述不应标记为未验证"""
-        answer = '等待期不得超过90天 [来源1]。'
-        sources = self._make_sources(1)
-        result = parse_citations(answer, sources)
-
-        assert len(result.unverified_claims) == 0
-
-    def test_empty_answer(self):
-        result = parse_citations('', [])
-        assert result.citations == []
-        assert result.unverified_claims == []
-
-    def test_out_of_range_source(self):
-        """超出范围的来源编号应被忽略"""
-        answer = '等待期不得超过90天 [来源99]。'
-        sources = self._make_sources(1)
-        result = parse_citations(answer, sources)
-
-        assert len(result.citations) == 0
-
-    def test_strong_assertion_detected(self):
-        """强断言关键词应被检测"""
-        answer = '保险公司必须设立合规部门。'
-        sources = self._make_sources(1)
-        result = parse_citations(answer, sources)
-
-        assert len(result.unverified_claims) > 0
-```
-
-#### 验收标准
-- [ ] `ask()` 返回值包含 `citations` 和 `unverified_claims` 字段
-- [ ] `[来源X]` 标记能正确解析为对应的 source
-- [ ] 超出范围的来源编号被忽略
-- [ ] 未被引用的事实性陈述（含数字/强断言）被标记
-- [ ] 未被引用的 source 在 `uncited_sources` 中列出
-- [ ] 向后兼容：不含 `citations` 字段的旧代码不会报错
+##### 验收标准
+- [ ] "等待期为90天" 这类以数字结尾的事实性陈述不被误跳过
+- [ ] 有 `[来源1]` 标记覆盖的段落不被报告为未验证
+- [ ] 无引用标记的事实性数字陈述被正确检测
+- [ ] 死代码 `pos` 变量已移除
 
 ---
 
-### P0-3: 修复上下文截断逻辑 ✅
+#### 问题 3.2: [P2] `ThreadLocalSettings.apply()` 线程安全缺陷 ✅
 
-#### 问题概述
-- **文件**: `scripts/lib/rag_engine/rag_engine.py:223-240`
-- **函数**: `_build_qa_prompt()`
-- **严重程度**: P0
-- **影响范围**: 所有 `ask()` 请求，可能导致 LLM 基于不完整条款回答
+##### 问题概述
+- **文件**: `scripts/lib/rag_engine/rag_engine.py:78-82`
+- **函数**: `ThreadLocalSettings.apply()`
+- **严重程度**: ⚡ P2
 
-#### 当前代码
+##### 修复方案
+在 `apply()` 方法中添加锁保护，复用 `__init__` 中已创建的 `self._lock`。
+
+##### 代码变更
+
+**文件: `scripts/lib/rag_engine/rag_engine.py`** — 修改 apply() 和 reset()
+
 ```python
-# scripts/lib/rag_engine/rag_engine.py:223-240
-def _build_qa_prompt(self, question: str, search_results: List[Dict[str, Any]]) -> str:
-    context_parts: List[str] = []
-    total_chars = 0
+# rag_engine.py:78-89 — 替换 apply() 和 reset()
+    def apply(self) -> None:
+        """应用线程配置到全局 Settings"""
+        if hasattr(self._local, 'initialized') and self._local.initialized:
+            with self._lock:
+                Settings.llm = self._local.llm
+                Settings.embed_model = self._local.embed_model
 
-    for i, result in enumerate(search_results, 1):
-        law_name = result.get('law_name', '未知法规')
-        article = result.get('article_number', '')
-        content = result.get('content', '')
-        part = f"{i}. 【{law_name}】{article}\n{content}"
-
-        if total_chars + len(part) > _MAX_CONTEXT_CHARS:
-            break  # ← 在条款中间截断，可能丢失关键信息
-
-        context_parts.append(part)
-        total_chars += len(part)
-
-    context = "\n\n".join(context_parts)
-    return _QA_PROMPT_TEMPLATE.format(context=context, question=question)
+    def reset(self) -> None:
+        """重置为全局默认配置"""
+        with self._lock:
+            if self._global_backup:
+                Settings.llm = self._global_backup['llm']
+                Settings.embed_model = self._global_backup['embed_model']
 ```
 
-#### 修复方案
-当单个条款超过截断限制时，尝试截断该条款内容而非直接丢弃。确保至少保留条款的前半部分内容，并在末尾添加省略标记。
-
-#### 代码变更
-```python
-# scripts/lib/rag_engine/rag_engine.py — 替换 _build_qa_prompt() 方法
-_HEADER_OVERHEAD = 50  # "X. 【法规名】条款号\n" 的预估长度
-
-def _build_qa_prompt(self, question: str, search_results: List[Dict[str, Any]]) -> str:
-    context_parts: List[str] = []
-    total_chars = 0
-
-    for i, result in enumerate(search_results, 1):
-        law_name = result.get('law_name', '未知法规')
-        article = result.get('article_number', '')
-        content = result.get('content', '')
-        header = f"{i}. 【{law_name}】{article}\n"
-        full_part = header + content
-
-        if total_chars + len(full_part) > _MAX_CONTEXT_CHARS:
-            remaining = _MAX_CONTEXT_CHARS - total_chars - _HEADER_OVERHEAD
-            if remaining > 100:
-                truncated_content = content[:remaining] + '……'
-                context_parts.append(header + truncated_content)
-            break
-
-        context_parts.append(full_part)
-        total_chars += len(full_part)
-
-    context = "\n\n".join(context_parts)
-    return _QA_PROMPT_TEMPLATE.format(context=context, question=question)
-```
-
-#### 涉及文件
-| 操作 | 文件 |
-|------|------|
+##### 涉及文件
+| 操作 | 文件路径 |
+|------|---------|
 | 修改 | `scripts/lib/rag_engine/rag_engine.py` |
 
-#### 权衡考虑
-| 方案 | 优点 | 缺点 | 选择 |
-|------|------|------|------|
-| A. 截断条款内容并标记省略 | 保留部分信息，避免完全丢失 | 截断位置可能不理想 | ✅ |
-| B. 直接丢弃超出条款 | 逻辑简单 | 可能丢失重要条款 | ❌ |
-| C. 动态调整上下文窗口大小 | 最灵活 | 需要了解 LLM 的 token 限制 | ⏳ |
-
-#### 测试建议
-```python
-# scripts/tests/unit/test_rag_engine_trust.py
-class TestBuildQaPrompt:
-    """上下文截断测试"""
-
-    def test_truncation_marks_incomplete_clause(self, tmp_path):
-        """超长条款应截断并添加省略标记"""
-        engine = RAGEngine.__new__(RAGEngine)
-        engine.config = RAGConfig()
-
-        results = [
-            {
-                'law_name': '测试法规',
-                'article_number': '第一条',
-                'content': '短内容。' * 5,
-            },
-            {
-                'law_name': '测试法规',
-                'article_number': '第二条',
-                'content': '这是一段非常长的内容。' * 200,
-            },
-        ]
-
-        prompt = engine._build_qa_prompt('测试问题', results)
-        assert '……' in prompt
-
-    def test_short_content_not_truncated(self, tmp_path):
-        """短内容不应被截断"""
-        engine = RAGEngine.__new__(RAGEngine)
-        engine.config = RAGConfig()
-
-        results = [
-            {
-                'law_name': '测试法规',
-                'article_number': '第一条',
-                'content': '短内容。',
-            },
-        ]
-
-        prompt = engine._build_qa_prompt('测试问题', results)
-        assert '……' not in prompt
-
-    def test_empty_results(self, tmp_path):
-        """空结果应生成有效 prompt"""
-        engine = RAGEngine.__new__(RAGEngine)
-        engine.config = RAGConfig()
-
-        prompt = engine._build_qa_prompt('测试问题', [])
-        assert '用户问题' in prompt
-        assert '测试问题' in prompt
-```
-
-#### 验收标准
-- [ ] 超出 `_MAX_CONTEXT_CHARS` 的条款被截断并添加省略标记
-- [ ] 短条款不被截断
-- [ ] 空结果列表不导致异常
-- [ ] 截断后的 prompt 仍为有效格式
+##### 验收标准
+- [ ] `apply()` 在写入全局 Settings 时持有锁
+- [ ] 多线程并发调用 `apply()` 不会产生竞态条件
 
 ---
 
-### P1-1: 后处理归因模块（相似度匹配） ✅
+#### 问题 3.3: [P3] Reranker fallback 路径修改原始数据 ✅
 
-#### 问题概述
-- **文件**: 新增 `scripts/lib/rag_engine/attribution.py`
-- **严重程度**: P1
-- **影响范围**: 提供第二层防护：逐句归因
+##### 问题概述
+- **文件**: `scripts/lib/rag_engine/reranker.py:56-58`
+- **严重程度**: ⚡ P3
 
-#### 修复方案
-在 `attribution.py` 中扩展归因能力，对未被 `[来源X]` 标记覆盖的句子，使用 embedding 相似度匹配最佳来源。
+##### 修复方案
+fallback 路径使用 `dict(candidates[i])` 创建浅拷贝。
 
-**解决思路**:
-1. 将 answer 按句号分割
-2. 对每个句子，计算与所有 sources 的 embedding 余弦相似度
-3. 相似度 > 阈值时标记为 `similarity` 置信级别
-4. 低于阈值的事实性陈述标记为 `unverified_claim`
+##### 代码变更
 
-具体代码已在 P0-2 的 `attribution.py` 中包含 `attribute_by_similarity()` 函数。
+**文件: `scripts/lib/rag_engine/reranker.py`** — 修改 fallback 路径
 
-#### 涉及文件
-| 操作 | 文件 |
-|------|------|
-| 修改 | `scripts/lib/rag_engine/attribution.py`（已在 P0-2 新增） |
-
-#### 权衡考虑
-| 方案 | 优点 | 缺点 | 选择 |
-|------|------|------|------|
-| A. Embedding 余弦相似度 | 语义理解好，误判率低 | 增加 1 次 embedding 计算 | ✅ |
-| B. Token Jaccard 相似度 | 无需额外计算 | 语义理解差，中文分词噪声大 | ❌ |
-| C. NLI cross-encoder | 最精确，能检测蕴含/矛盾 | 计算量大，需要额外模型 | ⏳ |
-
-#### 验收标准
-- [ ] 相似度归因函数对已知匹配的句子返回正确的 source
-- [ ] 低于阈值的句子被标记为 unverified
-- [ ] 空 answer 或空 sources 不导致异常
-- [ ] cosine_similarity 对零向量返回 0.0
-
----
-
-## 二、代码质量修复方案（P2） ✅
-
-### P2-1: 删除 VectorDB 遗留代码 ✅
-
-#### 问题概述
-- **文件**: `scripts/lib/rag_engine/vector_store.py` (全部 376 行)
-- **严重程度**: P2
-- **影响范围**: 无功能影响，但造成维护混淆
-
-#### 修复方案
-根据 CLAUDE.md 约束 16（"Dead code cleanup: remove unused code paths"），直接删除整个文件。确认无模块引用后删除。
-
-#### 代码变更
-```bash
-git rm scripts/lib/rag_engine/vector_store.py
-```
-
-#### 涉及文件
-| 操作 | 文件 |
-|------|------|
-| 删除 | `scripts/lib/rag_engine/vector_store.py` |
-
-#### 验收标准
-- [ ] `git grep -l "VectorDB\|vector_store" scripts/` 不返回任何业务代码引用
-- [ ] `pytest scripts/tests/` 全部通过
-- [ ] `mypy scripts/lib/rag_engine/` 无错误
-
----
-
-### P2-2: 修复 Reranker 排序解析正则 ✅
-
-#### 问题概述
-- **文件**: `scripts/lib/rag_engine/reranker.py:89-105`
-- **函数**: `_parse_ranking()`
-- **严重程度**: P2
-- **影响范围**: LLM 输出包含解释文字时可能误解析
-
-#### 当前代码
 ```python
-# scripts/lib/rag_engine/reranker.py:89-105
-@staticmethod
-def _parse_ranking(response: str, total: int) -> List[int]:
-    numbers = re.findall(r'\d+', response)  # ← 过于宽松
-    result: List[int] = []
-    seen: set[int] = set()
-    for num_str in numbers:
-        num = int(num_str)
-        if 1 <= num <= total:
-            idx = num - 1
-            if idx not in seen:
-                result.append(idx)
-                seen.add(idx)
-    for i in range(total):
-        if i not in seen:
-            result.append(i)
-    return result
+# reranker.py:55-59 — 替换 fallback 路径
+        if not did_rerank:
+            fallback = [dict(candidates[i]) for i in range(top_k)]
+            for r in fallback:
+                r['reranked'] = False
+            return fallback
 ```
 
-#### 修复方案
-使用更精确的正则，匹配逗号/空格分隔的数字序列，忽略解释性文字中的数字。
-
-#### 代码变更
-```python
-# scripts/lib/rag_engine/reranker.py — 替换 _parse_ranking() 方法
-@staticmethod
-def _parse_ranking(response: str, total: int) -> List[int]:
-    # 优先匹配 "2,5,1,4,3" 或 "2 5 1 4 3" 格式
-    comma_pattern = re.compile(r'^[\d,\s]+$')
-    if comma_pattern.match(response.strip()):
-        numbers = re.findall(r'\d+', response)
-    else:
-        # 回退：提取行首数字或被逗号/句号分隔的数字
-        numbers = re.findall(r'(?:^|[\s,，;；.。])\s*(\d+)\s*(?:$|[\s,，;；.。])', response)
-
-    result: List[int] = []
-    seen: set[int] = set()
-    for num_str in numbers:
-        try:
-            num = int(num_str)
-        except ValueError:
-            continue
-        if 1 <= num <= total:
-            idx = num - 1
-            if idx not in seen:
-                result.append(idx)
-                seen.add(idx)
-
-    # 未出现的编号追加到末尾
-    for i in range(total):
-        if i not in seen:
-            result.append(i)
-
-    return result
-```
-
-#### 涉及文件
-| 操作 | 文件 |
-|------|------|
+##### 涉及文件
+| 操作 | 文件路径 |
+|------|---------|
 | 修改 | `scripts/lib/rag_engine/reranker.py` |
 
-#### 权衡考虑
-| 方案 | 优点 | 缺点 | 选择 |
-|------|------|------|------|
-| A. 严格正则 + 宽松回退 | 兼顾精确和容错 | 正则稍复杂 | ✅ |
-| B. 仅用 `\d+` 全提取 | 简单 | 误提取解释中的数字 | ❌ |
-| C. 要求 JSON 输出格式 | 最精确 | 需要 LLM 支持 JSON mode | ⏳ |
-
-#### 测试建议
-```python
-# scripts/tests/unit/test_reranker.py
-import pytest
-from lib.rag_engine.reranker import LLMReranker
-
-
-class TestParseRanking:
-    """排序解析测试"""
-
-    def test_standard_format(self):
-        """标准逗号分隔格式"""
-        result = LLMReranker._parse_ranking("2,5,1,4,3", 5)
-        assert result == [1, 4, 0, 3, 2]
-
-    def test_with_spaces(self):
-        """带空格的格式"""
-        result = LLMReranker._parse_ranking("2 5 1 4 3", 5)
-        assert result == [1, 4, 0, 3, 2]
-
-    def test_partial_ranking(self):
-        """部分排序，未出现的追加到末尾"""
-        result = LLMReranker._parse_ranking("3,1", 5)
-        assert result[:2] == [2, 0]
-        assert set(result) == {0, 1, 2, 3, 4}
-
-    def test_with_explanation_text(self):
-        """包含解释文字时不应误提取数字"""
-        result = LLMReranker._parse_ranking(
-            "2是最相关的，因为内容匹配了100%的要求", 3
-        )
-        # "100" 不应被解析为编号（超出范围 1-3）
-        assert 99 not in [x + 1 for x in result]
-
-    def test_empty_response(self):
-        """空响应应返回原始顺序"""
-        result = LLMReranker._parse_ranking("", 3)
-        assert result == [0, 1, 2]
-
-    def test_duplicate_numbers(self):
-        """重复编号只保留第一次出现"""
-        result = LLMReranker._parse_ranking("1,1,2,2,3", 3)
-        assert result == [0, 1, 2]
-
-    def test_out_of_range_numbers(self):
-        """超出范围的编号应被忽略"""
-        result = LLMReranker._parse_ranking("1,99,2", 3)
-        assert 98 not in result
-```
-
-#### 验收标准
-- [ ] 标准逗号分隔格式正确解析
-- [ ] 部分排序时未出现的编号追加到末尾
-- [ ] 重复编号只保留第一次
-- [ ] 超出范围的编号被忽略
-- [ ] 空响应返回原始顺序
+##### 验收标准
+- [ ] fallback 路径不修改原始 candidates 列表
+- [ ] 成功路径和 fallback 路径都创建副本
 
 ---
 
-### P2-3: 修复评估器冗余率分母 ✅
-
-#### 问题概述
-- **文件**: `scripts/lib/rag_engine/evaluator.py:220`
-- **函数**: `_compute_redundancy_rate()`
-- **严重程度**: P2
-- **影响范围**: 冗余率指标可能超过 1.0，导致评估报告失真
-
-#### 当前代码
-```python
-# scripts/lib/rag_engine/evaluator.py:204-220
-def _compute_redundancy_rate(results: List[Dict[str, Any]]) -> float:
-    if len(results) <= 1:
-        return 0.0
-    valid_sets = [...]
-    redundant_count = 0
-    n = len(valid_sets)
-    for i in range(n):
-        for j in range(i + 1, n):
-            if _jaccard_similarity(valid_sets[i], valid_sets[j]) > 0.6:
-                redundant_count += 1
-    return redundant_count / n  # ← 分母应为 n*(n-1)/2
-```
-
-#### 修复方案
-将分母改为配对数量 `n*(n-1)/2`。
-
-#### 代码变更
-```python
-# scripts/lib/rag_engine/evaluator.py:220 — 替换 return 语句
-def _compute_redundancy_rate(results: List[Dict[str, Any]]) -> float:
-    if len(results) <= 1:
-        return 0.0
-
-    valid_sets: List[Set[str]] = [
-        ts for r in results
-        if (ts := _tokenize_to_set(r.get('content', ''))) is not None
-    ]
-    n = len(valid_sets)
-    if n <= 1:
-        return 0.0
-
-    redundant_count = 0
-    for i in range(n):
-        for j in range(i + 1, n):
-            if _jaccard_similarity(valid_sets[i], valid_sets[j]) > 0.6:
-                redundant_count += 1
-
-    return redundant_count / (n * (n - 1) / 2)
-```
-
-#### 涉及文件
-| 操作 | 文件 |
-|------|------|
-| 修改 | `scripts/lib/rag_engine/evaluator.py` |
-
-#### 测试建议
-```python
-# scripts/tests/unit/test_evaluator.py
-from lib.rag_engine.evaluator import _compute_redundancy_rate
-
-
-class TestRedundancyRate:
-    def test_empty_results(self):
-        assert _compute_redundancy_rate([]) == 0.0
-
-    def test_single_result(self):
-        assert _compute_redundancy_rate([{'content': '测试内容'}]) == 0.0
-
-    def test_no_redundancy(self):
-        results = [
-            {'content': '健康保险等待期规定'},
-            {'content': '意外伤害保险理赔流程'},
-        ]
-        rate = _compute_redundancy_rate(results)
-        assert 0.0 <= rate <= 1.0
-
-    def test_identical_results(self):
-        """完全相同的内容应返回 1.0"""
-        results = [
-            {'content': '健康保险等待期不得超过90天'},
-            {'content': '健康保险等待期不得超过90天'},
-        ]
-        rate = _compute_redundancy_rate(results)
-        assert rate == 1.0
-
-    def test_rate_never_exceeds_one(self):
-        """冗余率不应超过 1.0"""
-        results = [{'content': f'内容{i}' * 5} for i in range(10)]
-        rate = _compute_redundancy_rate(results)
-        assert 0.0 <= rate <= 1.0
-```
-
-#### 验收标准
-- [ ] 冗余率计算结果在 [0.0, 1.0] 范围内
-- [ ] 完全相同的内容返回 1.0
-- [ ] 完全不同的内容返回 0.0
-- [ ] 空列表和单元素列表返回 0.0
+### 🏗️ 设计缺陷 (P2/P3) ✅
 
 ---
 
-### P2-4: Reranker 失败时标记结果 ✅
+#### 问题 4.1: [P2] 测试断言条件化 — 掩盖失败 ✅
 
-#### 问题概述
-- **文件**: `scripts/lib/rag_engine/reranker.py:84-86`
-- **函数**: `_batch_rank()`
-- **严重程度**: P2
-- **影响范围**: 排序失败时用户无感知
+##### 问题概述
+- **文件**: `scripts/tests/integration/test_rag_integration.py`
+- **严重程度**: ⚡ P2
 
-#### 当前代码
+##### 修复方案
+将 `if results:` 条件断言改为 `assert results` 确定性断言。
+
+##### 代码变更
+
+**文件: `scripts/tests/integration/test_rag_integration.py`**
+
+将所有类似代码：
 ```python
-# scripts/lib/rag_engine/reranker.py:81-86
-except Exception as e:
-    logger.warning(f"Rerank 批量排序失败: {e}")
-    return list(range(len(candidates)))  # ← 静默回退
+results = engine.search("等待期", top_k=5)
+if results:
+    assert any('等待期' in r.get('content', '') for r in results)
 ```
 
-#### 修复方案
-在返回结果中添加 `reranked` 标记，让调用方知道排序是否实际执行。
-
-#### 代码变更
+替换为：
 ```python
-# scripts/lib/rag_engine/reranker.py — 修改 rerank() 和 _batch_rank()
-
-def rerank(
-    self,
-    query: str,
-    candidates: List[Dict[str, Any]],
-    top_k: Optional[int] = None
-) -> List[Dict[str, Any]]:
-    if not self._config.enabled or not candidates:
-        return candidates[:top_k] if top_k else candidates
-
-    top_k = top_k or self._config.top_k
-    candidates = candidates[:self._config.max_candidates]
-
-    ranked_indices, did_rerank = self._batch_rank(query, candidates)
-    if not did_rerank:
-        results = candidates[:top_k]
-        for r in results:
-            r['reranked'] = False
-        return results
-
-    results: List[Dict[str, Any]] = []
-    for rank, idx in enumerate(ranked_indices[:top_k]):
-        candidate = candidates[idx]
-        result = dict(candidate)
-        result['rerank_score'] = 1.0 / (rank + 1)
-        result['reranked'] = True
-        results.append(result)
-
-    return results
-
-def _batch_rank(self, query: str, candidates: List[Dict[str, Any]]) -> tuple:
-    """返回 (ranked_indices, did_rerank)"""
-    parts = []
-    for i, candidate in enumerate(candidates, 1):
-        content = candidate.get('content', '')
-        law_name = candidate.get('law_name', '')
-        article = candidate.get('article_number', '')
-        truncated = content[:800] if len(content) > 800 else content
-        parts.append(f"[{i}] 【{law_name}】{article}\n{truncated}")
-
-    prompt = _BATCH_RERANK_PROMPT.format(
-        query=query,
-        candidates="\n\n".join(parts),
-    )
-
-    try:
-        response = self._llm.generate(prompt)
-        return self._parse_ranking(str(response).strip(), len(candidates)), True
-    except Exception as e:
-        logger.warning(f"Rerank 批量排序失败: {e}")
-        return list(range(len(candidates))), False
+results = engine.search("等待期", top_k=5)
+assert results, "检索应返回结果"
+assert any('等待期' in r.get('content', '') for r in results)
 ```
 
-#### 涉及文件
-| 操作 | 文件 |
-|------|------|
-| 修改 | `scripts/lib/rag_engine/reranker.py` |
-
-#### 验收标准
-- [ ] 排序成功时，结果包含 `reranked: True`
-- [ ] 排序失败时，结果包含 `reranked: False`
-- [ ] `reranked` 不影响现有代码逻辑（仅作为附加标记）
+##### 验收标准
+- [ ] 检索返回空结果时测试失败而非通过
+- [ ] 所有原有通过的测试继续通过
 
 ---
 
-### P2-5: 修复死方法引用 ✅
+#### 问题 4.2: [P3] BM25 索引未包含在备份中 ✅
 
-#### 问题概述
-- **文件**: `scripts/lib/rag_engine/data_importer.py:130`
-- **严重程度**: P3
-- **影响范围**: `import_all()` 中 `skip_vector=False` 时会触发 `AttributeError`
+##### 问题概述
+- **文件**: `scripts/lib/rag_engine/data_importer.py:192`
+- **严重程度**: 🏗️ P3
 
-#### 当前代码
+##### 修复方案
+在 `rebuild_knowledge_base()` 的备份步骤中，同时备份 BM25 索引文件。
+
+##### 代码变更
+
+**文件: `scripts/lib/rag_engine/data_importer.py`** — 修改 rebuild_knowledge_base
+
+在备份步骤中添加：
 ```python
-# scripts/lib/rag_engine/data_importer.py:130-131
-index_stats = self.index_manager.get_index_stats()
-logger.info(f"索引统计: {index_stats}")
+                bm25_path = vector_db_path.parent / "bm25_index.pkl"
+                if bm25_path.exists():
+                    import shutil
+                    shutil.copy2(bm25_path, backup_dir / "bm25_index.pkl")
 ```
 
-`VectorIndexManager` 类中不存在 `get_index_stats()` 方法。
-
-#### 修复方案
-删除对不存在方法的调用，替换为基于已导入文档数量的统计。
-
-#### 代码变更
-```python
-# scripts/lib/rag_engine/data_importer.py:126-132 — 替换
-if self.import_to_vector_db(documents, force_rebuild):
-    stats['vector'] = len(documents)
-    logger.info(f"向量索引已创建，共 {len(documents)} 个文档块")
-step_num += 1
-```
-
-#### 涉及文件
-| 操作 | 文件 |
-|------|------|
+##### 涉及文件
+| 操作 | 文件路径 |
+|------|---------|
 | 修改 | `scripts/lib/rag_engine/data_importer.py` |
 
-#### 验收标准
-- [ ] `import_all()` 正常执行不报错
-- [ ] 导入统计信息正确输出
+##### 验收标准
+- [ ] 重建时 BM25 索引被备份到同一备份目录
+- [ ] BM25 索引文件不存在时不报错
 
 ---
 
-### P2-6: 修复 rag_fixtures.py 中的 preload_index 引用 ✅
+#### 问题 4.3: [P3] `hybrid` 分块策略在 config 中定义但未实现 ✅
 
-#### 问题概述
-- **文件**: `scripts/tests/utils/rag_fixtures.py:325`
-- **严重程度**: P3
-- **影响范围**: `production_rag_engine` fixture 无法使用
+##### 问题概述
+- **文件**: `scripts/lib/rag_engine/config.py`, `scripts/lib/rag_engine/doc_parser.py`
+- **严重程度**: 🏗️ P3
 
-#### 当前代码
+##### 修复方案
+从 `ChunkingConfig.__post_init__` 的合法策略列表中移除 `"hybrid"`。
+
+##### 代码变更
+
+**文件: `scripts/lib/rag_engine/config.py`** — 修改 ChunkingConfig 验证
+
 ```python
-# scripts/tests/utils/rag_fixtures.py:323-325
-engine = RAGEngine(production_rag_config)
-engine.preload_index()  # ← RAGEngine 没有此方法
+# config.py:47-49 — 修改策略验证
+    def __post_init__(self):
+        if self.strategy not in ("fixed", "semantic"):
+            raise ValueError(
+                f"Invalid chunking strategy: {self.strategy}. "
+                f"Must be 'fixed' or 'semantic'."
+            )
 ```
 
-#### 修复方案
-将 `preload_index()` 替换为 `initialize()`。
+##### 涉及文件
+| 操作 | 文件路径 |
+|------|---------|
+| 修改 | `scripts/lib/rag_engine/config.py` |
 
-#### 代码变更
-```python
-# scripts/tests/utils/rag_fixtures.py:323-325 — 替换
-engine = RAGEngine(production_rag_config)
-engine.initialize()
-return engine
-```
-
-#### 涉及文件
-| 操作 | 文件 |
-|------|------|
-| 修改 | `scripts/tests/utils/rag_fixtures.py` |
-
-#### 验收标准
-- [ ] `production_rag_engine` fixture 正常创建引擎
-- [ ] 引擎处于已初始化状态
+##### 验收标准
+- [ ] `ChunkingConfig(strategy="hybrid")` 抛出 `ValueError`
+- [ ] `ChunkingConfig(strategy="semantic")` 和 `ChunkingConfig(strategy="fixed")` 正常工作
 
 ---
 
-### P2-7: Query 预处理性能优化 ✅
+## 二、测试覆盖改进方案
 
-#### 问题概述
-- **文件**: `scripts/lib/rag_engine/query_preprocessor.py:82-94`
-- **函数**: `_rewrite_with_llm()`
-- **严重程度**: P2
-- **影响范围**: 每次 `preprocess()` 调用增加 1-2 秒延迟
+### 2.1 新增测试计划
 
-#### 当前代码
+#### 优先级 P1（核心模块）
+
+**1. `scripts/tests/unit/test_reranker.py`** — Reranker 单元测试
 ```python
-# scripts/lib/rag_engine/query_preprocessor.py:82-94
-def _rewrite_with_llm(self, query: str) -> Optional[str]:
-    if not self._llm:
-        return None
-    try:
-        prompt = _REWRITE_PROMPT.format(query=query)
-        response = self._llm.generate(prompt)
-        result = str(response).strip()
-        if result and len(result) > 2:
-            return result
-        return None
-    except Exception as e:
-        logger.warning(f"LLM query 重写失败: {e}")
-        return None
-```
-
-#### 修复方案
-添加简单的查询复杂度判断，对简单查询（≤ 8 字符且无复杂结构）跳过 LLM 重写。
-
-#### 代码变更
-```python
-# scripts/lib/rag_engine/query_preprocessor.py — 修改 _rewrite_with_llm()
-_SIMPLE_QUERY_THRESHOLD = 8
-
-def _rewrite_with_llm(self, query: str) -> Optional[str]:
-    if not self._llm:
-        return None
-    # 简单查询（短查询）跳过 LLM 重写
-    if len(query) <= _SIMPLE_QUERY_THRESHOLD:
-        return None
-    try:
-        prompt = _REWRITE_PROMPT.format(query=query)
-        response = self._llm.generate(prompt)
-        result = str(response).strip()
-        if result and len(result) > 2:
-            return result
-        return None
-    except Exception as e:
-        logger.warning(f"LLM query 重写失败: {e}")
-        return None
-```
-
-#### 涉及文件
-| 操作 | 文件 |
-|------|------|
-| 修改 | `scripts/lib/rag_engine/query_preprocessor.py` |
-
-#### 权衡考虑
-| 方案 | 优点 | 缺点 | 选择 |
-|------|------|------|------|
-| A. 按长度跳过简单查询 | 零成本，延迟降低明显 | 长度阈值需要调优 | ✅ |
-| B. 缓存重写结果 | 重复查询受益 | 增加内存使用 | ⏳ |
-| C. 异步重写不阻塞主流程 | 延迟最低 | 实现复杂，需要异步架构 | ❌ |
-
-#### 验收标准
-- [ ] ≤ 8 字符的查询不触发 LLM 重写
-- [ ] > 8 字符的查询仍正常重写
-- [ ] 重写失败时正常回退到归一化结果
-
----
-
-## 三、测试覆盖改进方案 ✅
-
-### 3.1 当前测试覆盖分析
-
-| 模块 | 覆盖率估算 | 优先级 |
-|------|-----------|--------|
-| rag_engine.py | 30% | 高 |
-| retrieval.py | 40% | 中 |
-| fusion.py | 20% | 高 |
-| reranker.py | 0% | 高 |
-| query_preprocessor.py | 0% | 高 |
-| evaluator.py | 0% | 高 |
-| semantic_chunker.py | 20% | 中 |
-| bm25_index.py | 40% | 低 |
-| attribution.py | 0% | 高（新增模块） |
-
-### 3.2 新增测试计划 ✅
-
-#### 优先级 P0 — 新增模块必须覆盖
-
-| 测试文件 | 覆盖模块 | 测试点 |
-|----------|----------|--------|
-| `scripts/tests/unit/test_attribution.py` | attribution.py | 引用解析、相似度归因、事实性检测、边界情况 |
-| `scripts/tests/unit/test_rag_engine_trust.py` | rag_engine.py (可信) | Prompt 格式、上下文截断、返回结构 |
-
-#### 优先级 P1 — 核心模块单元测试
-
-| 测试文件 | 覆盖模块 | 测试点 |
-|----------|----------|--------|
-| `scripts/tests/unit/test_reranker.py` | reranker.py | 排序解析、边界输入、失败回退、标记 |
-| `scripts/tests/unit/test_query_preprocessor.py` | query_preprocessor.py | 同义词替换、LLM 重写、空 query、扩展 |
-| `scripts/tests/unit/test_fusion.py` | fusion.py | RRF 融合、去重、空结果、单路结果 |
-| `scripts/tests/unit/test_evaluator.py` | evaluator.py | 冗余率、相关性判断、轻量级指标 |
-
-#### 优先级 P2 — 辅助模块
-
-| 测试文件 | 覆盖模块 | 测试点 |
-|----------|----------|--------|
-| `scripts/tests/unit/test_retrieval.py` | retrieval.py | 混合检索编排、Query 扩展 |
-| `scripts/tests/unit/test_semantic_chunker.py` | semantic_chunker.py | 长文档、无标题、非标准格式 |
-
-### 3.3 测试基础设施
-
-#### Reranker 测试 Mock
-
-```python
-# scripts/tests/unit/test_reranker.py
-import pytest
-from unittest.mock import MagicMock
-
-from lib.rag_engine.reranker import LLMReranker, RerankConfig
-
-
-@pytest.fixture
-def mock_llm():
-    return MagicMock()
-
-
-@pytest.fixture
-def reranker(mock_llm):
-    config = RerankConfig(enabled=True, top_k=3, max_candidates=10)
-    return LLMReranker(mock_llm, config)
-
-
-@pytest.fixture
-def sample_candidates():
-    return [
-        {'law_name': '法规1', 'article_number': '第一条', 'content': '等待期不超过90天。'},
-        {'law_name': '法规2', 'article_number': '第二条', 'content': '如实告知义务。'},
-        {'law_name': '法规3', 'article_number': '第三条', 'content': '保险期间不少于1年。'},
-    ]
-
-
 class TestLLMReranker:
-    def test_rerank_returns_top_k(self, reranker, mock_llm, sample_candidates):
-        mock_llm.generate.return_value = "1,3,2"
-        results = reranker.rerank("等待期规定", sample_candidates, top_k=2)
+    def test_rerank_success_returns_ranked_results(self):
+        """正常排序返回正确顺序"""
 
-        assert len(results) == 2
-        assert results[0]['reranked'] is True
-        assert results[0]['rerank_score'] == 1.0
+    def test_rerank_llm_failure_returns_original_order(self):
+        """LLM 失败时返回原始顺序并标记 reranked=False"""
 
-    def test_rerank_disabled(self, mock_llm, sample_candidates):
-        config = RerankConfig(enabled=False)
-        reranker = LLMReranker(mock_llm, config)
-        results = reranker.rerank("测试", sample_candidates)
+    def test_rerank_fallback_does_not_mutate_original(self):
+        """fallback 路径不修改原始 candidates"""
 
-        mock_llm.generate.assert_not_called()
+    def test_parse_ranking_valid_input(self):
+        """解析有效排序输出"""
 
-    def test_rerank_failure_marks_unreranked(self, reranker, mock_llm, sample_candidates):
-        mock_llm.generate.side_effect = Exception("LLM 不可用")
-        results = reranker.rerank("测试", sample_candidates)
+    def test_parse_ranking_incomplete_output(self):
+        """解析不完整输出，缺失编号追加到末尾"""
 
-        assert all(r['reranked'] is False for r in results)
+    def test_parse_ranking_invalid_numbers(self):
+        """解析包含超范围数字的输出"""
 
-    def test_rerank_truncates_candidates(self, reranker, mock_llm):
-        many_candidates = [
-            {'law_name': f'法规{i}', 'article_number': f'第{i}条', 'content': f'内容{i}。'}
-            for i in range(25)
-        ]
-        mock_llm.generate.return_value = "1,2,3"
-        results = reranker.rerank("测试", many_candidates)
+    def test_parse_ranking_duplicates(self):
+        """解析包含重复编号的输出"""
 
-        # max_candidates=10，应截断到 10 个候选
-        assert mock_llm.generate.call_count == 1
-        prompt = mock_llm.generate.call_args[0][0]
-        assert '[10]' in prompt
-        assert '[11]' not in prompt
+    def test_content_truncation_with_marker(self):
+        """超长内容截断并添加标记"""
+
+    def test_rerank_empty_candidates(self):
+        """空候选列表返回空结果"""
+
+    def test_rerank_disabled(self):
+        """禁用 rerank 时直接返回 top_k"""
 ```
 
-#### Fusion 测试
-
+**2. `scripts/tests/unit/test_query_preprocessor.py`** — 查询预处理单元测试
 ```python
-# scripts/tests/unit/test_fusion.py
-import pytest
-from llama_index.core.schema import NodeWithScore, TextNode
-from lib.rag_engine.fusion import reciprocal_rank_fusion
+class TestQueryPreprocessor:
+    def test_normalize_colloquial_terms(self):
+        """口语化术语归一化"""
 
+    def test_normalize_longest_match_first(self):
+        """最长匹配优先"""
 
-def _make_node(node_id: str, text: str, law_name: str, article: str) -> NodeWithScore:
-    node = TextNode(
-        text=text,
-        metadata={'law_name': law_name, 'article_number': article, 'category': '测试'},
-    )
-    node.node_id = node_id
-    return NodeWithScore(node=node, score=0.9)
+    def test_expand_generates_synonym_variants(self):
+        """同义扩展生成变体"""
 
+    def test_expand_deduplicates(self):
+        """扩展结果去重"""
 
+    def test_llm_rewrite_skipped_for_short_query(self):
+        """短查询（<=8字符）跳过 LLM 改写"""
+
+    def test_llm_rewrite_failure_fallback(self):
+        """LLM 改写失败时使用归一化结果"""
+
+    def test_llm_rewrite_overrides_normalization(self):
+        """LLM 改写结果覆盖归一化结果"""
+
+    def test_preprocess_full_pipeline(self):
+        """完整预处理流程"""
+```
+
+**3. `scripts/tests/unit/test_fusion.py`** — RRF 融合单元测试
+```python
 class TestReciprocalRankFusion:
     def test_empty_inputs(self):
-        result = reciprocal_rank_fusion([], [])
-        assert result == []
+        """空输入返回空列表"""
 
     def test_vector_only(self):
-        nodes = [
-            _make_node('v1', '等待期规定', '健康险', '第一条'),
-            _make_node('v2', '如实告知', '保险法', '第十六条'),
-        ]
-        result = reciprocal_rank_fusion(nodes, [])
-        assert len(result) == 2
-        assert result[0]['law_name'] == '健康险'
+        """仅有向量结果"""
 
-    def test_dedup_by_article(self):
-        nodes = [
-            _make_node('v1', '等待期不超过90天', '健康险', '第一条'),
-            _make_node('v2', '等待期不超过180天', '健康险', '第一条'),
-            _make_node('v3', '等待期不超过365天', '健康险', '第一条'),
-        ]
-        result = reciprocal_rank_fusion(nodes, [])
-        # 每条款最多 2 个 chunk
-        health_articles = [
-            r for r in result
-            if r['law_name'] == '健康险' and r['article_number'] == '第一条'
-        ]
-        assert len(health_articles) <= 2
+    def test_keyword_only(self):
+        """仅有关键词结果"""
 
-    def test_weighted_fusion(self):
-        v_nodes = [_make_node('v1', '向量结果', '法规A', '第一条')]
-        k_nodes = [_make_node('k1', '关键词结果', '法规A', '第一条')]
+    def test_fusion_combines_scores(self):
+        """两路结果正确融合"""
 
-        result_equal = reciprocal_rank_fusion(
-            v_nodes, k_nodes, vector_weight=1.0, keyword_weight=1.0
-        )
-        result_vector = reciprocal_rank_fusion(
-            v_nodes, k_nodes, vector_weight=2.0, keyword_weight=0.5
-        )
+    def test_deduplicate_by_article(self):
+        """按法规+条款去重"""
 
-        assert result_equal[0]['score'] != result_vector[0]['score']
+    def test_deduplicate_max_chunks(self):
+        """max_chunks_per_article 限制"""
+
+    def test_expansion_decay(self):
+        """扩展 query 分数衰减"""
+
+    def test_weights(self):
+        """vector_weight 和 keyword_weight 影响"""
+```
+
+#### 优先级 P2（辅助模块）
+
+**4. `scripts/tests/unit/test_attribution.py`** — 引用归因单元测试
+```python
+class TestParseCitations:
+    def test_parse_valid_citations(self):
+        """解析有效引用标记"""
+
+    def test_parse_uncited_sources(self):
+        """识别未引用的来源"""
+
+    def test_empty_answer(self):
+        """空回答返回空结果"""
+
+class TestDetectUnverifiedClaims:
+    def test_number_ending_claim_detected(self):
+        """以数字结尾的事实性陈述被检测"""
+
+    def test_cited_claim_not_reported(self):
+        """有引用标记的陈述不被报告"""
+
+    def test_legal_obligation_detected(self):
+        """法律义务关键词被检测"""
+
+    def test_no_factual_content(self):
+        """无非事实性内容时返回空列表"""
+```
+
+**5. `scripts/tests/unit/test_evaluator.py`** — 评估器单元测试
+```python
+class TestIsRelevant:
+    def test_keyword_match(self):
+        """关键词匹配返回 True"""
+
+    def test_source_file_match(self):
+        """source_file 匹配返回 True"""
+
+    def test_law_name_match_no_keywords(self):
+        """law_name 匹配但无关键词且无 source_file 返回 False"""
+
+    def test_no_match(self):
+        """无匹配返回 False"""
+
+class TestContextRelevance:
+    def test_high_relevance(self):
+        """上下文与问题高度相关"""
+
+    def test_low_relevance(self):
+        """上下文与问题无关"""
+
+    def test_empty_inputs(self):
+        """空输入返回 0.0"""
+
+class TestLightweightFaithfulness:
+    def test_bigram_overlap(self):
+        """bigram 覆盖率计算"""
+
+    def test_hallucination_detected(self):
+        """幻觉内容 bigram 覆盖率低"""
 ```
 
 ---
 
-## 四、技术债务清理方案 ✅
+## 三、技术债务清理方案
 
-### 4.1 技术债务清单
+### 3.1 清理路线图
 
-| 优先级 | 债务 | 位置 | 处理方式 |
-|--------|------|------|----------|
-| P2 | VectorDB 遗留代码 | vector_store.py | 删除 |
-| P2 | pickle 序列化 | bm25_index.py | 记录债务，暂不迁移（风险可控） |
-| P2 | ThreadLocalSettings 全局状态 | rag_engine.py | 记录债务，监控 LlamaIndex 版本更新 |
-| P3 | doc_parser.py `[条条]` typo | doc_parser.py:129 | 修正为 `[条]` |
-| P3 | BM25 索引无版本标识 | bm25_index.py | 添加版本号和兼容性检查 |
+**第一阶段（本次）— 修复 13 个问题：**
+- P0: 1 个
+- P1: 4 个
+- P2: 8 个
 
-### 4.2 清理路线图
-
-**阶段 1（本次）**: 删除 VectorDB、修复死方法引用、修正 typo
-
-**阶段 2（后续）**: 评估 BM25 序列化方案迁移（如 joblib）
-
-**阶段 3（后续）**: 评估 ThreadLocalSettings 替代方案
-
-### 4.3 修正 doc_parser.py typo ✅
-
-```python
-# scripts/lib/rag_engine/doc_parser.py:129-131 — 替换
-article_patterns = [
-    r'###\s*第([一二三四五六七八九十百千\d]+)条\s*(.+?)(?:\s|$)',
-    r'##\s*第([一二三四五六七八九十百千\d]+)条\s*(.+?)(?:\s|$)',
-    r'^第([一二三四五六七八九十百千\d]+)条\s*(.+?)(?:\s|$)',
-]
-```
-
-### 4.4 BM25 索引版本标识 ✅
-
-```python
-# scripts/lib/rag_engine/bm25_index.py — 修改 _save() 和 load()
-_BM25_INDEX_VERSION = 1
-
-@classmethod
-def _save(cls, index: 'BM25Index', path: Path) -> None:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, 'wb') as f:
-        pickle.dump({
-            'version': _BM25_INDEX_VERSION,
-            'bm25': index._bm25,
-            'nodes': index._nodes,
-        }, f)
-
-@classmethod
-def load(cls, index_path: Path) -> Optional['BM25Index']:
-    try:
-        with open(index_path, 'rb') as f:
-            data = pickle.load(f)
-
-        version = data.get('version', 0)
-        if version != _BM25_INDEX_VERSION:
-            logger.warning(
-                f"BM25 索引版本不匹配: 文件版本={version}, "
-                f"当前版本={_BM25_INDEX_VERSION}。建议重建索引。"
-            )
-
-        index = cls(data['bm25'], data['nodes'])
-        logger.info(f"BM25 索引已加载: {index_path} ({len(data['nodes'])} 个文档)")
-        return index
-    except FileNotFoundError:
-        logger.warning(f"BM25 索引文件不存在: {index_path}")
-        return None
-    except Exception as e:
-        logger.error(f"加载 BM25 索引失败: {e}")
-        return None
-```
-
----
-
-## 五、架构和代码质量改进
-
-### 5.1 改进返回结构
-
-#### 当前返回
-```python
-{'answer': str, 'sources': List[Dict]}
-```
-
-#### 目标返回
-```python
-{
-    'answer': str,
-    'sources': List[Dict],
-    'citations': List[Dict],          # 引用映射（P0-2）
-    'unverified_claims': List[str],   # 未验证事实性陈述（P0-2）
-}
-```
-
-**兼容性**: 新增字段，不删除已有字段。旧代码忽略新字段即可。
+**第二阶段（后续）— 3 个低优先级债务：**
+- P3: 配置类 frozen 化（需设计评审）
+- P3: Embedding fixture 去重
+- P3: `__init__.py` 日志副作用
 
 ---
 
@@ -1496,54 +1121,74 @@ def load(cls, index_path: Path) -> Optional['BM25Index']:
 
 ### 执行顺序建议
 
-按依赖关系和优先级排序：
-
 ```
-P0-1 强化 Prompt 引用标注          ← ✅ 无依赖，立即执行
-P0-3 修复上下文截断逻辑            ← ✅ 无依赖，立即执行
-P0-2 建立 answer→sources 引用映射  ← ✅ 依赖 P0-1（需要 [来源X] 格式）
-P1-1 后处理归因模块                ← ✅ 依赖 P0-2（扩展 attribution.py）
-P2-2 修复 Reranker 排序解析        ← ✅ 无依赖
-P2-3 修复评估器冗余率分母          ← ✅ 无依赖
-P2-4 Reranker 失败标记             ← ✅ 无依赖
-P2-5 修复死方法引用                ← ✅ 无依赖
-P2-6 修复 rag_fixtures.py          ← ✅ 无依赖
-P2-7 Query 预处理性能优化          ← ✅ 无依赖
-P2-1 删除 VectorDB 遗留代码        ← ✅ 无依赖，最后执行
-  修正 doc_parser typo             ← ✅ 无依赖
-  BM25 版本标识                    ← ✅ 无依赖
-测试覆盖                           ← ✅ 伴随每个修复一起提交
+Phase 1 (P0-P1 — 必须修复):
+  1.1 get_index_stats() 缺失         → 修复 data_importer + index_manager
+  1.2 _ensure_embedding_setup() 死代码 → 激活调用
+  2.1 上下文窗口过小                 → 提升 max_context_chars 到 8000
+  2.2 _is_relevant() 误判             → 修复 else 分支
+  2.3 轻量级 Faithfulness 粗糙        → 改为 bigram
+
+Phase 2 (P2 — 尽快修复):
+  2.4 检索后过滤重复                  → 移除 search() 后置过滤
+  2.5 查询扩展分数膨胀                → 添加扩展衰减权重
+  2.6 Rerank 截断过小                 → 提升到 1500 字符
+  2.7 缺少 Context Relevance          → 新增指标
+  3.1 _detect_unverified_claims() 逻辑错误 → 重写
+  3.2 ThreadLocalSettings 无锁        → 添加锁
+  4.1 测试条件断言                    → 改为确定性断言
+
+Phase 3 (P3 — 建议修复):
+  3.3 Reranker fallback 原始数据修改   → 创建副本
+  4.2 BM25 备份                       → 添加到备份步骤
+  4.3 hybrid 策略死配置               → 从合法值中移除
 ```
 
 ### 变更摘要
 
-| 类型 | 数量 | 详情 |
-|------|------|------|
-| 新增文件 | 1 | `attribution.py` |
-| 修改文件 | 8 | `rag_engine.py`, `reranker.py`, `evaluator.py`, `query_preprocessor.py`, `data_importer.py`, `rag_fixtures.py`, `doc_parser.py`, `bm25_index.py` |
-| 删除文件 | 1 | `vector_store.py` |
-| 新增测试 | 6 | attribution, reranker, fusion, evaluator, query_preprocessor, rag_engine_trust |
-| 修改测试 | 1 | `__init__.py`（导出） |
+| 文件 | 变更类型 | 涉及问题 |
+|------|---------|---------|
+| `scripts/lib/rag_engine/index_manager.py` | 新增方法 | 1.1 |
+| `scripts/lib/rag_engine/data_importer.py` | 修改 | 1.1, 1.2, 4.2 |
+| `scripts/lib/rag_engine/config.py` | 修改默认值 | 2.1, 4.3 |
+| `scripts/lib/rag_engine/rag_engine.py` | 修改 | 2.1, 2.4, 3.2 |
+| `scripts/lib/rag_engine/evaluator.py` | 修改 | 2.2, 2.3, 2.7 |
+| `scripts/lib/rag_engine/retrieval.py` | 修改 | 2.5 |
+| `scripts/lib/rag_engine/fusion.py` | 修改 | 2.5 |
+| `scripts/lib/rag_engine/reranker.py` | 修改 | 2.6, 3.3 |
+| `scripts/lib/rag_engine/attribution.py` | 修改 | 3.1 |
+| `scripts/tests/integration/test_rag_integration.py` | 修改 | 4.1 |
+| `scripts/tests/unit/test_reranker.py` | 新增 | 测试改进 |
+| `scripts/tests/unit/test_query_preprocessor.py` | 新增 | 测试改进 |
+| `scripts/tests/unit/test_fusion.py` | 新增 | 测试改进 |
+| `scripts/tests/unit/test_attribution.py` | 新增 | 测试改进 |
+| `scripts/tests/unit/test_evaluator.py` | 新增 | 测试改进 |
 
 ### 验收标准总结
 
 #### 功能验收标准
-- [x] `ask()` 返回值包含 `citations` 和 `unverified_claims` 字段
-- [x] `[来源X]` 引用标记能正确解析为对应 source
-- [x] 上下文截断不再丢弃整个条款，改为部分截断 + 省略标记
-- [x] Reranker 排序解析正确处理各种 LLM 输出格式
-- [x] 冗余率计算结果在 [0.0, 1.0] 范围内
-- [x] `import_all()` 正常执行不报错
-- [x] `production_rag_engine` fixture 正常创建
+- [ ] `import_all(skip_vector=False)` 不崩溃
+- [ ] 独立使用 `RegulationDataImporter` 时 embedding 模型正确初始化
+- [ ] 上下文窗口默认值 8000 字符，截断有日志
+- [ ] `_is_relevant()` 无关键词时不会误判为相关
+- [ ] 轻量级 Faithfulness 使用 bigram 覆盖率
+- [ ] 检索后过滤不再重复执行
+- [ ] 查询扩展分数有衰减机制
+- [ ] Rerank 截断长度 1500 字符
+- [ ] Context Relevance 指标已添加
+- [ ] `_detect_unverified_claims()` 正确处理数字结尾陈述
+- [ ] `ThreadLocalSettings.apply()` 线程安全
+- [ ] 测试断言不再条件化
+- [ ] BM25 索引包含在备份中
+- [ ] `"hybrid"` 策略不再被接受
 
 #### 质量验收标准
-- [x] 新增模块测试覆盖率 ≥ 80% (attribution 91%, reranker 97%, fusion 100%)
-- [x] 核心模块测试覆盖率从 0% 提升到 ≥ 70%
-- [x] `pytest tests/unit/` 全部通过 (60 passed, 4 skipped)
-- [ ] `mypy scripts/lib/rag_engine/` 无新增错误（已有大量 pre-existing errors）
+- [ ] `pytest scripts/tests/` 全部通过
+- [ ] `mypy scripts/lib/rag_engine/` 无错误
+- [ ] 新增单元测试覆盖 reranker, preprocessor, fusion, attribution, evaluator
 
 #### 部署验收标准
-- [x] `ask()` 返回结构向后兼容（新增字段，不删除已有字段）
-- [x] `search()` 接口不受影响
-- [x] 不引入新的第三方依赖（NLI 模型为可选 P2）
-- [x] 删除 VectorDB 后不影响任何功能
+- [ ] `RAGConfig(max_context_chars=4000)` 仍可使用（向后兼容）
+- [ ] `reciprocal_rank_fusion()` 签名向后兼容（`num_queries` 有默认值）
+- [ ] 已有评估脚本 `evaluate_rag.py` 正常运行
+- [ ] 知识库重建管线正常工作

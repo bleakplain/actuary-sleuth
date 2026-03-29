@@ -27,6 +27,7 @@ from lib.rag_engine import RAGEngine, RAGConfig
 from lib.rag_engine.evaluator import (
     RetrievalEvaluator,
     GenerationEvaluator,
+    GenerationEvalReport,
     RAGEvalReport,
     run_retrieval_evaluation,
 )
@@ -312,10 +313,7 @@ def main():
         gen_evaluator = GenerationEvaluator(rag_engine, llm=ragas_llm, embeddings=ragas_embeddings)
         generation_report = gen_evaluator.evaluate_batch(samples, rag_engine)
     else:
-        generation_report = type('GenerationEvalReport', (), {
-            'faithfulness': None, 'answer_relevancy': None,
-            'answer_correctness': None, 'by_type': {},
-        })()
+        generation_report = GenerationEvalReport()
 
     # 组装报告
     report = RAGEvalReport(
