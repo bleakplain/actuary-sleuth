@@ -96,6 +96,10 @@ class RAGConfig:
     enable_streaming: bool = False
     hybrid_config: HybridQueryConfig = None
 
+    # 生成配置
+    max_context_chars: int = 12000
+    enable_faithfulness: bool = False
+
     # 向量数据库配置
     collection_name: str = "regulations_vectors"
 
@@ -128,6 +132,9 @@ class RAGConfig:
 
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError(f"chunk_overlap ({self.chunk_overlap}) must be less than chunk_size ({self.chunk_size})")
+
+        if self.max_context_chars < 1:
+            raise ValueError(f"max_context_chars must be >= 1, got {self.max_context_chars}")
 
         if self.hybrid_config is None:
             self.hybrid_config = HybridQueryConfig()

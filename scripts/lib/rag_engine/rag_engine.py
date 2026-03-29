@@ -30,7 +30,8 @@ logger = logging.getLogger(__name__)
 
 _engine_init_lock = threading.Lock()
 
-_QA_PROMPT_TEMPLATE = """请根据以下法规条款回答用户的问题。
+_QA_PROMPT_TEMPLATE = """你是一位保险法规专家。请**仅依据**下方编号的法规条款回答用户问题。
+如果条款中没有足够信息，请坦诚说明"提供的法规条款中未找到相关信息"，不要自行补充外部知识。
 
 ## 法规条款
 
@@ -41,14 +42,17 @@ _QA_PROMPT_TEMPLATE = """请根据以下法规条款回答用户的问题。
 {question}
 
 ## 回答要求
-1. 仅基于上述法规条款回答，不得编造信息
-2. 每个事实性陈述（数字、条款规定、法律要求）必须在句末用 [来源X] 标注来源编号
-3. 如果法规条款不足以回答问题，明确说明"以上法规条款未涉及此问题"，不要猜测
-4. 不得包含法规条款中不存在的信息（包括但不限于条款号、数字、日期）
-5. 回答简洁专业
+1. **仅依据**上方编号的法规条款回答，不使用条款外的知识
+2. 引用信息时使用 [来源X] 标注来源
+3. 如果不同条款存在矛盾，优先引用编号靠前的条款并说明
+4. 每个事实性陈述（数字、条款规定、法律要求）必须在句末用 [来源X] 标注来源编号
+5. 不得包含法规条款中不存在的信息（包括但不限于条款号、数字、日期）
+6. 如果法规条款不足以回答问题，明确说明"以上法规条款未涉及此问题"，不要猜测
+7. 回答简洁专业，面向保险从业人员
 
 ## 回答示例
-健康保险的等待期有明确限制。根据规定，等待期不得超过90天 [来源1]。等待期内发生保险事故的，保险公司不承担保险责任 [来源1]。"""
+问：健康保险等待期有什么规定？
+答：根据《健康保险管理办法》第一条[来源1]，健康保险产品的等待期不得超过90天。等待期内发生保险事故，保险公司不承担保险责任。[来源1]"""
 
 
 class ThreadLocalSettings:
@@ -84,9 +88,6 @@ class ThreadLocalSettings:
                 Settings.llm = self._global_backup['llm']
                 Settings.embed_model = self._global_backup['embed_model']
 
-
-_MAX_CONTEXT_CHARS = 4000
-_HEADER_OVERHEAD = 50
 
 _thread_settings = ThreadLocalSettings()
 
@@ -209,14 +210,16 @@ class RAGEngine:
                     'unverified_claims': [],
                 }
 
-            prompt = self._build_qa_prompt(question, search_results)
-            assert self._llm_client is not None
+            prompt, included_count = self._build_qa_prompt(question, search_results)
+            if not self._llm_client:
+                raise RetrievalError("LLM 客户端未初始化")
             answer = self._llm_client.generate(prompt)
             answer_str = str(answer)
 
-            attribution = parse_citations(answer_str, search_results) if include_sources else AttributionResult()
+            included_sources = search_results[:included_count]
+            attribution = parse_citations(answer_str, included_sources) if include_sources else AttributionResult()
 
-            return {
+            result: Dict[str, Any] = {
                 'answer': answer_str,
                 'sources': search_results if include_sources else [],
                 'citations': [
@@ -231,6 +234,12 @@ class RAGEngine:
                 'unverified_claims': attribution.unverified_claims,
             }
 
+            if self.config.enable_faithfulness:
+                included_contexts = [r.get('content', '') for r in included_sources]
+                result['faithfulness_score'] = self._compute_faithfulness(included_contexts, answer_str)
+
+            return result
+
         except EngineInitializationError:
             raise
         except Exception as e:
@@ -244,9 +253,10 @@ class RAGEngine:
         """异步问答模式"""
         return await asyncio.to_thread(self._do_ask, question, include_sources)
 
-    def _build_qa_prompt(self, question: str, search_results: List[Dict[str, Any]]) -> str:
+    def _build_qa_prompt(self, question: str, search_results: List[Dict[str, Any]]) -> tuple[str, int]:
         context_parts: List[str] = []
         total_chars = 0
+        max_chars = self.config.max_context_chars
 
         for i, result in enumerate(search_results, 1):
             law_name = result.get('law_name', '未知法规')
@@ -255,8 +265,8 @@ class RAGEngine:
             header = f"{i}. 【{law_name}】{article}\n"
             full_part = header + content
 
-            if total_chars + len(full_part) > _MAX_CONTEXT_CHARS:
-                remaining = _MAX_CONTEXT_CHARS - total_chars - _HEADER_OVERHEAD
+            if total_chars + len(full_part) > max_chars:
+                remaining = max_chars - total_chars - 50
                 if remaining > 100:
                     truncated_content = content[:remaining] + '……'
                     context_parts.append(header + truncated_content)
@@ -266,7 +276,14 @@ class RAGEngine:
             total_chars += len(full_part)
 
         context = "\n\n".join(context_parts)
-        return _QA_PROMPT_TEMPLATE.format(context=context, question=question)
+        return _QA_PROMPT_TEMPLATE.format(context=context, question=question), len(context_parts)
+
+    @staticmethod
+    def _compute_faithfulness(contexts: List[str], answer: str) -> float:
+        if not contexts or not answer:
+            return 0.0
+        from lib.rag_engine.evaluator import GenerationEvaluator
+        return GenerationEvaluator._compute_faithfulness(contexts, answer)
 
     def search(
         self,

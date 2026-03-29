@@ -38,11 +38,14 @@ class TestPromptCitationFormat:
         assert '回答示例' in _QA_PROMPT_TEMPLATE
         assert '[来源1]' in _QA_PROMPT_TEMPLATE
 
-    def test_prompt_requires_no_fabrication(self):
-        assert '不得编造' in _QA_PROMPT_TEMPLATE
+    def test_prompt_requires_only_based_on_sources(self):
+        assert '仅依据' in _QA_PROMPT_TEMPLATE
 
-    def test_prompt_has_unknown_handling(self):
-        assert '未涉及' in _QA_PROMPT_TEMPLATE
+    def test_prompt_has_conflict_handling(self):
+        assert '矛盾' in _QA_PROMPT_TEMPLATE
+
+    def test_prompt_has_expert_persona(self):
+        assert '保险法规专家' in _QA_PROMPT_TEMPLATE
 
     def test_prompt_forbids_missing_info(self):
         assert '不存在的信息' in _QA_PROMPT_TEMPLATE
