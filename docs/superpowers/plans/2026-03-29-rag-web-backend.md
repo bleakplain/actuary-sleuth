@@ -54,18 +54,18 @@ scripts/tests/api/
 - Create: `scripts/api/app.py`
 - Modify: `scripts/requirements.txt` (追加 fastapi, uvicorn, sse-starlette, python-multipart)
 
-- [ ] **Step 1: 安装 FastAPI 依赖**
+- [x] **Step 1: 安装 FastAPI 依赖**
 
 ```bash
 pip install fastapi uvicorn sse-starlette python-multipart
 ```
 
-- [ ] **Step 2: 创建 `scripts/api/__init__.py`**
+- [x] **Step 2: 创建 `scripts/api/__init__.py`**
 
 ```python
 ```
 
-- [ ] **Step 3: 创建最小 FastAPI 入口 `scripts/api/app.py`**
+- [x] **Step 3: 创建最小 FastAPI 入口 `scripts/api/app.py`**
 
 ```python
 from contextlib import asynccontextmanager
@@ -100,7 +100,7 @@ async def health_check():
     return {"status": "ok"}
 ```
 
-- [ ] **Step 4: 验证服务可启动**
+- [x] **Step 4: 验证服务可启动**
 
 ```bash
 cd scripts && python -m uvicorn api.app:app --host 0.0.0.0 --port 8000 &
@@ -110,7 +110,7 @@ kill %1
 
 Expected: `{"status":"ok"}`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/api/__init__.py scripts/api/app.py
@@ -128,7 +128,7 @@ git commit -m "feat(api): scaffold FastAPI application with health endpoint"
 - Create: `scripts/tests/api/conftest.py`
 - Create: `scripts/tests/api/test_database.py`
 
-- [ ] **Step 1: 创建 `scripts/api/database.py` — DDL 和数据访问函数**
+- [x] **Step 1: 创建 `scripts/api/database.py` — DDL 和数据访问函数**
 
 复用现有 `lib/common/database.py` 的 `get_connection()` 连接池，新建 API 专属表。
 
@@ -660,7 +660,7 @@ def create_snapshot(name: str, description: str = "") -> str:
     return snapshot_id
 ```
 
-- [ ] **Step 2: 创建 `scripts/api/dependencies.py` — 共享依赖注入**
+- [x] **Step 2: 创建 `scripts/api/dependencies.py` — 共享依赖注入**
 
 ```python
 """FastAPI 共享依赖。"""
@@ -680,7 +680,7 @@ def on_shutdown():
     close_pool()
 ```
 
-- [ ] **Step 3: 创建测试 fixture `scripts/tests/api/conftest.py`**
+- [x] **Step 3: 创建测试 fixture `scripts/tests/api/conftest.py`**
 
 ```python
 """API 测试公共 fixture。"""
@@ -732,7 +732,7 @@ def api_client(tmp_path):
         pass
 ```
 
-- [ ] **Step 4: 创建 `scripts/tests/api/test_database.py`**
+- [x] **Step 4: 创建 `scripts/tests/api/test_database.py`**
 
 ```python
 """数据库层单元测试。"""
@@ -937,7 +937,7 @@ class TestComplianceReports:
         assert len(reports) == 1
 ```
 
-- [ ] **Step 5: 运行数据库测试**
+- [x] **Step 5: 运行数据库测试**
 
 ```bash
 cd scripts && python -m pytest tests/api/test_database.py -v
@@ -945,7 +945,7 @@ cd scripts && python -m pytest tests/api/test_database.py -v
 
 Expected: ALL PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add scripts/api/database.py scripts/api/dependencies.py \
@@ -965,7 +965,7 @@ git commit -m "feat(api): add database layer with DDL and data access functions"
 - Create: `scripts/api/schemas/eval.py`
 - Create: `scripts/api/schemas/compliance.py`
 
-- [ ] **Step 1: 创建 `scripts/api/schemas/ask.py`**
+- [x] **Step 1: 创建 `scripts/api/schemas/ask.py`**
 
 ```python
 from typing import Optional, List, Dict, Any
@@ -1018,7 +1018,7 @@ class ChatSSEEvent(BaseModel):
     data: Any = None
 ```
 
-- [ ] **Step 2: 创建 `scripts/api/schemas/knowledge.py`**
+- [x] **Step 2: 创建 `scripts/api/schemas/knowledge.py`**
 
 ```python
 from typing import Optional, Dict, Any, List
@@ -1057,7 +1057,7 @@ class TaskStatus(BaseModel):
     result: Optional[Dict[str, Any]] = None
 ```
 
-- [ ] **Step 3: 创建 `scripts/api/schemas/eval.py`**
+- [x] **Step 3: 创建 `scripts/api/schemas/eval.py`**
 
 ```python
 from typing import Optional, List, Dict, Any
@@ -1108,7 +1108,7 @@ class SnapshotCreate(BaseModel):
     description: str = ""
 ```
 
-- [ ] **Step 4: 创建 `scripts/api/schemas/compliance.py`**
+- [x] **Step 4: 创建 `scripts/api/schemas/compliance.py`**
 
 ```python
 from typing import Optional, Dict, Any, List
@@ -1144,7 +1144,7 @@ class ComplianceReportOut(BaseModel):
     created_at: str
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/api/schemas/
@@ -1161,12 +1161,12 @@ git commit -m "feat(api): add Pydantic schemas for all API modules"
 - Modify: `scripts/api/app.py` (注册路由、lifespan 初始化 RAGEngine)
 - Create: `scripts/tests/api/test_ask.py`
 
-- [ ] **Step 1: 创建 `scripts/api/routers/__init__.py`**
+- [x] **Step 1: 创建 `scripts/api/routers/__init__.py`**
 
 ```python
 ```
 
-- [ ] **Step 2: 创建 `scripts/api/routers/ask.py`**
+- [x] **Step 2: 创建 `scripts/api/routers/ask.py`**
 
 ```python
 """法规问答路由 — 对话式问答 + 精确检索。"""
@@ -1306,7 +1306,7 @@ async def delete_conversation(conversation_id: str):
     return {"deleted_messages": count}
 ```
 
-- [ ] **Step 3: 更新 `scripts/api/app.py` — 注册路由和 lifespan**
+- [x] **Step 3: 更新 `scripts/api/app.py` — 注册路由和 lifespan**
 
 ```python
 import logging
@@ -1392,7 +1392,7 @@ from fastapi import APIRouter
 router = APIRouter(prefix="/api/compliance", tags=["合规检查"])
 ```
 
-- [ ] **Step 4: 创建 `scripts/tests/api/test_ask.py`**
+- [x] **Step 4: 创建 `scripts/tests/api/test_ask.py`**
 
 ```python
 """问答路由测试。"""
@@ -1493,7 +1493,7 @@ class TestConversationManagement:
         assert resp.status_code == 404
 ```
 
-- [ ] **Step 5: 运行问答测试**
+- [x] **Step 5: 运行问答测试**
 
 ```bash
 cd scripts && python -m pytest tests/api/test_ask.py -v
@@ -1501,7 +1501,7 @@ cd scripts && python -m pytest tests/api/test_ask.py -v
 
 Expected: ALL PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add scripts/api/routers/ scripts/api/app.py scripts/tests/api/test_ask.py
@@ -1516,7 +1516,7 @@ git commit -m "feat(api): add ask router with chat SSE and conversation manageme
 - Modify: `scripts/api/routers/knowledge.py` (完整实现)
 - Create: `scripts/tests/api/test_knowledge.py`
 
-- [ ] **Step 1: 实现 `scripts/api/routers/knowledge.py`**
+- [x] **Step 1: 实现 `scripts/api/routers/knowledge.py`**
 
 ```python
 """知识库管理路由 — 文档列表、导入、重建、预览。"""
@@ -1680,7 +1680,7 @@ async def get_index_status():
         return IndexStatus(vector_db={"status": "error", "error": str(e)})
 ```
 
-- [ ] **Step 2: 创建 `scripts/tests/api/test_knowledge.py`**
+- [x] **Step 2: 创建 `scripts/tests/api/test_knowledge.py`**
 
 ```python
 """知识库管理路由测试。"""
@@ -1767,7 +1767,7 @@ class TestTaskStatus:
         assert resp.status_code == 404
 ```
 
-- [ ] **Step 3: 运行知识库测试**
+- [x] **Step 3: 运行知识库测试**
 
 ```bash
 cd scripts && python -m pytest tests/api/test_knowledge.py -v
@@ -1775,7 +1775,7 @@ cd scripts && python -m pytest tests/api/test_knowledge.py -v
 
 Expected: ALL PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/api/routers/knowledge.py scripts/tests/api/test_knowledge.py
@@ -1790,7 +1790,7 @@ git commit -m "feat(api): add knowledge base management router"
 - Modify: `scripts/api/routers/eval.py` (数据集管理部分)
 - Create: `scripts/tests/api/test_eval.py` (数据集部分)
 
-- [ ] **Step 1: 实现 `scripts/api/routers/eval.py` — 数据集管理路由**
+- [x] **Step 1: 实现 `scripts/api/routers/eval.py` — 数据集管理路由**
 
 ```python
 """评估管理路由 — 数据集 CRUD + 快照 + 评估运行。"""
@@ -1912,7 +1912,7 @@ async def restore_snapshot(snapshot_id: str):
     return {"restored": count}
 ```
 
-- [ ] **Step 2: 创建 `scripts/tests/api/test_eval.py` — 数据集测试**
+- [x] **Step 2: 创建 `scripts/tests/api/test_eval.py` — 数据集测试**
 
 ```python
 """评估路由测试 — 数据集管理部分。"""
@@ -2044,7 +2044,7 @@ class TestSnapshots:
         assert len(client.get("/api/eval/dataset").json()) == 2
 ```
 
-- [ ] **Step 3: 运行评估数据集测试**
+- [x] **Step 3: 运行评估数据集测试**
 
 ```bash
 cd scripts && python -m pytest tests/api/test_eval.py -v
@@ -2052,7 +2052,7 @@ cd scripts && python -m pytest tests/api/test_eval.py -v
 
 Expected: ALL PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/api/routers/eval.py scripts/tests/api/test_eval.py
@@ -2067,7 +2067,7 @@ git commit -m "feat(api): add eval dataset management router with snapshots"
 - Modify: `scripts/api/routers/eval.py` (追加评估运行路由)
 - Modify: `scripts/tests/api/test_eval.py` (追加运行测试)
 
-- [ ] **Step 1: 在 `scripts/api/routers/eval.py` 末尾追加评估运行路由**
+- [x] **Step 1: 在 `scripts/api/routers/eval.py` 末尾追加评估运行路由**
 
 ```python
 # ── 评估运行 ─────────────────────────────────────────
@@ -2307,7 +2307,7 @@ async def export_eval_report(run_id: str, format: str = "json"):
         raise HTTPException(status_code=400, detail="不支持的格式，可选: json, md")
 ```
 
-- [ ] **Step 2: 在 `scripts/tests/api/test_eval.py` 末尾追加运行测试**
+- [x] **Step 2: 在 `scripts/tests/api/test_eval.py` 末尾追加运行测试**
 
 ```python
 class TestEvalRuns:
@@ -2355,7 +2355,7 @@ class TestEvalRuns:
         assert len(data["improved"]) >= 1
 ```
 
-- [ ] **Step 3: 运行评估测试**
+- [x] **Step 3: 运行评估测试**
 
 ```bash
 cd scripts && python -m pytest tests/api/test_eval.py -v
@@ -2363,7 +2363,7 @@ cd scripts && python -m pytest tests/api/test_eval.py -v
 
 Expected: ALL PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/api/routers/eval.py scripts/tests/api/test_eval.py
@@ -2378,7 +2378,7 @@ git commit -m "feat(api): add eval run router with async execution and compariso
 - Modify: `scripts/api/routers/compliance.py` (完整实现)
 - Create: `scripts/tests/api/test_compliance.py`
 
-- [ ] **Step 1: 实现 `scripts/api/routers/compliance.py`**
+- [x] **Step 1: 实现 `scripts/api/routers/compliance.py`**
 
 ```python
 """合规检查路由 — 产品参数检查 + 条款文档审查。"""
@@ -2610,7 +2610,7 @@ async def get_compliance_report(report_id: str):
     return report
 ```
 
-- [ ] **Step 2: 创建 `scripts/tests/api/test_compliance.py`**
+- [x] **Step 2: 创建 `scripts/tests/api/test_compliance.py`**
 
 ```python
 """合规检查路由测试。"""
@@ -2727,7 +2727,7 @@ class TestReportHistory:
         assert resp.status_code == 404
 ```
 
-- [ ] **Step 3: 运行合规检查测试**
+- [x] **Step 3: 运行合规检查测试**
 
 ```bash
 cd scripts && python -m pytest tests/api/test_compliance.py -v
@@ -2735,7 +2735,7 @@ cd scripts && python -m pytest tests/api/test_compliance.py -v
 
 Expected: ALL PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/api/routers/compliance.py scripts/tests/api/test_compliance.py
@@ -2750,7 +2750,7 @@ git commit -m "feat(api): add compliance check router with product and document 
 - Modify: `scripts/requirements.txt`
 - Create: `scripts/run_api.py` (启动入口)
 
-- [ ] **Step 1: 更新 `scripts/requirements.txt`，追加依赖**
+- [x] **Step 1: 更新 `scripts/requirements.txt`，追加依赖**
 
 ```
 fastapi>=0.104.0
@@ -2759,7 +2759,7 @@ sse-starlette>=1.6.0
 python-multipart>=0.0.6
 ```
 
-- [ ] **Step 2: 创建 `scripts/run_api.py`**
+- [x] **Step 2: 创建 `scripts/run_api.py`**
 
 ```python
 #!/usr/bin/env python3
@@ -2784,7 +2784,7 @@ if __name__ == "__main__":
     )
 ```
 
-- [ ] **Step 3: 运行全部 API 测试**
+- [x] **Step 3: 运行全部 API 测试**
 
 ```bash
 cd scripts && python -m pytest tests/api/ -v
@@ -2792,7 +2792,7 @@ cd scripts && python -m pytest tests/api/ -v
 
 Expected: ALL PASS
 
-- [ ] **Step 4: 启动服务验证健康检查**
+- [x] **Step 4: 启动服务验证健康检查**
 
 ```bash
 cd scripts && python run_api.py &
@@ -2802,7 +2802,7 @@ kill %1
 
 Expected: `{"status":"ok","rag_engine":true}`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/run_api.py scripts/requirements.txt

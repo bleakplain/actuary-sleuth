@@ -21,3 +21,9 @@ rank-bm25>=0.2.2
 # markdown>=3.5.0
 # python-docx>=0.8.11
 # reportlab>=4.0.0
+
+# Web API dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+sse-starlette>=1.6.0
+python-multipart>=0.0.6

@@ -8,9 +8,14 @@ import sys
 import os
 from pathlib import Path
 
-# 添加lib目录到路径
-lib_dir = Path(__file__).parent.parent / "lib"
-sys.path.insert(0, str(lib_dir))
+
+def pytest_configure(config):
+    """Ensure scripts/ is first in sys.path so api package resolves correctly."""
+    scripts_dir = str(Path(__file__).parent.parent)
+    if scripts_dir in sys.path:
+        sys.path.remove(scripts_dir)
+    sys.path.insert(0, scripts_dir)
+
 
 # 加载环境变量
 env_file = Path(__file__).parent.parent / ".env"

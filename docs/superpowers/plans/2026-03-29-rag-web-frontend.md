@@ -64,20 +64,20 @@ scripts/web/
 - Create: `scripts/web/src/components/AppLayout.tsx`
 - Create: `scripts/web/src/types/index.ts`
 
-- [ ] **Step 1: 创建 Vite 项目**
+- [x] **Step 1: 创建 Vite 项目**
 
 ```bash
 cd scripts && npm create vite@latest web -- --template react-ts
 cd web && npm install
 ```
 
-- [ ] **Step 2: 安装依赖**
+- [x] **Step 2: 安装依赖**
 
 ```bash
 cd scripts/web && npm install antd @ant-design/icons react-router-dom zustand axios react-markdown remark-gfm recharts
 ```
 
-- [ ] **Step 3: 创建 TypeScript 类型定义 `scripts/web/src/types/index.ts`**
+- [x] **Step 3: 创建 TypeScript 类型定义 `scripts/web/src/types/index.ts`**
 
 ```typescript
 // ── 问答 ────────────────────────────────────────────
@@ -231,7 +231,7 @@ export interface ComplianceReport {
 }
 ```
 
-- [ ] **Step 4: 创建 axios 实例 `scripts/web/src/api/client.ts`**
+- [x] **Step 4: 创建 axios 实例 `scripts/web/src/api/client.ts`**
 
 ```typescript
 import axios from 'axios';
@@ -255,7 +255,7 @@ client.interceptors.response.use(
 export default client;
 ```
 
-- [ ] **Step 5: 创建全局布局 `scripts/web/src/components/AppLayout.tsx`**
+- [x] **Step 5: 创建全局布局 `scripts/web/src/components/AppLayout.tsx`**
 
 ```tsx
 import React, { useState } from 'react';
@@ -324,7 +324,7 @@ export default function AppLayout() {
 }
 ```
 
-- [ ] **Step 6: 配置路由 `scripts/web/src/App.tsx`**
+- [x] **Step 6: 配置路由 `scripts/web/src/App.tsx`**
 
 ```tsx
 import React from 'react';
@@ -358,7 +358,7 @@ export default function App() {
 }
 ```
 
-- [ ] **Step 7: 创建占位页面使路由可编译**
+- [x] **Step 7: 创建占位页面使路由可编译**
 
 创建 `scripts/web/src/pages/AskPage.tsx`:
 ```tsx
@@ -395,7 +395,7 @@ export default function CompliancePage() {
 }
 ```
 
-- [ ] **Step 8: 验证项目可启动**
+- [x] **Step 8: 验证项目可启动**
 
 ```bash
 cd scripts/web && npm run dev &
@@ -405,7 +405,7 @@ kill %1
 
 Expected: HTML 输出（Vite dev server 启动成功）
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add scripts/web/
@@ -425,7 +425,7 @@ git commit -m "feat(web): scaffold React + TypeScript + Ant Design project with 
 - Create: `scripts/web/src/components/CitationTag.tsx`
 - Create: `scripts/web/src/components/SourcePanel.tsx`
 
-- [ ] **Step 1: 创建 API 层 `scripts/web/src/api/ask.ts`**
+- [x] **Step 1: 创建 API 层 `scripts/web/src/api/ask.ts`**
 
 ```typescript
 import client from './client';
@@ -557,7 +557,7 @@ export function chatSSE(
 }
 ```
 
-- [ ] **Step 2: 创建状态管理 `scripts/web/src/stores/askStore.ts`**
+- [x] **Step 2: 创建状态管理 `scripts/web/src/stores/askStore.ts`**
 
 ```typescript
 import { create } from 'zustand';
@@ -710,7 +710,7 @@ export const useAskStore = create<AskState>((set, get) => ({
 }));
 ```
 
-- [ ] **Step 3: 创建引用标签组件 `scripts/web/src/components/CitationTag.tsx`**
+- [x] **Step 3: 创建引用标签组件 `scripts/web/src/components/CitationTag.tsx`**
 
 ```tsx
 import React from 'react';
@@ -735,7 +735,7 @@ export default function CitationTag({ citation, onClick }: Props) {
 }
 ```
 
-- [ ] **Step 4: 创建消息气泡组件 `scripts/web/src/components/MessageBubble.tsx`**
+- [x] **Step 4: 创建消息气泡组件 `scripts/web/src/components/MessageBubble.tsx`**
 
 ```tsx
 import React from 'react';
@@ -798,7 +798,7 @@ export default function MessageBubble({ message, onCitationClick }: Props) {
 }
 ```
 
-- [ ] **Step 5: 创建来源面板组件 `scripts/web/src/components/SourcePanel.tsx`**
+- [x] **Step 5: 创建来源面板组件 `scripts/web/src/components/SourcePanel.tsx`**
 
 ```tsx
 import React from 'react';
@@ -860,7 +860,7 @@ export default function SourcePanel({ open, sources, selectedSource, onSelect, o
 }
 ```
 
-- [ ] **Step 6: 创建对话面板组件 `scripts/web/src/components/ChatPanel.tsx`**
+- [x] **Step 6: 创建对话面板组件 `scripts/web/src/components/ChatPanel.tsx`**
 
 ```tsx
 import React, { useRef, useEffect } from 'react';
@@ -1009,7 +1009,7 @@ export default function ChatPanel() {
 }
 ```
 
-- [ ] **Step 7: 更新 `scripts/web/src/pages/AskPage.tsx`**
+- [x] **Step 7: 更新 `scripts/web/src/pages/AskPage.tsx`**
 
 ```tsx
 import React from 'react';
@@ -1024,7 +1024,7 @@ export default function AskPage() {
 }
 ```
 
-- [ ] **Step 8: 验证编译通过**
+- [x] **Step 8: 验证编译通过**
 
 ```bash
 cd scripts/web && npx tsc --noEmit
@@ -1032,7 +1032,7 @@ cd scripts/web && npx tsc --noEmit
 
 Expected: 无错误
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add scripts/web/src/
@@ -1047,7 +1047,7 @@ git commit -m "feat(web): add ask page with chat panel, SSE streaming, and sourc
 - Create: `scripts/web/src/api/knowledge.ts`
 - Modify: `scripts/web/src/pages/KnowledgePage.tsx`
 
-- [ ] **Step 1: 创建 API 层 `scripts/web/src/api/knowledge.ts`**
+- [x] **Step 1: 创建 API 层 `scripts/web/src/api/knowledge.ts`**
 
 ```typescript
 import client from './client';
@@ -1090,7 +1090,7 @@ export async function fetchIndexStatus(): Promise<IndexStatus> {
 }
 ```
 
-- [ ] **Step 2: 实现 `scripts/web/src/pages/KnowledgePage.tsx`**
+- [x] **Step 2: 实现 `scripts/web/src/pages/KnowledgePage.tsx`**
 
 ```tsx
 import React, { useState, useEffect, useCallback } from 'react';
@@ -1284,13 +1284,13 @@ export default function KnowledgePage() {
 }
 ```
 
-- [ ] **Step 3: 验证编译通过**
+- [x] **Step 3: 验证编译通过**
 
 ```bash
 cd scripts/web && npx tsc --noEmit
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/web/src/api/knowledge.ts scripts/web/src/pages/KnowledgePage.tsx
@@ -1305,7 +1305,7 @@ git commit -m "feat(web): add knowledge base management page with document list 
 - Create: `scripts/web/src/api/eval.ts`
 - Modify: `scripts/web/src/pages/EvalDatasetPage.tsx`
 
-- [ ] **Step 1: 创建 API 层 `scripts/web/src/api/eval.ts`**
+- [x] **Step 1: 创建 API 层 `scripts/web/src/api/eval.ts`**
 
 ```typescript
 import client from './client';
@@ -1410,7 +1410,7 @@ export async function exportEvalReport(runId: string, format: 'json' | 'md' = 'j
 }
 ```
 
-- [ ] **Step 2: 实现 `scripts/web/src/pages/EvalDatasetPage.tsx`**
+- [x] **Step 2: 实现 `scripts/web/src/pages/EvalDatasetPage.tsx`**
 
 ```tsx
 import React, { useState, useEffect, useCallback } from 'react';
@@ -1721,13 +1721,13 @@ export default function EvalDatasetPage() {
 }
 ```
 
-- [ ] **Step 3: 验证编译通过**
+- [x] **Step 3: 验证编译通过**
 
 ```bash
 cd scripts/web && npx tsc --noEmit
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/web/src/api/eval.ts scripts/web/src/pages/EvalDatasetPage.tsx
@@ -1742,7 +1742,7 @@ git commit -m "feat(web): add eval dataset management page with CRUD, import, an
 - Create: `scripts/web/src/components/MetricsChart.tsx`
 - Modify: `scripts/web/src/pages/EvalRunPage.tsx`
 
-- [ ] **Step 1: 创建指标图表组件 `scripts/web/src/components/MetricsChart.tsx`**
+- [x] **Step 1: 创建指标图表组件 `scripts/web/src/components/MetricsChart.tsx`**
 
 ```tsx
 import React from 'react';
@@ -1839,7 +1839,7 @@ export default function MetricsChart({ metrics, title = '评估指标' }: Props)
 }
 ```
 
-- [ ] **Step 2: 实现 `scripts/web/src/pages/EvalRunPage.tsx`**
+- [x] **Step 2: 实现 `scripts/web/src/pages/EvalRunPage.tsx`**
 
 ```tsx
 import React, { useState, useEffect, useCallback } from 'react';
@@ -2169,13 +2169,13 @@ export default function EvalRunPage() {
 }
 ```
 
-- [ ] **Step 3: 验证编译通过**
+- [x] **Step 3: 验证编译通过**
 
 ```bash
 cd scripts/web && npx tsc --noEmit
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/web/src/components/MetricsChart.tsx scripts/web/src/pages/EvalRunPage.tsx
@@ -2190,7 +2190,7 @@ git commit -m "feat(web): add eval run page with metrics charts, details, and co
 - Create: `scripts/web/src/api/compliance.ts`
 - Modify: `scripts/web/src/pages/CompliancePage.tsx`
 
-- [ ] **Step 1: 创建 API 层 `scripts/web/src/api/compliance.ts`**
+- [x] **Step 1: 创建 API 层 `scripts/web/src/api/compliance.ts`**
 
 ```typescript
 import client from './client';
@@ -2224,7 +2224,7 @@ export async function fetchComplianceReport(id: string): Promise<ComplianceRepor
 }
 ```
 
-- [ ] **Step 2: 实现 `scripts/web/src/pages/CompliancePage.tsx`**
+- [x] **Step 2: 实现 `scripts/web/src/pages/CompliancePage.tsx`**
 
 ```tsx
 import React, { useState, useEffect } from 'react';
@@ -2467,13 +2467,13 @@ export default function CompliancePage() {
 }
 ```
 
-- [ ] **Step 3: 验证编译通过**
+- [x] **Step 3: 验证编译通过**
 
 ```bash
 cd scripts/web && npx tsc --noEmit
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/web/src/api/compliance.ts scripts/web/src/pages/CompliancePage.tsx
@@ -2489,7 +2489,7 @@ git commit -m "feat(web): add compliance check page with product and document mo
 - Modify: `scripts/web/src/main.tsx`
 - Modify: `scripts/web/vite.config.ts` (API 代理)
 
-- [ ] **Step 1: 配置 Vite 代理 `scripts/web/vite.config.ts`**
+- [x] **Step 1: 配置 Vite 代理 `scripts/web/vite.config.ts`**
 
 ```typescript
 import { defineConfig } from 'vite';
@@ -2509,7 +2509,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 2: 全局样式 `scripts/web/src/index.css`**
+- [x] **Step 2: 全局样式 `scripts/web/src/index.css`**
 
 ```css
 body {
@@ -2540,7 +2540,7 @@ body {
 }
 ```
 
-- [ ] **Step 3: 更新 `scripts/web/src/main.tsx`**
+- [x] **Step 3: 更新 `scripts/web/src/main.tsx`**
 
 ```tsx
 import React from 'react';
@@ -2555,7 +2555,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 );
 ```
 
-- [ ] **Step 4: 验证构建**
+- [x] **Step 4: 验证构建**
 
 ```bash
 cd scripts/web && npm run build
@@ -2563,7 +2563,7 @@ cd scripts/web && npm run build
 
 Expected: 构建成功，`dist/` 目录生成
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/web/
@@ -2576,7 +2576,7 @@ git commit -m "feat(web): add global styles, vite proxy config, and build optimi
 
 **Files:** 无新文件
 
-- [ ] **Step 1: 启动后端 + 前端，验证端到端**
+- [x] **Step 1: 启动后端 + 前端，验证端到端**
 
 ```bash
 # 终端 1：启动后端
@@ -2587,18 +2587,18 @@ cd scripts/web && npm run dev &
 ```
 
 打开 http://localhost:3000 验证：
-- [ ] 侧边栏导航正常切换
-- [ ] 知识库页面显示文档列表
-- [ ] 评估数据集页面显示 30 条默认数据
-- [ ] 合规检查页面表单可填写
+- [x] 侧边栏导航正常切换
+- [x] 知识库页面显示文档列表
+- [x] 评估数据集页面显示 30 条默认数据
+- [x] 合规检查页面表单可填写
 
-- [ ] **Step 2: TypeScript 类型检查**
+- [x] **Step 2: TypeScript 类型检查**
 
 ```bash
 cd scripts/web && npx tsc --noEmit
 ```
 
-- [ ] **Step 3: 构建产物检查**
+- [x] **Step 3: 构建产物检查**
 
 ```bash
 cd scripts/web && npm run build && ls dist/
@@ -2606,7 +2606,7 @@ cd scripts/web && npm run build && ls dist/
 
 Expected: `index.html`, `assets/` 目录存在
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A
