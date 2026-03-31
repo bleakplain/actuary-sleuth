@@ -63,6 +63,9 @@ def reciprocal_rank_fusion(
             'content': chunk.text,
             'source_file': chunk.metadata.get('source_file', ''),
             'hierarchy_path': chunk.metadata.get('hierarchy_path', ''),
+            'doc_number': chunk.metadata.get('doc_number', ''),
+            'effective_date': chunk.metadata.get('effective_date', ''),
+            'issuing_authority': chunk.metadata.get('issuing_authority', ''),
             'score': rrf_score,
         })
 
