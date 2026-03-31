@@ -131,7 +131,6 @@ export default function CompliancePage() {
       const data = await complianceApi.fetchComplianceReports();
       setHistory(data);
     } catch {
-      // ignore
     } finally {
       setHistoryLoading(false);
     }
@@ -206,13 +205,12 @@ export default function CompliancePage() {
       title: '法规来源', dataIndex: 'source', key: 'source', width: 150,
       render: (text: string, record: ComplianceItem) => {
         if (!text) return '-';
-        // 解析 [来源X] 标签
-        const matches = text.match(/\[来源(\d+)\]/g);
-        if (!matches) return text;
+        const tags = [...text.matchAll(/\[来源(\d+)\]/g)];
+        if (tags.length === 0) return text;
         return (
           <Space size={4} wrap>
-            {matches.map((tag) => {
-              const idx = parseInt(tag.replace(/\[来源(\d+)\]/, '$1'), 10) - 1;
+            {tags.map(([tag, numStr]) => {
+              const idx = parseInt(numStr, 10) - 1;
               return (
                 <Tag
                   key={tag}

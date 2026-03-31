@@ -19,6 +19,7 @@ class ComplianceItem(BaseModel):
     requirement: str = ""
     status: str = Field(..., pattern="^(compliant|non_compliant|attention)$")
     source: Optional[str] = None
+    source_excerpt: Optional[str] = None
     suggestion: Optional[str] = None
 
 
