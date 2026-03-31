@@ -12,6 +12,10 @@ export interface Source {
   content: string;
   source_file: string;
   hierarchy_path: string;
+  doc_number?: string;
+  effective_date?: string;
+  issuing_authority?: string;
+  score?: number;
 }
 
 export interface Message {
@@ -114,6 +118,7 @@ export interface ComplianceItem {
   requirement: string;
   status: 'compliant' | 'non_compliant' | 'attention';
   source?: string;
+  source_excerpt?: string;
   suggestion?: string;
 }
 
