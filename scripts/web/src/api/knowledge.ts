@@ -32,6 +32,26 @@ export async function fetchDocumentPreview(name: string): Promise<{ name: string
   return data;
 }
 
+export async function fetchDocumentChunks(name: string): Promise<{
+  document_name: string;
+  total_chunks: number;
+  chunks: Array<{
+    law_name: string;
+    article_number: string;
+    category: string;
+    hierarchy_path: string;
+    source_file: string;
+    doc_number: string;
+    issuing_authority: string;
+    effective_date: string;
+    text: string;
+    text_length: number;
+  }>;
+}> {
+  const { data } = await client.get(`/api/kb/documents/${encodeURIComponent(name)}/chunks`);
+  return data;
+}
+
 export async function fetchIndexStatus(): Promise<IndexStatus> {
   const { data } = await client.get('/api/kb/status');
   return data;

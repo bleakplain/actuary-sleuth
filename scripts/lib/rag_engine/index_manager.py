@@ -40,6 +40,9 @@ class VectorIndexManager:
             logger.warning("没有文档可用于创建索引")
             return None
 
+        if force_rebuild:
+            self._drop_table()
+
         vector_store = LanceDBVectorStore(
             uri=self.config.vector_db_path,
             table_name=self.config.collection_name,
@@ -63,6 +66,14 @@ class VectorIndexManager:
 
     def _load_existing_index(self) -> Optional[VectorStoreIndex]:
         try:
+            from llama_index.core import Settings
+            if Settings.embed_model is None:
+                logger.warning("未配置 embed_model，跳过加载已有索引")
+                return None
+
+            if not self.index_exists():
+                return None
+
             vector_store = LanceDBVectorStore(
                 uri=self.config.vector_db_path,
                 table_name=self.config.collection_name,
@@ -91,13 +102,14 @@ class VectorIndexManager:
         )
 
     def get_index_stats(self) -> Dict[str, Any]:
-        """获取索引统计信息"""
-        if self.index is None:
-            return {'status': 'not_initialized'}
-
+        """获取索引统计信息（直接查询 LanceDB，不依赖 self.index）"""
         try:
-            vector_store = self.index.vector_store
-            table = vector_store.get_table(self.config.collection_name)
+            import lancedb
+            db = lancedb.connect(self.config.vector_db_path)
+            existing_tables = db.table_names()
+            if self.config.collection_name not in existing_tables:
+                return {'status': 'not_initialized'}
+            table = db.open_table(self.config.collection_name)
             count = len(table)
             return {
                 'status': 'ok',
@@ -116,3 +128,14 @@ class VectorIndexManager:
             return self.config.collection_name in existing_tables
         except Exception:
             return False
+
+    def _drop_table(self) -> None:
+        """删除已有的向量表（用于 force_rebuild）"""
+        try:
+            import lancedb
+            db = lancedb.connect(self.config.vector_db_path)
+            if self.config.collection_name in db.table_names():
+                db.drop_table(self.config.collection_name)
+                logger.info(f"已删除向量表 '{self.config.collection_name}'")
+        except Exception as e:
+            logger.warning(f"删除向量表失败: {e}")

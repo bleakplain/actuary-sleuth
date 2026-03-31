@@ -29,8 +29,7 @@ if env_file.exists():
 
 # 导入共享的fixtures
 try:
-    from tests.utils.fixtures import *
-    from tests.utils.mocks import *
-    from tests.utils.rag_fixtures import *
+    from tests.utils.fixtures import temp_output_dir, sample_docx_file
+    from tests.utils.mocks import MockLLMClient
 except ImportError:
     pass

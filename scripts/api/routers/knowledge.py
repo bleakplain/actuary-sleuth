@@ -1,6 +1,7 @@
 """知识库管理路由 — 文档列表、导入、重建、预览。"""
 
 import uuid
+import json
 import asyncio
 import logging
 from typing import Dict
@@ -30,16 +31,28 @@ def _get_regulations_dir() -> Path:
 
 @router.get("/documents", response_model=list[DocumentOut])
 async def list_documents():
+    import re
     reg_dir = _get_regulations_dir()
     documents = []
     if reg_dir.exists():
         for f in sorted(reg_dir.glob("*.md")):
             stat = f.stat()
             content = f.read_text(encoding="utf-8", errors="ignore")
+            # 统计所有法规条款/条目格式
+            clause_patterns = [
+                r'^第[一二三四五六七八九十百千\d]+条',
+                r'^（[一二三四五六七八九十百千\d]+）',
+                r'^[一二三四五六七八九十]+、',
+                r'^\d+[、.]\s',
+            ]
+            count = sum(
+                1 for l in content.split("\n")
+                if any(re.match(p, l.strip()) for p in clause_patterns)
+            )
             documents.append(DocumentOut(
                 name=f.name,
                 file_path=str(f.relative_to(reg_dir.parent)),
-                clause_count=len([l for l in content.split("\n") if l.strip().startswith("第")]),
+                clause_count=count,
                 file_size=stat.st_size,
             ))
     return documents
@@ -123,6 +136,67 @@ async def preview_document(document_name: str):
     return {"name": document_name, "content": content[:5000], "total_chars": len(content)}
 
 
+@router.get("/documents/{document_name}/chunks")
+async def list_document_chunks(document_name: str):
+    """返回指定文档在向量库中的所有分块，用于人工验证提取质量"""
+    import lancedb
+    config = _get_config()
+    try:
+        db = lancedb.connect(config.vector_db_path)
+        table = db.open_table(config.collection_name)
+        df = table.to_pandas()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"向量库读取失败: {e}")
+
+    chunks = []
+    for _, row in df.iterrows():
+        meta = row.get('metadata', {})
+        if not isinstance(meta, dict):
+            try:
+                meta = json.loads(meta) if isinstance(meta, str) else {}
+            except (json.JSONDecodeError, TypeError):
+                meta = {}
+
+        source_file = meta.get('source_file', '')
+        if source_file != document_name:
+            continue
+
+        text = str(row.get('text', ''))
+        chunks.append({
+            "law_name": meta.get('law_name', ''),
+            "article_number": meta.get('article_number', ''),
+            "category": meta.get('category', ''),
+            "hierarchy_path": meta.get('hierarchy_path', ''),
+            "source_file": meta.get('source_file', ''),
+            "doc_number": meta.get('doc_number', ''),
+            "issuing_authority": meta.get('issuing_authority', ''),
+            "effective_date": meta.get('effective_date', ''),
+            "text": text,
+            "text_length": len(text),
+        })
+
+    # 按条款号排序：提取数字或中文数字排在前面
+    def _article_sort_key(chunk):
+        num = chunk.get("article_number", "")
+        import re
+        m = re.search(r'第([一二三四五六七八九十百千\d]+)条', num)
+        if m:
+            s = m.group(1)
+            cn = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10,
+                  '百':100,'千':1000}
+            if s.isdigit():
+                return (0, int(s))
+            val = 0
+            for c in s:
+                val = val * 10 + cn.get(c, 0)
+            return (0, val)
+        return (1, num)
+
+    chunks.sort(key=_article_sort_key)
+
+    return {"document_name": document_name, "total_chunks": len(chunks), "chunks": chunks}
+
+
 @router.get("/status", response_model=IndexStatus)
 async def get_index_status():
     try:
@@ -133,7 +207,7 @@ async def get_index_status():
         vector_stats = vm.get_index_stats()
 
         from lib.rag_engine.bm25_index import BM25Index
-        bm25_path = Path(config.vector_db_path) / "bm25_index"
+        bm25_path = Path(config.vector_db_path).parent / "bm25_index.pkl"
         bm25_index = BM25Index.load(bm25_path) if bm25_path.exists() else None
 
         return IndexStatus(

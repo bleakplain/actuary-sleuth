@@ -27,3 +27,7 @@ export async function fetchComplianceReport(id: string): Promise<ComplianceRepor
   const { data } = await client.get(`/api/compliance/reports/${id}`);
   return data;
 }
+
+export async function deleteComplianceReport(id: string): Promise<void> {
+  await client.delete(`/api/compliance/reports/${id}`);
+}

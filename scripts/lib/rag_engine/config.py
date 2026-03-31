@@ -104,18 +104,29 @@ class RAGConfig:
     collection_name: str = "regulations_vectors"
 
     def __post_init__(self):
+        import os
         if self.vector_db_path is None:
-            # 使用统一的配置系统
-            from lib.config import get_config
-            config = get_config()
-            rel_path = config.data_paths.lancedb_uri
-            # 解析相对路径（相对于 scripts/ 目录）
-            if not Path(rel_path).is_absolute():
-                # __file__ 在 scripts/lib/rag_engine/，需要往上3层到 scripts/
-                scripts_dir = Path(__file__).parent.parent.parent
-                self.vector_db_path = str(scripts_dir / rel_path)
+            # 支持环境变量覆盖（WSL 跨文件系统场景）
+            env_path = os.environ.get('LANCEDB_URI')
+            if env_path:
+                self.vector_db_path = env_path
             else:
-                self.vector_db_path = str(Path(rel_path))
+                # 使用统一的配置系统
+                from lib.config import get_config
+                config = get_config()
+                rel_path = config.data_paths.lancedb_uri
+                if not Path(rel_path).is_absolute():
+                    scripts_dir = Path(__file__).parent.parent.parent
+                    self.vector_db_path = str(scripts_dir / rel_path)
+                else:
+                    self.vector_db_path = str(Path(rel_path))
+
+        # WSL/NTFS 上 LanceDB 大批量写入会失败，自动替换为 /tmp 路径
+        if '/mnt/' in self.vector_db_path:
+            import tempfile
+            tmp_lancedb = os.path.join(tempfile.gettempdir(), 'actuary_sleuth', 'lancedb')
+            os.makedirs(tmp_lancedb, exist_ok=True)
+            self.vector_db_path = tmp_lancedb
 
         if not Path(self.regulations_dir).is_absolute():
             # 使用统一的配置系统

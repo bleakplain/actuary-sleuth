@@ -214,3 +214,15 @@ async def get_compliance_report(report_id: str):
     if report is None:
         raise HTTPException(status_code=404, detail="报告不存在")
     return report
+
+
+@router.delete("/reports/{report_id}")
+async def delete_compliance_report(report_id: str):
+    from api.database import get_connection
+    with get_connection() as conn:
+        cur = conn.execute(
+            "DELETE FROM compliance_reports WHERE id = ?", (report_id,)
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="报告不存在")
+    return {"status": "deleted"}

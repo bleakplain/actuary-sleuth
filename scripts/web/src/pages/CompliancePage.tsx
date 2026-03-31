@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
   Card, Form, Input, Button, Table, Tag, Typography,
-  message, Tabs, Space, Descriptions,
+  message, Tabs, Space, Descriptions, Popconfirm,
 } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined,
-  HistoryOutlined,
+  HistoryOutlined, DeleteOutlined,
 } from '@ant-design/icons';
 import * as complianceApi from '../api/compliance';
 import type { ComplianceReport, ComplianceItem } from '../types';
@@ -26,6 +26,7 @@ export default function CompliancePage() {
   const [loading, setLoading] = useState(false);
   const [currentReport, setCurrentReport] = useState<ComplianceReport | null>(null);
   const [history, setHistory] = useState<ComplianceReport[]>([]);
+  const reportRef = React.useRef<HTMLDivElement>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
@@ -117,6 +118,23 @@ export default function CompliancePage() {
     },
   ];
 
+  const handleDeleteReport = async (reportId: string) => {
+    try {
+      await complianceApi.deleteComplianceReport(reportId);
+      message.success('删除成功');
+      if (currentReport?.id === reportId) setCurrentReport(null);
+      loadHistory();
+    } catch (err) {
+      message.error(`删除失败: ${err}`);
+    }
+  };
+
+  const handleSelectReport = (record: ComplianceReport) => {
+    setCurrentReport(record);
+    setActiveTab('history');
+    setTimeout(() => reportRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+  };
+
   const result = currentReport?.result;
   const summary = result?.summary;
 
@@ -181,7 +199,7 @@ export default function CompliancePage() {
                 size="small"
                 pagination={{ pageSize: 10 }}
                 onRow={(record) => ({
-                  onClick: () => setCurrentReport(record),
+                  onClick: () => handleSelectReport(record),
                   style: { cursor: 'pointer' },
                 })}
                 columns={[
@@ -192,6 +210,15 @@ export default function CompliancePage() {
                     render: (m: string) => m === 'product' ? '参数检查' : '文档审查',
                   },
                   { title: '检查时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
+                  {
+                    title: '操作', key: 'action', width: 80,
+                    render: (_: unknown, record: ComplianceReport) => (
+                      <Popconfirm title="确定删除该检查记录？" onConfirm={(e) => { e?.stopPropagation(); handleDeleteReport(record.id); }}>
+                        <Button type="text" danger size="small" icon={<DeleteOutlined />}
+                          onClick={(e) => e.stopPropagation()} />
+                      </Popconfirm>
+                    ),
+                  },
                 ]}
               />
             ),
@@ -200,6 +227,7 @@ export default function CompliancePage() {
       />
 
       {result && summary && (
+        <div ref={reportRef}>
         <Card title={`检查报告 - ${currentReport?.product_name || ''}`} style={{ marginTop: 16 }}>
           <Descriptions size="small" style={{ marginBottom: 16 }}>
             <Descriptions.Item label="模式">
@@ -232,6 +260,7 @@ export default function CompliancePage() {
             }}
           />
         </Card>
+        </div>
       )}
     </div>
   );
