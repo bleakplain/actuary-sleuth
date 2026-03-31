@@ -56,3 +56,30 @@ export async function fetchIndexStatus(): Promise<IndexStatus> {
   const { data } = await client.get('/api/kb/status');
   return data;
 }
+
+export interface KBVersion {
+  version_id: string;
+  created_at: string;
+  document_count: number;
+  chunk_count: number;
+  active: boolean;
+  description: string;
+}
+
+export async function fetchVersions(): Promise<{ versions: KBVersion[]; active_version: string }> {
+  const { data } = await client.get('/api/kb/versions');
+  return data;
+}
+
+export async function createVersion(description?: string): Promise<{ task_id: string }> {
+  const { data } = await client.post('/api/kb/versions', { description: description || '' });
+  return data;
+}
+
+export async function activateVersion(versionId: string): Promise<void> {
+  await client.post(`/api/kb/versions/${versionId}/activate`);
+}
+
+export async function deleteVersion(versionId: string): Promise<void> {
+  await client.delete(`/api/kb/versions/${versionId}`);
+}

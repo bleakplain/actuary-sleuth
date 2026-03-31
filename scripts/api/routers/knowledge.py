@@ -20,13 +20,14 @@ _tasks: Dict[str, Dict[str, object]] = {}
 
 
 def _get_config():
-    from lib.rag_engine.config import get_config
-    return get_config()
+    from lib.rag_engine.version_manager import KBVersionManager
+    return KBVersionManager().get_rag_config()
 
 
 def _get_regulations_dir() -> Path:
-    config = _get_config()
-    return Path(config.regulations_dir)
+    """文档列表和预览使用工作目录（非版本快照）。"""
+    from lib.rag_engine.config import RAGConfig
+    return Path(RAGConfig().regulations_dir)
 
 
 @router.get("/documents", response_model=list[DocumentOut])
@@ -90,24 +91,40 @@ async def import_documents(req: ImportRequest):
 
 @router.post("/documents/rebuild")
 async def rebuild_index(req: RebuildRequest):
+    """重建索引：创建新版本（快照当前源文件 + 重建索引）。"""
     task_id = f"task_{uuid.uuid4().hex[:8]}"
     _tasks[task_id] = {"status": "pending", "progress": "", "result": None}
 
     async def _run_rebuild():
         try:
             _tasks[task_id]["status"] = "running"
-            _tasks[task_id]["progress"] = "正在重建索引..."
+            _tasks[task_id]["progress"] = "正在创建新版本并重建索引..."
 
-            config = _get_config()
+            from lib.rag_engine.version_manager import KBVersionManager
+            from lib.rag_engine.config import RAGConfig
+            vm = KBVersionManager()
+            working_config = RAGConfig()
+
+            meta = vm.create_version(
+                source_dir=working_config.regulations_dir,
+                description="从当前源文件重建",
+            )
+
+            version_config = vm.get_rag_config(meta.version_id)
             from lib.rag_engine.data_importer import RegulationDataImporter
-            importer = RegulationDataImporter(config)
-            result = importer.rebuild_knowledge_base(file_pattern=req.file_pattern)
+            importer = RegulationDataImporter(version_config)
+            stats = importer.import_all(force_rebuild=True)
+            vm.update_version_chunk_count(meta.version_id, stats.get("vector", 0))
+
+            from api.routers.kb_version import reload_rag_engine
+            reload_rag_engine(vm)
 
             _tasks[task_id]["status"] = "completed"
-            _tasks[task_id]["result"] = result
+            _tasks[task_id]["result"] = {"version_id": meta.version_id, "stats": stats}
         except Exception as e:
             _tasks[task_id]["status"] = "failed"
             _tasks[task_id]["progress"] = str(e)
+            logger.error(f"重建索引失败: {e}")
 
     asyncio.create_task(_run_rebuild())
     return {"task_id": task_id, "status": "pending"}

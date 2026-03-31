@@ -67,8 +67,11 @@ class ThreadLocalSettings:
         """设置当前线程的配置"""
         with self._lock:
             if not self._global_backup:
-                self._global_backup['llm'] = getattr(Settings, 'llm', None)
-                self._global_backup['embed_model'] = getattr(Settings, 'embed_model', None)
+                try:
+                    self._global_backup['llm'] = Settings._llm
+                    self._global_backup['embed_model'] = Settings._embed_model
+                except AttributeError:
+                    pass
 
         if not hasattr(self._local, 'initialized'):
             self._local.llm = llm

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Card, Table, Button, Space, Modal, Typography, message, Progress, Statistic, Row, Col, Popconfirm, Descriptions, Tag, Spin } from 'antd';
-import { DatabaseOutlined, ReloadOutlined, ImportOutlined, SyncOutlined, UnorderedListOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Space, Modal, Typography, message, Progress, Statistic, Row, Col, Popconfirm, Descriptions, Tag, Spin, Drawer, Input, Badge } from 'antd';
+import { DatabaseOutlined, ReloadOutlined, ImportOutlined, PlusOutlined, UnorderedListOutlined, HistoryOutlined, DeleteOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import * as kbApi from '../api/knowledge';
+import type { KBVersion } from '../api/knowledge';
 import type { Document, IndexStatus } from '../types';
 
 const { Title, Text } = Typography;
@@ -37,6 +38,13 @@ export default function KnowledgePage() {
   const [highlightKey, setHighlightKey] = useState(0);
   const sourceRef = useRef<HTMLPreElement>(null);
 
+  // 版本管理状态
+  const [versions, setVersions] = useState<KBVersion[]>([]);
+  const [activeVersion, setActiveVersion] = useState('');
+  const [versionDrawerOpen, setVersionDrawerOpen] = useState(false);
+  const [createVersionModalOpen, setCreateVersionModalOpen] = useState(false);
+  const [versionDescription, setVersionDescription] = useState('');
+
   // highlightPos 变化时执行高亮；highlightKey 变化时强制 pre 重新渲染以清除旧高亮
   useEffect(() => {
     const node = sourceRef.current;
@@ -60,9 +68,15 @@ export default function KnowledgePage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [docs, status] = await Promise.all([kbApi.fetchDocuments(), kbApi.fetchIndexStatus()]);
+      const [docs, status, verData] = await Promise.all([
+        kbApi.fetchDocuments(),
+        kbApi.fetchIndexStatus(),
+        kbApi.fetchVersions(),
+      ]);
       setDocuments(docs);
       setIndexStatus(status);
+      setVersions(verData.versions);
+      setActiveVersion(verData.active_version);
     } catch (err) {
       message.error(`加载失败: ${err}`);
     } finally {
@@ -107,14 +121,36 @@ export default function KnowledgePage() {
     }
   };
 
-  const handleRebuild = async () => {
+  const handleCreateVersion = async () => {
     try {
-      const { task_id } = await kbApi.rebuildIndex('*.md', true);
+      const { task_id } = await kbApi.createVersion(versionDescription || undefined);
       setTaskId(task_id);
       setTaskStatus('pending');
-      message.info('开始重建索引...');
+      setCreateVersionModalOpen(false);
+      setVersionDescription('');
+      message.info('开始创建新版本...');
     } catch (err) {
-      message.error(`重建失败: ${err}`);
+      message.error(`创建版本失败: ${err}`);
+    }
+  };
+
+  const handleActivateVersion = async (versionId: string) => {
+    try {
+      await kbApi.activateVersion(versionId);
+      message.success(`已切换到 ${versionId}`);
+      loadData();
+    } catch (err) {
+      message.error(`切换失败: ${err}`);
+    }
+  };
+
+  const handleDeleteVersion = async (versionId: string) => {
+    try {
+      await kbApi.deleteVersion(versionId);
+      message.success(`已删除 ${versionId}`);
+      loadData();
+    } catch (err) {
+      message.error(`删除失败: ${err}`);
     }
   };
 
@@ -228,8 +264,9 @@ export default function KnowledgePage() {
         <Col span={6}>
           <Card>
             <Statistic
-              title="向量库状态"
-              value={indexStatus?.vector_db?.status || '未知'}
+              title="当前版本"
+              value={activeVersion || '-'}
+              suffix={activeVersion && <Tag color="blue" style={{ marginLeft: 4 }}>{versions.find(v => v.version_id === activeVersion)?.description || '当前激活'}</Tag>}
             />
           </Card>
         </Col>
@@ -244,17 +281,16 @@ export default function KnowledgePage() {
         >
           导入文档
         </Button>
-        <Popconfirm
-          title="确定重建索引？此操作会重新处理所有文档。"
-          onConfirm={handleRebuild}
+        <Button
+          icon={<PlusOutlined />}
+          onClick={() => setCreateVersionModalOpen(true)}
+          loading={taskStatus === 'running' || taskStatus === 'pending'}
         >
-          <Button
-            icon={<SyncOutlined />}
-            loading={taskStatus === 'running' || taskStatus === 'pending'}
-          >
-            重建索引
-          </Button>
-        </Popconfirm>
+          创建新版本
+        </Button>
+        <Button icon={<HistoryOutlined />} onClick={() => setVersionDrawerOpen(true)}>
+          版本管理
+        </Button>
         <Button icon={<ReloadOutlined />} onClick={loadData}>
           刷新
         </Button>
@@ -427,6 +463,105 @@ export default function KnowledgePage() {
           </Row>
         )}
       </Modal>
+
+      <Modal
+        title="创建新版本"
+        open={createVersionModalOpen}
+        onOk={handleCreateVersion}
+        onCancel={() => { setCreateVersionModalOpen(false); setVersionDescription(''); }}
+        okText="创建"
+        cancelText="取消"
+      >
+        <p style={{ color: '#666', marginBottom: 12 }}>
+          将从当前工作目录的源文件创建快照，并重建索引。创建完成后自动切换到新版本。
+        </p>
+        <Input.TextArea
+          placeholder="版本描述（可选，如：优化分块策略）"
+          value={versionDescription}
+          onChange={e => setVersionDescription(e.target.value)}
+          rows={2}
+        />
+      </Modal>
+
+      <Drawer
+        title="版本管理"
+        open={versionDrawerOpen}
+        onClose={() => setVersionDrawerOpen(false)}
+        width={600}
+      >
+        <Table
+          dataSource={versions}
+          rowKey="version_id"
+          pagination={false}
+          size="small"
+          rowClassName={record => record.active ? 'ant-table-row-active' : ''}
+          columns={[
+            {
+              title: '版本',
+              dataIndex: 'version_id',
+              key: 'version_id',
+              width: 70,
+              render: (v: string, r: KBVersion) => (
+                <Space>
+                  <Tag color={r.active ? 'blue' : 'default'}>{v}</Tag>
+                  {r.active && <Badge status="processing" />}
+                </Space>
+              ),
+            },
+            {
+              title: '描述',
+              dataIndex: 'description',
+              key: 'description',
+              ellipsis: true,
+              render: (v: string) => v || '-',
+            },
+            {
+              title: '文档',
+              dataIndex: 'document_count',
+              key: 'document_count',
+              width: 60,
+            },
+            {
+              title: '分块',
+              dataIndex: 'chunk_count',
+              key: 'chunk_count',
+              width: 60,
+            },
+            {
+              title: '创建时间',
+              dataIndex: 'created_at',
+              key: 'created_at',
+              width: 160,
+              ellipsis: true,
+            },
+            {
+              title: '操作',
+              key: 'action',
+              width: 120,
+              render: (_: unknown, record: KBVersion) => (
+                <Space size="small">
+                  {!record.active && (
+                    <Popconfirm
+                      title={`切换到 ${record.version_id}？`}
+                      onConfirm={() => handleActivateVersion(record.version_id)}
+                    >
+                      <Button type="link" size="small" icon={<CheckCircleOutlined />}>激活</Button>
+                    </Popconfirm>
+                  )}
+                  {!record.active && (
+                    <Popconfirm
+                      title={`确定删除 ${record.version_id}？此操作不可恢复。`}
+                      onConfirm={() => handleDeleteVersion(record.version_id)}
+                    >
+                      <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
+                    </Popconfirm>
+                  )}
+                </Space>
+              ),
+            },
+          ]}
+        />
+      </Drawer>
     </div>
   );
 }

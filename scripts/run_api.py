@@ -3,12 +3,24 @@
 
 import sys
 import os
-import uvicorn
+from pathlib import Path
 
 if __name__ == "__main__":
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
+
+    # 加载 .env 文件
+    env_file = Path(scripts_dir) / ".env"
+    if env_file.exists():
+        with open(env_file) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    os.environ.setdefault(key.strip(), value.strip())
+
+    import uvicorn
 
     uvicorn.run(
         "api.app:app",

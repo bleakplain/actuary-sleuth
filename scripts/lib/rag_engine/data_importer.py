@@ -61,6 +61,7 @@ class RegulationDataImporter:
         force_rebuild: bool = False
     ) -> bool:
         """导入到向量数据库"""
+        self._ensure_embedding_setup()
         index = self.index_manager.create_index(
             documents=documents,
             force_rebuild=force_rebuild
