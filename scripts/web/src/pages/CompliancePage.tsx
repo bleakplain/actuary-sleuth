@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import {
   Card, Form, Input, Button, Table, Tag, Typography,
-  message, Tabs, Space, Descriptions, Popconfirm,
+  message, Tabs, Space, Descriptions, Popconfirm, Drawer,
 } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined,
-  HistoryOutlined, DeleteOutlined,
+  HistoryOutlined, DeleteOutlined, BookOutlined,
 } from '@ant-design/icons';
 import * as complianceApi from '../api/compliance';
-import type { ComplianceReport, ComplianceItem } from '../types';
+import type { ComplianceReport, ComplianceItem, Source } from '../types';
 
 const { Title } = Typography;
 const { TextArea } = Input;
@@ -19,6 +19,95 @@ const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactNode; labe
   attention: { color: 'warning', icon: <ExclamationCircleOutlined />, label: '需关注' },
 };
 
+function SourceDrawer({
+  visible,
+  source,
+  excerpt,
+  onClose,
+}: {
+  visible: boolean;
+  source: Source | undefined;
+  excerpt?: string;
+  onClose: () => void;
+}) {
+  if (!source) return null;
+
+  return (
+    <Drawer
+      title={<Space><BookOutlined />法规来源详情</Space>}
+      placement="right"
+      width={560}
+      open={visible}
+      onClose={onClose}
+    >
+      <Descriptions column={1} size="small" bordered style={{ marginBottom: 16 }}>
+        <Descriptions.Item label="法规名称">{source.law_name}</Descriptions.Item>
+        <Descriptions.Item label="条款编号">{source.article_number}</Descriptions.Item>
+        {source.doc_number && (
+          <Descriptions.Item label="文号">{source.doc_number}</Descriptions.Item>
+        )}
+        {source.issuing_authority && (
+          <Descriptions.Item label="发布机关">{source.issuing_authority}</Descriptions.Item>
+        )}
+        {source.effective_date && (
+          <Descriptions.Item label="生效日期">{source.effective_date}</Descriptions.Item>
+        )}
+        <Descriptions.Item label="分类">{source.category}</Descriptions.Item>
+        {source.hierarchy_path && (
+          <Descriptions.Item label="层级路径">{source.hierarchy_path}</Descriptions.Item>
+        )}
+        {source.score != null && (
+          <Descriptions.Item label="检索相关度">
+            <Tag color={source.score > 0.02 ? 'green' : source.score > 0.01 ? 'orange' : 'red'}>
+              {source.score.toFixed(4)}
+            </Tag>
+          </Descriptions.Item>
+        )}
+      </Descriptions>
+
+      {excerpt && (
+        <div style={{ marginBottom: 16 }}>
+          <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+            引用原文片段
+          </Typography.Text>
+          <div
+            style={{
+              background: '#e6f7ff',
+              border: '1px solid #91d5ff',
+              borderRadius: 4,
+              padding: '8px 12px',
+              color: '#0050b3',
+              fontSize: 13,
+            }}
+          >
+            {excerpt}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+          法规原文
+        </Typography.Text>
+        <div
+          style={{
+            background: '#fafafa',
+            border: '1px solid #d9d9d9',
+            borderRadius: 4,
+            padding: '12px',
+            maxHeight: 300,
+            overflow: 'auto',
+            whiteSpace: 'pre-wrap',
+            fontSize: 13,
+          }}
+        >
+          {source.content}
+        </div>
+      </div>
+    </Drawer>
+  );
+}
+
 export default function CompliancePage() {
   const [activeTab, setActiveTab] = useState('product');
   const [productForm] = Form.useForm();
@@ -28,6 +117,9 @@ export default function CompliancePage() {
   const [history, setHistory] = useState<ComplianceReport[]>([]);
   const reportRef = React.useRef<HTMLDivElement>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [sourceDrawerVisible, setSourceDrawerVisible] = useState(false);
+  const [selectedSource, setSelectedSource] = useState<Source | undefined>();
+  const [selectedExcerpt, setSelectedExcerpt] = useState<string | undefined>();
 
   useEffect(() => {
     loadHistory();
@@ -111,7 +203,30 @@ export default function CompliancePage() {
       },
     },
     {
-      title: '法规来源', dataIndex: 'source', key: 'source', width: 150, ellipsis: true,
+      title: '法规来源', dataIndex: 'source', key: 'source', width: 150,
+      render: (text: string, record: ComplianceItem) => {
+        if (!text) return '-';
+        // 解析 [来源X] 标签
+        const matches = text.match(/\[来源(\d+)\]/g);
+        if (!matches) return text;
+        return (
+          <Space size={4} wrap>
+            {matches.map((tag) => {
+              const idx = parseInt(tag.replace(/\[来源(\d+)\]/, '$1'), 10) - 1;
+              return (
+                <Tag
+                  key={tag}
+                  color="blue"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => handleSourceClick(idx, record.source_excerpt)}
+                >
+                  {tag}
+                </Tag>
+              );
+            })}
+          </Space>
+        );
+      },
     },
     {
       title: '建议', dataIndex: 'suggestion', key: 'suggestion', ellipsis: true,
@@ -133,6 +248,15 @@ export default function CompliancePage() {
     setCurrentReport(record);
     setActiveTab('history');
     setTimeout(() => reportRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+  };
+
+  const handleSourceClick = (sourceIdx: number, excerpt?: string) => {
+    const sources = result?.sources;
+    if (sources && sourceIdx < sources.length) {
+      setSelectedSource(sources[sourceIdx]);
+      setSelectedExcerpt(excerpt);
+      setSourceDrawerVisible(true);
+    }
   };
 
   const result = currentReport?.result;
@@ -262,6 +386,13 @@ export default function CompliancePage() {
         </Card>
         </div>
       )}
+
+      <SourceDrawer
+        visible={sourceDrawerVisible}
+        source={selectedSource}
+        excerpt={selectedExcerpt}
+        onClose={() => setSourceDrawerVisible(false)}
+      />
     </div>
   );
 }
