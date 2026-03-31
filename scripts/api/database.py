@@ -86,13 +86,26 @@ CREATE TABLE IF NOT EXISTS compliance_reports (
 """
 
 
+def _deserialize_json_fields(row: dict, mappings: Dict[str, str]) -> dict:
+    for python_name, db_column in mappings.items():
+        val = row.pop(db_column, None)
+        if val is not None:
+            row[python_name] = json.loads(val)
+    return row
+
+
+_MSG_JSON_FIELDS = {"citations": "citations_json", "sources": "sources_json"}
+_SAMPLE_JSON_FIELDS = {"evidence_docs": "evidence_docs_json", "evidence_keywords": "evidence_keywords_json"}
+_RESULT_JSON_FIELDS = {
+    "retrieved_docs": "retrieved_docs_json",
+    "retrieval_metrics": "retrieval_metrics_json",
+    "generation_metrics": "generation_metrics_json",
+}
+
+
 def init_db():
-    """执行建表 DDL。应用启动时调用一次。"""
     with get_connection() as conn:
         conn.executescript(_SCHEMA_SQL)
-
-
-# ── 对话 (conversations / messages) ──────────────────
 
 
 def create_conversation(conversation_id: str, title: str = "") -> None:
@@ -123,13 +136,7 @@ def get_messages(conversation_id: str) -> List[Dict]:
             "FROM messages WHERE conversation_id = ? ORDER BY id",
             (conversation_id,),
         ).fetchall()
-        results = []
-        for r in rows:
-            d = dict(r)
-            d["citations"] = json.loads(d.pop("citations_json"))
-            d["sources"] = json.loads(d.pop("sources_json"))
-            results.append(d)
-        return results
+        return [_deserialize_json_fields(dict(r), _MSG_JSON_FIELDS) for r in rows]
 
 
 def add_message(
@@ -166,9 +173,6 @@ def delete_conversation(conversation_id: str) -> int:
         return msg_count
 
 
-# ── 评估数据集 (eval_samples / eval_snapshots) ──────
-
-
 def get_eval_samples(
     question_type: Optional[str] = None,
     difficulty: Optional[str] = None,
@@ -191,13 +195,7 @@ def get_eval_samples(
         rows = conn.execute(
             f"SELECT * FROM eval_samples{where} ORDER BY id", params
         ).fetchall()
-        results = []
-        for r in rows:
-            d = dict(r)
-            d["evidence_docs"] = json.loads(d.pop("evidence_docs_json"))
-            d["evidence_keywords"] = json.loads(d.pop("evidence_keywords_json"))
-            results.append(d)
-        return results
+        return [_deserialize_json_fields(dict(r), _SAMPLE_JSON_FIELDS) for r in rows]
 
 
 def get_eval_sample(sample_id: str) -> Optional[Dict]:
@@ -207,10 +205,30 @@ def get_eval_sample(sample_id: str) -> Optional[Dict]:
         ).fetchone()
         if row is None:
             return None
-        d = dict(row)
-        d["evidence_docs"] = json.loads(d.pop("evidence_docs_json"))
-        d["evidence_keywords"] = json.loads(d.pop("evidence_keywords_json"))
-        return d
+        return _deserialize_json_fields(dict(row), _SAMPLE_JSON_FIELDS)
+
+
+def _sample_insert_values(s: Dict, use_now: bool = True) -> tuple:
+    ts = "datetime('now')" if use_now else "?"
+    now = datetime.now(timezone.utc).isoformat()
+    return (
+        s["id"], s["question"], s.get("ground_truth", ""),
+        json.dumps(s.get("evidence_docs", []), ensure_ascii=False),
+        json.dumps(s.get("evidence_keywords", []), ensure_ascii=False),
+        s.get("question_type", "factual"),
+        s.get("difficulty", "medium"),
+        s.get("topic", ""),
+        now if use_now else s.get("created_at", now),
+        now if use_now else s.get("updated_at", now),
+    )
+
+
+_SAMPLE_INSERT_SQL = (
+    "INSERT OR IGNORE INTO eval_samples "
+    "(id, question, ground_truth, evidence_docs_json, evidence_keywords_json, "
+    "question_type, difficulty, topic, created_at, updated_at) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+)
 
 
 def upsert_eval_sample(sample: Dict) -> None:
@@ -257,40 +275,23 @@ def eval_sample_count() -> int:
 
 def import_eval_samples(samples: List[Dict]) -> int:
     count = 0
-    for s in samples:
-        with get_connection() as conn:
-            cur = conn.execute(
-                "INSERT OR IGNORE INTO eval_samples "
-                "(id, question, ground_truth, evidence_docs_json, evidence_keywords_json, "
-                "question_type, difficulty, topic, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
-                (
-                    s["id"], s["question"], s.get("ground_truth", ""),
-                    json.dumps(s.get("evidence_docs", []), ensure_ascii=False),
-                    json.dumps(s.get("evidence_keywords", []), ensure_ascii=False),
-                    s.get("question_type", "factual"),
-                    s.get("difficulty", "medium"),
-                    s.get("topic", ""),
-                ),
-            )
+    with get_connection() as conn:
+        for s in samples:
+            cur = conn.execute(_SAMPLE_INSERT_SQL, _sample_insert_values(s))
             if cur.rowcount > 0:
                 count += 1
     return count
-
-
-# ── 快照 ─────────────────────────────────────────────
 
 
 def create_snapshot(name: str, description: str = "") -> str:
     snapshot_id = f"snap_{uuid.uuid4().hex[:8]}"
     with get_connection() as conn:
         samples = get_eval_samples()
-        samples_json = json.dumps(samples, ensure_ascii=False)
-        cnt = len(samples)
         conn.execute(
             "INSERT INTO eval_snapshots (id, name, description, sample_count, samples_json) "
             "VALUES (?, ?, ?, ?, ?)",
-            (snapshot_id, name, description, cnt, samples_json),
+            (snapshot_id, name, description, len(samples),
+             json.dumps(samples, ensure_ascii=False)),
         )
     return snapshot_id
 
@@ -315,25 +316,9 @@ def restore_snapshot(snapshot_id: str) -> int:
             return 0
         count = 0
         for s in json.loads(snap["samples_json"]):
-            conn.execute(
-                "INSERT OR IGNORE INTO eval_samples "
-                "(id, question, ground_truth, evidence_docs_json, evidence_keywords_json, "
-                "question_type, difficulty, topic, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
-                (
-                    s["id"], s["question"], s.get("ground_truth", ""),
-                    json.dumps(s.get("evidence_docs", []), ensure_ascii=False),
-                    json.dumps(s.get("evidence_keywords", []), ensure_ascii=False),
-                    s.get("question_type", "factual"),
-                    s.get("difficulty", "medium"),
-                    s.get("topic", ""),
-                ),
-            )
+            conn.execute(_SAMPLE_INSERT_SQL, _sample_insert_values(s))
             count += 1
         return count
-
-
-# ── 评估运行 (eval_runs / eval_sample_results) ──────
 
 
 def create_eval_run(run_id: str, mode: str, config: Dict) -> None:
@@ -403,10 +388,7 @@ def get_eval_run(run_id: str) -> Optional[Dict]:
         if row is None:
             return None
         d = dict(row)
-        if d.get("config_json"):
-            d["config"] = json.loads(d.pop("config_json"))
-        if d.get("report_json"):
-            d["report"] = json.loads(d.pop("report_json"))
+        _deserialize_json_fields(d, {"config": "config_json", "report": "report_json"})
         return d
 
 
@@ -416,13 +398,7 @@ def get_eval_runs() -> List[Dict]:
             "SELECT id, mode, status, progress, total, started_at, finished_at, config_json "
             "FROM eval_runs ORDER BY started_at DESC"
         ).fetchall()
-        results = []
-        for r in rows:
-            d = dict(r)
-            if d.get("config_json"):
-                d["config"] = json.loads(d.pop("config_json"))
-            results.append(d)
-        return results
+        return [_deserialize_json_fields(dict(r), {"config": "config_json"}) for r in rows]
 
 
 def get_sample_results(run_id: str) -> List[Dict]:
@@ -431,17 +407,7 @@ def get_sample_results(run_id: str) -> List[Dict]:
             "SELECT * FROM eval_sample_results WHERE run_id = ? ORDER BY id",
             (run_id,),
         ).fetchall()
-        results = []
-        for r in rows:
-            d = dict(r)
-            d["retrieved_docs"] = json.loads(d.pop("retrieved_docs_json"))
-            d["retrieval_metrics"] = json.loads(d.pop("retrieval_metrics_json"))
-            d["generation_metrics"] = json.loads(d.pop("generation_metrics_json"))
-            results.append(d)
-        return results
-
-
-# ── 合规报告 ─────────────────────────────────────────
+        return [_deserialize_json_fields(dict(r), _RESULT_JSON_FIELDS) for r in rows]
 
 
 def save_compliance_report(
@@ -465,12 +431,7 @@ def get_compliance_reports() -> List[Dict]:
         rows = conn.execute(
             "SELECT * FROM compliance_reports ORDER BY created_at DESC"
         ).fetchall()
-        results = []
-        for r in rows:
-            d = dict(r)
-            d["result"] = json.loads(d.pop("result_json"))
-            results.append(d)
-        return results
+        return [_deserialize_json_fields(dict(r), {"result": "result_json"}) for r in rows]
 
 
 def get_compliance_report(report_id: str) -> Optional[Dict]:
@@ -480,6 +441,4 @@ def get_compliance_report(report_id: str) -> Optional[Dict]:
         ).fetchone()
         if row is None:
             return None
-        d = dict(row)
-        d["result"] = json.loads(d.pop("result_json"))
-        return d
+        return _deserialize_json_fields(dict(row), {"result": "result_json"})

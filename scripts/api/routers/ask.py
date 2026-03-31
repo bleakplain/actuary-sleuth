@@ -11,16 +11,10 @@ from sse_starlette.sse import EventSourceResponse
 from api.schemas.ask import (
     ChatRequest, ConversationOut, MessageOut,
 )
+from api.dependencies import get_rag_engine
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ask", tags=["法规问答"])
-
-
-def _get_engine():
-    from api.app import rag_engine
-    if rag_engine is None:
-        raise HTTPException(status_code=503, detail="RAG 引擎尚未就绪")
-    return rag_engine
 
 
 @router.post("/chat")
@@ -30,7 +24,7 @@ async def chat(req: ChatRequest):
     create_conversation(conversation_id, title=req.question[:50])
     add_message(conversation_id, "user", req.question)
 
-    engine = _get_engine()
+    engine = get_rag_engine()
 
     if req.mode == "search":
         try:

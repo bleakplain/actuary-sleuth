@@ -16,6 +16,12 @@ async def lifespan(app: FastAPI):
     logger.info("数据库初始化完成")
 
     try:
+        from api.routers.eval import _ensure_default_dataset
+        _ensure_default_dataset()
+    except Exception as e:
+        logger.warning(f"默认数据集初始化失败: {e}")
+
+    try:
         from lib.rag_engine import create_qa_engine
         rag_engine = create_qa_engine()
         rag_engine.initialize()

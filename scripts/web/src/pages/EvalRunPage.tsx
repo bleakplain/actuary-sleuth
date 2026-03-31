@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Card, Table, Button, Space, Select, Tag, Modal, Typography,
-  message, Progress, Row, Col, Descriptions, Spin,
+  message, Progress, Row, Col, Descriptions,
 } from 'antd';
 import {
   PlayCircleOutlined, DownloadOutlined, SwapOutlined,
@@ -17,21 +17,23 @@ export default function EvalRunPage() {
   const [loading, setLoading] = useState(false);
   const [selectedRun, setSelectedRun] = useState<EvalRun | null>(null);
   const [report, setReport] = useState<Record<string, Record<string, number>> | null>(null);
+  const [details, setDetails] = useState<SampleResult[]>([]);
 
-  const flattenedMetrics: Record<string, number> = {};
-  if (report) {
-    for (const [section, metrics] of Object.entries(report)) {
-      if (typeof metrics === 'object' && metrics !== null) {
-        for (const [key, val] of Object.entries(metrics)) {
-          if (typeof val === 'number') {
-            flattenedMetrics[`${section}.${key}`] = val;
+  const flattenedMetrics = useMemo((): Record<string, number> => {
+    const result: Record<string, number> = {};
+    if (report) {
+      for (const [section, metrics] of Object.entries(report)) {
+        if (typeof metrics === 'object' && metrics !== null) {
+          for (const [key, val] of Object.entries(metrics)) {
+            if (typeof val === 'number') {
+              result[`${section}.${key}`] = val;
+            }
           }
         }
       }
     }
-  }
-  const [details, setDetails] = useState<SampleResult[]>([]);
-  const [detailLoading] = useState(false);
+    return result;
+  }, [report]);
   const [compareModalOpen, setCompareModalOpen] = useState(false);
   const [compareIds, setCompareIds] = useState<{ baseline: string; compare: string }>({ baseline: '', compare: '' });
   const [compareResult, setCompareResult] = useState<{
@@ -234,17 +236,16 @@ export default function EvalRunPage() {
                 <>
                   <MetricsChart metrics={flattenedMetrics} title="聚合指标" />
                   <Card title="逐题详情" size="small" style={{ marginTop: 16 }}>
-                    <Spin spinning={detailLoading}>
-                      <Table
-                        dataSource={details}
-                        columns={detailColumns}
-                        rowKey="id"
-                        size="small"
-                        pagination={{ pageSize: 20 }}
-                        expandable={{
-                          expandedRowRender: (record) => (
-                            <div>
-                              <Text strong>生成回答：</Text>
+                    <Table
+                      dataSource={details}
+                      columns={detailColumns}
+                      rowKey="id"
+                      size="small"
+                      pagination={{ pageSize: 20 }}
+                      expandable={{
+                        expandedRowRender: (record) => (
+                          <div>
+                            <Text strong>生成回答：</Text>
                               <div style={{ marginTop: 4, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
                                 {record.generated_answer || '-'}
                               </div>
@@ -262,7 +263,6 @@ export default function EvalRunPage() {
                           ),
                         }}
                       />
-                    </Spin>
                   </Card>
                 </>
               )}

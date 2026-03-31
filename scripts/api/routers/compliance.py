@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 from api.schemas.compliance import (
     ProductCheckRequest, DocumentCheckRequest, ComplianceReportOut,
 )
+from api.dependencies import get_rag_engine
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/compliance", tags=["合规检查"])
@@ -90,11 +91,12 @@ _COMPLIANCE_PROMPT_DOCUMENT = """你是一位保险法规合规专家。请审�
 """
 
 
-def _get_engine():
-    from api.app import rag_engine
-    if rag_engine is None:
-        raise HTTPException(status_code=503, detail="RAG 引擎尚未就绪")
-    return rag_engine
+
+def _build_context(search_results: list) -> str:
+    return "\n\n".join(
+        f"[来源{i+1}] {r.get('law_name', '')} {r.get('article_number', '')}\n{r.get('content', '')}"
+        for i, r in enumerate(search_results)
+    )
 
 
 def _run_compliance_check(engine, prompt: str) -> Dict:
@@ -122,15 +124,12 @@ def _run_compliance_check(engine, prompt: str) -> Dict:
 
 @router.post("/check/product", response_model=ComplianceReportOut)
 async def check_product(req: ProductCheckRequest):
-    engine = _get_engine()
+    engine = get_rag_engine()
 
     query = f"{req.category} 保险产品合规要求 {req.product_name}"
     search_results = engine.search(query, top_k=10)
 
-    context = "\n\n".join(
-        f"[来源{i+1}] {r.get('law_name', '')} {r.get('article_number', '')}\n{r.get('content', '')}"
-        for i, r in enumerate(search_results)
-    )
+    context = _build_context(search_results)
 
     prompt = _COMPLIANCE_PROMPT_PRODUCT.format(
         product_name=req.product_name,
@@ -161,7 +160,7 @@ async def check_product(req: ProductCheckRequest):
 
 @router.post("/check/document", response_model=ComplianceReportOut)
 async def check_document(req: DocumentCheckRequest):
-    engine = _get_engine()
+    engine = get_rag_engine()
 
     try:
         from lib.llm.factory import LLMClientFactory
@@ -174,10 +173,7 @@ async def check_document(req: DocumentCheckRequest):
     query = f"保险合规要求 {extracted[:200]}"
     search_results = engine.search(query, top_k=10)
 
-    context = "\n\n".join(
-        f"[来源{i+1}] {r.get('law_name', '')} {r.get('article_number', '')}\n{r.get('content', '')}"
-        for i, r in enumerate(search_results)
-    )
+    context = _build_context(search_results)
 
     prompt = _COMPLIANCE_PROMPT_DOCUMENT.format(
         document_content=req.document_content[:5000],

@@ -4,7 +4,7 @@ import uuid
 import asyncio
 import json
 import logging
-from typing import Optional
+from typing import Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -35,14 +35,6 @@ def _ensure_default_dataset():
             logger.info(f"已导入 {count} 条默认评测数据")
     except Exception as e:
         logger.warning(f"导入默认数据集失败: {e}")
-
-
-@router.on_event("startup")
-async def _startup():
-    try:
-        _ensure_default_dataset()
-    except Exception:
-        pass
 
 
 @router.get("/dataset", response_model=list[EvalSampleOut])
