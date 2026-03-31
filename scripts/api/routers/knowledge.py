@@ -150,7 +150,7 @@ async def preview_document(document_name: str):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="文档不存在")
     content = file_path.read_text(encoding="utf-8", errors="ignore")
-    return {"name": document_name, "content": content[:5000], "total_chars": len(content)}
+    return {"name": document_name, "content": content, "total_chars": len(content)}
 
 
 @router.get("/documents/{document_name}/chunks")

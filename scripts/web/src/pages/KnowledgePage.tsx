@@ -34,9 +34,8 @@ export default function KnowledgePage() {
   const [selectedChunk, setSelectedChunk] = useState<ChunkItem | null>(null);
   const [sourceContent, setSourceContent] = useState('');
   const [chunksLoading, setChunksLoading] = useState(false);
-  const [highlightPos, setHighlightPos] = useState<{ start: number; end: number } | null>(null);
-  const [highlightKey, setHighlightKey] = useState(0);
-  const sourceRef = useRef<HTMLPreElement>(null);
+  const [highlightLines, setHighlightLines] = useState<{ start: number; end: number } | null>(null);
+  const sourceRef = useRef<HTMLDivElement>(null);
 
   // 版本管理状态
   const [versions, setVersions] = useState<KBVersion[]>([]);
@@ -45,25 +44,14 @@ export default function KnowledgePage() {
   const [createVersionModalOpen, setCreateVersionModalOpen] = useState(false);
   const [versionDescription, setVersionDescription] = useState('');
 
-  // highlightPos 变化时执行高亮；highlightKey 变化时强制 pre 重新渲染以清除旧高亮
+  // highlightLines 变化时滚动到高亮行
   useEffect(() => {
-    const node = sourceRef.current;
-    if (!node || highlightPos === null) return;
-    // 等待 DOM 更新
+    if (!highlightLines || !sourceRef.current) return;
     requestAnimationFrame(() => {
-      const pre = sourceRef.current;
-      if (!pre) return;
-      const textNode = pre.childNodes[0];
-      if (!textNode || textNode.nodeType !== Node.TEXT_NODE) return;
-      const range = document.createRange();
-      range.setStart(textNode, highlightPos.start);
-      range.setEnd(textNode, highlightPos.end);
-      const mark = document.createElement('mark');
-      mark.style.background = '#fff3cd';
-      range.surroundContents(mark);
-      mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const el = sourceRef.current?.querySelector('[data-highlight]');
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
-  }, [highlightPos, highlightKey]);
+  }, [highlightLines]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -155,37 +143,31 @@ export default function KnowledgePage() {
   };
 
   const locateInSource = useCallback((text: string) => {
-    // 提取具体条款文本：找到"第X条"开头，截取到下一个"第X条"或章节标题之前
+    // 在原文中按行查找条款位置
     const articleMatch = text.match(/第[一二三四五六七八九十百千\d]+条[\s\S]*?/) || [text];
     const articleText = articleMatch[0].slice(0, 500);
     const snippet = articleText.replace(/\s+/g, '').slice(0, 80);
-    const cleanSource = sourceContent.replace(/\s+/g, '');
-    const idx = cleanSource.indexOf(snippet);
-    if (idx >= 0) {
-      // 映射回原始文本位置
-      let srcIdx = 0, cleanIdx = 0;
-      while (cleanIdx < idx && srcIdx < sourceContent.length) {
-        if (!/\s/.test(sourceContent[srcIdx])) cleanIdx++;
-        srcIdx++;
+    const lines = sourceContent.split('\n');
+
+    // 逐行匹配：去除空白后比较前80字符
+    let startLine = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].replace(/\s+/g, '').startsWith(snippet)) {
+        startLine = i;
+        break;
       }
-      // 找到这一条的结束位置（下一个"第X条"或章节标题）
-      const endSnippet = articleText.replace(/\s+/g, '');
-      let endSrc = srcIdx, endClean = cleanIdx;
-      while (endClean < cleanIdx + endSnippet.length && endSrc < sourceContent.length) {
-        if (!/\s/.test(sourceContent[endSrc])) endClean++;
-        endSrc++;
-      }
-      // 在原始文本中找到下一个"第X条"作为结束边界
-      const afterPos = sourceContent.indexOf('\n', srcIdx);
-      if (afterPos > 0) {
-        const rest = sourceContent.slice(afterPos);
-        const nextArticle = rest.search(/\n[第（][一二三四五六七八九十百千\d]+[条）]/);
-        if (nextArticle > 0) {
-          endSrc = afterPos + nextArticle;
-        }
-      }
-      setHighlightPos({ start: srcIdx, end: endSrc });
     }
+    if (startLine < 0) return;
+
+    // 从起始行往下找下一个"第X条"作为结束行
+    let endLine = lines.length;
+    for (let i = startLine + 1; i < lines.length; i++) {
+      if (/^\s*[第（][一二三四五六七八九十百千\d]+[条）]/.test(lines[i])) {
+        endLine = i;
+        break;
+      }
+    }
+    setHighlightLines({ start: startLine, end: endLine });
   }, [sourceContent]);
 
   const handleViewChunks = async (name: string) => {
@@ -193,8 +175,7 @@ export default function KnowledgePage() {
     setChunksOpen(true);
     setChunksDocName(name);
     setSelectedChunk(null);
-    setHighlightPos(null);
-    setHighlightKey(k => k + 1);
+    setHighlightLines(null);
     try {
       const [previewResult, chunksResult] = await Promise.all([
         kbApi.fetchDocumentPreview(name),
@@ -343,9 +324,24 @@ export default function KnowledgePage() {
                 原文 ({chunksDocName})
               </div>
               <div style={{ flex: 1, overflow: 'auto', padding: '8px 12px' }}>
-                <pre key={highlightKey} ref={sourceRef} style={{ margin: 0, fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
-                  {sourceContent}
-                </pre>
+                <div ref={sourceRef} style={{ margin: 0, fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
+                  {sourceContent.split('\n').map((line, i) => {
+                    const isHighlighted = highlightLines && i >= highlightLines.start && i < highlightLines.end;
+                    return (
+                      <div
+                        key={i}
+                        data-highlight={isHighlighted ? 'true' : undefined}
+                        style={{
+                          background: isHighlighted ? '#fff3cd' : undefined,
+                          padding: isHighlighted ? '0 2px' : undefined,
+                          borderRadius: 2,
+                        }}
+                      >
+                        {line || '\u00A0'}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </Col>
 
@@ -366,7 +362,7 @@ export default function KnowledgePage() {
                   <Button
                     size="small"
                     style={{ marginBottom: 12 }}
-                    onClick={() => { setSelectedChunk(null); setHighlightPos(null); setHighlightKey(k => k + 1); }}
+                    onClick={() => { setSelectedChunk(null); setHighlightLines(null); }}
                   >
                     &larr; 返回列表
                   </Button>
