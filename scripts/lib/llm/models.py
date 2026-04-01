@@ -12,5 +12,4 @@ class ModelName(str, Enum):
     GLM_4_PLUS = "glm-4-plus"
     GLM_Z1_AIR = "glm-z1-air"
     GLM_4_AIR = "glm-4-air"
-    EMBEDDING_3 = "embedding-3"
-    NOMIC_EMBED_TEXT = "nomic-embed-text"
+    EMBEDDING = "jinaai/jina-embeddings-v5-text-small"

@@ -125,7 +125,7 @@ class LLMClientFactory:
         api_key, base_url = LLMClientFactory._get_base_config()
         return {
             'provider': 'zhipu',
-            'model': ModelName.EMBEDDING_3,
+            'model': ModelName.EMBEDDING,
             'api_key': api_key,
             'base_url': base_url,
             'timeout': 120,
@@ -136,7 +136,7 @@ class LLMClientFactory:
         api_key, base_url = LLMClientFactory._get_base_config()
         return ZhipuClient(
             api_key=api_key,
-            model=ModelName.EMBEDDING_3,
+            model="embedding-3",
             base_url=base_url,
             timeout=60
         )
