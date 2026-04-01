@@ -1,14 +1,16 @@
 import { create } from 'zustand';
-import type { Feedback, FeedbackStats } from '../types';
+import type { Feedback, FeedbackStats, FeedbackActionLog } from '../types';
 import * as feedbackApi from '../api/feedback';
 
 interface FeedbackState {
   badcases: Feedback[];
   stats: FeedbackStats | null;
   loading: boolean;
+  history: Record<string, FeedbackActionLog[]>;
 
   loadBadcases: (params?: { status?: string; classified_type?: string }) => Promise<void>;
   loadStats: () => Promise<void>;
+  loadHistory: (feedbackId: string) => Promise<void>;
   updateBadcase: (id: string, updates: Record<string, unknown>) => Promise<void>;
   classifyAll: () => Promise<void>;
 }
@@ -17,6 +19,7 @@ export const useFeedbackStore = create<FeedbackState>((set, get) => ({
   badcases: [],
   stats: null,
   loading: false,
+  history: {},
 
   loadBadcases: async (params) => {
     set({ loading: true });
@@ -27,6 +30,11 @@ export const useFeedbackStore = create<FeedbackState>((set, get) => ({
   loadStats: async () => {
     const stats = await feedbackApi.fetchFeedbackStats();
     set({ stats });
+  },
+
+  loadHistory: async (feedbackId) => {
+    const logs = await feedbackApi.fetchBadcaseHistory(feedbackId);
+    set((state) => ({ history: { ...state.history, [feedbackId]: logs } }));
   },
 
   updateBadcase: async (id, updates) => {

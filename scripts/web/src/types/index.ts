@@ -164,6 +164,8 @@ export interface Feedback {
   updated_at: string;
   user_question: string;
   assistant_answer: string;
+  fix_action: string;
+  resolved_at: string | null;
 }
 
 export interface FeedbackStats {
@@ -174,4 +176,12 @@ export interface FeedbackStats {
   by_type: Record<string, number>;
   by_status: Record<string, number>;
   by_risk: Record<string, number>;
+}
+
+export interface FeedbackActionLog {
+  id: number;
+  feedback_id: string;
+  action: string;
+  detail: string;
+  created_at: string;
 }
