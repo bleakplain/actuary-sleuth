@@ -63,6 +63,7 @@ try:
     from .evaluator import RetrievalEvaluator, GenerationEvaluator, RAGEvalReport
     from .eval_dataset import EvalSample, QuestionType, load_eval_dataset, create_default_eval_dataset, save_eval_dataset, DEFAULT_DATASET_PATH
     from .quality_detector import detect_quality, compute_retrieval_relevance, compute_info_completeness
+    from .badcase_classifier import classify_badcase, assess_compliance_risk
 
     _has_rag = True
 except ImportError:
@@ -89,6 +90,8 @@ except ImportError:
     detect_quality = None
     compute_retrieval_relevance = None
     compute_info_completeness = None
+    classify_badcase = None
+    assess_compliance_risk = None
     _has_rag = False
 
 __all__ = [
@@ -128,6 +131,8 @@ __all__ = [
     'detect_quality',
     'compute_retrieval_relevance',
     'compute_info_completeness',
+    'classify_badcase',
+    'assess_compliance_risk',
 ]
 
 __version__ = '0.1.0'
