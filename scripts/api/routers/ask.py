@@ -66,6 +66,7 @@ async def chat(req: ChatRequest):
                             "citations": result.get("citations", []),
                             "sources": result.get("sources", []),
                             "faithfulness_score": result.get("faithfulness_score"),
+                            "unverified_claims": result.get("unverified_claims", []),
                         },
                     },
                     ensure_ascii=False,
@@ -78,6 +79,8 @@ async def chat(req: ChatRequest):
                 answer,
                 citations=result.get("citations", []),
                 sources=result.get("sources", []),
+                faithfulness_score=result.get("faithfulness_score"),
+                unverified_claims=result.get("unverified_claims", []),
             )
         except Exception as e:
             logger.error(f"Chat failed: {e}")
