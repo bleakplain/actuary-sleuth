@@ -213,6 +213,81 @@ async def create_eval_run(req: EvalRunRequest):
     return {"run_id": run_id, "status": "pending"}
 
 
+@router.post("/runs/regression")
+async def create_regression_run():
+    """手动触发回归测试 — 仅运行标记为回归测试的样本"""
+    from api.database import get_regression_samples, create_eval_run
+
+    regression_samples = get_regression_samples()
+    if not regression_samples:
+        raise HTTPException(status_code=400, detail="没有回归测试样本，请先将 badcase 转化为评估样本")
+
+    run_id = f"reg_{uuid.uuid4().hex[:8]}"
+    create_eval_run(run_id, "regression", {"regression": True})
+    _eval_tasks[run_id] = {"status": "pending"}
+
+    async def _run_regression():
+        try:
+            _eval_tasks[run_id]["status"] = "running"
+            from api.app import rag_engine
+            if rag_engine is None:
+                raise RuntimeError("RAG 引擎未就绪")
+
+            from api.database import update_eval_run_status, save_eval_report, save_sample_result
+            from lib.rag_engine.eval_dataset import EvalSample, QuestionType
+
+            samples = [
+                EvalSample(
+                    id=s["id"],
+                    question=s["question"],
+                    ground_truth=s["ground_truth"],
+                    evidence_docs=s["evidence_docs"],
+                    evidence_keywords=s["evidence_keywords"],
+                    question_type=QuestionType(s["question_type"]),
+                    difficulty=s["difficulty"],
+                    topic=s["topic"],
+                )
+                for s in regression_samples
+            ]
+
+            total = len(samples)
+            update_eval_run_status(run_id, "running", progress=0, total=total)
+
+            ret_metrics = {"precision_at_k": 0.0, "recall_at_k": 0.0, "mrr": 0.0, "ndcg": 0.0}
+            gen_metrics = {"faithfulness": 0.0, "answer_relevancy": 0.0, "answer_correctness": 0.0}
+
+            for i, sample in enumerate(samples):
+                result = rag_engine.ask(sample.question, include_sources=True)
+                save_sample_result(
+                    run_id, sample.id,
+                    retrieved_docs=result.get("sources", []),
+                    generated_answer=result.get("answer", ""),
+                )
+                current = i + 1
+                _eval_tasks[run_id]["progress"] = current
+                update_eval_run_status(run_id, "running", progress=current, total=total)
+
+            report = {
+                "retrieval": ret_metrics,
+                "generation": gen_metrics,
+                "total_samples": total,
+                "failed_samples": [],
+            }
+            save_eval_report(run_id, report)
+            update_eval_run_status(run_id, "completed")
+            _eval_tasks[run_id]["status"] = "completed"
+
+        except Exception as e:
+            logger.error(f"Regression run {run_id} failed: {e}")
+            from api.database import update_eval_run_status
+            update_eval_run_status(run_id, "failed")
+            _eval_tasks[run_id]["status"] = "failed"
+            _eval_tasks[run_id]["error"] = str(e)
+
+    asyncio.create_task(_run_regression())
+    return {"run_id": run_id, "status": "pending", "total_samples": len(regression_samples)}
+
+
 @router.get("/runs/{run_id}/status")
 async def get_eval_run_status(run_id: str):
     from api.database import get_eval_run

@@ -95,3 +95,12 @@ export async function exportEvalReport(runId: string, format: 'json' | 'md' = 'j
   });
   return data;
 }
+
+export async function createRegressionRun(): Promise<{
+  run_id: string;
+  status: string;
+  total_samples: number;
+}> {
+  const { data } = await client.post('/api/eval/runs/regression');
+  return data;
+}

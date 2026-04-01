@@ -1,5 +1,5 @@
 import client from './client';
-import type { Feedback, FeedbackStats, Source, Citation } from '../types';
+import type { Feedback, FeedbackStats, FeedbackActionLog, Source, Citation } from '../types';
 
 export async function submitFeedback(params: {
   message_id: number;
@@ -33,6 +33,7 @@ export async function updateBadcase(
     classified_reason?: string;
     classified_fix_direction?: string;
     compliance_risk?: number;
+    fix_action?: string;
   },
 ): Promise<Feedback> {
   const { data } = await client.put(`/api/feedback/badcases/${id}`, updates);
@@ -64,4 +65,13 @@ export async function convertBadcase(id: string, ground_truth: string): Promise<
     params: { ground_truth },
   });
   return data;
+}
+
+export async function fetchBadcaseHistory(id: string): Promise<FeedbackActionLog[]> {
+  const { data } = await client.get(`/api/feedback/badcases/${id}/history`);
+  return data;
+}
+
+export async function classifyBadcases(): Promise<void> {
+  await client.post('/api/feedback/badcases/classify');
 }

@@ -154,7 +154,11 @@ export interface Feedback {
   correction: string;
   source_channel: string;
   auto_quality_score: number | null;
-  auto_quality_details: Record<string, number> | null;
+  auto_quality_details: {
+    faithfulness?: { score: number; issues: string };
+    relevance?: { score: number; issues: string };
+    completeness?: { score: number; issues: string };
+  } | null;
   classified_type: string | null;
   classified_reason: string | null;
   classified_fix_direction: string | null;
@@ -164,6 +168,8 @@ export interface Feedback {
   updated_at: string;
   user_question: string;
   assistant_answer: string;
+  fix_action: string;
+  resolved_at: string | null;
 }
 
 export interface FeedbackStats {
@@ -174,4 +180,12 @@ export interface FeedbackStats {
   by_type: Record<string, number>;
   by_status: Record<string, number>;
   by_risk: Record<string, number>;
+}
+
+export interface FeedbackActionLog {
+  id: number;
+  feedback_id: string;
+  action: string;
+  detail: string;
+  created_at: string;
 }

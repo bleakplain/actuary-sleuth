@@ -54,8 +54,8 @@ CREATE TABLE IF NOT EXISTS eval_snapshots (
 
 CREATE TABLE IF NOT EXISTS eval_runs (
     id TEXT PRIMARY KEY,
-    mode TEXT NOT NULL CHECK(mode IN ('retrieval', 'generation', 'full')),
-    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'running', 'completed', 'failed')),
+    mode TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
     progress INTEGER NOT NULL DEFAULT 0,
     total INTEGER NOT NULL DEFAULT 0,
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -106,6 +106,15 @@ CREATE TABLE IF NOT EXISTS feedback (
 CREATE INDEX IF NOT EXISTS idx_feedback_message ON feedback(message_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status);
 CREATE INDEX IF NOT EXISTS idx_feedback_type ON feedback(classified_type);
+
+CREATE TABLE IF NOT EXISTS feedback_action_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feedback_id TEXT NOT NULL REFERENCES feedback(id),
+    action TEXT NOT NULL,
+    detail TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_action_log_feedback ON feedback_action_log(feedback_id);
 """
 
 
@@ -140,6 +149,52 @@ def _migrate_db():
             conn.execute("ALTER TABLE messages ADD COLUMN faithfulness_score REAL")
         if 'unverified_claims_json' not in cols:
             conn.execute("ALTER TABLE messages ADD COLUMN unverified_claims_json TEXT DEFAULT '[]'")
+
+        # eval_samples: add is_regression
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(eval_samples)").fetchall()}
+        if 'is_regression' not in cols:
+            conn.execute("ALTER TABLE eval_samples ADD COLUMN is_regression INTEGER DEFAULT 0")
+
+        # feedback: add fix_action and resolved_at
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(feedback)").fetchall()}
+        if 'fix_action' not in cols:
+            conn.execute("ALTER TABLE feedback ADD COLUMN fix_action TEXT DEFAULT ''")
+        if 'resolved_at' not in cols:
+            conn.execute("ALTER TABLE feedback ADD COLUMN resolved_at TEXT")
+
+        # feedback_action_log table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS feedback_action_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                feedback_id TEXT NOT NULL REFERENCES feedback(id),
+                action TEXT NOT NULL,
+                detail TEXT DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_action_log_feedback ON feedback_action_log(feedback_id)")
+
+        # eval_runs: widen mode CHECK to include 'regression'
+        mode_check = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='eval_runs'"
+        ).fetchone()
+        if mode_check and "'retrieval', 'generation', 'full'" in (mode_check[0] or ""):
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS eval_runs_new (
+                    id TEXT PRIMARY KEY,
+                    mode TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    progress INTEGER NOT NULL DEFAULT 0,
+                    total INTEGER NOT NULL DEFAULT 0,
+                    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    finished_at TEXT,
+                    config_json TEXT NOT NULL DEFAULT '{}',
+                    report_json TEXT
+                );
+                INSERT INTO eval_runs_new SELECT * FROM eval_runs;
+                DROP TABLE eval_runs;
+                ALTER TABLE eval_runs_new RENAME TO eval_runs;
+            """)
 
 
 def create_conversation(conversation_id: str, title: str = "") -> None:
@@ -275,8 +330,8 @@ def upsert_eval_sample(sample: Dict) -> None:
         conn.execute("""
             INSERT INTO eval_samples
                 (id, question, ground_truth, evidence_docs_json, evidence_keywords_json,
-                 question_type, difficulty, topic, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 question_type, difficulty, topic, is_regression, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 question = excluded.question,
                 ground_truth = excluded.ground_truth,
@@ -285,6 +340,7 @@ def upsert_eval_sample(sample: Dict) -> None:
                 question_type = excluded.question_type,
                 difficulty = excluded.difficulty,
                 topic = excluded.topic,
+                is_regression = excluded.is_regression,
                 updated_at = excluded.updated_at
         """, (
             sample["id"], sample["question"], sample.get("ground_truth", ""),
@@ -293,6 +349,7 @@ def upsert_eval_sample(sample: Dict) -> None:
             sample.get("question_type", "factual"),
             sample.get("difficulty", "medium"),
             sample.get("topic", ""),
+            1 if sample.get("is_regression") else 0,
             now, now,
         ))
 
@@ -565,12 +622,22 @@ def update_feedback(feedback_id: str, updates: Dict) -> bool:
     for key, value in updates.items():
         sets.append(f"{key} = ?")
         params.append(value)
+
+    # Auto-set resolved_at when status changes to 'fixed'
+    if updates.get("status") == "fixed":
+        sets.append("resolved_at = datetime('now')")
+
     sets.append("updated_at = datetime('now')")
     params.append(feedback_id)
     with get_connection() as conn:
         cur = conn.execute(
             f"UPDATE feedback SET {', '.join(sets)} WHERE id = ?", params
         )
+        if cur.rowcount > 0:
+            if "status" in updates:
+                log_feedback_action(feedback_id, "status_change", f"状态变更为: {updates['status']}")
+            if updates.get("fix_action"):
+                log_feedback_action(feedback_id, "fix_applied", updates["fix_action"])
         return cur.rowcount > 0
 
 
@@ -604,3 +671,31 @@ def get_feedback_stats() -> Dict:
         "by_status": by_status,
         "by_risk": by_risk,
     }
+
+
+def get_regression_samples() -> List[Dict]:
+    """获取所有标记为回归测试的评估样本"""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM eval_samples WHERE is_regression = 1 ORDER BY id"
+        ).fetchall()
+        return [_deserialize_json_fields(dict(r), _SAMPLE_JSON_FIELDS) for r in rows]
+
+
+def log_feedback_action(feedback_id: str, action: str, detail: str = "") -> None:
+    """记录反馈状态变更日志"""
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO feedback_action_log (feedback_id, action, detail) VALUES (?, ?, ?)",
+            (feedback_id, action, detail),
+        )
+
+
+def get_feedback_history(feedback_id: str) -> List[Dict]:
+    """获取反馈的状态变更历史"""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM feedback_action_log WHERE feedback_id = ? ORDER BY created_at ASC",
+            (feedback_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]

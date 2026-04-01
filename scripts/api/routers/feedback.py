@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from api.schemas.feedback import (
-    FeedbackCreate, FeedbackOut, FeedbackUpdate, FeedbackStats,
+    FeedbackCreate, FeedbackOut, FeedbackUpdate, FeedbackStats, FeedbackActionLog,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,6 +77,16 @@ async def update_badcase(feedback_id: str, req: FeedbackUpdate):
 async def get_stats():
     from api.database import get_feedback_stats
     return get_feedback_stats()
+
+
+@router.get("/badcases/{feedback_id}/history", response_model=list[FeedbackActionLog])
+async def get_badcase_history(feedback_id: str):
+    """查看反馈的状态变更历史"""
+    from api.database import get_feedback, get_feedback_history
+    fb = get_feedback(feedback_id)
+    if fb is None:
+        raise HTTPException(status_code=404, detail="反馈不存在")
+    return get_feedback_history(feedback_id)
 
 
 @router.post("/badcases/classify")
@@ -220,6 +230,7 @@ async def convert_to_eval_sample(feedback_id: str, ground_truth: str = ""):
         "question_type": fb.get("classified_type", "factual") or "factual",
         "difficulty": "medium",
         "topic": "",
+        "is_regression": True,
     })
 
     update_feedback(feedback_id, {"status": "converted"})

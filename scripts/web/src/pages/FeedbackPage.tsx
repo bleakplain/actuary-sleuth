@@ -1,8 +1,11 @@
-import React, { useEffect } from 'react';
-import { Table, Tag, Select, Button, Space, message, Popconfirm, Modal, Descriptions, Card, Statistic, Row, Col, Tooltip } from 'antd';
-import { ReloadOutlined, ThunderboltOutlined, DislikeOutlined, LikeOutlined, WarningOutlined } from '@ant-design/icons';
+import React, { useEffect, useState } from 'react';
+import { Table, Tag, Select, Button, Space, message, Popconfirm, Modal, Descriptions, Card, Statistic, Row, Col, Tooltip, Input, Timeline } from 'antd';
+import { ReloadOutlined, ThunderboltOutlined, DislikeOutlined, LikeOutlined, WarningOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useFeedbackStore } from '../stores/feedbackStore';
 import { verifyBadcase, convertBadcase } from '../api/feedback';
+import { createRegressionRun } from '../api/eval';
+import type { Feedback } from '../types';
+import { useNavigate } from 'react-router-dom';
 
 const TYPE_COLORS: Record<string, string> = {
   retrieval_failure: 'orange', hallucination: 'red', knowledge_gap: 'blue',
@@ -17,23 +20,22 @@ const STATUS_LABELS: Record<string, string> = {
 const RISK_COLORS: Record<number, string> = { 0: 'green', 1: 'orange', 2: 'red' };
 const RISK_LABELS: Record<number, string> = { 0: '低', 1: '中', 2: '高' };
 
-export default function FeedbackPage() {
-  const { badcases, stats, loading, loadBadcases, loadStats, classifyAll, updateBadcase } = useFeedbackStore();
-  const [filterStatus, setFilterStatus] = React.useState<string | undefined>();
+const ACTION_LABELS: Record<string, string> = {
+  status_change: '状态变更',
+  fix_applied: '修复动作',
+  classified: '自动分类',
+  verified: '验证',
+};
 
-  useEffect(() => { loadBadcases({ status: filterStatus }); }, [filterStatus, loadBadcases]);
-  useEffect(() => { loadStats(); }, [loadStats]);
+const ExpandedRow: React.FC<{ record: Feedback }> = ({ record }) => {
+  const { loadHistory, history, loadBadcases, loadStats, updateBadcase } = useFeedbackStore();
+  const [fixAction, setFixAction] = useState('');
 
-  const handleClassify = async () => {
-    try {
-      await classifyAll();
-      message.success('批量分类完成');
-    } catch {
-      message.error('分类失败');
-    }
-  };
+  useEffect(() => { loadHistory(record.id); }, [record.id, loadHistory]);
 
-  const expandedRowRender = (record: typeof badcases[0]) => (
+  const actionLogs = history[record.id] || [];
+
+  return (
     <div style={{ padding: '8px 16px' }}>
       <Descriptions bordered size="small" column={1}>
         <Descriptions.Item label="用户问题">
@@ -70,16 +72,95 @@ export default function FeedbackPage() {
         {record.auto_quality_details && (
           <Descriptions.Item label="质量评估">
             <Space>
-              <Tag>忠实度: {record.auto_quality_details.faithfulness?.toFixed(2) ?? '-'}</Tag>
-              <Tag>检索相关: {record.auto_quality_details.retrieval_relevance?.toFixed(2) ?? '-'}</Tag>
-              <Tag>完整性: {record.auto_quality_details.completeness?.toFixed(2) ?? '-'}</Tag>
+              <Tag>忠实度: {record.auto_quality_details?.faithfulness?.score.toFixed(2) ?? '-'}</Tag>
+              <Tag>相关性: {record.auto_quality_details?.relevance?.score.toFixed(2) ?? '-'}</Tag>
+              <Tag>完整性: {record.auto_quality_details?.completeness?.score.toFixed(2) ?? '-'}</Tag>
               <Tag color="blue">综合: {record.auto_quality_score?.toFixed(2) ?? '-'}</Tag>
             </Space>
           </Descriptions.Item>
         )}
       </Descriptions>
+
+      {(record.status === 'classified' || record.status === 'fixing' || record.status === 'fixed') && (
+        <div style={{ marginTop: 12 }}>
+          <h4 style={{ marginBottom: 8 }}>修复记录</h4>
+          {record.status !== 'fixed' && (
+            <Space style={{ marginBottom: 8 }}>
+              <Input.TextArea
+                rows={2}
+                placeholder="描述修复动作（如：补充了《健康保险管理办法》第三章）"
+                value={fixAction}
+                onChange={(e) => setFixAction(e.target.value)}
+                style={{ width: 400 }}
+              />
+              <Button
+                type="primary"
+                icon={<CheckCircleOutlined />}
+                onClick={async () => {
+                  try {
+                    await updateBadcase(record.id, { status: 'fixed', fix_action: fixAction || record.fix_action || '' });
+                    message.success('已标记为已修复');
+                    setFixAction('');
+                    loadStats();
+                  } catch { message.error('操作失败'); }
+                }}
+              >
+                标记已解决
+              </Button>
+            </Space>
+          )}
+          {record.fix_action && (
+            <div style={{ marginBottom: 8, color: '#52c41a' }}>
+              修复动作：{record.fix_action}
+              {record.resolved_at && <span style={{ color: '#999', marginLeft: 8 }}>（{record.resolved_at}）</span>}
+            </div>
+          )}
+          {actionLogs.length > 0 && (
+            <Timeline
+              items={actionLogs.map(log => ({
+                children: (
+                  <span>
+                    <Tag>{ACTION_LABELS[log.action] || log.action}</Tag>
+                    {log.detail}
+                    <span style={{ color: '#999', marginLeft: 8, fontSize: 12 }}>{log.created_at}</span>
+                  </span>
+                ),
+              }))}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
+};
+
+export default function FeedbackPage() {
+  const { badcases, stats, loading, loadBadcases, loadStats, classifyAll, updateBadcase } = useFeedbackStore();
+  const [filterStatus, setFilterStatus] = React.useState<string | undefined>();
+  const navigate = useNavigate();
+
+  useEffect(() => { loadBadcases({ status: filterStatus }); }, [filterStatus, loadBadcases]);
+  useEffect(() => { loadStats(); }, [loadStats]);
+
+  const handleClassify = async () => {
+    try {
+      await classifyAll();
+      message.success('批量分类完成');
+    } catch {
+      message.error('分类失败');
+    }
+  };
+
+  const handleRegression = async () => {
+    try {
+      const result = await createRegressionRun();
+      message.success(`回归测试已启动，共 ${result.total_samples} 个样本`);
+      navigate('/eval/runs');
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || '启动失败';
+      message.error(detail);
+    }
+  };
 
   const columns = [
     { title: 'ID', dataIndex: 'id', key: 'id', width: 140, ellipsis: true },
@@ -223,6 +304,7 @@ export default function FeedbackPage() {
             ]}
           />
           <Button icon={<ThunderboltOutlined />} onClick={handleClassify} loading={loading}>批量分类</Button>
+          <Button icon={<ThunderboltOutlined />} onClick={handleRegression} loading={loading} danger>回归测试</Button>
           <Button icon={<ReloadOutlined />} onClick={() => { loadBadcases({ status: filterStatus }); loadStats(); }}>刷新</Button>
         </Space>
       </div>
@@ -232,7 +314,7 @@ export default function FeedbackPage() {
         rowKey="id"
         loading={loading}
         size="small"
-        expandable={{ expandedRowRender }}
+        expandable={{ expandedRowRender: (record: Feedback) => <ExpandedRow record={record} /> }}
         pagination={{ pageSize: 20 }}
       />
     </div>
