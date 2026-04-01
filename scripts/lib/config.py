@@ -176,6 +176,10 @@ class OllamaConfig:
         return self._config.get('embed_model', 'nomic-embed-text')
 
     @property
+    def embed_provider(self) -> str:
+        return self._config.get('embed_provider', 'zhipu')
+
+    @property
     def timeout(self) -> int:
         """Ollama 超时时间（秒）"""
         return self._config.get('timeout', 120)

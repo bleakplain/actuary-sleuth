@@ -111,6 +111,17 @@ class LLMClientFactory:
     @staticmethod
     def get_embedding_config() -> dict:
         """获取嵌入模型配置"""
+        from lib.config import get_config
+        app_config = get_config()
+
+        if app_config.ollama.embed_provider == 'ollama':
+            return {
+                'provider': 'ollama',
+                'model': app_config.ollama.embed_model,
+                'host': app_config.ollama.host,
+                'timeout': app_config.ollama.timeout,
+            }
+
         api_key, base_url = LLMClientFactory._get_base_config()
         return {
             'provider': 'zhipu',

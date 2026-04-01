@@ -14,7 +14,8 @@
   "ollama": {
     "host": "http://localhost:11434",
     "chat_model": "qwen2:7b",
-    "embed_model": "nomic-embed-text",
+    "embed_provider": "ollama",
+    "embed_model": "jinaai/jina-embeddings-v5-text-small",
     "timeout": 120
   },
   "llm": {
