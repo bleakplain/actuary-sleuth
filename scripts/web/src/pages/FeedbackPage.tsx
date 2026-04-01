@@ -3,7 +3,9 @@ import { Table, Tag, Select, Button, Space, message, Popconfirm, Modal, Descript
 import { ReloadOutlined, ThunderboltOutlined, DislikeOutlined, LikeOutlined, WarningOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useFeedbackStore } from '../stores/feedbackStore';
 import { verifyBadcase, convertBadcase } from '../api/feedback';
+import { createRegressionRun } from '../api/eval';
 import type { Feedback } from '../types';
+import { useNavigate } from 'react-router-dom';
 
 const TYPE_COLORS: Record<string, string> = {
   retrieval_failure: 'orange', hallucination: 'red', knowledge_gap: 'blue',
@@ -136,6 +138,7 @@ const ExpandedRow: React.FC<{ record: Feedback }> = ({ record }) => {
 export default function FeedbackPage() {
   const { badcases, stats, loading, loadBadcases, loadStats, classifyAll, updateBadcase } = useFeedbackStore();
   const [filterStatus, setFilterStatus] = React.useState<string | undefined>();
+  const navigate = useNavigate();
 
   useEffect(() => { loadBadcases({ status: filterStatus }); }, [filterStatus, loadBadcases]);
   useEffect(() => { loadStats(); }, [loadStats]);
@@ -146,6 +149,17 @@ export default function FeedbackPage() {
       message.success('批量分类完成');
     } catch {
       message.error('分类失败');
+    }
+  };
+
+  const handleRegression = async () => {
+    try {
+      const result = await createRegressionRun();
+      message.success(`回归测试已启动，共 ${result.total_samples} 个样本`);
+      navigate('/eval/runs');
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || '启动失败';
+      message.error(detail);
     }
   };
 
@@ -291,6 +305,7 @@ export default function FeedbackPage() {
             ]}
           />
           <Button icon={<ThunderboltOutlined />} onClick={handleClassify} loading={loading}>批量分类</Button>
+          <Button icon={<ThunderboltOutlined />} onClick={handleRegression} loading={loading} danger>回归测试</Button>
           <Button icon={<ReloadOutlined />} onClick={() => { loadBadcases({ status: filterStatus }); loadStats(); }}>刷新</Button>
         </Space>
       </div>
