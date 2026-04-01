@@ -430,10 +430,17 @@ def _filter_clauses_for_sub_reg(
 
 def _safe_filename(name: str) -> str:
     """将法规名称转换为安全的文件名。"""
-    name = re.sub(r'[<>:"/\\|?*]', '', name)
+    # Remove ASCII unsafe chars and full-width/CJK punctuation
+    name = re.sub(r'[<>:"/\\|?*（）【】《》、，。！？；：""\'\'…—〔〕「」]', '', name)
     name = re.sub(r'[\s]+', '_', name)
-    if len(name) > 100:
-        name = name[:100]
+    # Keep filename under 240 bytes (leaving room for .md suffix and path prefix).
+    # Truncate by bytes to handle multi-byte UTF-8 characters safely.
+    max_bytes = 240
+    encoded = name.encode("utf-8")
+    if len(encoded) > max_bytes:
+        encoded = encoded[:max_bytes]
+        # Decode back, ignoring any partial multi-byte sequence at the end
+        name = encoded.decode("utf-8", errors="ignore")
     return name.strip("_")
 
 
