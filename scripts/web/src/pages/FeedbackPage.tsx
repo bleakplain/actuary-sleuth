@@ -71,7 +71,7 @@ export default function FeedbackPage() {
           <Descriptions.Item label="质量评估">
             <Space>
               <Tag>忠实度: {record.auto_quality_details.faithfulness?.toFixed(2) ?? '-'}</Tag>
-              <Tag>检索相关: {record.auto_quality_details.retrieval_relevance?.toFixed(2) ?? '-'}</Tag>
+              <Tag>相关性: {record.auto_quality_details.relevance?.toFixed(2) ?? '-'}</Tag>
               <Tag>完整性: {record.auto_quality_details.completeness?.toFixed(2) ?? '-'}</Tag>
               <Tag color="blue">综合: {record.auto_quality_score?.toFixed(2) ?? '-'}</Tag>
             </Space>
