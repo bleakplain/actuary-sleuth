@@ -32,6 +32,11 @@ export async function fetchDocumentPreview(name: string): Promise<{ name: string
   return data;
 }
 
+export async function saveDocument(name: string, content: string): Promise<{ name: string; saved: boolean }> {
+  const { data } = await client.put(`/api/kb/documents/${encodeURIComponent(name)}`, { content });
+  return data;
+}
+
 export async function fetchDocumentChunks(name: string): Promise<{
   document_name: string;
   total_chunks: number;

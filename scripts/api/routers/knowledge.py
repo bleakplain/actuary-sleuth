@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 
 from api.schemas.knowledge import (
     DocumentOut, ImportRequest, RebuildRequest, IndexStatus, TaskStatus,
+    SaveDocumentRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,17 @@ async def preview_document(document_name: str):
         raise HTTPException(status_code=404, detail="文档不存在")
     content = file_path.read_text(encoding="utf-8", errors="ignore")
     return {"name": document_name, "content": content, "total_chars": len(content)}
+
+
+@router.put("/documents/{document_name}")
+async def save_document(document_name: str, req: SaveDocumentRequest):
+    """保存编辑后的文档内容到 references 目录。"""
+    reg_dir = _get_regulations_dir()
+    file_path = reg_dir / document_name
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="文档不存在")
+    file_path.write_text(req.content, encoding="utf-8")
+    return {"name": document_name, "saved": True, "total_chars": len(req.content)}
 
 
 @router.get("/documents/{document_name}/chunks")

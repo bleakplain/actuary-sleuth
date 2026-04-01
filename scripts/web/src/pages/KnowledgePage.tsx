@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, Table, Button, Space, Modal, Typography, message, Progress, Statistic, Row, Col, Popconfirm, Descriptions, Tag, Spin, Drawer, Input, Badge } from 'antd';
 import { DatabaseOutlined, ReloadOutlined, ImportOutlined, PlusOutlined, UnorderedListOutlined, HistoryOutlined, DeleteOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 import * as kbApi from '../api/knowledge';
 import type { KBVersion } from '../api/knowledge';
 import type { Document, IndexStatus } from '../types';
@@ -34,6 +37,9 @@ export default function KnowledgePage() {
   const [selectedChunk, setSelectedChunk] = useState<ChunkItem | null>(null);
   const [sourceContent, setSourceContent] = useState('');
   const [chunksLoading, setChunksLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [saving, setSaving] = useState(false);
   const [highlightLines, setHighlightLines] = useState<{ start: number; end: number } | null>(null);
   const sourceRef = useRef<HTMLDivElement>(null);
 
@@ -190,6 +196,30 @@ export default function KnowledgePage() {
     }
   };
 
+  const handleStartEdit = () => {
+    setEditContent(sourceContent);
+    setEditing(true);
+  };
+
+  const handleCancelEdit = () => {
+    setEditing(false);
+    setEditContent('');
+  };
+
+  const handleSaveEdit = async () => {
+    setSaving(true);
+    try {
+      await kbApi.saveDocument(chunksDocName, editContent);
+      setSourceContent(editContent);
+      setEditing(false);
+      message.success('保存成功，请重建索引以生效');
+    } catch (err) {
+      message.error(`保存失败: ${err}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const columns = [
     { title: '文档名称', dataIndex: 'name', key: 'name', ellipsis: true },
     {
@@ -300,7 +330,7 @@ export default function KnowledgePage() {
       <Modal
         title={`分块验证 — ${chunksDocName} (${chunks.length} 块)`}
         open={chunksOpen}
-        onCancel={() => { setChunksOpen(false); setSelectedChunk(null); }}
+        onCancel={() => { setChunksOpen(false); setSelectedChunk(null); setEditing(false); }}
         footer={null}
         width="95vw"
         style={{ top: 20, maxWidth: 1600 }}
@@ -320,28 +350,42 @@ export default function KnowledgePage() {
                 flexDirection: 'column',
               }}
             >
-              <div style={{ padding: '8px 12px', fontWeight: 600, borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
-                原文 ({chunksDocName})
+              <div style={{ padding: '8px 12px', fontWeight: 600, borderBottom: '1px solid #f0f0f0', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>原文 ({chunksDocName})</span>
+                <Space>
+                  {editing ? (
+                    <>
+                      <Button size="small" type="primary" loading={saving} onClick={handleSaveEdit}>保存</Button>
+                      <Button size="small" onClick={handleCancelEdit}>取消</Button>
+                    </>
+                  ) : (
+                    <Button size="small" onClick={handleStartEdit}>编辑</Button>
+                  )}
+                </Space>
               </div>
               <div style={{ flex: 1, overflow: 'auto', padding: '8px 12px' }}>
-                <div ref={sourceRef} style={{ margin: 0, fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
-                  {sourceContent.split('\n').map((line, i) => {
-                    const isHighlighted = highlightLines && i >= highlightLines.start && i < highlightLines.end;
-                    return (
-                      <div
-                        key={i}
-                        data-highlight={isHighlighted ? 'true' : undefined}
-                        style={{
-                          background: isHighlighted ? '#fff3cd' : undefined,
-                          padding: isHighlighted ? '0 2px' : undefined,
-                          borderRadius: 2,
-                        }}
-                      >
-                        {line || '\u00A0'}
-                      </div>
-                    );
-                  })}
-                </div>
+                {editing ? (
+                  <textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      border: '1px solid #d9d9d9',
+                      borderRadius: 4,
+                      padding: 8,
+                      fontSize: 12,
+                      lineHeight: 1.6,
+                      fontFamily: 'inherit',
+                      resize: 'none',
+                      outline: 'none',
+                    }}
+                  />
+                ) : (
+                  <div ref={sourceRef} className="markdown-body" style={{ margin: 0, fontSize: 12, lineHeight: 1.6 }}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{sourceContent}</ReactMarkdown>
+                  </div>
+                )}
               </div>
             </Col>
 
@@ -386,18 +430,18 @@ export default function KnowledgePage() {
                     <Descriptions.Item label="字数">{selectedChunk.text_length}</Descriptions.Item>
                   </Descriptions>
                   <div
+                    className="markdown-body"
                     style={{
                       background: '#fafafa',
                       padding: 12,
                       borderRadius: 6,
                       fontSize: 13,
                       lineHeight: 1.8,
-                      whiteSpace: 'pre-wrap',
                       maxHeight: 'calc(100vh - 400px)',
                       overflow: 'auto',
                     }}
                   >
-                    {selectedChunk.text}
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{selectedChunk.text}</ReactMarkdown>
                   </div>
                 </div>
               ) : (
