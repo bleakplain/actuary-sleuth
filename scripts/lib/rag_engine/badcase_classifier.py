@@ -5,9 +5,10 @@
 - hallucination: 幻觉生成 — 检索正确但 LLM 答案错误
 - knowledge_gap: 知识缺失 — 知识库里确实没有
 """
-import json
 import logging
 from typing import List, Dict, Any
+
+from lib.rag_engine._llm_utils import get_llm_client, parse_llm_json_response
 
 logger = logging.getLogger(__name__)
 
@@ -47,26 +48,6 @@ _COMPLIANCE_PROMPT = """评估以下 badcase 的合规风险等级。
 {{"risk_level": 0, "reason": "<评估理由>"}}"""
 
 
-def _get_llm():
-    """获取 LLM 客户端，延迟导入避免循环依赖。"""
-    from api.app import rag_engine
-    if rag_engine is None:
-        raise RuntimeError("RAG 引擎未就绪")
-    return rag_engine.llm_provider()
-
-
-def _parse_json_response(text: str) -> Dict:
-    """从 LLM 响应中提取 JSON，处理 markdown 代码块包裹。"""
-    text = text.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        lines = lines[1:]  # remove ```json or ```
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines)
-    return json.loads(text)
-
-
 def classify_badcase(
     query: str,
     retrieved_docs: List[Dict[str, Any]],
@@ -74,7 +55,7 @@ def classify_badcase(
     unverified_claims: List[str],
 ) -> Dict[str, str]:
     """LLM 驱动的三分类自动分类。"""
-    llm = _get_llm()
+    llm = get_llm_client()
 
     sources_text = "\n".join(
         f"- [{d.get('source_file', '未知')}] {d.get('content', '')[:200]}"
@@ -92,7 +73,7 @@ def classify_badcase(
     )
 
     response = llm.generate(prompt)
-    result = _parse_json_response(response)
+    result = parse_llm_json_response(response)
 
     valid_types = {"retrieval_failure", "hallucination", "knowledge_gap"}
     if result.get("type") not in valid_types:
@@ -111,10 +92,10 @@ def assess_compliance_risk(reason: str, answer: str) -> int:
         return 0
 
     try:
-        llm = _get_llm()
+        llm = get_llm_client()
         prompt = _COMPLIANCE_PROMPT.format(reason=reason, answer=answer[:500])
         response = llm.generate(prompt)
-        result = _parse_json_response(response)
+        result = parse_llm_json_response(response)
         risk = int(result.get("risk_level", 0))
         return max(0, min(2, risk))
     except Exception as e:

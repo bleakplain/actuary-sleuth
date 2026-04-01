@@ -15,7 +15,7 @@ def _mock_quality_response(faithfulness: float, relevance: float, completeness: 
 
 
 class TestDetectQuality:
-    @patch("lib.rag_engine.quality_detector._get_llm")
+    @patch("lib.rag_engine.quality_detector.get_llm_client")
     def test_high_quality(self, mock_get_llm):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = _mock_quality_response(0.9, 0.85, 0.9)
@@ -31,7 +31,7 @@ class TestDetectQuality:
         assert scores["completeness"] == 0.9
         assert scores["overall"] > 0.85
 
-    @patch("lib.rag_engine.quality_detector._get_llm")
+    @patch("lib.rag_engine.quality_detector.get_llm_client")
     def test_low_quality(self, mock_get_llm):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = _mock_quality_response(0.2, 0.3, 0.1)
@@ -44,7 +44,7 @@ class TestDetectQuality:
         )
         assert scores["overall"] < 0.3
 
-    @patch("lib.rag_engine.quality_detector._get_llm")
+    @patch("lib.rag_engine.quality_detector.get_llm_client")
     def test_llm_failure_raises(self, mock_get_llm):
         mock_llm = MagicMock()
         mock_llm.generate.side_effect = RuntimeError("LLM unavailable")
@@ -57,7 +57,7 @@ class TestDetectQuality:
                 sources=[],
             )
 
-    @patch("lib.rag_engine.quality_detector._get_llm")
+    @patch("lib.rag_engine.quality_detector.get_llm_client")
     def test_empty_inputs(self, mock_get_llm):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = _mock_quality_response(0.0, 0.0, 0.0)
@@ -66,7 +66,7 @@ class TestDetectQuality:
         scores = detect_quality(query="", answer="", sources=[])
         assert scores["overall"] == 0.0
 
-    @patch("lib.rag_engine.quality_detector._get_llm")
+    @patch("lib.rag_engine.quality_detector.get_llm_client")
     def test_llm_returns_invalid_json(self, mock_get_llm):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = "not json"

@@ -71,3 +71,7 @@ export async function fetchBadcaseHistory(id: string): Promise<FeedbackActionLog
   const { data } = await client.get(`/api/feedback/badcases/${id}/history`);
   return data;
 }
+
+export async function classifyBadcases(): Promise<void> {
+  await client.post('/api/feedback/badcases/classify');
+}

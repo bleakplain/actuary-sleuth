@@ -44,10 +44,7 @@ export const useFeedbackStore = create<FeedbackState>((set, get) => ({
 
   classifyAll: async () => {
     set({ loading: true });
-    const res = await fetch(`${import.meta.env.VITE_API_BASE || 'http://localhost:8000'}/api/feedback/badcases/classify`, {
-      method: 'POST',
-    });
-    await res.json();
+    await feedbackApi.classifyBadcases();
     get().loadBadcases();
     get().loadStats();
     set({ loading: false });

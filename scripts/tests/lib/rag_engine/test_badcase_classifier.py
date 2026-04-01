@@ -11,7 +11,7 @@ def _mock_llm_return(cls_type: str, reason: str, fix_dir: str) -> str:
 
 
 class TestClassifyBadcase:
-    @patch("lib.rag_engine.badcase_classifier._get_llm")
+    @patch("lib.rag_engine.badcase_classifier.get_llm_client")
     def test_retrieval_failure(self, mock_get_llm):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = _mock_llm_return(
@@ -30,7 +30,7 @@ class TestClassifyBadcase:
         assert result["type"] == "retrieval_failure"
         assert "fix_direction" in result
 
-    @patch("lib.rag_engine.badcase_classifier._get_llm")
+    @patch("lib.rag_engine.badcase_classifier.get_llm_client")
     def test_hallucination(self, mock_get_llm):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = _mock_llm_return(
@@ -48,7 +48,7 @@ class TestClassifyBadcase:
         )
         assert result["type"] == "hallucination"
 
-    @patch("lib.rag_engine.badcase_classifier._get_llm")
+    @patch("lib.rag_engine.badcase_classifier.get_llm_client")
     def test_knowledge_gap(self, mock_get_llm):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = _mock_llm_return(
@@ -66,7 +66,7 @@ class TestClassifyBadcase:
         )
         assert result["type"] == "knowledge_gap"
 
-    @patch("lib.rag_engine.badcase_classifier._get_llm")
+    @patch("lib.rag_engine.badcase_classifier.get_llm_client")
     def test_llm_failure_raises(self, mock_get_llm):
         mock_llm = MagicMock()
         mock_llm.generate.side_effect = RuntimeError("LLM unavailable")
@@ -80,7 +80,7 @@ class TestClassifyBadcase:
                 unverified_claims=[],
             )
 
-    @patch("lib.rag_engine.badcase_classifier._get_llm")
+    @patch("lib.rag_engine.badcase_classifier.get_llm_client")
     def test_llm_returns_invalid_json(self, mock_get_llm):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = "not json at all"
@@ -96,7 +96,7 @@ class TestClassifyBadcase:
 
 
 class TestAssessComplianceRisk:
-    @patch("lib.rag_engine.badcase_classifier._get_llm")
+    @patch("lib.rag_engine.badcase_classifier.get_llm_client")
     def test_high_risk(self, mock_get_llm):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = '{"risk_level": 2, "reason": "包含错误金额信息"}'
@@ -105,7 +105,7 @@ class TestAssessComplianceRisk:
         risk = assess_compliance_risk("答案错误", "身故保险金为基本保额的150%")
         assert risk == 2
 
-    @patch("lib.rag_engine.badcase_classifier._get_llm")
+    @patch("lib.rag_engine.badcase_classifier.get_llm_client")
     def test_low_risk(self, mock_get_llm):
         mock_llm = MagicMock()
         mock_llm.generate.return_value = '{"risk_level": 0, "reason": "一般性回答问题"}'
@@ -114,7 +114,7 @@ class TestAssessComplianceRisk:
         risk = assess_compliance_risk("回答不完整", "相关规定请查阅条款")
         assert risk == 0
 
-    @patch("lib.rag_engine.badcase_classifier._get_llm")
+    @patch("lib.rag_engine.badcase_classifier.get_llm_client")
     def test_llm_failure_returns_zero(self, mock_get_llm):
         mock_llm = MagicMock()
         mock_llm.generate.side_effect = RuntimeError("LLM unavailable")

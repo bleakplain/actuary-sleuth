@@ -72,9 +72,9 @@ const ExpandedRow: React.FC<{ record: Feedback }> = ({ record }) => {
         {record.auto_quality_details && (
           <Descriptions.Item label="质量评估">
             <Space>
-              <Tag>忠实度: {(record.auto_quality_details as any).faithfulness?.toFixed(2) ?? '-'}</Tag>
-              <Tag>相关性: {(record.auto_quality_details as any).relevance?.toFixed(2) ?? '-'}</Tag>
-              <Tag>完整性: {(record.auto_quality_details as any).completeness?.toFixed(2) ?? '-'}</Tag>
+              <Tag>忠实度: {record.auto_quality_details?.faithfulness?.score.toFixed(2) ?? '-'}</Tag>
+              <Tag>相关性: {record.auto_quality_details?.relevance?.score.toFixed(2) ?? '-'}</Tag>
+              <Tag>完整性: {record.auto_quality_details?.completeness?.score.toFixed(2) ?? '-'}</Tag>
               <Tag color="blue">综合: {record.auto_quality_score?.toFixed(2) ?? '-'}</Tag>
             </Space>
           </Descriptions.Item>
@@ -101,7 +101,6 @@ const ExpandedRow: React.FC<{ record: Feedback }> = ({ record }) => {
                     await updateBadcase(record.id, { status: 'fixed', fix_action: fixAction || record.fix_action || '' });
                     message.success('已标记为已修复');
                     setFixAction('');
-                    loadBadcases();
                     loadStats();
                   } catch { message.error('操作失败'); }
                 }}
