@@ -159,11 +159,15 @@ def parse_sheet_structure(sheet, sheet_name: str) -> SheetStructure:
     ):
         cell_a = row[0].value if row else None
         if cell_a is not None and not _is_number(cell_a):
+            cell_a_str = str(cell_a).strip()
+            # 跳过"序号"等重复表头行
+            if cell_a_str in ("序号",):
+                continue
             # 非数字行 = 子法规边界
             if current_sub["name"] and current_sub["start_row"] != row_idx:
                 sub_regulations.append(dict(current_sub))
             current_sub = {
-                "name": str(cell_a).strip(),
+                "name": cell_a_str,
                 "start_row": row_idx + 1,  # 数据从下一行开始
             }
     # 最后一个子法规
