@@ -54,8 +54,8 @@ CREATE TABLE IF NOT EXISTS eval_snapshots (
 
 CREATE TABLE IF NOT EXISTS eval_runs (
     id TEXT PRIMARY KEY,
-    mode TEXT NOT NULL CHECK(mode IN ('retrieval', 'generation', 'full')),
-    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'running', 'completed', 'failed')),
+    mode TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
     progress INTEGER NOT NULL DEFAULT 0,
     total INTEGER NOT NULL DEFAULT 0,
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -173,6 +173,28 @@ def _migrate_db():
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_action_log_feedback ON feedback_action_log(feedback_id)")
+
+        # eval_runs: widen mode CHECK to include 'regression'
+        mode_check = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='eval_runs'"
+        ).fetchone()
+        if mode_check and "'retrieval', 'generation', 'full'" in (mode_check[0] or ""):
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS eval_runs_new (
+                    id TEXT PRIMARY KEY,
+                    mode TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    progress INTEGER NOT NULL DEFAULT 0,
+                    total INTEGER NOT NULL DEFAULT 0,
+                    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    finished_at TEXT,
+                    config_json TEXT NOT NULL DEFAULT '{}',
+                    report_json TEXT
+                );
+                INSERT INTO eval_runs_new SELECT * FROM eval_runs;
+                DROP TABLE eval_runs;
+                ALTER TABLE eval_runs_new RENAME TO eval_runs;
+            """)
 
 
 def create_conversation(conversation_id: str, title: str = "") -> None:

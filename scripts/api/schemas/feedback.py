@@ -24,6 +24,8 @@ class FeedbackOut(BaseModel):
     classified_fix_direction: Optional[str] = None
     status: str
     compliance_risk: int
+    fix_action: str = ""
+    resolved_at: Optional[str] = None
     created_at: str
     updated_at: str
     user_question: str = ""
@@ -36,6 +38,7 @@ class FeedbackUpdate(BaseModel):
     classified_reason: Optional[str] = None
     classified_fix_direction: Optional[str] = None
     compliance_risk: Optional[int] = Field(None, ge=0, le=2)
+    fix_action: Optional[str] = None
 
 
 class FeedbackStats(BaseModel):
@@ -46,3 +49,11 @@ class FeedbackStats(BaseModel):
     by_type: Dict[str, int]
     by_status: Dict[str, int]
     by_risk: Dict[str, int]
+
+
+class FeedbackActionLog(BaseModel):
+    id: int
+    feedback_id: str
+    action: str
+    detail: str
+    created_at: str

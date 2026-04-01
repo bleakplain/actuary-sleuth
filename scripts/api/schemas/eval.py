@@ -31,7 +31,7 @@ class ImportSamplesRequest(BaseModel):
 
 
 class EvalRunRequest(BaseModel):
-    mode: str = Field("full", pattern="^(retrieval|generation|full)$")
+    mode: str = Field("full", pattern="^(retrieval|generation|full|regression)$")
     top_k: int = Field(5, ge=1, le=20)
     chunking: str = Field("semantic", pattern="^(semantic|fixed)$")
 
