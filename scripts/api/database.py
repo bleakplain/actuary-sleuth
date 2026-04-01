@@ -83,6 +83,29 @@ CREATE TABLE IF NOT EXISTS compliance_reports (
     result_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS feedback (
+    id TEXT PRIMARY KEY,
+    message_id INTEGER NOT NULL REFERENCES messages(id),
+    conversation_id TEXT NOT NULL REFERENCES conversations(id),
+    rating TEXT NOT NULL CHECK(rating IN ('up', 'down')),
+    reason TEXT NOT NULL DEFAULT '',
+    correction TEXT DEFAULT '',
+    source_channel TEXT NOT NULL DEFAULT 'user_button',
+    auto_quality_score REAL,
+    auto_quality_details_json TEXT,
+    classified_type TEXT,
+    classified_reason TEXT,
+    classified_fix_direction TEXT,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending', 'classified', 'fixing', 'fixed', 'rejected', 'converted')),
+    compliance_risk INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_message ON feedback(message_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status);
+CREATE INDEX IF NOT EXISTS idx_feedback_type ON feedback(classified_type);
 """
 
 
@@ -94,7 +117,7 @@ def _deserialize_json_fields(row: dict, mappings: Dict[str, str]) -> dict:
     return row
 
 
-_MSG_JSON_FIELDS = {"citations": "citations_json", "sources": "sources_json"}
+_MSG_JSON_FIELDS = {"citations": "citations_json", "sources": "sources_json", "unverified_claims": "unverified_claims_json"}
 _SAMPLE_JSON_FIELDS = {"evidence_docs": "evidence_docs_json", "evidence_keywords": "evidence_keywords_json"}
 _RESULT_JSON_FIELDS = {
     "retrieved_docs": "retrieved_docs_json",
@@ -106,6 +129,17 @@ _RESULT_JSON_FIELDS = {
 def init_db():
     with get_connection() as conn:
         conn.executescript(_SCHEMA_SQL)
+    _migrate_db()
+
+
+def _migrate_db():
+    """增量迁移：添加新列（如已存在则跳过）"""
+    with get_connection() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
+        if 'faithfulness_score' not in cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN faithfulness_score REAL")
+        if 'unverified_claims_json' not in cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN unverified_claims_json TEXT DEFAULT '[]'")
 
 
 def create_conversation(conversation_id: str, title: str = "") -> None:
@@ -132,7 +166,7 @@ def get_conversations() -> List[Dict]:
 def get_messages(conversation_id: str) -> List[Dict]:
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT id, conversation_id, role, content, citations_json, sources_json, timestamp "
+            "SELECT id, conversation_id, role, content, citations_json, sources_json, faithfulness_score, unverified_claims_json, timestamp "
             "FROM messages WHERE conversation_id = ? ORDER BY id",
             (conversation_id,),
         ).fetchall()
@@ -145,17 +179,21 @@ def add_message(
     content: str,
     citations: Optional[List[Dict]] = None,
     sources: Optional[List[Dict]] = None,
+    faithfulness_score: Optional[float] = None,
+    unverified_claims: Optional[List[str]] = None,
 ) -> int:
     with get_connection() as conn:
         cur = conn.execute(
-            "INSERT INTO messages (conversation_id, role, content, citations_json, sources_json) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO messages (conversation_id, role, content, citations_json, sources_json, faithfulness_score, unverified_claims_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 conversation_id,
                 role,
                 content,
                 json.dumps(citations or [], ensure_ascii=False),
                 json.dumps(sources or [], ensure_ascii=False),
+                faithfulness_score,
+                json.dumps(unverified_claims or [], ensure_ascii=False),
             ),
         )
         return cur.lastrowid
@@ -442,3 +480,107 @@ def get_compliance_report(report_id: str) -> Optional[Dict]:
         if row is None:
             return None
         return _deserialize_json_fields(dict(row), {"result": "result_json"})
+
+
+_FEEDBACK_JSON_FIELDS = {
+    "auto_quality_details": "auto_quality_details_json",
+}
+
+
+def create_feedback(
+    message_id: int,
+    conversation_id: str,
+    rating: str,
+    reason: str = "",
+    correction: str = "",
+    source_channel: str = "user_button",
+) -> str:
+    feedback_id = f"fb_{uuid.uuid4().hex[:8]}"
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO feedback (id, message_id, conversation_id, rating, reason, correction, source_channel) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (feedback_id, message_id, conversation_id, rating, reason, correction, source_channel),
+        )
+    return feedback_id
+
+
+def get_feedback(feedback_id: str) -> Optional[Dict]:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM feedback WHERE id = ?", (feedback_id,)).fetchone()
+        if row is None:
+            return None
+        return _deserialize_json_fields(dict(row), _FEEDBACK_JSON_FIELDS)
+
+
+def list_feedbacks(
+    status: Optional[str] = None,
+    classified_type: Optional[str] = None,
+    compliance_risk: Optional[int] = None,
+) -> List[Dict]:
+    clauses: list[str] = []
+    params: list = []
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    if classified_type:
+        clauses.append("classified_type = ?")
+        params.append(classified_type)
+    if compliance_risk is not None:
+        clauses.append("compliance_risk >= ?")
+        params.append(compliance_risk)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM feedback{where} ORDER BY created_at DESC", params
+        ).fetchall()
+        return [_deserialize_json_fields(dict(r), _FEEDBACK_JSON_FIELDS) for r in rows]
+
+
+def update_feedback(feedback_id: str, updates: Dict) -> bool:
+    if not updates:
+        return False
+    sets = []
+    params = []
+    for key, value in updates.items():
+        sets.append(f"{key} = ?")
+        params.append(value)
+    sets.append("updated_at = datetime('now')")
+    params.append(feedback_id)
+    with get_connection() as conn:
+        cur = conn.execute(
+            f"UPDATE feedback SET {', '.join(sets)} WHERE id = ?", params
+        )
+        return cur.rowcount > 0
+
+
+def get_feedback_stats() -> Dict:
+    with get_connection() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM feedback").fetchone()[0]
+        up_count = conn.execute("SELECT COUNT(*) FROM feedback WHERE rating = 'up'").fetchone()[0]
+        down_count = conn.execute("SELECT COUNT(*) FROM feedback WHERE rating = 'down'").fetchone()[0]
+        by_type = {}
+        for row in conn.execute(
+            "SELECT classified_type, COUNT(*) as cnt FROM feedback "
+            "WHERE classified_type IS NOT NULL GROUP BY classified_type"
+        ).fetchall():
+            by_type[row[0] or "unclear"] = row[1]
+        by_status = {}
+        for row in conn.execute(
+            "SELECT status, COUNT(*) as cnt FROM feedback GROUP BY status"
+        ).fetchall():
+            by_status[row[0]] = row[1]
+        by_risk = {}
+        for row in conn.execute(
+            "SELECT compliance_risk, COUNT(*) as cnt FROM feedback GROUP BY compliance_risk"
+        ).fetchall():
+            by_risk[str(row[0])] = row[1]
+    return {
+        "total": total,
+        "up_count": up_count,
+        "down_count": down_count,
+        "satisfaction_rate": round(up_count / total, 4) if total > 0 else 0.0,
+        "by_type": by_type,
+        "by_status": by_status,
+        "by_risk": by_risk,
+    }
