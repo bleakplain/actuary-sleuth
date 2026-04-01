@@ -29,7 +29,7 @@ class LLMClientFactory:
 
     @staticmethod
     def _get_base_config() -> tuple:
-        """获取基础配置"""
+        """获取智谱基础配置"""
         api_key = ConfigValidator.validate_zhipu_api_key(
             os.getenv('ZHIPU_API_KEY')
         )
@@ -37,11 +37,39 @@ class LLMClientFactory:
         from lib.config import get_config
         app_config = get_config()
         base_url = ConfigValidator.validate_base_url(
-            app_config.llm.base_url,
+            app_config.zhipu.base_url,
             '智谱'
         )
 
         return api_key, base_url
+
+    @staticmethod
+    def _build_provider_config(provider: str, scene: str) -> dict:
+        """根据 provider 和场景构建客户端配置
+
+        Args:
+            provider: 提供商名称 ('zhipu' 或 'ollama')
+            scene: 使用场景 ('chat' 或 'embed')
+        """
+        from lib.config import get_config
+        app_config = get_config()
+
+        if provider == 'ollama':
+            return {
+                'provider': 'ollama',
+                'model': getattr(app_config.ollama, f'{scene}_model'),
+                'host': app_config.ollama.host,
+                'timeout': app_config.ollama.timeout,
+            }
+
+        api_key, base_url = LLMClientFactory._get_base_config()
+        return {
+            'provider': 'zhipu',
+            'model': getattr(app_config.zhipu, f'{scene}_model'),
+            'api_key': api_key,
+            'base_url': base_url,
+            'timeout': app_config.zhipu.timeout,
+        }
 
     @staticmethod
     def _create_zhipu_client(model: str, timeout: int) -> BaseLLMClient:
@@ -75,8 +103,9 @@ class LLMClientFactory:
         if config['model'] is None:
             from lib.config import get_config
             app_config = get_config()
-            return LLMClientFactory._create_zhipu_client(
-                app_config.llm.model, app_config.llm.timeout
+            chat = app_config.llm.chat
+            return LLMClientFactory.create_client(
+                LLMClientFactory._build_provider_config(chat['provider'], 'chat')
             )
 
         return LLMClientFactory._create_zhipu_client(
@@ -113,23 +142,9 @@ class LLMClientFactory:
         """获取嵌入模型配置"""
         from lib.config import get_config
         app_config = get_config()
-
-        if app_config.embedding.provider == 'ollama':
-            return {
-                'provider': 'ollama',
-                'model': app_config.ollama.embed_model,
-                'host': app_config.ollama.host,
-                'timeout': app_config.ollama.timeout,
-            }
-
-        api_key, base_url = LLMClientFactory._get_base_config()
-        return {
-            'provider': 'zhipu',
-            'model': ModelName.EMBEDDING,
-            'api_key': api_key,
-            'base_url': base_url,
-            'timeout': 120,
-        }
+        return LLMClientFactory._build_provider_config(
+            app_config.embedding.provider, 'embed'
+        )
 
     @staticmethod
     def get_embedding_llm() -> ZhipuClient:

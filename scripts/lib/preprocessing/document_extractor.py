@@ -70,7 +70,7 @@ class DocumentExtractor:
         app_config = get_config()
         if hasattr(llm_client, 'timeout'):
             current_timeout = llm_client.timeout
-            config_timeout = app_config.llm.timeout
+            config_timeout = app_config.zhipu.timeout
             if current_timeout < config_timeout:
                 logger.warning(f"LLM 客户端超时 ({current_timeout}s) 小于配置值 ({config_timeout}s)，"
                                f"大文档处理可能会超时")

@@ -193,21 +193,11 @@ class EmbeddingConfig:
         return self._config.get('provider', 'zhipu')
 
 
-class LLMConfig:
-    """LLM 配置（支持多种提供商）"""
+class ZhipuConfig:
+    """智谱 API 配置"""
 
     def __init__(self, config_dict: Dict[str, Any]):
-        self._config = config_dict.get('llm', {})
-
-    @property
-    def provider(self) -> str:
-        """LLM 提供商：zhipu, ollama"""
-        return self._config.get('provider', 'zhipu')
-
-    @property
-    def model(self) -> str:
-        """模型名称"""
-        return self._config.get('model', 'glm-4-flash')
+        self._config = config_dict.get('zhipu', {})
 
     @property
     def api_key(self) -> Optional[str]:
@@ -217,6 +207,16 @@ class LLMConfig:
     def base_url(self) -> str:
         """API 基础URL"""
         return self._config.get('base_url', 'https://open.bigmodel.cn/api/paas/v4/')
+
+    @property
+    def chat_model(self) -> str:
+        """聊天模型"""
+        return self._config.get('chat_model', 'glm-4-flash')
+
+    @property
+    def embed_model(self) -> str:
+        """嵌入模型"""
+        return self._config.get('embed_model', 'embedding-3')
 
     @property
     def timeout(self) -> int:
@@ -233,22 +233,17 @@ class LLMConfig:
         """最大生成token数"""
         return self._config.get('max_tokens', 20000)
 
-    def to_client_config(self) -> Dict[str, Any]:
-        """转换为客户端配置字典"""
-        config = {
-            'provider': self.provider,
-            'model': self.model,
-            'timeout': self.timeout,
-            'max_tokens': self.max_tokens
-        }
 
-        if self.provider == 'zhipu':
-            config['api_key'] = self.api_key
-            config['base_url'] = self.base_url
-        elif self.provider == 'ollama':
-            config['host'] = self._config.get('host', 'http://localhost:11434')
+class LLMConfig:
+    """LLM 场景配置（按用途选择 provider 和 model）"""
 
-        return config
+    def __init__(self, config_dict: Dict[str, Any]):
+        self._config = config_dict.get('llm', {})
+
+    @property
+    def chat(self) -> Dict[str, str]:
+        """聊天场景配置：{provider, model}"""
+        return self._config.get('chat', {'provider': 'zhipu', 'model': 'glm-4-flash'})
 
 
 class DatabaseConfig:
@@ -361,6 +356,7 @@ class Config:
         self._audit = AuditConfig(self._config)
         self._ollama = OllamaConfig(self._config)
         self._embedding = EmbeddingConfig(self._config)
+        self._zhipu = ZhipuConfig(self._config)
         self._llm = LLMConfig(self._config)
         self._data_paths = DatabaseConfig(self._config)
         self._regulation_search = RegulationSearchConfig(self._config)
@@ -394,8 +390,13 @@ class Config:
         return self._embedding
 
     @property
+    def zhipu(self) -> ZhipuConfig:
+        """智谱 API 基础配置"""
+        return self._zhipu
+
+    @property
     def llm(self) -> LLMConfig:
-        """LLM 配置"""
+        """LLM 场景配置"""
         return self._llm
 
     @property

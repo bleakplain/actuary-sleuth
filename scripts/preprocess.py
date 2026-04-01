@@ -127,8 +127,11 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         # 创建提取流程（使用新的预处理模块）
-        llm_config = get_config().llm.to_client_config()
-        llm_client = LLMClientFactory.create_client(llm_config)
+        app_config = get_config()
+        chat = app_config.llm.chat
+        llm_client = LLMClientFactory.create_client(
+            LLMClientFactory._build_provider_config(chat['provider'], 'chat')
+        )
         pipeline = DocumentExtractor(llm_client)
 
         # 执行提取

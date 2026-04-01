@@ -17,16 +17,19 @@
     "embed_model": "jinaai/jina-embeddings-v5-text-small",
     "timeout": 120
   },
-  "embedding": {
-    "provider": "ollama"
-  },
-  "llm": {
-    "provider": "zhipu",
-    "model": "glm-4-flash",
+  "zhipu": {
     "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+    "chat_model": "glm-4-flash",
+    "embed_model": "embedding-3",
     "timeout": 60,
     "temperature": 0.1,
     "max_tokens": 16384
+  },
+  "llm": {
+    "chat": { "provider": "zhipu" }
+  },
+  "embedding": {
+    "provider": "ollama"
   },
   "report": {
     "default_format": "docx",
