@@ -2,6 +2,7 @@ import { Typography } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import CitationTag from './CitationTag';
+import FeedbackButtons from './FeedbackButtons';
 import type { Message, Citation, Source } from '../types';
 
 const { Text } = Typography;
@@ -65,6 +66,9 @@ export default function MessageBubble({ message, onCitationClick }: Props) {
               />
             ))}
           </div>
+        )}
+        {message.role === 'assistant' && (
+          <FeedbackButtons messageId={message.id} />
         )}
       </div>
     </div>

@@ -26,6 +26,8 @@ export interface Message {
   citations: Citation[];
   sources: Source[];
   timestamp: string;
+  faithfulness_score?: number;
+  unverified_claims?: string[];
 }
 
 export interface Conversation {
@@ -141,4 +143,33 @@ export interface ComplianceReport {
   mode: 'product' | 'document';
   result: ComplianceResult;
   created_at: string;
+}
+
+export interface Feedback {
+  id: string;
+  message_id: number;
+  conversation_id: string;
+  rating: 'up' | 'down';
+  reason: string;
+  correction: string;
+  source_channel: string;
+  auto_quality_score: number | null;
+  auto_quality_details: Record<string, number> | null;
+  classified_type: string | null;
+  classified_reason: string | null;
+  classified_fix_direction: string | null;
+  status: 'pending' | 'classified' | 'fixing' | 'fixed' | 'rejected' | 'converted';
+  compliance_risk: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FeedbackStats {
+  total: number;
+  up_count: number;
+  down_count: number;
+  satisfaction_rate: number;
+  by_type: Record<string, number>;
+  by_status: Record<string, number>;
+  by_risk: Record<string, number>;
 }
