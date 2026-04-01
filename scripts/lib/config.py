@@ -7,8 +7,10 @@
     from lib.config import get_config
 
     config = get_config()
-    app_id = config.feishu.app_id
-    export_enabled = config.report.export_feishu
+    chat_config = config.get_chat_config()
+    embed_config = config.get_embedding_config()
+    app_id = config.feishu_app_id
+    db_path = config.sqlite_db_path
 """
 import json
 import os
@@ -43,14 +45,11 @@ class FeishuConfig:
 
     @property
     def app_id(self) -> Optional[str]:
-        env_app_id = os.getenv('FEISHU_APP_ID')
-        if env_app_id:
-            return env_app_id
         return self._config.get('app_id')
 
     @property
     def app_secret(self) -> Optional[str]:
-        return os.getenv('FEISHU_APP_SECRET')
+        return self._config.get('app_secret')
 
     @property
     def enabled(self) -> bool:
@@ -60,7 +59,7 @@ class FeishuConfig:
     @property
     def target_group_id(self) -> Optional[str]:
         """获取飞书目标群组ID"""
-        return self._config.get('target_group_id') or os.getenv('FEISHU_TARGET_GROUP_ID')
+        return self._config.get('target_group_id')
 
 
 class ReportConfig:
@@ -201,7 +200,7 @@ class ZhipuConfig:
 
     @property
     def api_key(self) -> Optional[str]:
-        return os.getenv('ZHIPU_API_KEY')
+        return self._config.get('api_key')
 
     @property
     def base_url(self) -> str:
@@ -304,7 +303,7 @@ class OpenClawConfig:
     @property
     def bin(self) -> str:
         """OpenClaw二进制文件路径"""
-        return self._config.get('bin', '/usr/bin/openclaw') or os.getenv('OPENCLAW_BIN', '/usr/bin/openclaw')
+        return self._config.get('bin', '/usr/bin/openclaw')
 
 
 # ===== 主配置类 =====
@@ -313,16 +312,17 @@ class Config:
     """
     配置管理类
 
-    提供类型安全的嵌套配置访问接口，支持：
-    - 按需读取配置项
-    - 类型提示和默认值
-    - 环境变量回退
-    - 配置验证
+    提供业务语义化的配置访问接口，支持：
+    - 场景化配置方法 (get_chat_config, get_embedding_config)
+    - 业务属性 (feishu_app_id, sqlite_db_path, ...)
+    - 环境变量覆盖
+    - 通用 get() 方法支持点号分隔的嵌套键
 
     使用示例：
         config = get_config()
-        app_id = config.feishu.app_id
-        export_enabled = config.report.export_feishu
+        chat_config = config.get_chat_config()
+        embed_config = config.get_embedding_config()
+        db_path = config.sqlite_db_path
     """
 
     def __init__(self, config_path: Optional[Path] = None):
@@ -338,7 +338,7 @@ class Config:
         self._init_nested_configs()
 
     def _load(self) -> None:
-        """加载配置文件"""
+        """加载配置文件并合并环境变量"""
         if self._config_path.exists():
             try:
                 with open(self._config_path, 'r', encoding='utf-8') as f:
@@ -349,8 +349,25 @@ class Config:
         else:
             self._config = {}
 
+        self._apply_env_overrides()
+
+    def _apply_env_overrides(self) -> None:
+        """环境变量覆盖配置文件值（集中声明所有环境变量映射）"""
+        _ENV_OVERRIDES = [
+            # (section, key, env_var)
+            ('feishu', 'app_id', 'FEISHU_APP_ID'),
+            ('feishu', 'app_secret', 'FEISHU_APP_SECRET'),
+            ('feishu', 'target_group_id', 'FEISHU_TARGET_GROUP_ID'),
+            ('zhipu', 'api_key', 'ZHIPU_API_KEY'),
+            ('openclaw', 'bin', 'OPENCLAW_BIN'),
+        ]
+        for section, key, env_var in _ENV_OVERRIDES:
+            env_val = os.getenv(env_var)
+            if env_val:
+                self._config.setdefault(section, {})[key] = env_val
+
     def _init_nested_configs(self) -> None:
-        """初始化嵌套配置对象"""
+        """初始化嵌套配置对象（仅内部使用）"""
         self._feishu = FeishuConfig(self._config)
         self._report = ReportConfig(self._config)
         self._audit = AuditConfig(self._config)
@@ -362,57 +379,151 @@ class Config:
         self._regulation_search = RegulationSearchConfig(self._config)
         self._openclaw = OpenClawConfig(self._config)
 
-    # ===== 嵌套配置属性 =====
+    # ===== 场景配置方法 =====
+
+    def _build_provider_config(self, provider: str, scene: str, **overrides) -> dict:
+        """根据 provider 和场景构建客户端配置（内部方法）
+
+        Args:
+            provider: 提供商名称 ('zhipu' 或 'ollama')
+            scene: 使用场景 ('chat' 或 'embed')
+            **overrides: 覆盖配置项
+        """
+        if provider == 'ollama':
+            config = {
+                'provider': 'ollama',
+                'model': getattr(self._ollama, f'{scene}_model'),
+                'host': self._ollama.host,
+                'timeout': self._ollama.timeout,
+            }
+        else:
+            config = {
+                'provider': 'zhipu',
+                'model': getattr(self._zhipu, f'{scene}_model'),
+                'api_key': self._zhipu.api_key,
+                'base_url': self._zhipu.base_url,
+                'timeout': self._zhipu.timeout,
+            }
+        config.update(overrides)
+        return config
+
+    def get_chat_config(self, **overrides) -> dict:
+        """获取聊天场景配置（可直接传给 LLMClientFactory.create_client）
+
+        Returns:
+            dict: 包含 provider, model, host/api_key, base_url, timeout 等字段
+        """
+        provider = self._llm.chat.get('provider', 'zhipu')
+        return self._build_provider_config(provider, 'chat', **overrides)
+
+    def get_embedding_config(self, **overrides) -> dict:
+        """获取嵌入场景配置（可直接传给 embedding 客户端）
+
+        Returns:
+            dict: 包含 provider, model, host/api_key, base_url, timeout 等字段
+        """
+        provider = self._embedding.provider
+        return self._build_provider_config(provider, 'embed', **overrides)
+
+    # ===== 业务属性 =====
 
     @property
-    def feishu(self) -> FeishuConfig:
-        """飞书配置"""
-        return self._feishu
+    def feishu_app_id(self) -> Optional[str]:
+        """飞书应用 ID"""
+        return self._feishu.app_id
 
     @property
-    def report(self) -> ReportConfig:
-        """报告配置"""
-        return self._report
+    def feishu_app_secret(self) -> Optional[str]:
+        """飞书应用密钥"""
+        return self._feishu.app_secret
 
     @property
-    def audit(self) -> AuditConfig:
-        """审核配置"""
-        return self._audit
+    def feishu_group_id(self) -> Optional[str]:
+        """飞书目标群组 ID"""
+        return self._feishu.target_group_id
 
     @property
-    def ollama(self) -> OllamaConfig:
-        """Ollama 配置"""
-        return self._ollama
+    def feishu_enabled(self) -> bool:
+        """飞书配置是否完整"""
+        return self._feishu.enabled
 
     @property
-    def embedding(self) -> EmbeddingConfig:
-        """嵌入模型配置"""
-        return self._embedding
+    def sqlite_db_path(self) -> str:
+        """SQLite 数据库路径"""
+        return self._data_paths.sqlite_db
 
     @property
-    def zhipu(self) -> ZhipuConfig:
-        """智谱 API 基础配置"""
-        return self._zhipu
+    def lancedb_path(self) -> str:
+        """LanceDB 连接字符串"""
+        return self._data_paths.lancedb_uri
 
     @property
-    def llm(self) -> LLMConfig:
-        """LLM 场景配置"""
-        return self._llm
+    def chat_timeout(self) -> int:
+        """聊天场景超时时间（秒）"""
+        return self._zhipu.timeout
 
     @property
-    def data_paths(self) -> DatabaseConfig:
-        """数据库路径配置"""
-        return self._data_paths
+    def report_export_feishu(self) -> bool:
+        """是否自动导出飞书文档"""
+        return self._report.export_feishu
 
     @property
-    def regulation_search(self) -> RegulationSearchConfig:
-        """法规搜索配置"""
-        return self._regulation_search
+    def report_grade_thresholds(self) -> List[Tuple[int, str]]:
+        """评级阈值"""
+        return self._report.grade_thresholds
 
     @property
-    def openclaw(self) -> 'OpenClawConfig':
-        """OpenClaw配置"""
-        return self._openclaw
+    def report_default_grade(self) -> str:
+        """默认评级"""
+        return self._report.default_grade
+
+    @property
+    def report_high_violations_limit(self) -> int:
+        """严重违规限制"""
+        return self._report.high_violations_limit
+
+    @property
+    def report_medium_violations_limit(self) -> int:
+        """中等违规限制"""
+        return self._report.medium_violations_limit
+
+    @property
+    def report_p1_remediation_limit(self) -> int:
+        """P1 整改限制"""
+        return self._report.p1_remediation_limit
+
+    def get_product_thresholds(self, product_category: str) -> Optional[List[Tuple[int, str]]]:
+        """获取产品特定的评级阈值"""
+        return self._report.get_product_thresholds(product_category)
+
+    def get_product_violation_limits(self, product_category: str) -> Optional[Dict[str, int]]:
+        """获取产品特定的违规限制"""
+        return self._report.get_product_violation_limits(product_category)
+
+    @property
+    def audit_scoring_weights(self) -> Dict[str, int]:
+        """审核评分权重"""
+        return self._audit.scoring_weights
+
+    @property
+    def audit_thresholds(self) -> Dict[str, int]:
+        """审核评级阈值"""
+        return self._audit.thresholds
+
+    @property
+    def regulation_data_dir(self) -> str:
+        """法规数据目录"""
+        return self._regulation_search.data_dir
+
+    @property
+    def regulation_default_top_k(self) -> int:
+        """法规搜索默认返回数量"""
+        return self._regulation_search.default_top_k
+
+    @property
+    def openclaw_bin_path(self) -> str:
+        """OpenClaw 二进制文件路径"""
+        return self._openclaw.bin
 
     # ===== 通用方法 =====
 

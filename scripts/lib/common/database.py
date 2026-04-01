@@ -20,7 +20,7 @@ def get_db_path() -> Path:
     """获取数据库路径"""
     from lib.config import get_config
     config = get_config()
-    rel_path = config.data_paths.sqlite_db
+    rel_path = config.sqlite_db_path
 
     if not Path(rel_path).is_absolute():
         # __file__ 是 lib/common/database.py

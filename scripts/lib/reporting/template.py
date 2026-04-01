@@ -65,23 +65,23 @@ class ReportGenerationTemplate:
 
     def _load_thresholds(self):
         """从配置加载阈值"""
-        self.GRADE_THRESHOLDS = self.config.report.grade_thresholds
-        self.GRADE_DEFAULT = self.config.report.default_grade
-        self.HIGH_VIOLATIONS_LIMIT = self.config.report.high_violations_limit
-        self.MEDIUM_VIOLATIONS_LIMIT = self.config.report.medium_violations_limit
-        self.P1_REMEDIATION_MEDIUM_LIMIT = self.config.report.p1_remediation_limit
+        self.GRADE_THRESHOLDS = self.config.report_grade_thresholds
+        self.GRADE_DEFAULT = self.config.report_default_grade
+        self.HIGH_VIOLATIONS_LIMIT = self.config.report_high_violations_limit
+        self.MEDIUM_VIOLATIONS_LIMIT = self.config.report_medium_violations_limit
+        self.P1_REMEDIATION_MEDIUM_LIMIT = self.config.report_p1_remediation_limit
 
     def _apply_product_config(self, context: EvaluationContext):
         """应用产品特定配置"""
         product_category = getattr(context.product, 'category', None)
         if product_category:
-            product_thresholds = self.config.report.get_product_thresholds(
+            product_thresholds = self.config.get_product_thresholds(
                 product_category.value if hasattr(product_category, 'value') else product_category
             )
             if product_thresholds:
                 self.GRADE_THRESHOLDS = product_thresholds
 
-            product_limits = self.config.report.get_product_violation_limits(
+            product_limits = self.config.get_product_violation_limits(
                 product_category.value if hasattr(product_category, 'value') else product_category
             )
             if product_limits:

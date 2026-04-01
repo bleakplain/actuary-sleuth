@@ -11,7 +11,7 @@ def get_db_path() -> Path:
     """获取数据库路径"""
     from lib.config import get_config
     config = get_config()
-    rel_path = config.data_paths.sqlite_db  # 从配置读取相对路径
+    rel_path = config.sqlite_db_path
 
     # 如果是相对路径，相对于脚本目录解析
     if not Path(rel_path).is_absolute():

@@ -114,7 +114,7 @@ class RAGConfig:
                 # 使用统一的配置系统
                 from lib.config import get_config
                 config = get_config()
-                rel_path = config.data_paths.lancedb_uri
+                rel_path = config.lancedb_path
                 if not Path(rel_path).is_absolute():
                     scripts_dir = Path(__file__).parent.parent.parent
                     self.vector_db_path = str(scripts_dir / rel_path)

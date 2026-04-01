@@ -47,7 +47,7 @@ def main():
 
         # 导出飞书文档
         config = get_config()
-        export_feishu = args.export_feishu or config.report.export_feishu
+        export_feishu = args.export_feishu or config.report_export_feishu
 
         if export_feishu:
             feishu_result = export_to_feishu(

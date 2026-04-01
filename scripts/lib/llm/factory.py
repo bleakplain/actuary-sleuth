@@ -5,7 +5,6 @@ LLM 客户端工厂类
 
 提供场景化的 LLM 客户端创建方法。
 """
-import os
 import threading
 from typing import Dict, Any, Optional
 
@@ -28,52 +27,10 @@ class LLMClientFactory:
     }
 
     @staticmethod
-    def _get_base_config() -> tuple:
-        """获取智谱基础配置"""
-        api_key = ConfigValidator.validate_zhipu_api_key(
-            os.getenv('ZHIPU_API_KEY')
-        )
-
-        from lib.config import get_config
-        app_config = get_config()
-        base_url = ConfigValidator.validate_base_url(
-            app_config.zhipu.base_url,
-            '智谱'
-        )
-
-        return api_key, base_url
-
-    @staticmethod
     def _build_provider_config(provider: str, scene: str, **overrides) -> dict:
-        """根据 provider 和场景构建客户端配置
-
-        Args:
-            provider: 提供商名称 ('zhipu' 或 'ollama')
-            scene: 使用场景 ('chat' 或 'embed')
-            **overrides: 覆盖配置项
-        """
+        """委托给 Config._build_provider_config"""
         from lib.config import get_config
-        app_config = get_config()
-
-        if provider == 'ollama':
-            config = {
-                'provider': 'ollama',
-                'model': getattr(app_config.ollama, f'{scene}_model'),
-                'host': app_config.ollama.host,
-                'timeout': app_config.ollama.timeout,
-            }
-        else:
-            api_key, base_url = LLMClientFactory._get_base_config()
-            config = {
-                'provider': 'zhipu',
-                'model': getattr(app_config.zhipu, f'{scene}_model'),
-                'api_key': api_key,
-                'base_url': base_url,
-                'timeout': app_config.zhipu.timeout,
-            }
-
-        config.update(overrides)
-        return config
+        return get_config()._build_provider_config(provider, scene, **overrides)
 
     @staticmethod
     def _create_zhipu_client(model: str, timeout: int) -> BaseLLMClient:
@@ -101,10 +58,8 @@ class LLMClientFactory:
         # doc_preprocess 使用配置文件的值
         if config['model'] is None:
             from lib.config import get_config
-            app_config = get_config()
-            chat = app_config.llm.chat
             return LLMClientFactory.create_client(
-                LLMClientFactory._build_provider_config(chat['provider'], 'chat')
+                get_config().get_chat_config()
             )
 
         return LLMClientFactory._create_zhipu_client(
@@ -140,20 +95,20 @@ class LLMClientFactory:
     def get_embedding_config() -> dict:
         """获取嵌入模型配置"""
         from lib.config import get_config
-        app_config = get_config()
-        return LLMClientFactory._build_provider_config(
-            app_config.embedding.provider, 'embed'
-        )
+        return get_config().get_embedding_config()
 
     @staticmethod
     def get_embedding_llm() -> ZhipuClient:
-        api_key, base_url = LLMClientFactory._get_base_config()
-        return ZhipuClient(
-            api_key=api_key,
-            model="embedding-3",
-            base_url=base_url,
-            timeout=60
-        )
+        from lib.config import get_config
+        config = get_config().get_embedding_config()
+        if config['provider'] == 'zhipu':
+            return ZhipuClient(
+                api_key=config['api_key'],
+                model=config['model'],
+                base_url=config['base_url'],
+                timeout=config['timeout']
+            )
+        raise ValueError("get_embedding_llm() only supports zhipu provider")
 
     @staticmethod
     def create_client(config: Dict[str, Any]) -> BaseLLMClient:
@@ -241,14 +196,8 @@ def get_client(config: Optional[Dict[str, Any]] = None) -> BaseLLMClient:
         with _client_lock:
             if _client is None:
                 if config is None:
-                    api_key, base_url = LLMClientFactory._get_base_config()
-                    config = {
-                        'provider': 'zhipu',
-                        'model': 'glm-z1-air',
-                        'api_key': api_key,
-                        'base_url': base_url,
-                        'timeout': 60
-                    }
+                    from lib.config import get_config
+                    config = get_config().get_chat_config()
 
                 _client = LLMClientFactory.create_client(config)
 

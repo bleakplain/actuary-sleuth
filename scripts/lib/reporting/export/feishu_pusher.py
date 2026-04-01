@@ -56,7 +56,7 @@ class _FeishuPusher:
         self._timeout = timeout or self.DEFAULT_PUSH_TIMEOUT
         self._allowed_output_dir = allowed_output_dir
 
-        raw_group_id = target_group_id or config.feishu.target_group_id
+        raw_group_id = target_group_id or config.feishu_group_id
         if raw_group_id:
             self._target_group_id = validate_group_id(raw_group_id)
         else:
