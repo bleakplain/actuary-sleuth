@@ -66,19 +66,46 @@ async def chat(req: ChatRequest):
                             "citations": result.get("citations", []),
                             "sources": result.get("sources", []),
                             "faithfulness_score": result.get("faithfulness_score"),
+                            "unverified_claims": result.get("unverified_claims", []),
                         },
                     },
                     ensure_ascii=False,
                 ),
             }
 
-            add_message(
+            msg_id = add_message(
                 conversation_id,
                 "assistant",
                 answer,
                 citations=result.get("citations", []),
                 sources=result.get("sources", []),
+                faithfulness_score=result.get("faithfulness_score"),
+                unverified_claims=result.get("unverified_claims", []),
             )
+            # 自动质量检测 — 低于阈值自动创建 feedback
+            try:
+                from lib.rag_engine.quality_detector import detect_quality
+                quality = detect_quality(
+                    query=req.question,
+                    answer=answer,
+                    sources=result.get("sources", []),
+                    faithfulness_score=result.get("faithfulness_score"),
+                )
+                if quality["overall"] < 0.4:
+                    from api.database import create_feedback, update_feedback
+                    fb_id = create_feedback(
+                        message_id=msg_id,
+                        conversation_id=conversation_id,
+                        rating="down",
+                        reason="auto_detected",
+                        source_channel="auto_detect",
+                    )
+                    update_feedback(fb_id, {
+                        "auto_quality_score": quality["overall"],
+                        "auto_quality_details_json": json.dumps(quality, ensure_ascii=False),
+                    })
+            except Exception as e:
+                logger.warning(f"Auto quality detection failed: {e}")
         except Exception as e:
             logger.error(f"Chat failed: {e}")
             yield {

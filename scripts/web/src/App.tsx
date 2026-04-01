@@ -7,6 +7,8 @@ import KnowledgePage from './pages/KnowledgePage';
 import EvalDatasetPage from './pages/EvalDatasetPage';
 import EvalRunPage from './pages/EvalRunPage';
 import CompliancePage from './pages/CompliancePage';
+import FeedbackBadcasesPage from './pages/FeedbackBadcasesPage';
+import FeedbackStatsPage from './pages/FeedbackStatsPage';
 
 export default function App() {
   return (
@@ -20,6 +22,8 @@ export default function App() {
             <Route path="/eval/dataset" element={<EvalDatasetPage />} />
             <Route path="/eval/runs" element={<EvalRunPage />} />
             <Route path="/compliance" element={<CompliancePage />} />
+            <Route path="/feedback/badcases" element={<FeedbackBadcasesPage />} />
+            <Route path="/feedback/stats" element={<FeedbackStatsPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

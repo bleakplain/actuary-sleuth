@@ -108,12 +108,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from api.routers import ask, knowledge, eval as eval_router, compliance, kb_version
+from api.routers import ask, knowledge, eval as eval_router, compliance, kb_version, feedback
 app.include_router(ask.router)
 app.include_router(knowledge.router)
 app.include_router(eval_router.router)
 app.include_router(compliance.router)
 app.include_router(kb_version.router)
+app.include_router(feedback.router)
 
 
 @app.get("/api/health")
