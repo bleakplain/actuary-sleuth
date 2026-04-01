@@ -79,8 +79,8 @@ class ChunkingConfig:
 class RAGConfig:
     """法规 RAG 引擎配置"""
 
-    # 数据目录配置
-    regulations_dir: str = "./references"
+    # 数据目录配置（绝对路径，__post_init__ 中解析）
+    regulations_dir: str = ""
     vector_db_path: Optional[str] = None
 
     # 文本处理配置（固定分块策略使用）
@@ -128,18 +128,14 @@ class RAGConfig:
             os.makedirs(tmp_lancedb, exist_ok=True)
             self.vector_db_path = tmp_lancedb
 
-        if not Path(self.regulations_dir).is_absolute():
-            # 使用统一的配置系统
-            from lib.config import get_config
-            config = get_config()
-            reg_dir = config.regulation_search.data_dir
-            if not Path(reg_dir).is_absolute():
-                # reg_dir 是相对于 scripts/ 目录的路径
-                # __file__ 在 scripts/lib/rag_engine/，需要往上3层到 scripts/
-                scripts_dir = Path(__file__).parent.parent.parent
-                self.regulations_dir = str(scripts_dir / reg_dir)
-            else:
-                self.regulations_dir = reg_dir
+        # regulations_dir：环境变量 > settings.json > 默认（仓库根/references）
+        import os
+        env_dir = os.environ.get("REGULATIONS_DIR")
+        if env_dir:
+            self.regulations_dir = env_dir
+        elif not self.regulations_dir:
+            repo_root = Path(__file__).parent.parent.parent.parent
+            self.regulations_dir = str(repo_root / "references")
 
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError(f"chunk_overlap ({self.chunk_overlap}) must be less than chunk_size ({self.chunk_size})")

@@ -41,10 +41,11 @@ class KBVersionManager:
 
     def __init__(self, base_dir: Optional[str] = None):
         if base_dir is None:
-            import tempfile
             import os
-            base_dir = os.path.join(
-                tempfile.gettempdir(), "actuary_sleuth", "data", "kb"
+            # 优先使用环境变量，否则使用项目内路径
+            base_dir = os.environ.get(
+                "KB_VERSION_DIR",
+                str(Path(__file__).parent / "data" / "kb"),
             )
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
