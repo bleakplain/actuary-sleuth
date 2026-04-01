@@ -173,16 +173,24 @@ class OllamaConfig:
     @property
     def embed_model(self) -> str:
         """Ollama 嵌入模型"""
-        return self._config.get('embed_model', 'nomic-embed-text')
-
-    @property
-    def embed_provider(self) -> str:
-        return self._config.get('embed_provider', 'zhipu')
+        return self._config.get('embed_model', 'jinaai/jina-embeddings-v5-text-small')
 
     @property
     def timeout(self) -> int:
         """Ollama 超时时间（秒）"""
         return self._config.get('timeout', 120)
+
+
+class EmbeddingConfig:
+    """嵌入模型配置"""
+
+    def __init__(self, config_dict: Dict[str, Any]):
+        self._config = config_dict.get('embedding', {})
+
+    @property
+    def provider(self) -> str:
+        """嵌入模型提供商：ollama 或 zhipu"""
+        return self._config.get('provider', 'zhipu')
 
 
 class LLMConfig:
@@ -352,6 +360,7 @@ class Config:
         self._report = ReportConfig(self._config)
         self._audit = AuditConfig(self._config)
         self._ollama = OllamaConfig(self._config)
+        self._embedding = EmbeddingConfig(self._config)
         self._llm = LLMConfig(self._config)
         self._data_paths = DatabaseConfig(self._config)
         self._regulation_search = RegulationSearchConfig(self._config)
@@ -378,6 +387,11 @@ class Config:
     def ollama(self) -> OllamaConfig:
         """Ollama 配置"""
         return self._ollama
+
+    @property
+    def embedding(self) -> EmbeddingConfig:
+        """嵌入模型配置"""
+        return self._embedding
 
     @property
     def llm(self) -> LLMConfig:

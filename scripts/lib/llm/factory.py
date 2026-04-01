@@ -114,7 +114,7 @@ class LLMClientFactory:
         from lib.config import get_config
         app_config = get_config()
 
-        if app_config.ollama.embed_provider == 'ollama':
+        if app_config.embedding.provider == 'ollama':
             return {
                 'provider': 'ollama',
                 'model': app_config.ollama.embed_model,
