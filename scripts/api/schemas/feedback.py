@@ -26,6 +26,8 @@ class FeedbackOut(BaseModel):
     compliance_risk: int
     created_at: str
     updated_at: str
+    user_question: str = ""
+    assistant_answer: str = ""
 
 
 class FeedbackUpdate(BaseModel):

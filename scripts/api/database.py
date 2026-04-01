@@ -505,12 +505,32 @@ def create_feedback(
     return feedback_id
 
 
+def _enrich_feedback(row: Dict) -> Dict:
+    """为反馈记录补充用户问题和助手回答"""
+    row = _deserialize_json_fields(row, _FEEDBACK_JSON_FIELDS)
+    mid = row.get("message_id")
+    cid = row.get("conversation_id")
+    if not mid or not cid:
+        return row
+    with get_connection() as conn:
+        assistant = conn.execute(
+            "SELECT content FROM messages WHERE id = ?", (mid,)
+        ).fetchone()
+        user_msg = conn.execute(
+            "SELECT content FROM messages WHERE conversation_id = ? AND role = 'user' AND id < ? ORDER BY id DESC LIMIT 1",
+            (cid, mid),
+        ).fetchone()
+    row["assistant_answer"] = assistant[0] if assistant else ""
+    row["user_question"] = user_msg[0] if user_msg else ""
+    return row
+
+
 def get_feedback(feedback_id: str) -> Optional[Dict]:
     with get_connection() as conn:
         row = conn.execute("SELECT * FROM feedback WHERE id = ?", (feedback_id,)).fetchone()
         if row is None:
             return None
-        return _deserialize_json_fields(dict(row), _FEEDBACK_JSON_FIELDS)
+        return _enrich_feedback(dict(row))
 
 
 def list_feedbacks(
@@ -534,7 +554,7 @@ def list_feedbacks(
         rows = conn.execute(
             f"SELECT * FROM feedback{where} ORDER BY created_at DESC", params
         ).fetchall()
-        return [_deserialize_json_fields(dict(r), _FEEDBACK_JSON_FIELDS) for r in rows]
+        return [_enrich_feedback(dict(r)) for r in rows]
 
 
 def update_feedback(feedback_id: str, updates: Dict) -> bool:
