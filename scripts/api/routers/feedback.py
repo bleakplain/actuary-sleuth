@@ -160,7 +160,18 @@ async def verify_badcase(feedback_id: str):
         if rag_engine is None:
             raise RuntimeError("RAG 引擎未就绪")
 
-        result = rag_engine.ask(query, include_sources=True)
+        from lib.rag_engine.config import RAGConfig
+        verify_config = RAGConfig(enable_faithfulness=True)
+        from lib.rag_engine.rag_engine import RAGEngine
+        verify_engine = RAGEngine(config=verify_config, llm_provider=rag_engine.llm_provider)
+        verify_engine._initialized = True
+        verify_engine.index_manager = rag_engine.index_manager
+        verify_engine._bm25_index = rag_engine._bm25_index
+        verify_engine._reranker = rag_engine._reranker
+        verify_engine._preprocessor = rag_engine._preprocessor
+        verify_engine.query_engine = rag_engine.query_engine
+
+        result = verify_engine.ask(query, include_sources=True)
         return {
             "feedback_id": feedback_id,
             "original_answer": fb.get("correction") or "",
@@ -168,6 +179,7 @@ async def verify_badcase(feedback_id: str):
             "new_sources": result.get("sources", []),
             "new_citations": result.get("citations", []),
             "new_faithfulness": result.get("faithfulness_score"),
+            "new_unverified_claims": result.get("unverified_claims", []),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"验证失败: {e}")

@@ -162,6 +162,8 @@ export interface Feedback {
   compliance_risk: number;
   created_at: string;
   updated_at: string;
+  user_question: string;
+  assistant_answer: string;
 }
 
 export interface FeedbackStats {

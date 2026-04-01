@@ -5,6 +5,7 @@ import {
   DatabaseOutlined,
   BarChartOutlined,
   SafetyCertificateOutlined,
+  DislikeOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 
@@ -16,6 +17,7 @@ const menuItems = [
   { key: '/eval/dataset', icon: <BarChartOutlined />, label: '评估数据集' },
   { key: '/eval/runs', icon: <BarChartOutlined />, label: '评估运行' },
   { key: '/compliance', icon: <SafetyCertificateOutlined />, label: '合规检查' },
+  { key: '/feedback', icon: <DislikeOutlined />, label: '问题反馈' },
 ];
 
 export default function AppLayout() {
