@@ -268,7 +268,8 @@ class ZhipuClient(BaseLLMClient):
 
         response.raise_for_status()
         result = response.json()
-        return result.get("content", "")
+        # GLM-OCR returns table content in md_results field
+        return result.get("md_results", result.get("content", ""))
 
     @_track_timing("zhipu")
     @_with_circuit_breaker("zhipu")

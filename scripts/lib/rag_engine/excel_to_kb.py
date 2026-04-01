@@ -281,10 +281,12 @@ def extract_images_from_sheet(sheet, sheet_name: str) -> List[ImageInfo]:
             continue
 
         try:
-            pil_img = img.ref if hasattr(img, "ref") else None
-            if pil_img is None:
-                pil_img = img.image if hasattr(img, "image") else None
-            if pil_img is not None:
+            # img._data() returns raw image file bytes
+            raw = img._data() if callable(getattr(img, "_data", None)) else None
+            if raw:
+                # Use PIL to verify and re-encode as PNG
+                from PIL import Image as PILImage
+                pil_img = PILImage.open(io.BytesIO(raw))
                 img_buf = io.BytesIO()
                 pil_img.save(img_buf, format="PNG")
                 images.append(ImageInfo(
@@ -321,7 +323,7 @@ def ocr_image(image_data: bytes, api_key: str) -> str:
     import base64
     from lib.llm.zhipu import ZhipuClient
 
-    b64 = base64.b64encode(image_data).decode("utf-8")
+    b64 = f"data:image/png;base64,{base64.b64encode(image_data).decode('utf-8')}"
     client = ZhipuClient(api_key=api_key)
     try:
         result = client.ocr_table(b64)

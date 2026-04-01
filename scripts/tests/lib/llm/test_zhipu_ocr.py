@@ -15,7 +15,7 @@ class TestZhipuClientOCR:
         client = ZhipuClient(api_key="test-key", base_url="https://fake.api/v4/")
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"content": "| Col1 | Col2 |\n|------|------|\n| A | B |"}
+        mock_response.json.return_value = {"md_results": "<table><tr><td>A</td><td>B</td></tr></table>"}
         mock_response.raise_for_status = MagicMock()
 
         session = MagicMock()
@@ -23,20 +23,20 @@ class TestZhipuClientOCR:
         client._session = session
 
         result = client.ocr_table("data:image/png;base64,abc123")
-        assert "| Col1 | Col2 |" in result
+        assert "<table>" in result
         session.post.assert_called_once()
         call_kwargs = session.post.call_args
         assert "/layout_parsing" in call_kwargs[0][0]
         assert call_kwargs[1]["json"]["model"] == "glm-ocr"
 
     def test_ocr_table_extracts_content_from_response(self):
-        """ocr_table should return the 'content' field from response."""
+        """ocr_table should return the 'md_results' field from response."""
         from lib.llm.zhipu import ZhipuClient
 
         client = ZhipuClient(api_key="test-key", base_url="https://fake.api/v4/")
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"content": "markdown table content here"}
+        mock_response.json.return_value = {"md_results": "markdown table content here"}
         mock_response.raise_for_status = MagicMock()
 
         session = MagicMock()
@@ -63,7 +63,7 @@ class TestZhipuClientOCR:
             client._do_ocr_table("base64data")
 
     def test_ocr_table_empty_content(self):
-        """ocr_table should return empty string when content field missing."""
+        """ocr_table should return empty string when neither md_results nor content field present."""
         from lib.llm.zhipu import ZhipuClient
 
         client = ZhipuClient(api_key="test-key", base_url="https://fake.api/v4/")
