@@ -32,7 +32,7 @@ class TestRAGIntegration:
 
         try:
             from llama_index.embeddings.ollama import OllamaEmbedding
-            embed_model = OllamaEmbedding(model_name="nomic-embed-text")
+            embed_model = OllamaEmbedding(model_name="jinaai/jina-embeddings-v5-text-small")
             Settings.embed_model = embed_model
         except Exception:
             try:
@@ -125,7 +125,7 @@ class TestRAGIntegration:
 
         try:
             from llama_index.embeddings.ollama import OllamaEmbedding
-            embed_model = OllamaEmbedding(model_name="nomic-embed-text")
+            embed_model = OllamaEmbedding(model_name="jinaai/jina-embeddings-v5-text-small")
             Settings.embed_model = embed_model
         except Exception:
             try:
@@ -192,7 +192,7 @@ class TestRAGIntegration:
 
         try:
             from llama_index.embeddings.ollama import OllamaEmbedding
-            embed_model = OllamaEmbedding(model_name="nomic-embed-text")
+            embed_model = OllamaEmbedding(model_name="jinaai/jina-embeddings-v5-text-small")
             Settings.embed_model = embed_model
         except Exception:
             try:
@@ -276,7 +276,7 @@ class TestRAGWithRealData:
 
         try:
             from llama_index.embeddings.ollama import OllamaEmbedding
-            embed_model = OllamaEmbedding(model_name="nomic-embed-text")
+            embed_model = OllamaEmbedding(model_name="jinaai/jina-embeddings-v5-text-small")
             Settings.embed_model = embed_model
         except Exception:
             try:

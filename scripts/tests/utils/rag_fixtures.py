@@ -112,7 +112,7 @@ def real_vector_index(temp_lancedb_dir, sample_regulation_documents):
 
     # 配置嵌入模型（使用轻量级模型）
     try:
-        embed_model = OllamaEmbedding(model_name="nomic-embed-text")
+        embed_model = OllamaEmbedding(model_name="jinaai/jina-embeddings-v5-text-small")
         Settings.embed_model = embed_model
     except Exception:
         # 如果ollama不可用，使用默认嵌入
@@ -239,7 +239,7 @@ def real_regulation_vector_index(real_lancedb_dir, real_references_dir):
 
     # 配置嵌入模型
     try:
-        embed_model = OllamaEmbedding(model_name="nomic-embed-text")
+        embed_model = OllamaEmbedding(model_name="jinaai/jina-embeddings-v5-text-small")
         Settings.embed_model = embed_model
     except Exception:
         from llama_index.embeddings.openai import OpenAIEmbedding
