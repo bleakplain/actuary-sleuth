@@ -20,6 +20,7 @@ _MODEL_LIMITS = {
     'glm-z1-air': {'context': 128000, 'output': 8192},
     'nomic-embed-text': {'context': 8192, 'output': 512},
     'embedding-3': {'context': 8192, 'output': 2048},
+    'jinaai/jina-embeddings-v5-text-small': {'context': 8192, 'output': 1024},
 }
 
 
@@ -196,6 +197,51 @@ class ZhipuEmbeddingAdapter(BaseEmbedding):
         return self._model
 
 
+class JinaEmbeddingAdapter(BaseEmbedding):
+    """Jina v5 嵌入适配器（通过 Ollama 调用，自动添加 task-specific 前缀）"""
+
+    _PREFIX_QUERY = "search_query: "
+    _PREFIX_PASSAGE = "passage: "
+
+    def __init__(
+        self,
+        model_name: str = "jinaai/jina-embeddings-v5-text-small",
+        base_url: str = "http://localhost:11434",
+        embed_batch_size: int = 50,
+    ):
+        from llama_index.embeddings.ollama import OllamaEmbedding
+        super().__init__(
+            model_name=model_name,
+            embed_batch_size=embed_batch_size,
+        )
+        self._ollama_embed = OllamaEmbedding(
+            model_name=model_name,
+            base_url=base_url,
+            embed_batch_size=embed_batch_size,
+        )
+
+    def _get_query_embedding(self, query: str) -> List[float]:
+        prefixed = self._PREFIX_QUERY + query
+        return self._ollama_embed.get_text_embedding(prefixed)
+
+    def _get_text_embedding(self, text: str) -> List[float]:
+        prefixed = self._PREFIX_PASSAGE + text
+        return self._ollama_embed.get_text_embedding(prefixed)
+
+    def _get_text_embeddings(self, texts: List[str]) -> List[List[float]]:
+        prefixed = [self._PREFIX_PASSAGE + t for t in texts]
+        return self._ollama_embed.get_text_embeddings(prefixed)
+
+    async def _aget_query_embedding(self, query: str) -> List[float]:
+        return await asyncio.to_thread(self._get_query_embedding, query)
+
+    async def aget_text_embedding(self, text: str) -> List[float]:
+        return await asyncio.to_thread(self.get_text_embedding, text)
+
+    async def aget_text_embeddings(self, texts: List[str]) -> List[List[float]]:
+        return await asyncio.to_thread(self._get_text_embeddings, texts)
+
+
 def get_embedding_model(config: dict):
     """
     创建嵌入模型适配器（工厂函数）
@@ -226,8 +272,15 @@ def get_embedding_model(config: dict):
             embed_batch_size=config.get('embed_batch_size', 50),
         )
     elif provider == 'ollama':
+        model = config.get('model', 'nomic-embed-text')
+        if 'jina' in model:
+            return JinaEmbeddingAdapter(
+                model_name=model,
+                base_url=config.get('host', 'http://localhost:11434'),
+                embed_batch_size=config.get('embed_batch_size', 50),
+            )
         return OllamaEmbedding(
-            model_name=config.get('model', 'nomic-embed-text'),
+            model_name=model,
             base_url=config.get('host', 'http://localhost:11434'),
             embed_batch_size=config.get('embed_batch_size', 50),
         )
