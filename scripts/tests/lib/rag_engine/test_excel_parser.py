@@ -36,9 +36,9 @@ class TestSheetStructureParser:
         assert sheet is not None
 
         structure = parse_sheet_structure(sheet, "00. 对照样例")
-        assert structure["header_row"] == 2
-        assert structure["data_start_row"] == 4
-        assert structure["regulation_name"] != ""
+        assert structure.header_row == 2
+        assert structure.data_start_row == 4
+        assert structure.regulation_name != ""
         wb.close()
 
     def test_detect_regulation_boundaries_with_owner(self):
@@ -55,8 +55,8 @@ class TestSheetStructureParser:
         assert sheet is not None
 
         structure = parse_sheet_structure(sheet, "01. 对照样例")
-        assert structure["header_row"] == 3
-        assert structure["data_start_row"] == 5
+        assert structure.header_row == 3
+        assert structure.data_start_row == 5
         wb.close()
 
     def test_detect_sub_regulations_in_sheet_10(self):
@@ -74,7 +74,7 @@ class TestSheetStructureParser:
 
         structure = parse_sheet_structure(sheet, "10. 对照样例")
         # Sheet 10 should have multiple sub-regulations
-        assert len(structure.get("sub_regulations", [])) >= 5
+        assert len(structure.sub_regulations) >= 5
         wb.close()
 
     def test_extract_metadata_columns(self):
@@ -91,6 +91,6 @@ class TestSheetStructureParser:
         assert sheet is not None
 
         structure = parse_sheet_structure(sheet, "00. 对照样例")
-        headers = structure["headers"]
+        headers = structure.headers
         assert "项目" in headers.values() or any("项目" in str(v) for v in headers.values())
         wb.close()

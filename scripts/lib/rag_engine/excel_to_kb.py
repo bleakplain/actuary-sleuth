@@ -47,7 +47,7 @@ _METADATA_COLUMNS = {
 }
 
 
-@dataclass
+@dataclass(frozen=True)
 class SheetStructure:
     """解析后的 sheet 结构信息。"""
     sheet_name: str
@@ -58,14 +58,8 @@ class SheetStructure:
     sub_regulations: List[Dict] = field(default_factory=list)
     layout_type: str = "standard"  # "standard" or "with_owner"
 
-    def __getitem__(self, key: str):
-        return getattr(self, key)
 
-    def get(self, key: str, default=None):
-        return getattr(self, key, default)
-
-
-@dataclass
+@dataclass(frozen=True)
 class ClauseEntry:
     """单个检查条款。"""
     sequence: int
@@ -74,7 +68,7 @@ class ClauseEntry:
     metadata: Dict[str, str] = field(default_factory=dict)
 
 
-@dataclass
+@dataclass(frozen=True)
 class ImageInfo:
     """Excel 内嵌图片信息。"""
     sheet_name: str
