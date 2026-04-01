@@ -62,6 +62,7 @@ try:
     from .semantic_chunker import SemanticChunker
     from .evaluator import RetrievalEvaluator, GenerationEvaluator, RAGEvalReport
     from .eval_dataset import EvalSample, QuestionType, load_eval_dataset, create_default_eval_dataset, save_eval_dataset, DEFAULT_DATASET_PATH
+    from .quality_detector import detect_quality, compute_retrieval_relevance, compute_info_completeness
 
     _has_rag = True
 except ImportError:
@@ -85,6 +86,9 @@ except ImportError:
     create_default_eval_dataset = None
     save_eval_dataset = None
     DEFAULT_DATASET_PATH = None
+    detect_quality = None
+    compute_retrieval_relevance = None
+    compute_info_completeness = None
     _has_rag = False
 
 __all__ = [
@@ -121,6 +125,9 @@ __all__ = [
     'create_default_eval_dataset',
     'save_eval_dataset',
     'DEFAULT_DATASET_PATH',
+    'detect_quality',
+    'compute_retrieval_relevance',
+    'compute_info_completeness',
 ]
 
 __version__ = '0.1.0'
