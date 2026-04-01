@@ -44,44 +44,43 @@ class LLMClientFactory:
         return api_key, base_url
 
     @staticmethod
-    def _build_provider_config(provider: str, scene: str) -> dict:
+    def _build_provider_config(provider: str, scene: str, **overrides) -> dict:
         """根据 provider 和场景构建客户端配置
 
         Args:
             provider: 提供商名称 ('zhipu' 或 'ollama')
             scene: 使用场景 ('chat' 或 'embed')
+            **overrides: 覆盖配置项
         """
         from lib.config import get_config
         app_config = get_config()
 
         if provider == 'ollama':
-            return {
+            config = {
                 'provider': 'ollama',
                 'model': getattr(app_config.ollama, f'{scene}_model'),
                 'host': app_config.ollama.host,
                 'timeout': app_config.ollama.timeout,
             }
+        else:
+            api_key, base_url = LLMClientFactory._get_base_config()
+            config = {
+                'provider': 'zhipu',
+                'model': getattr(app_config.zhipu, f'{scene}_model'),
+                'api_key': api_key,
+                'base_url': base_url,
+                'timeout': app_config.zhipu.timeout,
+            }
 
-        api_key, base_url = LLMClientFactory._get_base_config()
-        return {
-            'provider': 'zhipu',
-            'model': getattr(app_config.zhipu, f'{scene}_model'),
-            'api_key': api_key,
-            'base_url': base_url,
-            'timeout': app_config.zhipu.timeout,
-        }
+        config.update(overrides)
+        return config
 
     @staticmethod
     def _create_zhipu_client(model: str, timeout: int) -> BaseLLMClient:
         """创建智谱客户端"""
-        api_key, base_url = LLMClientFactory._get_base_config()
-        return LLMClientFactory.create_client({
-            'provider': 'zhipu',
-            'model': model,
-            'api_key': api_key,
-            'base_url': base_url,
-            'timeout': timeout
-        })
+        return LLMClientFactory.create_client(
+            LLMClientFactory._build_provider_config('zhipu', 'chat', model=model, timeout=timeout)
+        )
 
     @staticmethod
     def _create_scenario_llm(scenario: str) -> BaseLLMClient:

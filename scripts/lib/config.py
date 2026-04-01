@@ -243,7 +243,7 @@ class LLMConfig:
     @property
     def chat(self) -> Dict[str, str]:
         """聊天场景配置：{provider, model}"""
-        return self._config.get('chat', {'provider': 'zhipu', 'model': 'glm-4-flash'})
+        return self._config.get('chat', {'provider': 'zhipu'})
 
 
 class DatabaseConfig:
