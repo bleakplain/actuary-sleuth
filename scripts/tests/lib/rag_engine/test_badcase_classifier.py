@@ -1,23 +1,45 @@
+# scripts/tests/lib/rag_engine/test_badcase_classifier.py
+import json
 import pytest
-from lib.rag_engine.badcase_classifier import (
-    classify_badcase,
-    assess_compliance_risk,
-)
+from unittest.mock import MagicMock, patch
+
+from lib.rag_engine.badcase_classifier import classify_badcase, assess_compliance_risk
+
+
+def _mock_llm_return(cls_type: str, reason: str, fix_dir: str) -> str:
+    return json.dumps({"type": cls_type, "reason": reason, "fix_direction": fix_dir}, ensure_ascii=False)
 
 
 class TestClassifyBadcase:
-    def test_knowledge_gap(self):
-        """知识库中没有相关信息"""
+    @patch("lib.rag_engine.badcase_classifier._get_llm")
+    def test_retrieval_failure(self, mock_get_llm):
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = _mock_llm_return(
+            "retrieval_failure",
+            "相关文档未被检索到",
+            "优化检索策略",
+        )
+        mock_get_llm.return_value = mock_llm
+
         result = classify_badcase(
-            query="线上理赔怎么操作",
-            retrieved_docs=[{"content": "健康保险等待期规定", "source_file": "health_ins.md"}],
-            answer="提供的法规条款中未找到相关信息",
+            query="意外险的免赔额是多少",
+            retrieved_docs=[{"content": "健康保险的免赔规定"}],
+            answer="未找到相关信息",
             unverified_claims=[],
         )
-        assert result["type"] == "knowledge_gap"
+        assert result["type"] == "retrieval_failure"
+        assert "fix_direction" in result
 
-    def test_hallucination(self):
-        """检索到了正确文档但 LLM 答错了"""
+    @patch("lib.rag_engine.badcase_classifier._get_llm")
+    def test_hallucination(self, mock_get_llm):
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = _mock_llm_return(
+            "hallucination",
+            "回答包含来源不支持的内容",
+            "加强 Prompt 忠实度约束",
+        )
+        mock_get_llm.return_value = mock_llm
+
         result = classify_badcase(
             query="健康保险等待期最长多少天",
             retrieved_docs=[{"content": "健康保险等待期不得超过90天"}],
@@ -26,47 +48,77 @@ class TestClassifyBadcase:
         )
         assert result["type"] == "hallucination"
 
-    def test_retrieval_failure(self):
-        """检索到了文档但不是最相关的"""
-        result = classify_badcase(
-            query="意外险的免赔额是多少",
-            retrieved_docs=[{"content": "健康保险的免赔规定", "source_file": "health_ins.md"}],
-            answer="提供的法规条款中未找到关于意外险免赔额的信息",
-            unverified_claims=[],
+    @patch("lib.rag_engine.badcase_classifier._get_llm")
+    def test_knowledge_gap(self, mock_get_llm):
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = _mock_llm_return(
+            "knowledge_gap",
+            "知识库中不存在相关信息",
+            "补充相关法规文档",
         )
-        assert result["type"] == "retrieval_failure"
+        mock_get_llm.return_value = mock_llm
 
-    def test_no_unverified_and_answer_matches(self):
-        """答案与检索结果一致，用户仍不满意 → 检索失败"""
         result = classify_badcase(
-            query="保险合同解除条件",
-            retrieved_docs=[{"content": "投保人可以解除保险合同"}],
-            answer="投保人可以解除保险合同",
+            query="线上理赔怎么操作",
+            retrieved_docs=[],
+            answer="未找到相关信息",
             unverified_claims=[],
         )
-        assert result["type"] == "retrieval_failure"
+        assert result["type"] == "knowledge_gap"
+
+    @patch("lib.rag_engine.badcase_classifier._get_llm")
+    def test_llm_failure_raises(self, mock_get_llm):
+        mock_llm = MagicMock()
+        mock_llm.generate.side_effect = RuntimeError("LLM unavailable")
+        mock_get_llm.return_value = mock_llm
+
+        with pytest.raises(RuntimeError):
+            classify_badcase(
+                query="test",
+                retrieved_docs=[],
+                answer="test",
+                unverified_claims=[],
+            )
+
+    @patch("lib.rag_engine.badcase_classifier._get_llm")
+    def test_llm_returns_invalid_json(self, mock_get_llm):
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = "not json at all"
+        mock_get_llm.return_value = mock_llm
+
+        with pytest.raises(ValueError):
+            classify_badcase(
+                query="test",
+                retrieved_docs=[{"content": "test"}],
+                answer="test",
+                unverified_claims=[],
+            )
 
 
 class TestAssessComplianceRisk:
-    def test_amount_in_wrong_answer(self):
-        """错误答案中包含金额 → 高风险"""
-        risk = assess_compliance_risk(
-            reason="答案错误",
-            answer="身故保险金为基本保额的150%",
-        )
+    @patch("lib.rag_engine.badcase_classifier._get_llm")
+    def test_high_risk(self, mock_get_llm):
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = '{"risk_level": 2, "reason": "包含错误金额信息"}'
+        mock_get_llm.return_value = mock_llm
+
+        risk = assess_compliance_risk("答案错误", "身故保险金为基本保额的150%")
         assert risk == 2
 
-    def test_compliance_keywords(self):
-        """涉及合规关键词 → 中风险"""
-        risk = assess_compliance_risk(
-            reason="答案错误",
-            answer="保险公司不得拒绝承保",
-        )
-        assert risk == 1
+    @patch("lib.rag_engine.badcase_classifier._get_llm")
+    def test_low_risk(self, mock_get_llm):
+        mock_llm = MagicMock()
+        mock_llm.generate.return_value = '{"risk_level": 0, "reason": "一般性回答问题"}'
+        mock_get_llm.return_value = mock_llm
 
-    def test_low_risk(self):
-        risk = assess_compliance_risk(
-            reason="回答不完整",
-            answer="相关规定请查阅条款",
-        )
+        risk = assess_compliance_risk("回答不完整", "相关规定请查阅条款")
+        assert risk == 0
+
+    @patch("lib.rag_engine.badcase_classifier._get_llm")
+    def test_llm_failure_returns_zero(self, mock_get_llm):
+        mock_llm = MagicMock()
+        mock_llm.generate.side_effect = RuntimeError("LLM unavailable")
+        mock_get_llm.return_value = mock_llm
+
+        risk = assess_compliance_risk("test", "test")
         assert risk == 0
