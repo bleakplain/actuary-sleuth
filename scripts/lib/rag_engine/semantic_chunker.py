@@ -25,8 +25,17 @@ _ARTICLE_PATTERN = re.compile(
 _PLAIN_ARTICLE_PATTERN = re.compile(
     r'^第([一二三四五六七八九十百千\d]+)条\s*(.*?)$'
 )
+# 通知类文件的条款编号：全角或半角括号包裹的中文/阿拉伯数字
+# 匹配 （一）（二）、（ 一 ）(1)(2) 等，允许括号内有空格
+_PAREN_ARTICLE_PATTERN = re.compile(
+    r'^[（(]\s*([一二三四五六七八九十百千\d]+)\s*[）)]\s*(.*?)$'
+)
 _CHAPTER_PATTERN = re.compile(
     r'^(第[一二三四五六七八九十百千\d]+[章节部分篇])\s*(.*?)$'
+)
+# 通知类文件的章节标题：中文数字 + 顿号，如 "一、产品条款表述"
+_SECTION_PATTERN = re.compile(
+    r'^([一二三四五六七八九十百千]+)\s*、\s*(.*?)$'
 )
 _DOC_NUMBER_PATTERN = re.compile(
     r'^(\d{4})\s*年[第]\s*(\d+)\s*号$'
@@ -54,7 +63,14 @@ class SemanticChunker:
 
         doc_meta = self._extract_doc_meta(lines)
         law_name = doc_meta.get('law_name', '')
-        segments = self._split_by_structure(lines)
+
+        # 检测文档是否包含传统的"第X条"格式
+        has_article_format = any(
+            _ARTICLE_PATTERN.match(line.strip()) or _PLAIN_ARTICLE_PATTERN.match(line.strip())
+            for line in lines
+        )
+
+        segments = self._split_by_structure(lines, use_paren=not has_article_format)
 
         return self._build_nodes(segments, law_name, source_file, doc_meta)
 
@@ -68,6 +84,8 @@ class SemanticChunker:
             stripped = line.strip()
             # 遇到第一条或章节标题时停止
             if _PLAIN_ARTICLE_PATTERN.match(stripped) or _CHAPTER_PATTERN.match(stripped):
+                break
+            if _PAREN_ARTICLE_PATTERN.match(stripped) or _SECTION_PATTERN.match(stripped):
                 break
             preamble_text.append(stripped)
 
@@ -100,7 +118,7 @@ class SemanticChunker:
 
         # 法规名称
         # 优先从 ## 标题提取（如 "## 人身保险产品信息披露管理办法"）
-        m = re.search(r'##\s*([^\n（(]+?(?:办法|规定|条例|细则|通知|意见))', full_preamble)
+        m = re.search(r'##\s*([^\n（(]+?(?:办法|规定|条例|细则|通知|意见|清单))', full_preamble)
         if m:
             name = m.group(1).strip()
             if 4 < len(name) < 40:
@@ -124,8 +142,12 @@ class SemanticChunker:
         return meta
 
     @staticmethod
-    def _split_by_structure(lines: List[str]) -> List[dict]:
-        """按章节和条款分割文档，每个条款为一个 segment"""
+    def _split_by_structure(lines: List[str], use_paren: bool = False) -> List[dict]:
+        """按章节和条款分割文档，每个条款为一个 segment
+
+        Args:
+            use_paren: 当文档不含"第X条"格式时，启用括号编号（（X））识别
+        """
         segments: List[dict] = []
         current_lines: List[str] = []
         current_article = ''
@@ -155,15 +177,19 @@ class SemanticChunker:
 
                 if level == 1 and re.match(r'^第[一二三四五六七八九十百千\d]+部分', title):
                     continue
-                if level == 2 and not md_law_name:
-                    if any(kw in title for kw in ['法', '办法', '规定', '条例', '细则']):
-                        md_law_name = title
+                if level == 2:
+                    if not md_law_name:
+                        if any(kw in title for kw in ['法', '办法', '规定', '条例', '细则', '清单']):
+                            md_law_name = title
+                    elif title == md_law_name:
+                        # 遇到同名 ## 标题（如负面清单 2023版+2025版），停止收集
+                        break
                     continue
                 if level == 3:
                     continue
                 continue
 
-            # 章节标题
+            # 章节标题（传统格式：第X章/第X部分）
             chapter_match = _CHAPTER_PATTERN.match(stripped)
             if chapter_match:
                 if current_article and current_lines:
@@ -179,10 +205,29 @@ class SemanticChunker:
                 chapter = stripped
                 continue
 
-            # 条款标记
+            # 通知类章节标题（中文数字 + 顿号，如 "一、产品条款表述"）
+            # 仅在启用括号编号模式时才识别为章节标题
+            section_match = _SECTION_PATTERN.match(stripped) if use_paren else None
+            if section_match:
+                if current_article and current_lines:
+                    text = '\n'.join(current_lines).strip()
+                    if text:
+                        segments.append({
+                            'text': text,
+                            'article': current_article,
+                            'chapter': chapter,
+                        })
+                    current_lines = []
+                    current_article = ''
+                chapter = stripped
+                continue
+
+            # 条款标记（优先级：Markdown标题格式 > 纯文本第X条 > 括号编号）
             article_match = _ARTICLE_PATTERN.match(stripped)
             if not article_match:
                 article_match = _PLAIN_ARTICLE_PATTERN.match(stripped)
+            if not article_match and use_paren:
+                article_match = _PAREN_ARTICLE_PATTERN.match(stripped)
 
             if article_match:
                 # 遇到第一条时，丢弃之前积累的前置内容（发文号、颁布信息等）
@@ -203,7 +248,11 @@ class SemanticChunker:
 
                 article_num = article_match.group(1)
                 article_desc = article_match.group(2).strip()
-                current_article = f"第{article_num}条"
+                # 括号编号格式用 "第（X）项" 而非 "第X条"
+                if _PAREN_ARTICLE_PATTERN.match(stripped):
+                    current_article = f"第（{article_num}）项"
+                else:
+                    current_article = f"第{article_num}条"
                 if article_desc:
                     current_article += f" {article_desc}"
 
@@ -243,7 +292,7 @@ class SemanticChunker:
                 hierarchy_parts.append(seg['chapter'])
             hierarchy_path = ' > '.join(hierarchy_parts)
 
-            article_brief = re.match(r'^(第[一二三四五六七八九十百千\d]+条)', seg['article'])
+            article_brief = re.match(r'^(第[一二三四五六七八九十百千\d]+条|第[（(][一二三四五六七八九十百千\d]+[）)]项)', seg['article'])
             article_number = article_brief.group(1) if article_brief else seg['article']
 
             meta = {

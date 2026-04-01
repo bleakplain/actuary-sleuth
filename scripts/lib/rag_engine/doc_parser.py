@@ -184,6 +184,8 @@ class RegulationNodeParser(NodeParser):
             r'###\s*第([一二三四五六七八九十百千\d]+)条\s*(.+?)(?:\s|$)',
             r'##\s*第([一二三四五六七八九十百千\d]+)条\s*(.+?)(?:\s|$)',
             r'^第([一二三四五六七八九十百千\d]+)条\s*(.+?)(?:\s|$)',
+            # 通知类文件的括号编号：全角或半角括号包裹
+            r'^[（(]\s*([一二三四五六七八九十百千\d]+)\s*[）)]\s*(.*?)$',
         ]
 
         for line in lines:
@@ -199,7 +201,11 @@ class RegulationNodeParser(NodeParser):
                     is_article = True
                     article_num = match.group(1)
                     article_desc = match.group(2).strip() if len(match.groups()) > 1 else ""
-                    article_title = f"第{article_num}条"
+                    # 括号编号格式用 "第（X）项" 而非 "第X条"
+                    if re.match(r'^[（(]', stripped):
+                        article_title = f"第（{article_num}）项"
+                    else:
+                        article_title = f"第{article_num}条"
                     if article_desc:
                         article_title += f" {article_desc}"
                     break
