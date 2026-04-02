@@ -7,8 +7,6 @@
     from lib.config import get_config
 
     config = get_config()
-    chat_config = config.get_chat_config()
-    embed_config = config.get_embedding_config()
     app_id = config.feishu_app_id
     db_path = config.sqlite_db_path
 """
@@ -306,15 +304,13 @@ class Config:
     配置管理类
 
     提供业务语义化的配置访问接口，支持：
-    - 场景化配置方法 (get_chat_config, get_embedding_config)
     - 业务属性 (feishu_app_id, sqlite_db_path, ...)
     - 环境变量覆盖
     - 通用 get() 方法支持点号分隔的嵌套键
 
     使用示例：
         config = get_config()
-        chat_config = config.get_chat_config()
-        embed_config = config.get_embedding_config()
+        app_id = config.feishu_app_id
         db_path = config.sqlite_db_path
     """
 
@@ -370,52 +366,6 @@ class Config:
         self._data_paths = DatabaseConfig(self._config)
         self._regulation_search = RegulationSearchConfig(self._config)
         self._openclaw = OpenClawConfig(self._config)
-
-    # ===== 场景配置方法 =====
-
-    def _build_provider_config(self, provider: str, scene: str, **overrides) -> dict:
-        """根据 provider 和场景构建客户端配置（内部方法）
-
-        Args:
-            provider: 提供商名称 ('zhipu' 或 'ollama')
-            scene: 使用场景 ('chat' 或 'embed')
-            **overrides: 覆盖配置项
-        """
-        if provider == 'ollama':
-            config = {
-                'provider': 'ollama',
-                'model': getattr(self._ollama, f'{scene}_model'),
-                'host': self._ollama.host,
-                'timeout': self._ollama.timeout,
-            }
-        else:
-            config = {
-                'provider': 'zhipu',
-                'model': getattr(self._zhipu, f'{scene}_model'),
-                'api_key': self._zhipu.api_key,
-                'base_url': self._zhipu.base_url,
-                'timeout': self._zhipu.timeout,
-            }
-        config.update(overrides)
-        return config
-
-    def get_chat_config(self, **overrides) -> dict:
-        """获取聊天场景配置（可直接传给 LLMClientFactory.create_client）
-
-        Returns:
-            dict: 包含 provider, model, host/api_key, base_url, timeout 等字段
-        """
-        provider = self._llm.chat.get('provider', 'zhipu')
-        return self._build_provider_config(provider, 'chat', **overrides)
-
-    def get_embedding_config(self, **overrides) -> dict:
-        """获取嵌入场景配置（可直接传给 embedding 客户端）
-
-        Returns:
-            dict: 包含 provider, model, host/api_key, base_url, timeout 等字段
-        """
-        provider = self._llm.embed.get('provider', 'zhipu')
-        return self._build_provider_config(provider, 'embed', **overrides)
 
     # ===== 业务属性 =====
 

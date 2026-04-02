@@ -28,9 +28,26 @@ class LLMClientFactory:
 
     @staticmethod
     def _build_provider_config(provider: str, scene: str, **overrides) -> dict:
-        """委托给 Config._build_provider_config"""
+        """根据 provider 和场景构建客户端配置"""
         from lib.config import get_config
-        return get_config()._build_provider_config(provider, scene, **overrides)
+        cfg = get_config()
+        if provider == 'ollama':
+            result = {
+                'provider': 'ollama',
+                'model': getattr(cfg._ollama, f'{scene}_model'),
+                'host': cfg._ollama.host,
+                'timeout': cfg._ollama.timeout,
+            }
+        else:
+            result = {
+                'provider': 'zhipu',
+                'model': getattr(cfg._zhipu, f'{scene}_model'),
+                'api_key': cfg._zhipu.api_key,
+                'base_url': cfg._zhipu.base_url,
+                'timeout': cfg._zhipu.timeout,
+            }
+        result.update(overrides)
+        return result
 
     @staticmethod
     def _create_zhipu_client(model: str, timeout: int) -> BaseLLMClient:
@@ -58,8 +75,10 @@ class LLMClientFactory:
         # doc_preprocess 使用配置文件的值
         if config['model'] is None:
             from lib.config import get_config
+            cfg = get_config()
+            provider = cfg._llm.chat.get('provider', 'zhipu')
             return LLMClientFactory.create_client(
-                get_config().get_chat_config()
+                LLMClientFactory._build_provider_config(provider, 'chat')
             )
 
         return LLMClientFactory._create_zhipu_client(
@@ -95,12 +114,13 @@ class LLMClientFactory:
     def get_embedding_config() -> dict:
         """获取嵌入模型配置"""
         from lib.config import get_config
-        return get_config().get_embedding_config()
+        cfg = get_config()
+        provider = cfg._llm.embed.get('provider', 'zhipu')
+        return LLMClientFactory._build_provider_config(provider, 'embed')
 
     @staticmethod
     def get_embedding_llm() -> ZhipuClient:
-        from lib.config import get_config
-        config = get_config().get_embedding_config()
+        config = LLMClientFactory.get_embedding_config()
         if config['provider'] == 'zhipu':
             return ZhipuClient(
                 api_key=config['api_key'],
@@ -197,7 +217,9 @@ def get_client(config: Optional[Dict[str, Any]] = None) -> BaseLLMClient:
             if _client is None:
                 if config is None:
                     from lib.config import get_config
-                    config = get_config().get_chat_config()
+                    cfg = get_config()
+                    provider = cfg._llm.chat.get('provider', 'zhipu')
+                    config = LLMClientFactory._build_provider_config(provider, 'chat')
 
                 _client = LLMClientFactory.create_client(config)
 

@@ -14,7 +14,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
-from lib.config import get_config
+
 from lib.common.id_generator import IDGenerator
 from lib.preprocessing import DocumentExtractor
 from lib.llm_client import LLMClientFactory
@@ -127,10 +127,7 @@ def execute(params: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         # 创建提取流程（使用新的预处理模块）
-        app_config = get_config()
-        llm_client = LLMClientFactory.create_client(
-            app_config.get_chat_config()
-        )
+        llm_client = LLMClientFactory.get_doc_preprocess_llm()
         pipeline = DocumentExtractor(llm_client)
 
         # 执行提取
