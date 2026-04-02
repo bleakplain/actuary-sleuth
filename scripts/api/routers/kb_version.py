@@ -80,8 +80,8 @@ async def create_version(req: CreateVersionRequest):
 
             # 使用版本路径构建索引
             version_config = vm.get_rag_config(meta.version_id)
-            from lib.rag_engine.data_importer import RegulationDataImporter
-            importer = RegulationDataImporter(version_config)
+            from lib.rag_engine.data_importer import KBDataImporter
+            importer = KBDataImporter(version_config)
             stats = importer.import_all(force_rebuild=True)
 
             vm.update_version_chunk_count(meta.version_id, stats.get("vector", 0))

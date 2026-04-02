@@ -20,12 +20,6 @@
     audit = create_audit_engine()
     regulations = audit.search("健康保险等待期", top_k=5)
 
-### 数据导入
-    from lib.rag_engine import RegulationDataImporter
-
-    importer = RegulationDataImporter()
-    importer.import_all(force_rebuild=True)
-
 ## 架构
 
     RAGEngine (统一引擎)
@@ -33,8 +27,7 @@
     │   ├── create_qa_engine() → glm-4-flash (快速响应)
     │   └── create_audit_engine() → glm-4-plus (高质量分析)
     ├── VectorIndexManager: 向量索引管理
-    ├── RegulationDocParser: 法规文档解析
-    └── RegulationDataImporter: 数据导入编排
+    └── KBDataImporter: 数据导入编排
 """
 import logging
 
@@ -53,9 +46,7 @@ from .attribution import parse_citations, AttributionResult, Citation
 # Optional RAG engine components (require llama_index)
 try:
     from .rag_engine import RAGEngine, create_qa_engine, create_audit_engine
-    from .doc_parser import RegulationDocParser
     from .index_manager import VectorIndexManager
-    from .data_importer import RegulationDataImporter
     from .data_importer import KBDataImporter
     from .retrieval import hybrid_search, vector_search
     from .fusion import reciprocal_rank_fusion
@@ -71,9 +62,7 @@ except ImportError:
     RAGEngine = None
     create_qa_engine = None
     create_audit_engine = None
-    RegulationDocParser = None
     VectorIndexManager = None
-    RegulationDataImporter = None
     KBDataImporter = None
     hybrid_search = None
     vector_search = None
@@ -113,9 +102,7 @@ __all__ = [
     'RAGEngine',
     'create_qa_engine',
     'create_audit_engine',
-    'RegulationDocParser',
     'VectorIndexManager',
-    'RegulationDataImporter',
     'KBDataImporter',
     'hybrid_search',
     'vector_search',

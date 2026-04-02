@@ -86,12 +86,14 @@ async def import_documents(req: ImportRequest):
             _tasks[task_id]["progress"] = "正在导入..."
 
             config = _get_config()
-            from lib.rag_engine.data_importer import RegulationDataImporter
-            importer = RegulationDataImporter(config)
+            from lib.rag_engine.data_importer import KBDataImporter
+            importer = KBDataImporter(config)
 
             if req.file_path:
-                result = importer.parse_single_file(req.file_path)
-                importer.import_to_vector_db([result])
+                documents = importer.parse_documents(file_pattern=f"**/{Path(req.file_path).name}")
+                chunks = importer.chunk_documents(documents)
+                importer.import_to_vector_db(chunks, force_rebuild=True)
+                result = {"parsed": len(documents), "vector": len(chunks), "bm25": 0}
             else:
                 result = importer.import_all(file_pattern=req.file_pattern)
 
@@ -127,8 +129,8 @@ async def rebuild_index(req: RebuildRequest):
             )
 
             version_config = vm.get_rag_config(meta.version_id)
-            from lib.rag_engine.data_importer import RegulationDataImporter
-            importer = RegulationDataImporter(version_config)
+            from lib.rag_engine.data_importer import KBDataImporter
+            importer = KBDataImporter(version_config)
             stats = importer.import_all(force_rebuild=True)
             vm.update_version_chunk_count(meta.version_id, stats.get("vector", 0))
 
