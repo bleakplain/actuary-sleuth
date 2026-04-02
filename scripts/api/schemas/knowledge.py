@@ -32,3 +32,7 @@ class TaskStatus(BaseModel):
     status: str
     progress: str = ""
     result: Optional[Dict[str, object]] = None
+
+
+class SaveDocumentRequest(BaseModel):
+    content: str = Field(..., description="文档内容（Markdown）")

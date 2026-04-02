@@ -1,5 +1,6 @@
 """知识库管理路由 — 文档列表、导入、重建、预览。"""
 
+import re
 import uuid
 import json
 import asyncio
@@ -11,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 
 from api.schemas.knowledge import (
     DocumentOut, ImportRequest, RebuildRequest, IndexStatus, TaskStatus,
+    SaveDocumentRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,23 +34,18 @@ def _get_regulations_dir() -> Path:
 
 @router.get("/documents", response_model=list[DocumentOut])
 async def list_documents():
-    import re
     reg_dir = _get_regulations_dir()
     documents = []
     if reg_dir.exists():
-        for f in sorted(reg_dir.glob("*.md")):
+        for f in sorted(reg_dir.glob("**/*.md")):
+            if f.is_dir():
+                continue
             stat = f.stat()
             content = f.read_text(encoding="utf-8", errors="ignore")
-            # 统计所有法规条款/条目格式
-            clause_patterns = [
-                r'^第[一二三四五六七八九十百千\d]+条',
-                r'^（[一二三四五六七八九十百千\d]+）',
-                r'^[一二三四五六七八九十]+、',
-                r'^\d+[、.]\s',
-            ]
+            # 统计 ## 第N项 分块数
             count = sum(
                 1 for l in content.split("\n")
-                if any(re.match(p, l.strip()) for p in clause_patterns)
+                if re.match(r'^##\s*第\d+项', l.strip())
             )
             documents.append(DocumentOut(
                 name=f.name,
@@ -143,18 +140,29 @@ async def get_task_status(task_id: str):
     )
 
 
-@router.get("/documents/{document_name}/preview")
-async def preview_document(document_name: str):
+@router.get("/documents/{file_path:path}/preview")
+async def preview_document(file_path: str):
     reg_dir = _get_regulations_dir()
-    file_path = reg_dir / document_name
-    if not file_path.exists():
+    full_path = reg_dir.parent / file_path
+    if not full_path.exists():
         raise HTTPException(status_code=404, detail="文档不存在")
-    content = file_path.read_text(encoding="utf-8", errors="ignore")
-    return {"name": document_name, "content": content, "total_chars": len(content)}
+    content = full_path.read_text(encoding="utf-8", errors="ignore")
+    return {"name": full_path.name, "content": content, "total_chars": len(content)}
 
 
-@router.get("/documents/{document_name}/chunks")
-async def list_document_chunks(document_name: str):
+@router.put("/documents/{file_path:path}")
+async def save_document(file_path: str, req: SaveDocumentRequest):
+    """保存编辑后的文档内容到 references 目录。"""
+    reg_dir = _get_regulations_dir()
+    full_path = reg_dir.parent / file_path
+    if not full_path.exists():
+        raise HTTPException(status_code=404, detail="文档不存在")
+    full_path.write_text(req.content, encoding="utf-8")
+    return {"name": full_path.name, "saved": True, "total_chars": len(req.content)}
+
+
+@router.get("/documents/{file_path:path}/chunks")
+async def list_document_chunks(file_path: str):
     """返回指定文档在向量库中的所有分块，用于人工验证提取质量"""
     import lancedb
     config = _get_config()
@@ -165,6 +173,13 @@ async def list_document_chunks(document_name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"向量库读取失败: {e}")
 
+    _skip_keys = {'_node_content', '_node_type', 'doc_id', 'document_id', 'ref_doc_id',
+                  'id_', 'embedding', 'excluded_embed_metadata_keys',
+                  'excluded_llm_metadata_keys', 'relationships', 'metadata_template',
+                  'metadata_separator', 'mimetype', 'start_char_idx', 'end_char_idx',
+                  'text_template', 'class_name', 'text'}
+
+    doc_name = Path(file_path).name
     chunks = []
     for _, row in df.iterrows():
         meta = row.get('metadata', {})
@@ -174,12 +189,11 @@ async def list_document_chunks(document_name: str):
             except (json.JSONDecodeError, TypeError):
                 meta = {}
 
-        source_file = meta.get('source_file', '')
-        if source_file != document_name:
+        if meta.get('source_file', '') != doc_name:
             continue
 
         text = str(row.get('text', ''))
-        chunks.append({
+        chunk = {
             "law_name": meta.get('law_name', ''),
             "article_number": meta.get('article_number', ''),
             "category": meta.get('category', ''),
@@ -190,13 +204,17 @@ async def list_document_chunks(document_name: str):
             "effective_date": meta.get('effective_date', ''),
             "text": text,
             "text_length": len(text),
-        })
+        }
+        # 添加动态 blockquote 元数据（险种分型、主附险等）
+        for k, v in meta.items():
+            if k not in chunk and k not in _skip_keys and v:
+                chunk[k] = str(v)
+        chunks.append(chunk)
 
     # 按条款号排序：提取数字或中文数字排在前面
     def _article_sort_key(chunk):
         num = chunk.get("article_number", "")
-        import re
-        m = re.search(r'第([一二三四五六七八九十百千\d]+)条', num)
+        m = re.search(r'第([一二三四五六七八九十百千\d]+)[条项]', num)
         if m:
             s = m.group(1)
             cn = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10,
@@ -211,7 +229,7 @@ async def list_document_chunks(document_name: str):
 
     chunks.sort(key=_article_sort_key)
 
-    return {"document_name": document_name, "total_chunks": len(chunks), "chunks": chunks}
+    return {"document_name": doc_name, "total_chunks": len(chunks), "chunks": chunks}
 
 
 @router.get("/status", response_model=IndexStatus)

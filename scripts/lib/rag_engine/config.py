@@ -122,7 +122,8 @@ class RAGConfig:
                     self.vector_db_path = str(Path(rel_path))
 
         # WSL/NTFS 上 LanceDB 大批量写入会失败，自动替换为 /tmp 路径
-        if '/mnt/' in self.vector_db_path:
+        # 版本管理路径（kb/）跳过替换，因为数据已存储在版本目录中
+        if '/mnt/' in self.vector_db_path and '/kb/' not in self.vector_db_path:
             import tempfile
             tmp_lancedb = os.path.join(tempfile.gettempdir(), 'actuary_sleuth', 'lancedb')
             os.makedirs(tmp_lancedb, exist_ok=True)

@@ -246,3 +246,37 @@ class ZhipuClient(BaseLLMClient):
     )
     def embed(self, texts: List[str], model: Optional[str] = None) -> List[List[float]]:
         return self._do_embed(texts, model)
+
+    def _do_ocr_table(self, image_base64: str) -> str:
+        """调用 GLM-OCR 识别表格为 Markdown。"""
+        url = f"{self.base_url}/layout_parsing"
+        data = {
+            "model": "glm-ocr",
+            "file": image_base64,
+        }
+        session = self._get_session()
+        response = session.post(url, json=data, timeout=self.timeout)
+
+        if response.status_code == 429:
+            raise requests.exceptions.RequestException(
+                f"429 Rate limit exceeded: {response.text[:200]}"
+            )
+        if response.status_code >= 500:
+            raise requests.exceptions.RequestException(
+                f"{response.status_code} Server error: {response.text[:200]}"
+            )
+
+        response.raise_for_status()
+        result = response.json()
+        # GLM-OCR returns table content in md_results field
+        return result.get("md_results", result.get("content", ""))
+
+    @_track_timing("zhipu")
+    @_with_circuit_breaker("zhipu")
+    @_retry_with_backoff(
+        max_retries=LLMConstants.MAX_RETRIES,
+        base_delay=LLMConstants.RETRY_BASE_DELAY,
+        rate_limit_delay_mult=LLMConstants.RATE_LIMIT_DELAY_MULT,
+    )
+    def ocr_table(self, image_base64: str) -> str:
+        return self._do_ocr_table(image_base64)

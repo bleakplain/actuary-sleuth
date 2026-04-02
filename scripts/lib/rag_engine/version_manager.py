@@ -2,12 +2,14 @@
 # -*- coding: utf-8 -*-
 """知识库版本管理器
 
-管理法规知识库的多版本：每个版本独立保存源文件快照、向量索引和 BM25 索引。
+管理法规知识库的多版本：每个版本独立保存向量索引和 BM25 索引。
+源文件统一存放在外部目录（如项目根目录 references/），不随版本复制。
+版本元数据持久化到 SQLite 数据库（kb_versions 表）。
 """
-import json
+import os
 import shutil
 import logging
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict
@@ -24,13 +26,12 @@ class VersionMeta:
     chunk_count: int = 0
     active: bool = False
     description: str = ""
+    regulations_dir: str = ""
 
 
-@dataclass
-class _VersionRegistry:
-    """版本注册表（持久化到 version_meta.json）"""
-    versions: List[VersionMeta] = field(default_factory=list)
-    active_version: str = ""
+def _get_connection():
+    from lib.common.database import get_connection
+    return get_connection()
 
 
 class KBVersionManager:
@@ -41,100 +42,113 @@ class KBVersionManager:
 
     def __init__(self, base_dir: Optional[str] = None):
         if base_dir is None:
-            import os
-            # 优先使用环境变量，否则使用项目内路径
             base_dir = os.environ.get(
                 "KB_VERSION_DIR",
                 str(Path(__file__).parent / "data" / "kb"),
             )
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
-        self._registry_path = self.base_dir / "version_meta.json"
-        self._registry = self._load_registry()
+        self._ensure_table()
 
-    # ── 持久化 ──────────────────────────────────────────────
+    def _ensure_table(self) -> None:
+        """确保 kb_versions 表已创建（支持非 app 启动场景）。"""
+        try:
+            from api.database import init_db
+            init_db()
+        except Exception:
+            pass
 
-    def _load_registry(self) -> _VersionRegistry:
-        if self._registry_path.exists():
-            with open(self._registry_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return _VersionRegistry(
-                versions=[VersionMeta(**v) for v in data.get("versions", [])],
-                active_version=data.get("active_version", ""),
-            )
-        return _VersionRegistry()
+    # ── 辅助 ──────────────────────────────────────────────────
 
-    def _save_registry(self) -> None:
-        self._registry_path.write_text(
-            json.dumps(asdict(self._registry), ensure_ascii=False, indent=2),
-            encoding="utf-8",
+    @staticmethod
+    def _row_to_meta(row) -> VersionMeta:
+        return VersionMeta(
+            version_id=row["version_id"],
+            created_at=row["created_at"],
+            document_count=row["document_count"],
+            chunk_count=row["chunk_count"],
+            active=bool(row["active"]),
+            description=row["description"],
+            regulations_dir=row["regulations_dir"],
         )
 
     # ── 查询 ──────────────────────────────────────────────────
 
     @property
     def active_version(self) -> Optional[str]:
-        return self._registry.active_version or None
+        with _get_connection() as conn:
+            row = conn.execute(
+                "SELECT version_id FROM kb_versions WHERE active = 1"
+            ).fetchone()
+            return row["version_id"] if row else None
 
     def list_versions(self) -> List[VersionMeta]:
-        return list(self._registry.versions)
+        with _get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM kb_versions ORDER BY created_at"
+            ).fetchall()
+            return [self._row_to_meta(r) for r in rows]
 
     def get_version_meta(self, version_id: str) -> Optional[VersionMeta]:
-        for v in self._registry.versions:
-            if v.version_id == version_id:
-                return v
-        return None
+        with _get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM kb_versions WHERE version_id = ?",
+                (version_id,),
+            ).fetchone()
+            return self._row_to_meta(row) if row else None
 
     def next_version_id(self) -> str:
-        max_num = 0
-        for v in self._registry.versions:
-            if v.version_id.startswith("v"):
+        with _get_connection() as conn:
+            row = conn.execute(
+                "SELECT version_id FROM kb_versions "
+                "WHERE version_id LIKE 'v%' ORDER BY version_id DESC LIMIT 1"
+            ).fetchone()
+            if row:
                 try:
-                    max_num = max(max_num, int(v.version_id[1:]))
+                    return f"v{int(row['version_id'][1:]) + 1}"
                 except ValueError:
                     pass
-        return f"v{max_num + 1}"
+        return "v1"
 
     # ── 版本操作 ──────────────────────────────────────────────
 
     def create_version(
         self,
-        source_dir: str,
+        regulations_dir: str,
         description: str = "",
     ) -> VersionMeta:
-        """创建新版本：复制源文件快照到版本目录。"""
+        """创建新版本：仅管理索引，源文件保持在 regulations_dir。"""
         version_id = self.next_version_id()
         version_dir = self.base_dir / version_id
         version_dir.mkdir(parents=True, exist_ok=True)
 
-        refs_dir = version_dir / "references"
-        src_path = Path(source_dir)
-        if src_path.exists():
-            if refs_dir.exists():
-                shutil.rmtree(refs_dir)
-            shutil.copytree(src_path, refs_dir)
+        reg_path = Path(regulations_dir)
+        doc_count = len(list(reg_path.rglob("*.md"))) if reg_path.exists() else 0
 
-        doc_count = len(list(refs_dir.glob("*.md"))) if refs_dir.exists() else 0
+        now = datetime.now(timezone.utc).isoformat()
 
-        # 设为 active
-        for v in self._registry.versions:
-            v.active = False
+        with _get_connection() as conn:
+            conn.execute("UPDATE kb_versions SET active = 0")
+            conn.execute(
+                "INSERT INTO kb_versions "
+                "(version_id, created_at, document_count, chunk_count, "
+                "description, regulations_dir, active) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1)",
+                (version_id, now, doc_count, 0, description, str(reg_path)),
+            )
 
         meta = VersionMeta(
             version_id=version_id,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=now,
             document_count=doc_count,
             chunk_count=0,
             active=True,
             description=description,
+            regulations_dir=str(reg_path),
         )
-        self._registry.versions.append(meta)
-        self._registry.active_version = version_id
-        self._save_registry()
 
-        # 写入版本目录下的 meta.json
         (version_dir / "meta.json").write_text(
-            json.dumps(asdict(meta), ensure_ascii=False, indent=2),
+            f'{{"version_id": "{version_id}"}}',
             encoding="utf-8",
         )
 
@@ -146,43 +160,55 @@ class KBVersionManager:
         meta = self.get_version_meta(version_id)
         if not meta:
             return False
-        for v in self._registry.versions:
-            v.active = (v.version_id == version_id)
-        self._registry.active_version = version_id
-        self._save_registry()
+        with _get_connection() as conn:
+            conn.execute("UPDATE kb_versions SET active = 0")
+            conn.execute(
+                "UPDATE kb_versions SET active = 1 WHERE version_id = ?",
+                (version_id,),
+            )
         logger.info(f"切换到知识库版本 {version_id}")
         return True
 
     def delete_version(self, version_id: str) -> bool:
         """删除非 active 版本。"""
-        if version_id == self._registry.active_version:
-            logger.warning(f"不能删除当前激活的版本 {version_id}")
-            return False
-        self._registry.versions = [
-            v for v in self._registry.versions if v.version_id != version_id
-        ]
+        with _get_connection() as conn:
+            row = conn.execute(
+                "SELECT active FROM kb_versions WHERE version_id = ?",
+                (version_id,),
+            ).fetchone()
+            if not row:
+                return False
+            if row["active"]:
+                logger.warning(f"不能删除当前激活的版本 {version_id}")
+                return False
+            conn.execute(
+                "DELETE FROM kb_versions WHERE version_id = ?",
+                (version_id,),
+            )
+
         version_dir = self.base_dir / version_id
         if version_dir.exists():
             shutil.rmtree(version_dir)
             logger.info(f"删除知识库版本 {version_id}")
-        self._save_registry()
         return True
 
     def update_version_chunk_count(self, version_id: str, chunk_count: int) -> None:
         """更新版本的 chunk 数量（索引构建完成后调用）。"""
-        for v in self._registry.versions:
-            if v.version_id == version_id:
-                v.chunk_count = chunk_count
-                break
-        self._save_registry()
+        with _get_connection() as conn:
+            conn.execute(
+                "UPDATE kb_versions SET chunk_count = ? WHERE version_id = ?",
+                (chunk_count, version_id),
+            )
 
     # ── 路径解析 ──────────────────────────────────────────────
 
     def get_version_paths(self, version_id: str) -> Dict[str, str]:
         """返回指定版本的路径映射。"""
         version_dir = self.base_dir / version_id
+        meta = self.get_version_meta(version_id)
+        reg_dir = meta.regulations_dir if meta and meta.regulations_dir else str(version_dir / "references")
         return {
-            "regulations_dir": str(version_dir / "references"),
+            "regulations_dir": reg_dir,
             "vector_db_path": str(version_dir / "lancedb"),
             "bm25_index_path": str(version_dir / "bm25_index.pkl"),
         }
@@ -215,8 +241,10 @@ class KBVersionManager:
         legacy_references: str,
     ) -> bool:
         """将旧版非版本化数据迁移到 v1。仅当无任何版本时执行。"""
-        if self._registry.versions:
-            return False
+        with _get_connection() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM kb_versions").fetchone()[0]
+            if count > 0:
+                return False
 
         v1_dir = self.base_dir / "v1"
         v1_dir.mkdir(parents=True, exist_ok=True)
@@ -246,17 +274,15 @@ class KBVersionManager:
             len(list(dst_refs.glob("*.md"))) if dst_refs.exists() else 0
         )
 
-        meta = VersionMeta(
-            version_id="v1",
-            created_at=datetime.now(timezone.utc).isoformat(),
-            document_count=doc_count,
-            chunk_count=0,
-            active=True,
-            description="从旧数据自动迁移",
-        )
-        self._registry.versions.append(meta)
-        self._registry.active_version = "v1"
-        self._save_registry()
+        now = datetime.now(timezone.utc).isoformat()
+        with _get_connection() as conn:
+            conn.execute(
+                "INSERT INTO kb_versions "
+                "(version_id, created_at, document_count, chunk_count, "
+                "description, active) "
+                "VALUES (?, ?, ?, ?, ?, 1)",
+                ("v1", now, doc_count, 0, "从旧数据自动迁移"),
+            )
 
         logger.info(f"旧数据迁移完成: {v1_dir}")
         return True

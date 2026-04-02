@@ -27,12 +27,21 @@ export async function fetchTaskStatus(taskId: string): Promise<TaskStatus> {
   return data;
 }
 
-export async function fetchDocumentPreview(name: string): Promise<{ name: string; content: string; total_chars: number }> {
-  const { data } = await client.get(`/api/kb/documents/${encodeURIComponent(name)}/preview`);
+function encodeFilePath(filePath: string): string {
+  return filePath.split('/').map(seg => encodeURIComponent(seg)).join('/');
+}
+
+export async function fetchDocumentPreview(filePath: string): Promise<{ name: string; content: string; total_chars: number }> {
+  const { data } = await client.get(`/api/kb/documents/${encodeFilePath(filePath)}/preview`);
   return data;
 }
 
-export async function fetchDocumentChunks(name: string): Promise<{
+export async function saveDocument(filePath: string, content: string): Promise<{ name: string; saved: boolean }> {
+  const { data } = await client.put(`/api/kb/documents/${encodeFilePath(filePath)}`, { content });
+  return data;
+}
+
+export async function fetchDocumentChunks(filePath: string): Promise<{
   document_name: string;
   total_chunks: number;
   chunks: Array<{
@@ -48,7 +57,7 @@ export async function fetchDocumentChunks(name: string): Promise<{
     text_length: number;
   }>;
 }> {
-  const { data } = await client.get(`/api/kb/documents/${encodeURIComponent(name)}/chunks`);
+  const { data } = await client.get(`/api/kb/documents/${encodeFilePath(filePath)}/chunks`);
   return data;
 }
 
