@@ -213,7 +213,7 @@ class KBVersionManager:
             return None
         return self.get_version_paths(vid)
 
-    def get_rag_config(self, version_id: str = None) -> "RAGConfig":
+    def get_rag_config(self, version_id: Optional[str] = None) -> "RAGConfig":
         """创建指定版本的 RAGConfig 实例。"""
         from .config import RAGConfig
         vid = version_id or self.active_version

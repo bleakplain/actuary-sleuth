@@ -4,9 +4,9 @@ import atexit
 import json
 import re
 import logging
-import requests
+import requests  # type: ignore[import-untyped]
 import threading
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from .base import BaseLLMClient
 from .metrics import _track_timing, _with_circuit_breaker, _retry_with_backoff
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class ZhipuClient(BaseLLMClient):
     """智谱AI客户端"""
 
-    _shutdown_hooks = []
+    _shutdown_hooks: List = []
 
     def __init__(
         self,

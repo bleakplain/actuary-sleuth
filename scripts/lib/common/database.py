@@ -6,7 +6,7 @@ import json
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 from lib.common.connection_pool import get_connection_pool, SQLiteConnectionPool
 from lib.common.exceptions import DatabaseError, RecordNotFoundError
 from lib.config import get_sqlite_db_path
@@ -41,7 +41,7 @@ def _get_pool() -> SQLiteConnectionPool:
     return _connection_pool
 
 
-def _create_connection(db_path: Path = None):
+def _create_connection(db_path: Optional[Path] = None):
     """创建数据库连接"""
     if db_path is None:
         db_path = get_db_path()

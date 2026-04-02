@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class VectorIndexManager:
     """法规向量索引管理器"""
 
-    def __init__(self, config: RAGConfig = None):
+    def __init__(self, config: Optional[RAGConfig] = None):
         self.config = config or RAGConfig()
         self.index: Optional[VectorStoreIndex] = None
 
@@ -88,7 +88,7 @@ class VectorIndexManager:
     def get_index(self) -> Optional[VectorStoreIndex]:
         return self.index
 
-    def create_query_engine(self, top_k: int = None, streaming: bool = None):
+    def create_query_engine(self, top_k: Optional[int] = None, streaming: Optional[bool] = None):
         if self.index is None:
             logger.warning("索引未初始化")
             return None

@@ -94,7 +94,7 @@ class RAGConfig:
     # 检索配置
     top_k_results: int = 5
     enable_streaming: bool = False
-    hybrid_config: HybridQueryConfig = None
+    hybrid_config: Optional[HybridQueryConfig] = None
 
     # 生成配置
     max_context_chars: int = 12000
