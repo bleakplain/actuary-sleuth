@@ -44,7 +44,7 @@ def vector_search(
             ExactMatchFilter(key=k, value=v)
             for k, v in filters.items()
         ]
-        metadata_filters = MetadataFilters(filters=filter_list)
+        metadata_filters = MetadataFilters(filters=filter_list)  # type: ignore[arg-type]
 
     vector_retriever = index.as_retriever(
         similarity_top_k=top_k,
@@ -62,7 +62,7 @@ def hybrid_search(
     keyword_top_k: int,
     k: int = 60,
     filters: Optional[Dict[str, Any]] = None,
-    preprocessor: QueryPreprocessor = None,
+    preprocessor: Optional[QueryPreprocessor] = None,
     vector_weight: float = 1.0,
     keyword_weight: float = 1.0,
     max_chunks_per_article: int = 3,

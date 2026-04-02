@@ -60,7 +60,7 @@ def reciprocal_rank_fusion(
             'law_name': chunk.metadata.get('law_name', '未知'),
             'article_number': chunk.metadata.get('article_number', '未知'),
             'category': chunk.metadata.get('category', ''),
-            'content': chunk.text,
+            'content': chunk.text,  # type: ignore[attr-defined]
             'source_file': chunk.metadata.get('source_file', ''),
             'hierarchy_path': chunk.metadata.get('hierarchy_path', ''),
             'doc_number': chunk.metadata.get('doc_number', ''),

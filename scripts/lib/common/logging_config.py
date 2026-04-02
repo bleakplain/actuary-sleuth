@@ -53,9 +53,9 @@ def setup_logging(
     if log_file:
         file_handler = logging.FileHandler(log_file, encoding='utf-8')
         file_handler.setFormatter(formatter)
-        handlers.append(file_handler)
+        handlers.append(file_handler)  # type: ignore[arg-type]
 
-    root_logger.handlers = handlers
+    root_logger.handlers = handlers  # type: ignore[assignment]
 
 
 def get_logger(name: str) -> logging.Logger:

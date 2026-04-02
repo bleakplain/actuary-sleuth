@@ -6,7 +6,7 @@
 """
 import logging
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from llama_index.core import Settings
 from llama_index.core import Document
@@ -29,7 +29,7 @@ class KBDataImporter:
     使用 KBChecklistChunker 按 ## 第N项 分块，提取 frontmatter 和 blockquote 元数据。
     """
 
-    def __init__(self, config: RAGConfig = None):
+    def __init__(self, config: Optional[RAGConfig] = None):
         self.config = config or RAGConfig()
         from .kb_chunker import KBChecklistChunker
         self.chunker = KBChecklistChunker()
@@ -105,6 +105,8 @@ class KBDataImporter:
 
         logger.info("步骤 4: 构建 BM25 索引")
         from .bm25_index import BM25Index
+        if not self.config.vector_db_path:
+            return stats
         data_dir = Path(self.config.vector_db_path).parent
         bm25_path = data_dir / "bm25_index.pkl"
         try:

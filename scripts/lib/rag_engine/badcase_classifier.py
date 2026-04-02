@@ -88,11 +88,11 @@ def classify_badcase(
         context_bigrams.add(ctx_tokens[i] + ctx_tokens[i + 1])
 
     if answer_bigrams and context_bigrams:
-        overlap = len(answer_bigrams & context_bigrams) / len(answer_bigrams)
-        if overlap < 0.2:
+        bigram_overlap = len(answer_bigrams & context_bigrams) / len(answer_bigrams)
+        if bigram_overlap < 0.2:
             return {
                 "type": "hallucination",
-                "reason": f"答案与检索内容重叠度极低({overlap:.2f})，疑似幻觉",
+                "reason": f"答案与检索内容重叠度极低({bigram_overlap:.2f})，疑似幻觉",
                 "fix_direction": "加强 Prompt 忠实度约束，要求 LLM 严格引用来源",
             }
 

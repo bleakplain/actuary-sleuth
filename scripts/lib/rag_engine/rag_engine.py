@@ -100,8 +100,8 @@ class RAGEngine:
 
     def __init__(
         self,
-        config: RAGConfig = None,
-        llm_client: BaseLLMClient = None
+        config: Optional[RAGConfig] = None,
+        llm_client: Optional[BaseLLMClient] = None
     ):
         self.config = config or RAGConfig()
         self.index_manager = VectorIndexManager(self.config)
@@ -291,9 +291,9 @@ class RAGEngine:
     def search(
         self,
         query_text: str,
-        top_k: int = None,
+        top_k: Optional[int] = None,
         use_hybrid: bool = True,
-        filters: Dict[str, Any] = None
+        filters: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """检索模式：返回结构化法规列表"""
         if not self._initialized:
@@ -306,6 +306,8 @@ class RAGEngine:
             if use_hybrid:
                 results = self._hybrid_search(query_text, top_k, filters)
             else:
+                if self.query_engine is None:
+                    raise EngineInitializationError("Query engine not initialized")
                 response = self.query_engine.query(query_text)
                 results = self._extract_results_from_response(response)
 
@@ -324,7 +326,7 @@ class RAGEngine:
     def _hybrid_search(
         self,
         query_text: str,
-        top_k: int = None,
+        top_k: Optional[int] = None,
         filters: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """混合检索（向量 + BM25 关键词 + RRF 融合 + Rerank）"""
@@ -389,10 +391,10 @@ class RAGEngine:
     def search_by_metadata(
         self,
         query: str,
-        law_name: str = None,
-        category: str = None,
-        hierarchy_level: str = None,
-        issuing_authority: str = None
+        law_name: Optional[str] = None,
+        category: Optional[str] = None,
+        hierarchy_level: Optional[str] = None,
+        issuing_authority: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         使用增强元数据进行检索
@@ -422,7 +424,7 @@ class RAGEngine:
 
 # 工厂函数：创建不同场景的引擎
 
-def create_qa_engine(config: RAGConfig = None) -> RAGEngine:
+def create_qa_engine(config: Optional[RAGConfig] = None) -> RAGEngine:
     """
     创建问答引擎
 
@@ -437,7 +439,7 @@ def create_qa_engine(config: RAGConfig = None) -> RAGEngine:
     return RAGEngine(config or RAGConfig(), LLMClientFactory.create_qa_llm())
 
 
-def create_audit_engine(config: RAGConfig = None) -> RAGEngine:
+def create_audit_engine(config: Optional[RAGConfig] = None) -> RAGEngine:
     """
     创建审计引擎
 
