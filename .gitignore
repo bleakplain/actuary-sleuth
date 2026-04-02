@@ -69,3 +69,18 @@ data/lancedb/
 .env
 .env.local
 .env.*.local
+
+# Claude worktrees
+.claude/worktrees/
+
+# Vite / web build cache
+scripts/.vite/
+
+# Playwright / test results
+scripts/web/test-results/
+scripts/test-results/
+
+# Local data files
+scripts/data/bm25_index.pkl
+scripts/data/lancedb/
+
