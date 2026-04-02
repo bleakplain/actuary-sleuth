@@ -3,7 +3,7 @@
 """
 LLM 客户端模块
 
-支持多种LLM提供商：智谱AI、Ollama等
+支持多种 LLM 提供商：智谱 AI、Ollama 等
 
 ## 使用示例
 
@@ -13,26 +13,6 @@ LLM 客户端模块
     qa_llm = LLMClientFactory.get_qa_llm()
     audit_llm = LLMClientFactory.get_audit_llm()
     preprocess_llm = LLMClientFactory.get_doc_preprocess_llm()
-
-### 直接创建客户端
-    from lib.llm import LLMClientFactory
-
-    client = LLMClientFactory.create_client({
-        'provider': 'zhipu',
-        'model': 'glm-4-flash',
-        'api_key': 'your-api-key',
-        'timeout': 60
-    })
-
-    response = client.chat([
-        {'role': 'user', 'content': '你好'}
-    ])
-
-### 使用便捷函数
-    from lib.llm import get_client
-
-    client = get_client()  # 使用默认配置
-    result = client.generate("解释一下保险法")
 """
 
 # 基础组件
@@ -50,11 +30,7 @@ from .zhipu import ZhipuClient
 from .ollama import OllamaClient
 
 # 工厂
-from .factory import (
-    LLMClientFactory,
-    get_client,
-    reset_client,
-)
+from .factory import LLMClientFactory
 
 # LangChain 适配器
 from .langchain_adapter import ChatAdapter, EmbeddingAdapter
@@ -76,8 +52,6 @@ __all__ = [
 
     # 工厂
     'LLMClientFactory',
-    'get_client',
-    'reset_client',
 
     # LangChain 适配器
     'ChatAdapter',

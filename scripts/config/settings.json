@@ -27,7 +27,13 @@
   },
   "llm": {
     "chat": { "provider": "zhipu" },
-    "embed": { "provider": "ollama" }
+    "embed": { "provider": "ollama" },
+    "scenes": {
+      "qa":             { "model": "glm-4-flash", "timeout": 60 },
+      "audit":          { "model": "glm-4-plus",  "timeout": 120 },
+      "eval":           { "model": "glm-4-flash", "timeout": 180 },
+      "doc_preprocess": { "model": null, "timeout": null }
+    }
   },
   "report": {
     "default_format": "docx",

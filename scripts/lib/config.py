@@ -194,6 +194,11 @@ class LLMConfig:
         """嵌入场景配置：{provider}"""
         return self._config.get('embed', {'provider': 'zhipu'})
 
+    @property
+    def scenes(self) -> Dict[str, Dict[str, Any]]:
+        """场景配置：{scene_name: {model, timeout}}"""
+        return self._config.get('scenes', {})
+
 
 class ZhipuConfig:
     """智谱 API 配置"""
