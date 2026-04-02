@@ -20,13 +20,13 @@ from .base import BaseLLMClient
 
 def _message_to_dict(msg: BaseMessage) -> Dict[str, str]:
     if isinstance(msg, ChatMessage):
-        return {"role": msg.role, "content": msg.content}
+        return {"role": msg.role, "content": msg.content}  # type: ignore[dict-item]
     if isinstance(msg, HumanMessage):
-        return {"role": "user", "content": msg.content}
+        return {"role": "user", "content": msg.content}  # type: ignore[dict-item]
     if isinstance(msg, AIMessage):
-        return {"role": "assistant", "content": msg.content}
+        return {"role": "assistant", "content": msg.content}  # type: ignore[dict-item]
     if isinstance(msg, SystemMessage):
-        return {"role": "system", "content": msg.content}
+        return {"role": "system", "content": msg.content}  # type: ignore[dict-item]
     raise ValueError(f"Unsupported message type: {type(msg).__name__}")
 
 
@@ -37,7 +37,7 @@ class ChatAdapter(BaseChatModel):
     client: Any = Field(default=None)
 
     def __init__(self, client: BaseLLMClient, **kwargs: Any):
-        super().__init__(client=client, **kwargs)
+        super().__init__(client=client, **kwargs)  # type: ignore[call-arg]
 
     @property
     def _llm_type(self) -> str:
@@ -58,7 +58,7 @@ class ChatAdapter(BaseChatModel):
         response_text = self.client.chat(dict_messages, **kwargs)
         return ChatResult(generations=[ChatGeneration(message=AIMessage(content=response_text))])
 
-    async def _agenerate(
+    async def _agenerate(  # type: ignore[override]
         self,
         messages: List[BaseMessage],
         stop: Optional[List[str]] = None,
@@ -73,7 +73,7 @@ class ChatAdapter(BaseChatModel):
 class EmbeddingAdapter(Embeddings):
     """将 BaseEmbedding 适配为 LangChain Embeddings"""
 
-    def __init__(self, model: 'BaseEmbedding'):
+    def __init__(self, model: 'BaseEmbedding'):  # type: ignore[name-defined]
         self.model = model
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:

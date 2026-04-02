@@ -4,10 +4,9 @@
 
 解析 LLM 回答中的引用标注，建立句子→来源映射。
 """
-import math
 import re
 import logging
-from typing import List, Dict, Any, Optional, Tuple, Callable
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -128,88 +127,3 @@ def _detect_unverified_claims(
 
     return unverified
 
-
-def _split_sentences(text: str) -> List[str]:
-    """按中文句号分割"""
-    parts = re.split(r'(?<=[。！？\n])\s*', text)
-    return [p.strip() for p in parts if p.strip()]
-
-
-def _cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
-    """计算余弦相似度"""
-    dot = sum(a * b for a, b in zip(vec_a, vec_b))
-    norm_a = math.sqrt(sum(a * a for a in vec_a))
-    norm_b = math.sqrt(sum(b * b for b in vec_b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
-
-
-def _contains_factual_pattern(text: str) -> bool:
-    """检测文本是否包含事实性陈述模式"""
-    for pattern in _FACTUAL_PATTERNS:
-        if pattern.search(text):
-            return True
-    return False
-
-
-def attribute_by_similarity(
-    answer: str,
-    sources: List[Dict[str, Any]],
-    embed_func: Optional[Callable[[str], List[float]]] = None,
-    threshold: float = 0.6,
-) -> AttributionResult:
-    """基于 embedding 相似度的逐句归因"""
-    if not answer or not sources or embed_func is None:
-        return AttributionResult()
-
-    sentences = _split_sentences(answer)
-    citations: List[Citation] = []
-    unverified: List[str] = []
-
-    source_texts = [s.get('content', '') for s in sources]
-
-    try:
-        source_embeds = [embed_func(t) for t in source_texts]
-    except Exception as e:
-        logger.warning(f"Embedding 计算失败: {e}")
-        return AttributionResult()
-
-    for sentence in sentences:
-        sentence = sentence.strip()
-        if not sentence or len(sentence) < 5:
-            continue
-
-        try:
-            sentence_embed = embed_func(sentence)
-        except Exception:
-            continue
-
-        best_idx = -1
-        best_score = -1.0
-        for idx, src_embed in enumerate(source_embeds):
-            score = _cosine_similarity(sentence_embed, src_embed)
-            if score > best_score:
-                best_score = score
-                best_idx = idx
-
-        if best_score >= threshold and best_idx >= 0:
-            source = sources[best_idx]
-            citations.append(Citation(
-                source_idx=best_idx,
-                law_name=source.get('law_name', '未知'),
-                article_number=source.get('article_number', '未知'),
-                content=source.get('content', ''),
-                confidence='similarity',
-            ))
-        elif _contains_factual_pattern(sentence):
-            unverified.append(sentence)
-
-    cited_indices = {c.source_idx for c in citations}
-    uncited = sorted(set(range(len(sources))) - cited_indices)
-
-    return AttributionResult(
-        citations=citations,
-        unverified_claims=unverified,
-        uncited_sources=uncited,
-    )

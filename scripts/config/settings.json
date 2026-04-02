@@ -4,59 +4,28 @@
     "sqlite_db": "data/actuary.db",
     "lancedb_uri": "data/lancedb",
     "regulations_dir": "../references",
-    "kb_version_dir": "lib/rag_engine/data/kb",
-    "negative_list": "data/negative_list.json",
-    "industry_standards": "data/industry_standards.json",
-    "audit_logs": "data/audit_logs.json"
-  },
-  "regulation_search": {
-    "data_dir": "../../references",
-    "default_top_k": 5
+    "kb_version_dir": "lib/rag_engine/data/kb"
   },
   "ollama": {
     "host": "http://localhost:11434",
-    "chat_model": "qwen2:7b",
-    "embed_model": "jinaai/jina-embeddings-v5-text-small",
     "timeout": 120
   },
   "zhipu": {
     "base_url": "https://open.bigmodel.cn/api/paas/v4/",
-    "chat_model": "glm-4-flash",
-    "embed_model": "embedding-3",
     "timeout": 60,
     "temperature": 0.1,
     "max_tokens": 16384
   },
   "llm": {
-    "chat":  { "provider": "zhipu" },
-    "embed": { "provider": "ollama" },
-    "eval":  { "provider": "zhipu" },
-    "audit": { "provider": "zhipu" },
-    "qa":    { "provider": "zhipu" },
-    "doc_preprocess": { "provider": "zhipu" }
-  },
-  "report": {
-    "default_format": "docx",
-    "output_dir": "./reports",
-    "export_feishu": true
+    "embed":       { "provider": "ollama", "model": "jinaai/jina-embeddings-v5-text-small" },
+    "eval":        { "provider": "zhipu",  "model": "glm-4-flash", "timeout": 180 },
+    "audit":       { "provider": "zhipu",  "model": "glm-4-flash", "timeout": 120 },
+    "qa":          { "provider": "zhipu",  "model": "glm-4-flash" },
+    "name_parser": { "provider": "zhipu",  "model": "glm-4-flash", "timeout": 120 },
+    "ocr":         { "provider": "zhipu",  "model": "glm-4-flash", "timeout": 120 }
   },
   "feishu": {
     "app_id": "",
     "target_group_id": "oc_d7b83e1f9eb58c6797b061dcc33d212f"
-  },
-  "openclaw": {
-    "bin": "/usr/bin/openclaw"
-  },
-  "audit": {
-    "scoring_weights": {
-      "high": 20,
-      "medium": 10,
-      "low": 5
-    },
-    "thresholds": {
-      "excellent": 90,
-      "good": 75,
-      "pass": 60
-    }
   }
 }

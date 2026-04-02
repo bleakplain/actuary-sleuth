@@ -14,25 +14,17 @@
     result = qa.ask("健康保险产品的等待期有什么规定？")
     print(result['answer'])
 
-### 审计查询
-    from lib.rag_engine import create_audit_engine
-
-    audit = create_audit_engine()
-    regulations = audit.search("健康保险等待期", top_k=5)
-
 ## 架构
 
     RAGEngine (统一引擎)
     ├── llm_provider: 策略模式，支持不同场景
-    │   ├── create_qa_engine() → glm-4-flash (快速响应)
-    │   └── create_audit_engine() → glm-4-plus (高质量分析)
+    │   └── create_qa_engine() → glm-4-flash (快速响应)
     ├── VectorIndexManager: 向量索引管理
-    └── KBDataImporter: 数据导入编排
+    └── KBIndexer: 索引构建编排
 """
 import logging
 from typing import Any
 
-# 配置日志
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -44,17 +36,15 @@ from .query_preprocessor import QueryPreprocessor, PreprocessedQuery
 from .reranker import LLMReranker, RerankConfig
 from .attribution import parse_citations, AttributionResult, Citation
 
-# Optional RAG engine components (require llama_index)
 RAGEngine: Any
 create_qa_engine: Any
-create_audit_engine: Any
 VectorIndexManager: Any
-KBDataImporter: Any
+KBIndexer: Any
 hybrid_search: Any
 vector_search: Any
 reciprocal_rank_fusion: Any
 BM25Index: Any
-KBChecklistChunker: Any
+ChecklistChunker: Any
 RetrievalEvaluator: Any
 GenerationEvaluator: Any
 RAGEvalReport: Any
@@ -71,13 +61,13 @@ classify_badcase: Any
 assess_compliance_risk: Any
 
 try:
-    from .rag_engine import RAGEngine, create_qa_engine, create_audit_engine
+    from .rag_engine import RAGEngine, create_qa_engine
     from .index_manager import VectorIndexManager
-    from .data_importer import KBDataImporter
+    from .indexer import KBIndexer
     from .retrieval import hybrid_search, vector_search
     from .fusion import reciprocal_rank_fusion
     from .bm25_index import BM25Index
-    from .kb_chunker import KBChecklistChunker
+    from .chunker import ChecklistChunker
     from .evaluator import RetrievalEvaluator, GenerationEvaluator, RAGEvalReport
     from .eval_dataset import EvalSample, QuestionType, load_eval_dataset, create_default_eval_dataset, save_eval_dataset, DEFAULT_DATASET_PATH
     from .quality_detector import detect_quality, compute_retrieval_relevance, compute_info_completeness
@@ -87,14 +77,13 @@ try:
 except ImportError:
     RAGEngine = None
     create_qa_engine = None
-    create_audit_engine = None
     VectorIndexManager = None
-    KBDataImporter = None
+    KBIndexer = None
     hybrid_search = None
     vector_search = None
     reciprocal_rank_fusion = None
     BM25Index = None
-    KBChecklistChunker = None
+    ChecklistChunker = None
     RetrievalEvaluator = None
     GenerationEvaluator = None
     RAGEvalReport = None
@@ -127,14 +116,13 @@ __all__ = [
     'Citation',
     'RAGEngine',
     'create_qa_engine',
-    'create_audit_engine',
     'VectorIndexManager',
-    'KBDataImporter',
+    'KBIndexer',
     'hybrid_search',
     'vector_search',
     'reciprocal_rank_fusion',
     'BM25Index',
-    'KBChecklistChunker',
+    'ChecklistChunker',
     'RetrievalEvaluator',
     'GenerationEvaluator',
     'RAGEvalReport',

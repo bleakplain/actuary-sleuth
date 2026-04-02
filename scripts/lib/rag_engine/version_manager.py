@@ -6,14 +6,19 @@
 源文件统一存放在外部目录（如项目根目录 references/），不随版本复制。
 版本元数据持久化到 SQLite 数据库（kb_versions 表）。
 """
+from __future__ import annotations
+
 import shutil
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, TYPE_CHECKING
 
 from lib.config import get_kb_version_dir
+
+if TYPE_CHECKING:
+    from .config import RAGConfig
 
 logger = logging.getLogger(__name__)
 

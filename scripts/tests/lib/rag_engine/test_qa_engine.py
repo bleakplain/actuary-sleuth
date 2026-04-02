@@ -217,9 +217,9 @@ collection: test_测试法规
         """)
 
         # 2. 解析文档
-        from lib.rag_engine.data_importer import KBDataImporter
+        from lib.rag_engine.indexer import KBIndexer
         importer_config = RAGConfig(regulations_dir=str(temp_output_dir), vector_db_path=str(temp_lancedb_dir))
-        importer = KBDataImporter(importer_config)
+        importer = KBIndexer(importer_config)
         raw_docs = importer.parse_documents(file_pattern="test_regulation.md")
         documents = importer.chunk_documents(raw_docs)
 

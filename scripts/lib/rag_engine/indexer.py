@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-数据导入模块
-负责将法规文档导入到向量数据库和 BM25 索引
-"""
+"""知识库索引构建模块，将法规文档导入到向量数据库和 BM25 索引。"""
 import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -19,32 +16,30 @@ from lib.llm import LLMClientFactory
 logger = logging.getLogger(__name__)
 
 
-class KBDataImporter:
-    """KB 检查清单数据导入器
+class KBIndexer:
+    """知识库索引构建器
 
-    将 excel_to_kb.py 生成的预处理 Markdown 文件导入到：
+    将 preprocessor.py 生成的预处理 Markdown 文件导入到：
     1. 向量数据库 (LanceDB) - 用于语义检索
     2. BM25 索引 - 用于关键词检索
 
-    使用 KBChecklistChunker 按 ## 第N项 分块，提取 frontmatter 和 blockquote 元数据。
+    使用 ChecklistChunker 按 ## 第N项 分块，提取 frontmatter 和 blockquote 元数据。
     """
 
     def __init__(self, config: Optional[RAGConfig] = None):
         self.config = config or RAGConfig()
-        from .kb_chunker import KBChecklistChunker
-        self.chunker = KBChecklistChunker()
+        from .chunker import ChecklistChunker
+        self.chunker = ChecklistChunker()
         self.index_manager = VectorIndexManager(self.config)
         self._embedding_setup_done = False
 
     def _ensure_embedding_setup(self):
-        """确保 Embedding 模型已设置"""
         if not self._embedding_setup_done:
             embed_config = LLMClientFactory.get_embedding_config()
             Settings.embed_model = get_embedding_model(embed_config)
             self._embedding_setup_done = True
 
     def import_to_vector_db(self, documents: List, force_rebuild: bool = False) -> bool:
-        """导入到向量数据库"""
         self._ensure_embedding_setup()
         index = self.index_manager.create_index(
             documents=documents,
@@ -53,7 +48,6 @@ class KBDataImporter:
         return index is not None
 
     def parse_documents(self, file_pattern: str = "**/*.md") -> List:
-        """递归加载所有 Markdown 文件。"""
         regulations_dir = Path(self.config.regulations_dir)
         if not regulations_dir.exists():
             logger.error(f"目录不存在: {regulations_dir}")
@@ -71,7 +65,6 @@ class KBDataImporter:
         return documents
 
     def chunk_documents(self, documents: List) -> List:
-        """使用 KBChecklistChunker 分块。"""
         text_nodes = self.chunker.chunk(documents)
         return [Document(text=node.text, metadata=node.metadata) for node in text_nodes]
 
@@ -81,7 +74,6 @@ class KBDataImporter:
         force_rebuild: bool = False,
         skip_vector: bool = False,
     ) -> Dict[str, int]:
-        """完整导入流程：加载 → 分块 → 向量索引 → BM25 索引。"""
         stats = {'parsed': 0, 'vector': 0, 'bm25': 0}
 
         logger.info("步骤 1: 加载文档")

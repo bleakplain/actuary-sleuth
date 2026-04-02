@@ -5,7 +5,7 @@ LlamaIndex 适配器
 将 BaseLLMClient 接口适配到 LlamaIndex
 """
 import asyncio
-import requests
+import requests  # type: ignore[import-untyped]
 from typing import List, Optional
 
 from llama_index.core.llms import LLM, CompletionResponse, ChatResponse, ChatMessage, LLMMetadata
@@ -45,17 +45,17 @@ class ClientLLMAdapter(LLM):
             model_name=self._client.model,
         )
 
-    def complete(self, prompt: str, **kwargs) -> CompletionResponse:
+    def complete(self, prompt: str, **kwargs) -> CompletionResponse:  # type: ignore[override]
         response = self._client.generate(str(prompt), **kwargs)
         return CompletionResponse(text=response)
 
-    async def acomplete(self, prompt: str, **kwargs) -> CompletionResponse:
+    async def acomplete(self, prompt: str, **kwargs) -> CompletionResponse:  # type: ignore[override]
         response = await asyncio.to_thread(
             self._client.generate, str(prompt), **kwargs
         )
         return CompletionResponse(text=response)
 
-    def stream_complete(self, prompt: str, **kwargs):
+    def stream_complete(self, prompt: str, **kwargs):  # type: ignore[override]
         async def _stream():
             response = await asyncio.to_thread(
                 self._client.generate, str(prompt), **kwargs
@@ -63,13 +63,13 @@ class ClientLLMAdapter(LLM):
             yield CompletionResponse(text=response)
         return _stream()
 
-    async def astream_complete(self, prompt: str, **kwargs):
+    async def astream_complete(self, prompt: str, **kwargs):  # type: ignore[override]
         response = await asyncio.to_thread(
             self._client.generate, str(prompt), **kwargs
         )
         yield CompletionResponse(text=response)
 
-    def chat(self, messages: list, **kwargs) -> ChatResponse:
+    def chat(self, messages: list, **kwargs) -> ChatResponse:  # type: ignore[override]
         if not messages:
             return ChatResponse(message=ChatMessage(role='assistant', content=''))
 
@@ -83,13 +83,13 @@ class ClientLLMAdapter(LLM):
         response = self._client.chat(formatted_messages, **kwargs)
         return ChatResponse(message=ChatMessage(role='assistant', content=response))
 
-    async def achat(self, messages: list, **kwargs) -> ChatResponse:
+    async def achat(self, messages: list, **kwargs) -> ChatResponse:  # type: ignore[override]
         response = await asyncio.to_thread(
             self._client.chat, messages, **kwargs
         )
         return ChatResponse(message=ChatMessage(role='assistant', content=response))
 
-    def stream_chat(self, messages: list, **kwargs):
+    def stream_chat(self, messages: list, **kwargs):  # type: ignore[override]
         async def _stream():
             response = await asyncio.to_thread(
                 self._client.chat, messages, **kwargs
@@ -97,7 +97,7 @@ class ClientLLMAdapter(LLM):
             yield ChatResponse(message=ChatMessage(role='assistant', content=response))
         return _stream()
 
-    async def astream_chat(self, messages: list, **kwargs):
+    async def astream_chat(self, messages: list, **kwargs):  # type: ignore[override]
         response = await asyncio.to_thread(
             self._client.chat, messages, **kwargs
         )
@@ -192,8 +192,8 @@ class ZhipuEmbeddingAdapter(BaseEmbedding):
     async def aget_text_embeddings(self, texts: List[str]) -> List[List[float]]:
         return await asyncio.to_thread(self.get_text_embeddings, texts)
 
-    @property
-    def model_name(self) -> str:
+    @property  # type: ignore[misc]
+    def model_name(self) -> str:  # type: ignore[override]
         return self._model
 
 
@@ -230,7 +230,7 @@ class JinaEmbeddingAdapter(BaseEmbedding):
 
     def _get_text_embeddings(self, texts: List[str]) -> List[List[float]]:
         prefixed = [self._PREFIX_PASSAGE + t for t in texts]
-        return self._ollama_embed.get_text_embeddings(prefixed)
+        return self._ollama_embed.get_text_embeddings(prefixed)  # type: ignore[attr-defined]
 
     async def _aget_query_embedding(self, query: str) -> List[float]:
         return await asyncio.to_thread(self._get_query_embedding, query)

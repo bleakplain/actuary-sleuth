@@ -4,7 +4,7 @@
 Ollama 客户端
 """
 import logging
-import requests
+import requests  # type: ignore[import-untyped]
 from typing import List, Dict
 
 from .base import BaseLLMClient
@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 class OllamaClient(BaseLLMClient):
     """Ollama 客户端"""
+
+    _session: requests.Session
 
     def __init__(
         self,

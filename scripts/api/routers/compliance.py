@@ -183,7 +183,7 @@ async def check_document(req: DocumentCheckRequest):
 
     try:
         from lib.llm.factory import LLMClientFactory
-        llm = LLMClientFactory.get_qa_llm()
+        llm = LLMClientFactory.create_qa_llm()
         extract_prompt = f"请从以下保险条款中提取关键参数（险种类型、等待期、免赔额等），以 JSON 格式输出：\n\n{req.document_content[:3000]}"
         extracted = llm.chat([{"role": "user", "content": extract_prompt}])
     except Exception:

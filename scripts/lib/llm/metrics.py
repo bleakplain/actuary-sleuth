@@ -7,7 +7,7 @@ API 指标收集和熔断器
 """
 import functools
 import logging
-import requests
+import requests  # type: ignore[import-untyped]
 import threading
 import time
 import uuid

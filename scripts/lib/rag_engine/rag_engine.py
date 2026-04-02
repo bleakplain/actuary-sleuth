@@ -13,7 +13,7 @@ from typing import Dict, Any, List, Optional
 try:
     from llama_index.core import Settings
 except ImportError:
-    Settings = None
+    Settings = None  # type: ignore[assignment]
 
 from .config import RAGConfig
 from .index_manager import VectorIndexManager
@@ -147,7 +147,7 @@ class RAGEngine:
                 _thread_settings.apply()
 
                 index = self.index_manager.create_index(
-                    documents=None,
+                    documents=[],
                     force_rebuild=force_rebuild
                 )
 
@@ -187,6 +187,7 @@ class RAGEngine:
 
     def _load_bm25_index(self) -> None:
         """加载 BM25 索引"""
+        assert self.config.vector_db_path is not None
         data_dir = Path(self.config.vector_db_path).parent
         index_path = data_dir / "bm25_index.pkl"
         self._bm25_index = BM25Index.load(index_path)
@@ -331,6 +332,7 @@ class RAGEngine:
     ) -> List[Dict[str, Any]]:
         """混合检索（向量 + BM25 关键词 + RRF 融合 + Rerank）"""
         config = self.config.hybrid_config
+        assert config is not None
         index = self.index_manager.get_index()
         if not index:
             return []
@@ -437,18 +439,3 @@ def create_qa_engine(config: Optional[RAGConfig] = None) -> RAGEngine:
         RAGEngine: 配置为问答模式的引擎实例
     """
     return RAGEngine(config or RAGConfig(), LLMClientFactory.create_qa_llm())
-
-
-def create_audit_engine(config: Optional[RAGConfig] = None) -> RAGEngine:
-    """
-    创建审计引擎
-
-    使用高质量分析模型 (glm-4-plus)，适合保险产品审计场景。
-
-    Args:
-        config: RAG 配置，可选
-
-    Returns:
-        RAGEngine: 配置为审计模式的引擎实例
-    """
-    return RAGEngine(config or RAGConfig(), LLMClientFactory.create_audit_llm())

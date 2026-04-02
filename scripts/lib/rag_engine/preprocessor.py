@@ -10,9 +10,7 @@ import io
 import json
 import logging
 import re
-import shutil
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -39,8 +37,6 @@ _SHEET_DIR_MAP = {
 # 非险种目录（不提取险种类型到 frontmatter）
 _NON_INSURANCE_TYPE_DIRS = {"00_保险法", "01_负面清单检查", "02_条款费率管理办法", "10_其他监管规定"}
 
-# 元数据列索引（0-based）及其名称
-# Col 0=序号, Col 1=项目(条款内容), Col 2=空, Col 3-7=元数据
 _METADATA_COLUMNS = {
     3: "险种大类",
     4: "险种类型",
@@ -59,7 +55,7 @@ class SheetStructure:
     regulation_name: str
     headers: Dict[int, str] = field(default_factory=dict)
     sub_regulations: List[Dict] = field(default_factory=list)
-    layout_type: str = "standard"  # "standard" or "with_owner"
+    layout_type: str = "standard"
 
 
 @dataclass(frozen=True)
@@ -77,7 +73,7 @@ class ImageInfo:
     sheet_name: str
     row: int
     col: int
-    image_data: bytes  # PNG bytes
+    image_data: bytes
 
 
 def _get_sheet_code(sheet_name: str) -> str:
@@ -123,7 +119,6 @@ def parse_sheet_structure(sheet, sheet_name: str) -> SheetStructure:
     """解析 sheet 的结构信息：header 行、数据起始行、法规名称、子法规边界。"""
     rows = list(sheet.iter_rows(min_row=1, max_row=6, values_only=True))
 
-    # 判断布局类型：第2行是否包含"产品开发责任人"
     layout_type = "standard"
     if len(rows) >= 2 and rows[1] and any(
         "产品开发责任人" in str(cell) for cell in rows[1] if cell
@@ -139,25 +134,20 @@ def parse_sheet_structure(sheet, sheet_name: str) -> SheetStructure:
         regulation_row = 4
         data_start_row = 5
 
-    # 提取 header
     header_data = rows[header_row - 1] if len(rows) >= header_row else []
     headers = {}
     for idx, val in enumerate(header_data):
         if val:
             headers[idx] = str(val).strip()
 
-    # 提取法规名称
     regulation_name = ""
     if len(rows) >= regulation_row and rows[regulation_row - 1]:
         regulation_name = str(rows[regulation_row - 1][0] or "").strip()
-        # 有些 sheet 法规名在第1行
         if not regulation_name and len(rows) >= 1 and rows[0]:
             regulation_name = str(rows[0][0] or "").strip()
 
-    # 清理法规名称中的换行注释（如 "\n（适用于互联网产品）"）
     regulation_name = re.sub(r'\n[（(][^）)]*[）)]', '', regulation_name)
 
-    # 检测子法规边界（遍历所有数据行）
     sub_regulations = []
     current_sub = {"name": regulation_name, "start_row": data_start_row}
     for row_idx, row in enumerate(
@@ -166,23 +156,18 @@ def parse_sheet_structure(sheet, sheet_name: str) -> SheetStructure:
         cell_a = row[0].value if row else None
         if cell_a is not None and not _is_number(cell_a):
             cell_a_str = str(cell_a).strip()
-            # 跳过"序号"等重复表头行
             if cell_a_str in ("序号",):
                 continue
-            # 非数字行 = 子法规边界
             if current_sub["name"] and current_sub["start_row"] != row_idx:
                 sub_regulations.append(dict(current_sub))
             # 清理子法规名称：去掉换行后的括号注释（如 "\n（适用于互联网产品）"）
             clean_name = re.sub(r'\n[（(][^）)]*[）)]', '', cell_a_str)
             current_sub = {
                 "name": clean_name,
-                "start_row": row_idx + 1,  # 数据从下一行开始
-            }
-    # 最后一个子法规
+                "start_row": row_idx + 1,            }
     if current_sub["name"]:
         sub_regulations.append(dict(current_sub))
 
-    # 如果只有一个子法规且名字等于 sheet 级法规名，用空列表表示无子法规
     if len(sub_regulations) == 1 and sub_regulations[0]["name"] == regulation_name:
         sub_regulations = []
 
@@ -207,7 +192,6 @@ def extract_clauses(sheet, structure: SheetStructure) -> List[ClauseEntry]:
     ):
         cell_a = row[0] if row else None
 
-        # 跳过空行和子法规标题行
         if cell_a is None or (not _is_number(cell_a)):
             continue
 
@@ -215,7 +199,6 @@ def extract_clauses(sheet, structure: SheetStructure) -> List[ClauseEntry]:
         if not content:
             continue
 
-        # 提取元数据（B-G 列之后的列，按实际 header 对应）
         metadata = {}
         for col_idx, col_name in _METADATA_COLUMNS.items():
             if col_idx < len(row) and row[col_idx]:
@@ -248,10 +231,8 @@ def generate_frontmatter(
     parsed_info: Optional[dict] = None,
 ) -> str:
     """生成 YAML frontmatter。"""
-    import yaml
+    import yaml  # type: ignore[import-untyped]
 
-    # 从目录名提取险种类型（如 "04_普通型人身保险" → "普通型人身保险"）
-    # 跳过非险种目录（保险法、负面清单检查、条款费率管理办法、其他监管规定）
     insurance_type = ""
     if collection and collection not in _NON_INSURANCE_TYPE_DIRS and "_" in collection:
         insurance_type = collection.split("_", 1)[1]
@@ -296,16 +277,14 @@ def extract_images_from_sheet(sheet, sheet_name: str) -> List[ImageInfo]:
     for img in sheet._images:
         anchor = img.anchor
         if hasattr(anchor, "_from"):
-            row = anchor._from.row + 1  # openpyxl is 0-based
+            row = anchor._from.row + 1
             col = anchor._from.col
         else:
             continue
 
         try:
-            # img._data() returns raw image file bytes
             raw = img._data() if callable(getattr(img, "_data", None)) else None
             if raw:
-                # Use PIL to verify and re-encode as PNG
                 from PIL import Image as PILImage
                 pil_img = PILImage.open(io.BytesIO(raw))
                 img_buf = io.BytesIO()
@@ -339,18 +318,18 @@ def extract_images_from_excel(excel_path: str) -> List[ImageInfo]:
     return all_images
 
 
-def ocr_image(image_data: bytes, api_key: str) -> str:
-    """调用智谱 GLM-OCR 识别图片中的表格。"""
+def ocr_image(image_data: bytes) -> str:
+    """调用 OCR 识别图片中的表格。"""
     import base64
-    from lib.llm.zhipu import ZhipuClient
+    from lib.llm import LLMClientFactory
 
     b64 = f"data:image/png;base64,{base64.b64encode(image_data).decode('utf-8')}"
-    client = ZhipuClient(api_key=api_key)
+    llm = LLMClientFactory.create_ocr_llm()
     try:
-        result = client.ocr_table(b64)
+        result = llm.ocr_table(b64)
         return result
     finally:
-        client.close()
+        llm.close()
 
 
 
@@ -362,19 +341,14 @@ def _simplify_regulation_name(name: str) -> str:
     """
     clean = name
 
-    # 1. 移除括号形式文号: （银保监办发〔2021〕7号）、(保监发〔2015〕93号)
     clean = re.sub(r'[（(][^）)]*[发函公告号令][^）)]*[）)]', '', clean)
-    # 2. 移除直接拼接文号: 银保监办发2021108号, 保监发201593号, 金寿险函202510号
     clean = re.sub(
         r'(?:银保监|保监|金寿险|国金|金融|保险)?(?:办|会)?(?:发|函)\s*[〔\[]?\d+[\]〕]?\s*号',
         '', clean,
     )
-    # 3. 纯数字编号: 2022年第8号
     clean = re.sub(r'\d{4}年第\d+号', '', clean)
-    # 4. 日期格式: 通知公告2021-4-22
     clean = re.sub(r'通知公告\d{4}[-/]\d{1,2}[-/]\d{1,2}', '', clean)
 
-    # 5. 移除发文机关前缀
     for pat in [
         r'中国(?:银行)?保险监督管理委员会(?:办公厅|人身险监管部)?',
         r'中国(?:银行)?保监会(?:办公厅)?',
@@ -399,17 +373,12 @@ def _simplify_negative_list_name(name: str) -> tuple:
         如 ('"负面清单"2025版产品报送管理', '2025版') → ('产品报送管理', '2025版')
     """
     extra = None
-    # 提取版本号（如"2025版"）
     ver_match = re.search(r'(\d{4})版', name)
     if ver_match:
         extra = f"{ver_match.group(1)}版"
-    # 去掉引号
     clean = name.replace('\u201c', '').replace('\u201d', '').replace('"', '')
-    # 去掉"负面清单"前缀，仅当后面跟着分隔符（版本号、括号、冒号）
-    # 不处理 "负面清单未提及的..." 这种负面清单是主题一部分的情况
     clean = re.sub(r'^负面清单[（(\d]', lambda m: m.group()[4:], clean)
     clean = re.sub(r'^负面清单\s*[:：]', '', clean)
-    # 清理残留的前缀版本号（已提取到 extra）
     clean = re.sub(r'^[（(]?\d{4}版[）)]?\s*[:：]?\s*', '', clean)
     clean = clean.lstrip('：: ').strip()
     return (clean, extra)
@@ -417,11 +386,9 @@ def _simplify_negative_list_name(name: str) -> tuple:
 
 def _extract_json_array(text: str) -> Optional[str]:
     """从 LLM 返回文本中提取 JSON 数组，处理 thinking 文本和 code block。"""
-    # 尝试找到第一个 [ 和匹配的 ]
     start = text.find('[')
     if start == -1:
         return None
-    # 从 start 开始，计算括号平衡
     depth = 0
     in_string = False
     escape_next = False
@@ -449,13 +416,11 @@ def _extract_json_array(text: str) -> Optional[str]:
 
 def parse_regulation_names(
     regulations: List[str],
-    api_key: str,
 ) -> Dict[str, dict]:
-    """调用智谱 LLM 批量解析法规名称，返回结构化结果。
+    """调用 LLM 批量解析法规名称，返回结构化结果。
 
     Args:
         regulations: regulation 名称列表
-        api_key: 智谱 API Key
 
     Returns:
         dict keyed by original regulation name, each value:
@@ -489,12 +454,10 @@ def parse_regulation_names(
 法规列表：
 {numbered_list}"""
 
-    from lib.llm.zhipu import ZhipuClient
-    client = ZhipuClient(api_key=api_key, timeout=300)
+    from lib.llm import LLMClientFactory
+    llm = LLMClientFactory.create_name_parser_llm()
     try:
-        # 使用 glm-4-flash 避免 thinking 模型返回推理文本
-        result = client.generate(prompt, model="glm-4-flash", temperature=0.0, max_tokens=8192)
-        # 提取 JSON 数组（LLM 可能包含 thinking 文本或 code block）
+        result = llm.generate(prompt, temperature=0.0, max_tokens=8192)
         json_str = _extract_json_array(result)
         if not json_str:
             logger.error("LLM 返回内容中未找到有效 JSON 数组")
@@ -515,14 +478,13 @@ def parse_regulation_names(
         logger.error(f"解析 LLM 返回结果失败: {e}")
         return {}
     finally:
-        client.close()
+        llm.close()
 
 
-def convert_excel_to_kb(
+def convert_excel_to_markdown(
     excel_path: str,
     output_dir: str,
     skip_ocr: bool = False,
-    zhipu_api_key: Optional[str] = None,
 ) -> Path:
     """主转换函数：Excel → Markdown 知识库。"""
     import openpyxl
@@ -531,14 +493,11 @@ def convert_excel_to_kb(
     output_path.mkdir(parents=True, exist_ok=True)
     refs_dir = output_path
 
-    # 阶段1：提取图片（需要非 read_only 模式）
     images = extract_images_from_excel(excel_path) if not skip_ocr else []
 
-    # 以 read_only 模式处理数据
     wb = openpyxl.load_workbook(excel_path, read_only=True, data_only=True)
 
-    # 阶段2：收集所有 regulation 名称，批量 LLM 解析
-    all_regulations = []  # [(regulation_name, sheet_name, dir_name, structure)]
+    all_regulations = []
     for sheet_name in wb.sheetnames:
         if sheet_name in _SKIP_SHEETS:
             continue
@@ -557,18 +516,15 @@ def convert_excel_to_kb(
     # 批量解析法规名称
     regulation_names = [r[0] for r in all_regulations if r[0]]
     parsed_map = {}
-    if zhipu_api_key and regulation_names:
-        parsed_map = parse_regulation_names(regulation_names, zhipu_api_key)
+    if regulation_names:
+        parsed_map = parse_regulation_names(regulation_names)
         logger.info(f"LLM 解析了 {len(parsed_map)}/{len(regulation_names)} 条法规名称")
 
-    # 阶段3：生成 Markdown 文件
-    # 清理旧的生成文件（保留 .xlsx 等非 .md 文件）
     for d in refs_dir.iterdir():
         if d.is_dir() and d.name in _SHEET_DIR_MAP.values():
             for f in d.glob("*.md"):
                 f.unlink()
 
-    # 需要重新打开 workbook（read_only 模式只能遍历一次）
     wb.close()
     wb = openpyxl.load_workbook(excel_path, read_only=True, data_only=True)
 
@@ -598,17 +554,8 @@ def convert_excel_to_kb(
 
         clauses = extract_clauses(sheet, structure)
         if structure.sub_regulations:
-            # 过滤出当前子法规的条款
-            sub_idx = structure.sub_regulations.index(
-                next(s for s in structure.sub_regulations if s["name"] == reg_name)
-            )
-            start = structure.sub_regulations[sub_idx]["start_row"]
-            end = (
-                structure.sub_regulations[sub_idx + 1]["start_row"]
-                if sub_idx + 1 < len(structure.sub_regulations)
-                else float("inf")
-            )
-            clauses = [c for c in clauses if start <= c.row < end]
+            sub_reg = next(s for s in structure.sub_regulations if s["name"] == reg_name)
+            clauses = _filter_clauses_for_sub_reg(clauses, sub_reg, structure)
 
         if not clauses:
             logger.debug(f"跳过无条款的法规: {reg_name}")
@@ -622,9 +569,8 @@ def convert_excel_to_kb(
 
     wb.close()
 
-    # 阶段2：OCR 处理图片并嵌入
     if images and not skip_ocr:
-        _process_and_embed_images(images, refs_dir, zhipu_api_key)
+        _process_and_embed_images(images, refs_dir)
 
     md_count = len(list(refs_dir.rglob("*.md")))
     logger.info(f"生成完成: {md_count} 个文档")
@@ -648,18 +594,13 @@ def _filter_clauses_for_sub_reg(
 
 def _safe_filename(name: str) -> str:
     """将法规名称转换为安全的文件名。"""
-    # Remove ASCII unsafe chars and full-width/CJK punctuation
     name = re.sub(r'[<>:"/\\|?*（）【】《》、，。！？；：""\'\'…—〔〕「」]', '', name)
-    # Normalize & separator: strip surrounding spaces before collapsing whitespace
     name = re.sub(r'\s*&\s*', '&', name)
     name = re.sub(r'[\s]+', '_', name)
-    # Keep filename under 240 bytes (leaving room for .md suffix and path prefix).
-    # Truncate by bytes to handle multi-byte UTF-8 characters safely.
     max_bytes = 240
     encoded = name.encode("utf-8")
     if len(encoded) > max_bytes:
         encoded = encoded[:max_bytes]
-        # Decode back, ignoring any partial multi-byte sequence at the end
         name = encoded.decode("utf-8", errors="ignore")
     return name.strip("_")
 
@@ -667,13 +608,8 @@ def _safe_filename(name: str) -> str:
 def _process_and_embed_images(
     images: List[ImageInfo],
     refs_dir: Path,
-    zhipu_api_key: Optional[str],
 ) -> None:
     """OCR 处理图片并嵌入到对应的 Markdown 文件。"""
-    if not zhipu_api_key:
-        logger.warning("未提供 ZHIPU_API_KEY，跳过 OCR 图片处理")
-        return
-
     for img_info in images:
         dir_name = _get_dir_name(img_info.sheet_name)
         sheet_dir = refs_dir / dir_name
@@ -683,7 +619,7 @@ def _process_and_embed_images(
             continue
 
         try:
-            md_table = ocr_image(img_info.image_data, zhipu_api_key)
+            md_table = ocr_image(img_info.image_data)
             if not md_table:
                 logger.warning(f"OCR 返回空结果: sheet={img_info.sheet_name} row={img_info.row}")
                 continue
@@ -702,9 +638,9 @@ def _embed_table_near_row(sheet_dir: Path, row: int, md_table: str) -> None:
         return
 
     target = md_files[0]
-    existing = target.read_text(encoding="utf-8")
     table_section = f"\n## 费率表\n\n{md_table}\n"
-    target.write_text(existing + table_section, encoding="utf-8")
+    with target.open("a", encoding="utf-8") as f:
+        f.write(table_section)
 
 
 def main():
@@ -712,10 +648,8 @@ def main():
     parser.add_argument("--input", required=True, help="Excel 文件路径")
     parser.add_argument("--output", default=None, help="输出目录路径（默认为项目根目录 references/）")
     parser.add_argument("--skip-ocr", action="store_true", help="跳过 OCR 图片处理")
-    parser.add_argument("--zhipu-api-key", default=None, help="智谱 API Key")
     args = parser.parse_args()
 
-    # 默认输出到项目根目录 references/
     output = args.output
     if not output:
         repo_root = Path(__file__).parent.parent.parent.parent
@@ -726,16 +660,10 @@ def main():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
-    api_key = args.zhipu_api_key
-    if not api_key:
-        import os
-        api_key = os.getenv("ZHIPU_API_KEY")
-
-    convert_excel_to_kb(
+    convert_excel_to_markdown(
         excel_path=args.input,
         output_dir=output,
         skip_ocr=args.skip_ocr,
-        zhipu_api_key=api_key,
     )
 
 

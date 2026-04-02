@@ -12,11 +12,10 @@ class BaseLLMClient(ABC):
 
     MAX_PROMPT_LENGTH = 100000
 
-    def __init__(self, model: str, timeout: int = 30, use_cache: bool = True):
+    def __init__(self, model: str, timeout: int = 30):
         self.model = model
         self.timeout = timeout
         self._session = None
-        self._use_cache = use_cache
 
     def _validate_prompt(self, prompt: str) -> None:
         if not prompt or not prompt.strip():
@@ -60,21 +59,9 @@ class BaseLLMClient(ABC):
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         pass
 
-    def chat_with_cache(self, messages: List[Dict[str, str]], **kwargs) -> str:
-        if not self._use_cache:
-            return self.chat(messages, **kwargs)
-
-        from lib.llm.cache import get_cache
-        cache = get_cache()
-
-        cached_response = cache.get(messages, self.model)
-        if cached_response is not None:
-            return cached_response
-
-        response = self.chat(messages, **kwargs)
-        cache.set(messages, response, self.model)
-
-        return response
+    def ocr_table(self, image_base64: str) -> str:
+        """OCR 识别表格为 Markdown（默认不支持，子类按需实现）。"""
+        raise NotImplementedError(f"{self.__class__.__name__} does not support OCR")
 
     @abstractmethod
     def health_check(self) -> bool:

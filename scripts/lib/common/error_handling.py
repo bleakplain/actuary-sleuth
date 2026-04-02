@@ -9,7 +9,7 @@ import functools
 import logging
 import os
 import traceback
-from typing import Callable, TypeVar, Optional, Dict, Any
+from typing import Callable, TypeVar, Optional, Dict, Any, overload
 
 from lib.common.exceptions import (
     ActuarySleuthException,
@@ -81,14 +81,14 @@ def create_error_response(
         if not debug_mode:
             return {
                 "success": False,
-                "error_code": ErrorCode.INTERNAL_ERROR.value[0],
-                "error_message": ErrorCode.INTERNAL_ERROR.value[1],
+                "error_code": ErrorCode.INTERNAL_ERROR[0],
+                "error_message": ErrorCode.INTERNAL_ERROR[1],
                 "error_type": "system_error"
             }
         else:
             return {
                 "success": False,
-                "error_code": ErrorCode.INTERNAL_ERROR.value[0],
+                "error_code": ErrorCode.INTERNAL_ERROR[0],
                 "error_message": str(exception),
                 "error_type": type(exception).__name__,
                 "traceback": traceback.format_exc()
@@ -106,9 +106,9 @@ def handle_audit_errors(step: str = "", reraise: bool = True):
     Returns:
         装饰器函数
     """
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+    def decorator(func: Callable[..., T]) -> Callable[..., Optional[T]]:
         @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> T:
+        def wrapper(*args: Any, **kwargs: Any) -> Optional[T]:
             try:
                 return func(*args, **kwargs)
             except (ActuarySleuthException, ValidationException):
@@ -150,7 +150,13 @@ def handle_audit_errors(step: str = "", reraise: bool = True):
     return decorator
 
 
-def handle_llm_errors(func: Optional[Callable[..., T]] = None) -> Callable[..., Optional[T]]:
+@overload
+def handle_llm_errors(func: Callable[..., T]) -> Callable[..., Optional[T]]: ...
+
+@overload
+def handle_llm_errors(func: None = None) -> Callable[[Callable[..., T]], Callable[..., Optional[T]]]: ...
+
+def handle_llm_errors(func: Optional[Callable[..., T]] = None):
     """
     LLM 调用错误处理装饰器
 
@@ -195,7 +201,13 @@ def handle_llm_errors(func: Optional[Callable[..., T]] = None) -> Callable[..., 
     return decorator
 
 
-def handle_database_errors(func: Optional[Callable[..., T]] = None) -> Callable[..., T]:
+@overload
+def handle_database_errors(func: Callable[..., T]) -> Callable[..., T]: ...
+
+@overload
+def handle_database_errors(func: None = None) -> Callable[[Callable[..., T]], Callable[..., T]]: ...
+
+def handle_database_errors(func: Optional[Callable[..., T]] = None):
     """
     数据库操作错误处理装饰器
 

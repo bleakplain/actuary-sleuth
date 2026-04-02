@@ -15,7 +15,7 @@ import os
 import sys
 import threading
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional
 
 
 # 路径常量
@@ -60,97 +60,6 @@ class FeishuConfig:
         return self._config.get('target_group_id')
 
 
-class ReportConfig:
-    """报告配置"""
-
-    def __init__(self, config_dict: Dict[str, Any]):
-        self._config = config_dict.get('report', {})
-
-    @property
-    def export_feishu(self) -> bool:
-        """是否自动导出飞书文档"""
-        return self._config.get('export_feishu', False)
-
-    @property
-    def output_dir(self) -> str:
-        """报告输出目录"""
-        return self._config.get('output_dir', './reports')
-
-    @property
-    def default_format(self) -> str:
-        """默认报告格式"""
-        return self._config.get('default_format', 'feishu')
-
-    @property
-    def grade_thresholds(self) -> List[Tuple[int, str]]:
-        """获取评级阈值"""
-        default_thresholds = [(90, '优秀'), (75, '良好'), (60, '合格')]
-        thresholds_config = self._config.get('grading', {}).get('thresholds', [])
-        if thresholds_config:
-            return [(t.get('score'), t.get('grade')) for t in thresholds_config]
-        return default_thresholds
-
-    @property
-    def default_grade(self) -> str:
-        """获取默认评级"""
-        return self._config.get('grading', {}).get('default_grade', '不合格')
-
-    @property
-    def high_violations_limit(self) -> int:
-        """获取严重违规限制"""
-        return self._config.get('violations', {}).get('high_limit', 20)
-
-    @property
-    def medium_violations_limit(self) -> int:
-        """获取中等违规限制"""
-        return self._config.get('violations', {}).get('medium_limit', 10)
-
-    @property
-    def p1_remediation_limit(self) -> int:
-        """获取 P1 整改限制"""
-        return self._config.get('violations', {}).get('p1_remediation_limit', 5)
-
-    def get_product_thresholds(self, product_category: str) -> Optional[List[Tuple[int, str]]]:
-        """获取产品特定的评级阈值"""
-        product_config = self._config.get('product_specific', {}).get(product_category)
-        if product_config and 'grading' in product_config:
-            thresholds_config = product_config['grading'].get('thresholds', [])
-            return [(t.get('score'), t.get('grade')) for t in thresholds_config]
-        return None
-
-    def get_product_violation_limits(self, product_category: str) -> Optional[Dict[str, int]]:
-        """获取产品特定的违规限制"""
-        product_config = self._config.get('product_specific', {}).get(product_category)
-        if product_config and 'violations' in product_config:
-            return product_config['violations']
-        return None
-
-
-class AuditConfig:
-    """审核配置"""
-
-    def __init__(self, config_dict: Dict[str, Any]):
-        self._config = config_dict.get('audit', {})
-
-    @property
-    def scoring_weights(self) -> Dict[str, int]:
-        """审核评分权重"""
-        return self._config.get('scoring_weights', {
-            'high': 10,
-            'medium': 5,
-            'low': 2
-        })
-
-    @property
-    def thresholds(self) -> Dict[str, int]:
-        """审核评级阈值"""
-        return self._config.get('thresholds', {
-            'excellent': 90,
-            'good': 75,
-            'pass': 60
-        })
-
-
 class OllamaConfig:
     """Ollama 配置"""
 
@@ -163,16 +72,6 @@ class OllamaConfig:
         return self._config.get('host', 'http://localhost:11434')
 
     @property
-    def chat_model(self) -> str:
-        """Ollama 聊天模型"""
-        return self._config.get('chat_model', 'qwen2:7b')
-
-    @property
-    def embed_model(self) -> str:
-        """Ollama 嵌入模型"""
-        return self._config.get('embed_model', 'jinaai/jina-embeddings-v5-text-small')
-
-    @property
     def timeout(self) -> int:
         """Ollama 超时时间（秒）"""
         return self._config.get('timeout', 120)
@@ -181,23 +80,54 @@ class OllamaConfig:
 class LLMConfig:
     """LLM 场景配置（按用途选择 provider）"""
 
+    _SCENES = ('qa', 'audit', 'eval', 'embed', 'name_parser', 'ocr')
+
     def __init__(self, config_dict: Dict[str, Any]):
         self._config = config_dict.get('llm', {})
+        self._ollama = OllamaConfig(config_dict)
+        self._zhipu = ZhipuConfig(config_dict)
+
+    def _build(self, scene: str) -> Dict[str, Any]:
+        scene_cfg = self._config.get(scene, {})
+        provider = scene_cfg.get('provider', 'zhipu')
+        timeout = scene_cfg.get('timeout') or (
+            self._ollama.timeout if provider == 'ollama' else self._zhipu.timeout
+        )
+        config: Dict[str, Any] = {
+            'provider': provider,
+            'model': scene_cfg.get('model', ''),
+            'timeout': timeout,
+        }
+        if provider == 'ollama':
+            config['host'] = self._ollama.host
+        else:
+            config['api_key'] = self._zhipu.api_key
+            config['base_url'] = self._zhipu.base_url
+        return config
 
     @property
-    def chat(self) -> Dict[str, str]:
-        """聊天场景配置：{provider}"""
-        return self._config.get('chat', {'provider': 'zhipu'})
+    def qa(self) -> Dict[str, Any]:
+        return self._build('qa')
 
     @property
-    def embed(self) -> Dict[str, str]:
-        """嵌入场景配置：{provider}"""
-        return self._config.get('embed', {'provider': 'zhipu'})
+    def audit(self) -> Dict[str, Any]:
+        return self._build('audit')
 
-    def get_provider(self, scene: str) -> str:
-        """获取场景对应的 provider"""
-        scene_config = self._config.get(scene, {})
-        return scene_config.get('provider', self.chat.get('provider', 'zhipu'))
+    @property
+    def eval(self) -> Dict[str, Any]:
+        return self._build('eval')
+
+    @property
+    def embed(self) -> Dict[str, Any]:
+        return self._build('embed')
+
+    @property
+    def name_parser(self) -> Dict[str, Any]:
+        return self._build('name_parser')
+
+    @property
+    def ocr(self) -> Dict[str, Any]:
+        return self._build('ocr')
 
 
 class ZhipuConfig:
@@ -214,16 +144,6 @@ class ZhipuConfig:
     def base_url(self) -> str:
         """API 基础URL"""
         return self._config.get('base_url', 'https://open.bigmodel.cn/api/paas/v4/')
-
-    @property
-    def chat_model(self) -> str:
-        """聊天模型"""
-        return self._config.get('chat_model', 'glm-4-flash')
-
-    @property
-    def embed_model(self) -> str:
-        """嵌入模型"""
-        return self._config.get('embed_model', 'embedding-3')
 
     @property
     def timeout(self) -> int:
@@ -258,21 +178,6 @@ class DatabaseConfig:
         return self._config.get('lancedb_uri', '../../data/lancedb')
 
     @property
-    def negative_list(self) -> str:
-        """负面清单文件路径"""
-        return self._config.get('negative_list', 'data/negative_list.json')
-
-    @property
-    def industry_standards(self) -> str:
-        """行业标准文件路径"""
-        return self._config.get('industry_standards', 'data/industry_standards.json')
-
-    @property
-    def audit_logs(self) -> str:
-        """审核日志文件路径"""
-        return self._config.get('audit_logs', 'data/audit_logs.json')
-
-    @property
     def regulations_dir(self) -> str:
         """法规文件目录"""
         return self._config.get('regulations_dir', 'references')
@@ -281,35 +186,6 @@ class DatabaseConfig:
     def kb_version_dir(self) -> str:
         """知识库版本目录"""
         return self._config.get('kb_version_dir', 'lib/rag_engine/data/kb')
-
-
-class RegulationSearchConfig:
-    """法规搜索配置"""
-
-    def __init__(self, config_dict: Dict[str, Any]):
-        self._config = config_dict.get('regulation_search', {})
-
-    @property
-    def data_dir(self) -> str:
-        """法规数据目录"""
-        return self._config.get('data_dir', '../../references')
-
-    @property
-    def default_top_k(self) -> int:
-        """法规搜索默认返回数量"""
-        return self._config.get('default_top_k', 5)
-
-
-class OpenClawConfig:
-    """OpenClaw配置"""
-
-    def __init__(self, config_dict: Dict[str, Any]):
-        self._config = config_dict.get('openclaw', {})
-
-    @property
-    def bin(self) -> str:
-        """OpenClaw二进制文件路径"""
-        return self._config.get('bin', '/usr/bin/openclaw')
 
 
 # ===== 主配置类 =====
@@ -373,14 +249,10 @@ class Config:
     def _init_nested_configs(self) -> None:
         """初始化嵌套配置对象（仅内部使用）"""
         self._feishu = FeishuConfig(self._config)
-        self._report = ReportConfig(self._config)
-        self._audit = AuditConfig(self._config)
         self._ollama = OllamaConfig(self._config)
         self._zhipu = ZhipuConfig(self._config)
         self._llm = LLMConfig(self._config)
         self._data_paths = DatabaseConfig(self._config)
-        self._regulation_search = RegulationSearchConfig(self._config)
-        self._openclaw = OpenClawConfig(self._config)
 
     # ===== 嵌套配置属性 =====
 
@@ -389,17 +261,10 @@ class Config:
         return self._feishu
 
     @property
-    def report(self) -> ReportConfig:
-        return self._report
-
-    @property
     def llm(self) -> LLMConfig:
         return self._llm
 
     @property
-    def openclaw(self) -> OpenClawConfig:
-        return self._openclaw
-
     # ===== 业务属性 =====
 
     @property
@@ -431,74 +296,6 @@ class Config:
     def lancedb_path(self) -> str:
         """LanceDB 连接字符串"""
         return self._data_paths.lancedb_uri
-
-    @property
-    def chat_timeout(self) -> int:
-        """聊天场景超时时间（秒）"""
-        return self._zhipu.timeout
-
-    @property
-    def report_export_feishu(self) -> bool:
-        """是否自动导出飞书文档"""
-        return self._report.export_feishu
-
-    @property
-    def report_grade_thresholds(self) -> List[Tuple[int, str]]:
-        """评级阈值"""
-        return self._report.grade_thresholds
-
-    @property
-    def report_default_grade(self) -> str:
-        """默认评级"""
-        return self._report.default_grade
-
-    @property
-    def report_high_violations_limit(self) -> int:
-        """严重违规限制"""
-        return self._report.high_violations_limit
-
-    @property
-    def report_medium_violations_limit(self) -> int:
-        """中等违规限制"""
-        return self._report.medium_violations_limit
-
-    @property
-    def report_p1_remediation_limit(self) -> int:
-        """P1 整改限制"""
-        return self._report.p1_remediation_limit
-
-    def get_product_thresholds(self, product_category: str) -> Optional[List[Tuple[int, str]]]:
-        """获取产品特定的评级阈值"""
-        return self._report.get_product_thresholds(product_category)
-
-    def get_product_violation_limits(self, product_category: str) -> Optional[Dict[str, int]]:
-        """获取产品特定的违规限制"""
-        return self._report.get_product_violation_limits(product_category)
-
-    @property
-    def audit_scoring_weights(self) -> Dict[str, int]:
-        """审核评分权重"""
-        return self._audit.scoring_weights
-
-    @property
-    def audit_thresholds(self) -> Dict[str, int]:
-        """审核评级阈值"""
-        return self._audit.thresholds
-
-    @property
-    def regulation_data_dir(self) -> str:
-        """法规数据目录"""
-        return self._regulation_search.data_dir
-
-    @property
-    def regulation_default_top_k(self) -> int:
-        """法规搜索默认返回数量"""
-        return self._regulation_search.default_top_k
-
-    @property
-    def openclaw_bin_path(self) -> str:
-        """OpenClaw 二进制文件路径"""
-        return self._openclaw.bin
 
     # ===== 通用方法 =====
 
@@ -614,18 +411,28 @@ def get_llm_config() -> 'LLMConfig':
     """获取 LLM 配置。"""
     return get_config().llm
 
-def get_report_config() -> 'ReportConfig':
-    """获取报告配置。"""
-    return get_config().report
+
+def get_qa_llm_config() -> Dict[str, Any]:
+    return get_llm_config().qa
+
+def get_audit_llm_config() -> Dict[str, Any]:
+    return get_llm_config().audit
+
+def get_eval_llm_config() -> Dict[str, Any]:
+    return get_llm_config().eval
+
+def get_embed_llm_config() -> Dict[str, Any]:
+    return get_llm_config().embed
+
+def get_name_parser_llm_config() -> Dict[str, Any]:
+    return get_llm_config().name_parser
+
+def get_ocr_llm_config() -> Dict[str, Any]:
+    return get_llm_config().ocr
 
 def get_feishu_config() -> 'FeishuConfig':
     """获取飞书配置。"""
     return get_config().feishu
-
-def get_openclaw_config() -> 'OpenClawConfig':
-    """获取 OpenClaw 配置。"""
-    return get_config().openclaw
-
 
 def reset_config() -> None:
     """重置全局配置（线程安全）"""
@@ -644,16 +451,3 @@ def reload_config() -> Config:
         else:
             _global_config = Config()
     return _global_config
-
-
-def load_config() -> Dict[str, Any]:
-    """
-    加载配置文件并返回原始字典
-
-    提供对底层配置数据的直接访问，用于需要字典格式的场景。
-
-    Returns:
-        dict: 配置字典，包含所有配置项的原始数据
-    """
-    config = get_config()
-    return config._config

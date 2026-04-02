@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """KB 检查清单分块器
 
-解析 excel_to_kb.py 生成的结构化 Markdown 文件：
+解析 preprocessor.py 生成的结构化 Markdown 文件：
 - YAML frontmatter → 文件级元数据
 - ## 第N项 → 分块边界
 - > **元数据** blockquote → 条款级元数据
@@ -14,7 +14,7 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from llama_index.core import Document
 from llama_index.core.schema import TextNode
@@ -29,7 +29,7 @@ _SENTENCE_SPLIT = re.compile(r'(?<=[。；！？\n])\s*')
 _FRONTMATTER_RE = re.compile(r'^---\s*\n', re.MULTILINE)
 
 
-class KBChecklistChunker:
+class ChecklistChunker:
     """KB 检查清单分块器。
 
     将预处理好的 Markdown 文件按 ## 第N项 拆分为独立 chunk，
@@ -104,17 +104,14 @@ class KBChecklistChunker:
             end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
             section = body[start:end].strip()
 
-            # 提取 blockquote 元数据
             chunk_meta: Dict[str, str] = {}
             meta_match = _BLOCKQUOTE_META.search(section)
             if meta_match:
                 meta_str = meta_match.group(1)
                 for kv in _KV_PAIR.finditer(meta_str):
                     chunk_meta[kv.group(1).strip()] = kv.group(2).strip()
-                # 移除 blockquote 行
                 section = _BLOCKQUOTE_META.sub('', section).strip()
 
-            # 移除前导空行
             section = re.sub(r'^\s+', '', section, count=1) if section else section
 
             items.append({
@@ -133,7 +130,6 @@ class KBChecklistChunker:
         frontmatter: dict,
     ) -> List[TextNode]:
         """构建 TextNode 列表。"""
-        # 文件级元数据
         collection = str(frontmatter.get('collection', ''))
         category = collection.split('_', 1)[1] if '_' in collection else collection
 
@@ -155,7 +151,6 @@ class KBChecklistChunker:
             article_number = f"第{item['item_number']}项"
             hierarchy_path = f"{category} > {law_name} > {article_number}"
 
-            # 基础元数据（检索管线必需）
             metadata: Dict[str, Any] = {
                 'law_name': law_name,
                 'article_number': article_number,
@@ -164,23 +159,19 @@ class KBChecklistChunker:
                 'hierarchy_path': hierarchy_path,
             }
 
-            # 可选管线字段
             if doc_number:
                 metadata['doc_number'] = doc_number
             if issuing_authority:
                 metadata['issuing_authority'] = issuing_authority
 
-            # frontmatter 扩展字段
             if insurance_type:
                 metadata['险种类型'] = insurance_type
             if remark:
                 metadata['备注'] = remark
 
-            # blockquote 条款级元数据
             for key, value in item['chunk_meta'].items():
                 metadata[key] = value
 
-            # 长内容拆分
             if len(content) > _MAX_CHUNK_CHARS:
                 sub_nodes = self._split_long_chunk(content, metadata)
                 nodes.extend(sub_nodes)
