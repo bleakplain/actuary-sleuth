@@ -180,16 +180,21 @@ class OllamaConfig:
         return self._config.get('timeout', 120)
 
 
-class EmbeddingConfig:
-    """嵌入模型配置"""
+class LLMConfig:
+    """LLM 场景配置（按用途选择 provider）"""
 
     def __init__(self, config_dict: Dict[str, Any]):
-        self._config = config_dict.get('embedding', {})
+        self._config = config_dict.get('llm', {})
 
     @property
-    def provider(self) -> str:
-        """嵌入模型提供商：ollama 或 zhipu"""
-        return self._config.get('provider', 'zhipu')
+    def chat(self) -> Dict[str, str]:
+        """聊天场景配置：{provider}"""
+        return self._config.get('chat', {'provider': 'zhipu'})
+
+    @property
+    def embed(self) -> Dict[str, str]:
+        """嵌入场景配置：{provider}"""
+        return self._config.get('embed', {'provider': 'zhipu'})
 
 
 class ZhipuConfig:
@@ -231,18 +236,6 @@ class ZhipuConfig:
     def max_tokens(self) -> int:
         """最大生成token数"""
         return self._config.get('max_tokens', 20000)
-
-
-class LLMConfig:
-    """LLM 场景配置（按用途选择 provider 和 model）"""
-
-    def __init__(self, config_dict: Dict[str, Any]):
-        self._config = config_dict.get('llm', {})
-
-    @property
-    def chat(self) -> Dict[str, str]:
-        """聊天场景配置：{provider, model}"""
-        return self._config.get('chat', {'provider': 'zhipu'})
 
 
 class DatabaseConfig:
@@ -372,7 +365,6 @@ class Config:
         self._report = ReportConfig(self._config)
         self._audit = AuditConfig(self._config)
         self._ollama = OllamaConfig(self._config)
-        self._embedding = EmbeddingConfig(self._config)
         self._zhipu = ZhipuConfig(self._config)
         self._llm = LLMConfig(self._config)
         self._data_paths = DatabaseConfig(self._config)
@@ -422,7 +414,7 @@ class Config:
         Returns:
             dict: 包含 provider, model, host/api_key, base_url, timeout 等字段
         """
-        provider = self._embedding.provider
+        provider = self._llm.embed.get('provider', 'zhipu')
         return self._build_provider_config(provider, 'embed', **overrides)
 
     # ===== 业务属性 =====

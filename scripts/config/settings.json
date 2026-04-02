@@ -26,10 +26,8 @@
     "max_tokens": 16384
   },
   "llm": {
-    "chat": { "provider": "zhipu" }
-  },
-  "embedding": {
-    "provider": "ollama"
+    "chat": { "provider": "zhipu" },
+    "embed": { "provider": "ollama" }
   },
   "report": {
     "default_format": "docx",
