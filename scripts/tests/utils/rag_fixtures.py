@@ -235,7 +235,8 @@ def real_regulation_vector_index(real_lancedb_dir, real_references_dir):
     if not HAS_LLAMA_INDEX:
         pytest.skip("llama_index not installed")
 
-    from lib.rag_engine.doc_parser import RegulationDocParser
+    from lib.rag_engine.data_importer import KBDataImporter
+    from lib.rag_engine.config import RAGConfig
 
     # 配置嵌入模型
     try:
@@ -257,8 +258,10 @@ def real_regulation_vector_index(real_lancedb_dir, real_references_dir):
     )
 
     # 解析真实法规文档
-    parser = RegulationDocParser(regulations_dir=str(real_references_dir))
-    all_documents = parser.parse_all()
+    importer_config = RAGConfig(regulations_dir=str(real_references_dir))
+    importer = KBDataImporter(importer_config)
+    raw_docs = importer.parse_documents()
+    all_documents = importer.chunk_documents(raw_docs)
 
     if not all_documents:
         pytest.skip(f"未能从 {real_references_dir} 解析出任何法规文档")

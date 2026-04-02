@@ -184,7 +184,6 @@ class TestDataFlowWithRealComponents:
 
     def test_parse_documents_and_create_index(self, temp_lancedb_dir, temp_output_dir):
         """测试解析文档并创建索引"""
-        from lib.rag_engine.doc_parser import RegulationDocParser
         from llama_index.core import Settings, VectorStoreIndex
         from llama_index.vector_stores.lancedb import LanceDBVectorStore
         from llama_index.core.storage.storage_context import StorageContext
@@ -203,19 +202,26 @@ class TestDataFlowWithRealComponents:
 
         # 1. 创建测试文件
         test_file = temp_output_dir / "test_regulation.md"
-        test_file.write_text("""
+        test_file.write_text("""---
+regulation: 测试法规
+collection: test_测试法规
+---
+
 # 测试法规
 
-### 第一条 等待期
+## 第1项
 健康保险产品的等待期不得超过90天。
 
-### 第二条 费率
+## 第2项
 保险费率应当公平合理。
         """)
 
         # 2. 解析文档
-        parser = RegulationDocParser(regulations_dir=str(temp_output_dir))
-        documents = parser.parse_single_file("test_regulation.md")
+        from lib.rag_engine.data_importer import KBDataImporter
+        importer_config = RAGConfig(regulations_dir=str(temp_output_dir), vector_db_path=str(temp_lancedb_dir))
+        importer = KBDataImporter(importer_config)
+        raw_docs = importer.parse_documents(file_pattern="test_regulation.md")
+        documents = importer.chunk_documents(raw_docs)
 
         assert len(documents) > 0
 

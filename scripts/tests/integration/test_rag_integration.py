@@ -13,7 +13,6 @@ pytest.importorskip("llama_index", reason="llama_index not installed")
 from lib.rag_engine.config import RAGConfig
 from lib.rag_engine.rag_engine import RAGEngine
 from lib.rag_engine.index_manager import VectorIndexManager
-from lib.rag_engine.doc_parser import RegulationDocParser
 from lib.common.database import SQLiteConnectionPool
 
 
@@ -135,22 +134,29 @@ class TestRAGIntegration:
 
         # 1. 创建测试文档
         test_file = temp_output_dir / "regulation.md"
-        test_file.write_text("""
+        test_file.write_text("""---
+regulation: 保险法
+collection: test_保险法
+---
+
 # 保险法
 
-### 第一条 保险责任
+## 第1项
 保险公司应当承担保险责任，按照合同约定给付保险金。
 
-### 第二条 如实告知
+## 第2项
 投保人应当如实告知被保险人的健康状况。
 
-### 第三条 等待期
+## 第3项
 健康保险产品的等待期不得超过90天。
         """)
 
         # 2. 解析文档
-        parser = RegulationDocParser(regulations_dir=str(temp_output_dir))
-        documents = parser.parse_single_file("regulation.md")
+        from lib.rag_engine.data_importer import KBDataImporter
+        importer_config = RAGConfig(regulations_dir=str(temp_output_dir), vector_db_path=str(temp_lancedb_dir))
+        importer = KBDataImporter(importer_config)
+        raw_docs = importer.parse_documents(file_pattern="regulation.md")
+        documents = importer.chunk_documents(raw_docs)
 
         assert len(documents) > 0
         assert all('law_name' in doc.metadata for doc in documents)
