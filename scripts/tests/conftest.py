@@ -28,10 +28,7 @@ if env_file.exists():
                 os.environ.setdefault(key.strip(), value.strip())
 
 # 导入共享的fixtures
-try:
-    from tests.utils.fixtures import temp_output_dir, sample_docx_file
-    from tests.utils.mocks import MockLLMClient
-except ImportError:
-    pass
+from tests.utils.fixtures import temp_output_dir
+from tests.utils.mocks import MockLLMClient
 
 pytest_plugins = ["tests.utils.rag_fixtures"]

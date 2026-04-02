@@ -6,8 +6,6 @@ RAG引擎集成测试 - 使用真实的SQLite和LanceDB
 这些测试使用真实的数据库和向量索引，验证整个RAG流程的正确性。
 """
 import pytest
-import tempfile
-import shutil
 from pathlib import Path
 
 pytest.importorskip("llama_index", reason="llama_index not installed")
@@ -326,11 +324,3 @@ class TestRAGWithRealData:
             assert 'score' in results[0]
 
 
-@pytest.fixture
-def temp_output_dir():
-    """临时输出目录"""
-    temp_dir = Path(tempfile.mkdtemp(prefix="test_rag_output_"))
-    yield temp_dir
-    # 清理
-    if temp_dir.exists():
-        shutil.rmtree(temp_dir, ignore_errors=True)

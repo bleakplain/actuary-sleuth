@@ -17,7 +17,7 @@ from llama_index.core.node_parser import NodeParser
 from llama_index.core.readers import SimpleDirectoryReader
 from llama_index.core.schema import TextNode
 
-from .config import RAGConfig, ChunkingConfig
+from .config import RAGConfig
 
 logger = logging.getLogger(__name__)
 
@@ -288,15 +288,9 @@ class RegulationDocParser:
 
         # 根据配置选择分块策略
         self.chunking_strategy = self.config.chunking_strategy
-        self.chunking_config = self.config.chunking_config
 
-        if self.chunking_strategy == "semantic":
-            logger.info("使用语义分块策略")
-            from .semantic_chunker import SemanticChunker
-            self.chunker = SemanticChunker(self.chunking_config)
-        else:
-            logger.info("使用传统条款分块策略")
-            self.node_parser = RegulationNodeParser()
+        logger.info("使用传统条款分块策略")
+        self.node_parser = RegulationNodeParser()
 
     def parse_all(self, file_pattern: str = "*.md") -> List[Document]:
         """解析目录下所有法规文档"""
@@ -320,24 +314,13 @@ class RegulationDocParser:
 
         documents = _clean_documents(documents)
 
-        # 根据策略选择解析方式
-        if self.chunking_strategy == "semantic":
-            # 语义分块：直接对文档进行语义分块
-            from .semantic_chunker import SemanticChunker
-            if not hasattr(self, 'chunker'):
-                self.chunker = SemanticChunker(self.chunking_config)
+        # 传统分块：按条款分割
+        if not hasattr(self, 'node_parser'):
+            self.node_parser = RegulationNodeParser()
 
-            text_nodes = self.chunker.chunk(documents)
+        text_nodes = self.node_parser._parse_nodes(documents)
 
-            result_documents = _nodes_to_documents(text_nodes)
-        else:
-            # 传统分块：先按条款分割
-            if not hasattr(self, 'node_parser'):
-                self.node_parser = RegulationNodeParser()
-
-            text_nodes = self.node_parser._parse_nodes(documents)
-
-            result_documents = _nodes_to_documents(text_nodes)
+        result_documents = _nodes_to_documents(text_nodes)
 
         logger.info(f"在 {self.regulations_dir} 中找到 {len(md_files)} 个 markdown 文件")
         logger.info(f"总共解析了 {len(result_documents)} 个文档块")
@@ -361,18 +344,10 @@ class RegulationDocParser:
 
         docs = _clean_documents(docs)
 
-        # 根据策略选择解析方式
-        if self.chunking_strategy == "semantic":
-            if not hasattr(self, 'chunker'):
-                from .semantic_chunker import SemanticChunker
-                self.chunker = SemanticChunker(self.chunking_config)
+        if not hasattr(self, 'node_parser'):
+            self.node_parser = RegulationNodeParser()
 
-            text_nodes = self.chunker.chunk(docs)
-        else:
-            if not hasattr(self, 'node_parser'):
-                self.node_parser = RegulationNodeParser()
-
-            text_nodes = self.node_parser._parse_nodes(docs)
+        text_nodes = self.node_parser._parse_nodes(docs)
 
         return _nodes_to_documents(text_nodes)
 

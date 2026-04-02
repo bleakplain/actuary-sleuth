@@ -8,7 +8,7 @@
 
 ## Architecture Boundaries
 - **Entry points**: `scripts/*.py`
-- **Domain logic**: `scripts/lib/audit/`, `scripts/lib/preprocessing`, `scripts/lib/reporting`
+- **Domain logic**: `scripts/lib/audit/`, `scripts/lib/reporting`
 - **Data models**: `scripts/lib/common/models.py`, `scripts/lib/common/audit.py`
 - **Utilities**: `scripts/lib/common/`
 - **Do not** put persistence in domain modules → use `scripts/lib/common/database.py`
@@ -32,7 +32,7 @@
 ## Code Style
 
 ### Naming
-- Functions: business semantics, verb-noun组合 (`fetch_feishu_document`, `execute_preprocess`)
+- Functions: business semantics, verb-noun组合 (`fetch_feishu_document`)
 - Classes: nouns (`AuditService`, `DocumentFetcher`, `Product`)
 - Private: prefix `_` (`_managed_query`)
 
@@ -75,21 +75,20 @@ class ActuarySleuthException(Exception): pass
 # lib/common/exceptions.py - re-export
 from lib.exceptions import ActuarySleuthException, DatabaseError
 
-# lib/preprocessing/exceptions.py - module specific
+# lib/common/exceptions.py - module specific
 class DocumentFetchError(ActuarySleuthException): pass
 ```
 
 ## Core Flow
 
 ```
-fetch_feishu_document → execute_preprocess → check_negative_list
+fetch_feishu_document → check_negative_list
 → analyze_pricing → calculate_result → save_db → export_report
 ```
 
 ## Module Organization
 - **lib/common/** - models, database, exceptions, constants, shared utilities
 - **lib/audit/** - audit orchestration
-- **lib/preprocessing/** - document fetching, extraction
 - **lib/reporting/** - report generation, export
 - **lib/rag_engine/** - vector search, QA
 - **lib/llm/** - LLM client abstraction
@@ -132,7 +131,7 @@ Located at `scripts/config/settings.json`, overrideable via env vars.
 6. No new service packages, reuse lib/ structure
 7. Tests must pass before commit
 8. Self-documenting code, no redundant comments
-9. Reuse lib/llm error handling, don't implement retry in preprocessing
+9. Reuse lib/llm error handling, don't implement retry in domain modules
 10. Avoid unnecessary type conversions
 11. Minimal parameters, use metadata
 12. Constants in `lib/common/constants.py`

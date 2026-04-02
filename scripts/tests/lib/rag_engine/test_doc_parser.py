@@ -4,7 +4,6 @@
 测试 doc_parser 模块 - 使用真实组件
 """
 import pytest
-import tempfile
 from pathlib import Path
 
 pytest.importorskip("llama_index", reason="llama_index not installed")
@@ -120,7 +119,7 @@ class TestRegulationDocParser:
         parser = RegulationDocParser(regulations_dir="./references")
         assert parser is not None
         assert parser.regulations_dir.name == "references"
-        assert parser.chunker is not None
+        assert parser.node_parser is not None
 
     def test_parser_with_nonexistent_dir(self):
         """测试不存在的目录"""
@@ -284,8 +283,3 @@ class TestHierarchyPathInNodes:
         assert nodes[0].metadata['hierarchy_path'] != ''
 
 
-@pytest.fixture
-def temp_output_dir():
-    """临时输出目录"""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        yield Path(tmpdir)

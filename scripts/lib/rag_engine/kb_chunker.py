@@ -40,7 +40,7 @@ class KBChecklistChunker:
         self.config = config
 
     def chunk(self, documents: List[Document]) -> List[TextNode]:
-        """分块入口，兼容 SemanticChunker 接口。"""
+        """分块入口，兼容 regulation 分块器接口。"""
         all_nodes: List[TextNode] = []
         for doc in documents:
             all_nodes.extend(self._chunk_single(doc))

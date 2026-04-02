@@ -30,9 +30,6 @@ from lib.rag_engine.evaluator import (
 )
 
 
-# ===== Fixtures =====
-
-
 @pytest.fixture
 def sample_eval():
     """基础测试用 EvalSample"""
@@ -101,7 +98,7 @@ def mixed_results(relevant_results, irrelevant_results):
     return relevant_results + irrelevant_results
 
 
-# ===== TestEvalDataset =====
+
 
 
 class TestEvalDataset:
@@ -194,7 +191,7 @@ class TestEvalDataset:
         assert nested_path.exists()
 
 
-# ===== TestRetrievalMetrics =====
+
 
 
 class TestRetrievalMetrics:
@@ -311,7 +308,7 @@ class TestRetrievalMetrics:
         assert _compute_redundancy_rate([]) == 0.0
 
 
-# ===== TestRetrievalEvaluator =====
+
 
 
 class TestRetrievalEvaluator:
@@ -469,7 +466,7 @@ class TestRetrievalEvaluator:
         assert report.ndcg == 0.0
 
 
-# ===== TestGenerationEvaluator =====
+
 
 
 class TestGenerationEvaluator:
@@ -580,7 +577,7 @@ class TestGenerationEvaluator:
         assert 0.0 <= report.faithfulness <= 1.0
 
 
-# ===== TestRAGEvalReport =====
+
 
 
 class TestRAGEvalReport:
@@ -620,7 +617,7 @@ class TestRAGEvalReport:
         assert len(d['failed_samples']) == 1
 
 
-# ===== TestRetrievalReport =====
+
 
 
 class TestRetrievalEvalReport:
@@ -646,7 +643,7 @@ class TestRetrievalEvalReport:
         assert '0.800' in captured.out
 
 
-# ===== TestGenerationReport =====
+
 
 
 class TestGenerationEvalReport:

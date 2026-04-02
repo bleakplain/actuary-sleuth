@@ -9,7 +9,8 @@ from typing import Dict, Any
 
 sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
-from lib.preprocessing.document_fetcher import fetch_feishu_document, DocumentFetchError
+from lib.common.document_fetcher import fetch_feishu_document
+from lib.common.exceptions import DocumentFetchError
 from lib.audit.evaluation import calculate_result
 from lib.common.id_generator import IDGenerator
 from lib.common.logger import get_audit_logger

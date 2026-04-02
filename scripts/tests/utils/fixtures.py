@@ -6,7 +6,6 @@
 import pytest
 import tempfile
 from pathlib import Path
-from docx import Document
 
 
 @pytest.fixture
@@ -47,17 +46,6 @@ def sample_document_content():
 ## 保险责任
 意外身故保险金：被保险人因遭受意外伤害，并自意外伤害发生之日起180日内以该次意外伤害为直接原因身故的，保险公司按保险金额给付意外身故保险金，本合同终止。
 """
-
-
-@pytest.fixture
-def sample_docx_file(temp_output_dir):
-    """示例DOCX文件"""
-    doc_path = temp_output_dir / "test_document.docx"
-    doc = Document()
-    doc.add_heading("测试产品", 0)
-    doc.add_paragraph("这是测试产品内容")
-    doc.save(doc_path)
-    return doc_path
 
 
 @pytest.fixture

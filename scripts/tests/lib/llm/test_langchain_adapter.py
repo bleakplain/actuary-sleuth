@@ -8,22 +8,29 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, ChatMessage, HumanMessage, SystemMessage
 from langchain_core.outputs import ChatResult
 
+from lib.llm.base import BaseLLMClient
 from lib.llm.langchain_adapter import ChatAdapter, _message_to_dict
 
 
-class MockLLMClient:
-    """Mock BaseLLMClient"""
+class MockChatClient(BaseLLMClient):
+    """Mock that echoes last message content for testing message flow."""
 
     def __init__(self, model: str = "glm-4-flash"):
-        self.model = model
+        super().__init__(model, timeout=30)
 
     def chat(self, messages, **kwargs):
         return f"response to: {messages[-1]['content']}"
 
+    def generate(self, prompt, **kwargs):
+        return f"response to: {prompt}"
+
+    def health_check(self):
+        return True
+
 
 @pytest.fixture
 def mock_chat_client():
-    return MockLLMClient()
+    return MockChatClient()
 
 
 class TestMessageConversion:
@@ -85,7 +92,7 @@ class TestChatAdapter:
         mock_chat_client.chat.assert_called_once()
 
     def test_generate_preserves_kwargs(self):
-        client = MockLLMClient()
+        client = MockChatClient()
         client.chat = MagicMock(return_value="response")
         adapter = ChatAdapter(client=client)
         adapter._generate([HumanMessage(content="test")], temperature=0.5)

@@ -6,7 +6,6 @@ RAG 引擎测试 - 使用真实数据库和索引
 注意：这些测试需要 llama_index 模块和嵌入模型。
 """
 import pytest
-import tempfile
 from pathlib import Path
 
 pytest.importorskip("llama_index", reason="llama_index not installed")
@@ -314,12 +313,3 @@ class TestRAGEngineIntegration:
             RAGConfig(chunk_size=100, chunk_overlap=100)
 
 
-@pytest.fixture
-def temp_output_dir():
-    """临时输出目录"""
-    temp_dir = Path(tempfile.mkdtemp(prefix="test_rag_output_"))
-    yield temp_dir
-    # 清理
-    import shutil
-    if temp_dir.exists():
-        shutil.rmtree(temp_dir, ignore_errors=True)

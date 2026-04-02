@@ -94,8 +94,6 @@ class RegulationDataImporter:
         # 显示分块策略信息
         logger.info("=" * 60)
         logger.info(f"分块策略: {self.config.chunking_strategy}")
-        if self.config.chunking_strategy == "semantic":
-            logger.info("使用语义分块 - 保留文档结构和语义完整性")
         logger.info("=" * 60)
 
         logger.info("步骤 1: 解析法规文档")

@@ -19,7 +19,7 @@ MIN_CLAUSE_LENGTH = DocumentValidation.MIN_CLAUSE_LENGTH
 MAX_TOTAL_TEXT_LENGTH = DocumentValidation.MAX_TOTAL_TEXT_LENGTH
 
 
-# ==================== 法规文档预处理模型 ====================
+# ==================== 法规文档模型 ====================
 
 class RegulationStatus(str, Enum):
     """法规处理状态"""
@@ -71,7 +71,7 @@ class RegulationDocument:
     record: RegulationRecord
 
 
-# ==================== Preprocessing → Audit 接口模型 ====================
+# ==================== Audit 接口模型 ====================
 
 class ProductCategory(str, Enum):
     """产品类别"""

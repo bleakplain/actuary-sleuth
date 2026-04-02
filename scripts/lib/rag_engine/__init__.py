@@ -60,7 +60,6 @@ try:
     from .retrieval import hybrid_search, vector_search
     from .fusion import reciprocal_rank_fusion
     from .bm25_index import BM25Index
-    from .semantic_chunker import SemanticChunker
     from .kb_chunker import KBChecklistChunker
     from .evaluator import RetrievalEvaluator, GenerationEvaluator, RAGEvalReport
     from .eval_dataset import EvalSample, QuestionType, load_eval_dataset, create_default_eval_dataset, save_eval_dataset, DEFAULT_DATASET_PATH
@@ -80,7 +79,6 @@ except ImportError:
     vector_search = None
     reciprocal_rank_fusion = None
     BM25Index = None
-    SemanticChunker = None
     KBChecklistChunker = None
     RetrievalEvaluator = None
     GenerationEvaluator = None
@@ -123,7 +121,6 @@ __all__ = [
     'vector_search',
     'reciprocal_rank_fusion',
     'BM25Index',
-    'SemanticChunker',
     'KBChecklistChunker',
     'RetrievalEvaluator',
     'GenerationEvaluator',
