@@ -5,10 +5,10 @@ import {
   deleteConversation,
   chatSearch,
   chatSSE,
-} from '../../api/ask';
+} from './ask';
 
 // Mock the axios client
-vi.mock('../../api/client', () => {
+vi.mock('./client', () => {
   const mockGet = vi.fn();
   const mockPost = vi.fn();
   const mockDelete = vi.fn();
@@ -18,7 +18,7 @@ vi.mock('../../api/client', () => {
 });
 
 // Need to import after mock setup to get the mocked module
-import client from '../../api/client';
+import client from './client';
 
 const mockedClient = vi.mocked(client);
 

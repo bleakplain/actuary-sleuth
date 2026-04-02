@@ -15,9 +15,9 @@ import {
   fetchEvalRuns,
   compareEvalRuns,
   exportEvalReport,
-} from '../../api/eval';
+} from './eval';
 
-vi.mock('../../api/client', () => {
+vi.mock('./client', () => {
   const mockGet = vi.fn();
   const mockPost = vi.fn();
   const mockPut = vi.fn();
@@ -25,7 +25,7 @@ vi.mock('../../api/client', () => {
   return { default: { get: mockGet, post: mockPost, put: mockPut, delete: mockDelete } };
 });
 
-import client from '../../api/client';
+import client from './client';
 const mockedClient = vi.mocked(client);
 
 describe('eval API', () => {

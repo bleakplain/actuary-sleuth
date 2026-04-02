@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { useAskStore } from '../../stores/askStore';
+import { useAskStore } from './askStore';
 
 // Mock the ask API module
-vi.mock('../../api/ask', () => ({
+vi.mock('../api/ask', () => ({
   fetchConversations: vi.fn(),
   fetchMessages: vi.fn(),
   deleteConversation: vi.fn(),
@@ -13,7 +13,7 @@ vi.mock('../../api/ask', () => ({
   }),
 }));
 
-import * as askApi from '../../api/ask';
+import * as askApi from '../api/ask';
 
 const mockedFetchConversations = vi.mocked(askApi.fetchConversations);
 const mockedFetchMessages = vi.mocked(askApi.fetchMessages);

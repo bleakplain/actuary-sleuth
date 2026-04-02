@@ -4,15 +4,15 @@ import {
   checkDocument,
   fetchComplianceReports,
   fetchComplianceReport,
-} from '../../api/compliance';
+} from './compliance';
 
-vi.mock('../../api/client', () => {
+vi.mock('./client', () => {
   const mockGet = vi.fn();
   const mockPost = vi.fn();
   return { default: { get: mockGet, post: mockPost } };
 });
 
-import client from '../../api/client';
+import client from './client';
 const mockedClient = vi.mocked(client);
 
 describe('compliance API', () => {

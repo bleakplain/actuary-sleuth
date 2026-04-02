@@ -6,15 +6,15 @@ import {
   fetchTaskStatus,
   fetchDocumentPreview,
   fetchIndexStatus,
-} from '../../api/knowledge';
+} from './knowledge';
 
-vi.mock('../../api/client', () => {
+vi.mock('./client', () => {
   const mockGet = vi.fn();
   const mockPost = vi.fn();
   return { default: { get: mockGet, post: mockPost } };
 });
 
-import client from '../../api/client';
+import client from './client';
 const mockedClient = vi.mocked(client);
 
 describe('knowledge API', () => {
