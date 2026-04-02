@@ -7,8 +7,9 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable
-from lib.common.exceptions import DatabaseError, RecordNotFoundError
 from lib.common.connection_pool import get_connection_pool, SQLiteConnectionPool
+from lib.common.exceptions import DatabaseError, RecordNotFoundError
+from lib.config import get_sqlite_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -18,16 +19,7 @@ _pool_lock = threading.Lock()
 # 数据库路径 - 从配置读取
 def get_db_path() -> Path:
     """获取数据库路径"""
-    from lib.config import get_config
-    config = get_config()
-    rel_path = config.sqlite_db_path
-
-    if not Path(rel_path).is_absolute():
-        # __file__ 是 lib/common/database.py
-        # parent 是 common/, parent.parent 是 lib/, parent.parent.parent 是 scripts/
-        script_dir = Path(__file__).parent.parent.parent
-        return script_dir / rel_path
-    return Path(rel_path)
+    return Path(get_sqlite_db_path())
 
 # 并发优化配置
 DB_TIMEOUT = 30

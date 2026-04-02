@@ -18,7 +18,7 @@ import re
 from typing import Dict, Any, Optional
 
 from lib.common.exceptions import ExportException
-from lib.config import get_config
+from lib.config import get_feishu_config, get_openclaw_config
 from lib.common.logger import get_logger
 from .result import PushResult
 from .validation import validate_file_path, sanitize_message, validate_group_id
@@ -51,12 +51,11 @@ class _FeishuPusher:
         timeout: Optional[int] = None,
         allowed_output_dir: Optional[str] = None
     ):
-        config = get_config()
-        self._openclaw_bin = openclaw_bin or config.get('openclaw.bin', self.DEFAULT_OPENCLAW_BIN)
+        self._openclaw_bin = openclaw_bin or get_openclaw_config().bin
         self._timeout = timeout or self.DEFAULT_PUSH_TIMEOUT
         self._allowed_output_dir = allowed_output_dir
 
-        raw_group_id = target_group_id or config.feishu_group_id
+        raw_group_id = target_group_id or get_feishu_config().target_group_id
         if raw_group_id:
             self._target_group_id = validate_group_id(raw_group_id)
         else:

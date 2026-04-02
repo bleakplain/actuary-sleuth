@@ -11,31 +11,20 @@ _rag_initialized = False
 
 
 def _ensure_knowledge_base():
-    """初始化知识库：迁移旧数据或创建初始版本。"""
+    """初始化知识库：创建初始版本。"""
     from lib.rag_engine.version_manager import KBVersionManager
     from lib.rag_engine.config import RAGConfig
     from lib.rag_engine.index_manager import VectorIndexManager
 
     vm = KBVersionManager()
 
-    # 迁移旧版非版本化数据
-    if not vm.list_versions():
-        legacy_config = RAGConfig()
-        legacy_lancedb = legacy_config.vector_db_path
-        legacy_bm25 = str(Path(legacy_lancedb).parent / "bm25_index.pkl")
-        vm.migrate_legacy_data(
-            legacy_lancedb=legacy_lancedb,
-            legacy_bm25=legacy_bm25,
-            legacy_references=legacy_config.regulations_dir,
-        )
-
-    # 如果仍无版本（既无旧数据也无源文件），从当前 references 创建 v1
+    # 无版本时从当前 references 创建 v1
     if not vm.list_versions():
         working_config = RAGConfig()
         refs_dir = Path(working_config.regulations_dir)
-        if refs_dir.exists() and list(refs_dir.glob("*.md")):
+        if refs_dir.exists() and list(refs_dir.glob("**/*.md")):
             vm.create_version(
-                source_dir=working_config.regulations_dir,
+                regulations_dir=working_config.regulations_dir,
                 description="初始版本",
             )
         else:

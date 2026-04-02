@@ -6,13 +6,14 @@
 源文件统一存放在外部目录（如项目根目录 references/），不随版本复制。
 版本元数据持久化到 SQLite 数据库（kb_versions 表）。
 """
-import os
 import shutil
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict
+
+from lib.config import get_kb_version_dir
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +43,7 @@ class KBVersionManager:
 
     def __init__(self, base_dir: Optional[str] = None):
         if base_dir is None:
-            base_dir = os.environ.get(
-                "KB_VERSION_DIR",
-                str(Path(__file__).parent / "data" / "kb"),
-            )
+            base_dir = get_kb_version_dir()
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_table()
@@ -147,11 +145,6 @@ class KBVersionManager:
             regulations_dir=str(reg_path),
         )
 
-        (version_dir / "meta.json").write_text(
-            f'{{"version_id": "{version_id}"}}',
-            encoding="utf-8",
-        )
-
         logger.info(f"创建知识库版本 {version_id}: {doc_count} 个文档")
         return meta
 
@@ -231,58 +224,3 @@ class KBVersionManager:
             regulations_dir=paths["regulations_dir"],
             vector_db_path=paths["vector_db_path"],
         )
-
-    # ── 旧数据迁移 ────────────────────────────────────────────
-
-    def migrate_legacy_data(
-        self,
-        legacy_lancedb: str,
-        legacy_bm25: str,
-        legacy_references: str,
-    ) -> bool:
-        """将旧版非版本化数据迁移到 v1。仅当无任何版本时执行。"""
-        with _get_connection() as conn:
-            count = conn.execute("SELECT COUNT(*) FROM kb_versions").fetchone()[0]
-            if count > 0:
-                return False
-
-        v1_dir = self.base_dir / "v1"
-        v1_dir.mkdir(parents=True, exist_ok=True)
-
-        # 复制 references
-        src_refs = Path(legacy_references)
-        dst_refs = v1_dir / "references"
-        if src_refs.exists() and not dst_refs.exists():
-            shutil.copytree(src_refs, dst_refs)
-            logger.info(f"迁移源文件: {src_refs} → {dst_refs}")
-
-        # 复制 lancedb
-        src_ldb = Path(legacy_lancedb)
-        dst_ldb = v1_dir / "lancedb"
-        if src_ldb.exists() and not dst_ldb.exists():
-            shutil.copytree(src_ldb, dst_ldb)
-            logger.info(f"迁移向量索引: {src_ldb} → {dst_ldb}")
-
-        # 复制 bm25
-        src_bm25 = Path(legacy_bm25)
-        dst_bm25 = v1_dir / "bm25_index.pkl"
-        if src_bm25.exists() and not dst_bm25.exists():
-            shutil.copy2(src_bm25, dst_bm25)
-            logger.info(f"迁移 BM25 索引: {src_bm25} → {dst_bm25}")
-
-        doc_count = (
-            len(list(dst_refs.glob("*.md"))) if dst_refs.exists() else 0
-        )
-
-        now = datetime.now(timezone.utc).isoformat()
-        with _get_connection() as conn:
-            conn.execute(
-                "INSERT INTO kb_versions "
-                "(version_id, created_at, document_count, chunk_count, "
-                "description, active) "
-                "VALUES (?, ?, ?, ?, ?, 1)",
-                ("v1", now, doc_count, 0, "从旧数据自动迁移"),
-            )
-
-        logger.info(f"旧数据迁移完成: {v1_dir}")
-        return True

@@ -73,7 +73,7 @@ async def create_version(req: CreateVersionRequest):
             from lib.rag_engine.config import RAGConfig
             working_config = RAGConfig()
             meta = vm.create_version(
-                source_dir=working_config.regulations_dir,
+                regulations_dir=working_config.regulations_dir,
                 description=req.description,
             )
             _tasks[task_id]["progress"] = f"已创建 {meta.version_id}，正在构建索引..."

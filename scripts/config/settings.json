@@ -3,6 +3,8 @@
   "data_paths": {
     "sqlite_db": "data/actuary.db",
     "lancedb_uri": "data/lancedb",
+    "regulations_dir": "../references",
+    "kb_version_dir": "lib/rag_engine/data/kb",
     "negative_list": "data/negative_list.json",
     "industry_standards": "data/industry_standards.json",
     "audit_logs": "data/audit_logs.json"

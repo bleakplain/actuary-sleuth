@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Any
 
-from lib.config import get_config
+from lib.config import get_report_config
 from lib.reporting.template import ReportGenerationTemplate
 from lib.reporting.model import EvaluationContext
 from lib.common.models import Product
@@ -46,8 +46,7 @@ def main():
         result = execute(params)
 
         # 导出飞书文档
-        config = get_config()
-        export_feishu = args.export_feishu or config.report_export_feishu
+        export_feishu = args.export_feishu or get_report_config().export_feishu
 
         if export_feishu:
             feishu_result = export_to_feishu(

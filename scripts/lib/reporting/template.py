@@ -18,7 +18,8 @@ from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 from dataclasses import replace
 
-from lib.config import get_config, Config
+from lib.config import get_report_config
+from lib.config import ReportConfig
 from lib.common.id_generator import IDGenerator
 from lib.reporting.strategies import RemediationStrategies
 from lib.reporting.model import EvaluationContext
@@ -51,25 +52,25 @@ class ReportGenerationTemplate:
         '不通过': '不合格',
     }
 
-    def __init__(self, config: Optional[Config] = None):
+    def __init__(self, report_config: Optional[ReportConfig] = None):
         """
         初始化报告生成模板
 
         Args:
-            config: 配置对象(可选)
+            report_config: 报告配置对象(可选)
         """
-        self.config = config or get_config()
+        self.config = report_config or get_report_config()
         self.report_id = None
         self.remediation_strategies = RemediationStrategies()
         self._load_thresholds()
 
     def _load_thresholds(self):
         """从配置加载阈值"""
-        self.GRADE_THRESHOLDS = self.config.report_grade_thresholds
-        self.GRADE_DEFAULT = self.config.report_default_grade
-        self.HIGH_VIOLATIONS_LIMIT = self.config.report_high_violations_limit
-        self.MEDIUM_VIOLATIONS_LIMIT = self.config.report_medium_violations_limit
-        self.P1_REMEDIATION_MEDIUM_LIMIT = self.config.report_p1_remediation_limit
+        self.GRADE_THRESHOLDS = self.config.grade_thresholds
+        self.GRADE_DEFAULT = self.config.default_grade
+        self.HIGH_VIOLATIONS_LIMIT = self.config.high_violations_limit
+        self.MEDIUM_VIOLATIONS_LIMIT = self.config.medium_violations_limit
+        self.P1_REMEDIATION_MEDIUM_LIMIT = self.config.p1_remediation_limit
 
     def _apply_product_config(self, context: EvaluationContext):
         """应用产品特定配置"""

@@ -6,18 +6,7 @@
 import sqlite3
 from pathlib import Path
 
-
-def get_db_path() -> Path:
-    """获取数据库路径"""
-    from lib.config import get_config
-    config = get_config()
-    rel_path = config.sqlite_db_path
-
-    # 如果是相对路径，相对于脚本目录解析
-    if not Path(rel_path).is_absolute():
-        script_dir = Path(__file__).parent
-        return script_dir / rel_path
-    return Path(rel_path)
+from lib.common.database import get_db_path
 
 
 def init_database():

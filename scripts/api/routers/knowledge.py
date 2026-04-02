@@ -28,29 +28,48 @@ def _get_config():
 
 def _get_regulations_dir() -> Path:
     """文档列表和预览使用工作目录（非版本快照）。"""
-    from lib.rag_engine.config import RAGConfig
-    return Path(RAGConfig().regulations_dir)
+    from lib.config import get_regulations_dir
+    return Path(get_regulations_dir())
+
+
+def _load_chunk_counts() -> dict:
+    """从向量库统计每个 source_file 的实际 chunk 数量。"""
+    try:
+        import lancedb
+        config = _get_config()
+        db = lancedb.connect(config.vector_db_path)
+        table = db.open_table(config.collection_name)
+        df = table.to_pandas()
+        counts = {}
+        for _, row in df.iterrows():
+            meta = row.get("metadata", {})
+            if not isinstance(meta, dict):
+                try:
+                    meta = json.loads(meta) if isinstance(meta, str) else {}
+                except (json.JSONDecodeError, TypeError):
+                    meta = {}
+            sf = meta.get("source_file", "")
+            if sf:
+                counts[sf] = counts.get(sf, 0) + 1
+        return counts
+    except Exception:
+        return {}
 
 
 @router.get("/documents", response_model=list[DocumentOut])
 async def list_documents():
     reg_dir = _get_regulations_dir()
+    chunk_counts = _load_chunk_counts()
     documents = []
     if reg_dir.exists():
         for f in sorted(reg_dir.glob("**/*.md")):
             if f.is_dir():
                 continue
             stat = f.stat()
-            content = f.read_text(encoding="utf-8", errors="ignore")
-            # 统计 ## 第N项 分块数
-            count = sum(
-                1 for l in content.split("\n")
-                if re.match(r'^##\s*第\d+项', l.strip())
-            )
             documents.append(DocumentOut(
                 name=f.name,
                 file_path=str(f.relative_to(reg_dir.parent)),
-                clause_count=count,
+                clause_count=chunk_counts.get(f.name, 0),
                 file_size=stat.st_size,
             ))
     return documents
@@ -103,7 +122,7 @@ async def rebuild_index(req: RebuildRequest):
             working_config = RAGConfig()
 
             meta = vm.create_version(
-                source_dir=working_config.regulations_dir,
+                regulations_dir=working_config.regulations_dir,
                 description="从当前源文件重建",
             )
 

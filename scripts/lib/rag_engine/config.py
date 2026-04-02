@@ -104,39 +104,15 @@ class RAGConfig:
     collection_name: str = "regulations_vectors"
 
     def __post_init__(self):
-        import os
+        from lib.config import get_vector_db_path, get_regulations_dir
+
+        # vector_db_path：参数 > settings.json > 默认
         if self.vector_db_path is None:
-            # 支持环境变量覆盖（WSL 跨文件系统场景）
-            env_path = os.environ.get('LANCEDB_URI')
-            if env_path:
-                self.vector_db_path = env_path
-            else:
-                # 使用统一的配置系统
-                from lib.config import get_config
-                config = get_config()
-                rel_path = config.lancedb_path
-                if not Path(rel_path).is_absolute():
-                    scripts_dir = Path(__file__).parent.parent.parent
-                    self.vector_db_path = str(scripts_dir / rel_path)
-                else:
-                    self.vector_db_path = str(Path(rel_path))
+            self.vector_db_path = get_vector_db_path()
 
-        # WSL/NTFS 上 LanceDB 大批量写入会失败，自动替换为 /tmp 路径
-        # 版本管理路径（kb/）跳过替换，因为数据已存储在版本目录中
-        if '/mnt/' in self.vector_db_path and '/kb/' not in self.vector_db_path:
-            import tempfile
-            tmp_lancedb = os.path.join(tempfile.gettempdir(), 'actuary_sleuth', 'lancedb')
-            os.makedirs(tmp_lancedb, exist_ok=True)
-            self.vector_db_path = tmp_lancedb
-
-        # regulations_dir：环境变量 > settings.json > 默认（仓库根/references）
-        import os
-        env_dir = os.environ.get("REGULATIONS_DIR")
-        if env_dir:
-            self.regulations_dir = env_dir
-        elif not self.regulations_dir:
-            repo_root = Path(__file__).parent.parent.parent.parent
-            self.regulations_dir = str(repo_root / "references")
+        # regulations_dir：参数 > settings.json > 默认
+        if not self.regulations_dir:
+            self.regulations_dir = get_regulations_dir()
 
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError(f"chunk_overlap ({self.chunk_overlap}) must be less than chunk_size ({self.chunk_size})")

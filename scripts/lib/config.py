@@ -12,15 +12,15 @@
 """
 import json
 import os
-import re
 import sys
 import threading
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 
 
-# 配置文件路径
-CONFIG_PATH = Path(__file__).parent.parent / 'config' / 'settings.json'
+# 路径常量
+SCRIPTS_DIR = Path(__file__).parent.parent
+CONFIG_PATH = SCRIPTS_DIR / 'config' / 'settings.json'
 
 
 # ===== 嵌套配置类 =====
@@ -272,6 +272,16 @@ class DatabaseConfig:
         """审核日志文件路径"""
         return self._config.get('audit_logs', 'data/audit_logs.json')
 
+    @property
+    def regulations_dir(self) -> str:
+        """法规文件目录"""
+        return self._config.get('regulations_dir', 'references')
+
+    @property
+    def kb_version_dir(self) -> str:
+        """知识库版本目录"""
+        return self._config.get('kb_version_dir', 'lib/rag_engine/data/kb')
+
 
 class RegulationSearchConfig:
     """法规搜索配置"""
@@ -510,6 +520,29 @@ class Config:
         """配置版本"""
         return self._config.get('version', 'unknown')
 
+    def _resolve_path(self, rel_path: str) -> str:
+        """将配置路径解析为绝对路径（相对路径基于 scripts/ 目录）。"""
+        p = Path(rel_path)
+        if p.is_absolute():
+            return rel_path
+        return str(SCRIPTS_DIR / p)
+
+    def get_regulations_dir(self) -> str:
+        """获取法规文件目录的绝对路径。"""
+        return self._resolve_path(self._data_paths.regulations_dir)
+
+    def get_kb_version_dir(self) -> str:
+        """获取知识库版本目录的绝对路径。"""
+        return self._resolve_path(self._data_paths.kb_version_dir)
+
+    def get_vector_db_path(self) -> str:
+        """获取向量数据库的绝对路径。"""
+        return self._resolve_path(self._data_paths.lancedb_uri)
+
+    def get_sqlite_db_path(self) -> str:
+        """获取 SQLite 数据库的绝对路径。"""
+        return self._resolve_path(self._data_paths.sqlite_db)
+
 
 # ===== 全局配置实例（单例模式）=====
 
@@ -539,6 +572,41 @@ def get_config(config_path: Optional[Path] = None) -> Config:
                     _global_config = Config(config_path)
 
     return _global_config
+
+
+# ===== 模块级快捷函数 =====
+
+def get_sqlite_db_path() -> str:
+    """获取 SQLite 数据库的绝对路径。"""
+    return get_config().get_sqlite_db_path()
+
+def get_vector_db_path() -> str:
+    """获取向量数据库的绝对路径。"""
+    return get_config().get_vector_db_path()
+
+def get_regulations_dir() -> str:
+    """获取法规文件目录的绝对路径。"""
+    return get_config().get_regulations_dir()
+
+def get_kb_version_dir() -> str:
+    """获取知识库版本目录的绝对路径。"""
+    return get_config().get_kb_version_dir()
+
+def get_llm_config() -> 'LLMConfig':
+    """获取 LLM 配置。"""
+    return get_config().llm
+
+def get_report_config() -> 'ReportConfig':
+    """获取报告配置。"""
+    return get_config().report
+
+def get_feishu_config() -> 'FeishuConfig':
+    """获取飞书配置。"""
+    return get_config().feishu
+
+def get_openclaw_config() -> 'OpenClawConfig':
+    """获取 OpenClaw 配置。"""
+    return get_config().openclaw
 
 
 def reset_config() -> None:
