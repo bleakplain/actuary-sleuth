@@ -8,7 +8,7 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, ChatMessage, HumanMessage, SystemMessage
 from langchain_core.outputs import ChatResult
 
-from lib.llm.langchain_adapter import ChatAdapter, EmbeddingAdapter, _message_to_dict
+from lib.llm.langchain_adapter import ChatAdapter, _message_to_dict
 
 
 class MockLLMClient:
@@ -21,24 +21,9 @@ class MockLLMClient:
         return f"response to: {messages[-1]['content']}"
 
 
-class MockEmbeddingClient:
-    """Mock BaseLLMClient with embed support"""
-
-    def __init__(self, model: str = "embedding-3"):
-        self.model = model
-
-    def embed(self, texts, **kwargs):
-        return [[float(i) for i in range(3)] for _ in texts]
-
-
 @pytest.fixture
 def mock_chat_client():
     return MockLLMClient()
-
-
-@pytest.fixture
-def mock_embed_client():
-    return MockEmbeddingClient()
 
 
 class TestMessageConversion:
@@ -107,27 +92,3 @@ class TestChatAdapter:
         client.chat.assert_called_once()
         call_kwargs = client.chat.call_args[1]
         assert call_kwargs.get("temperature") == 0.5
-
-
-class TestEmbeddingAdapter:
-
-    def test_embed_documents(self, mock_embed_client):
-        adapter = EmbeddingAdapter(client=mock_embed_client)
-        result = adapter.embed_documents(["hello", "world"])
-        assert len(result) == 2
-        assert result[0] == [0.0, 1.0, 2.0]
-
-    def test_embed_query(self, mock_embed_client):
-        adapter = EmbeddingAdapter(client=mock_embed_client)
-        result = adapter.embed_query("hello")
-        assert result == [0.0, 1.0, 2.0]
-
-    def test_embed_empty_list(self, mock_embed_client):
-        adapter = EmbeddingAdapter(client=mock_embed_client)
-        result = adapter.embed_documents([])
-        assert result == []
-
-    def test_embed_single_text(self, mock_embed_client):
-        adapter = EmbeddingAdapter(client=mock_embed_client)
-        result = adapter.embed_documents(["only one"])
-        assert len(result) == 1

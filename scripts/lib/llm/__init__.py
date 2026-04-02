@@ -10,9 +10,9 @@ LLM 客户端模块
 ### 场景化创建（推荐）
     from lib.llm import LLMClientFactory
 
-    qa_llm = LLMClientFactory.get_qa_llm()
-    audit_llm = LLMClientFactory.get_audit_llm()
-    preprocess_llm = LLMClientFactory.get_doc_preprocess_llm()
+    qa_llm = LLMClientFactory.create_qa_llm()
+    audit_llm = LLMClientFactory.create_audit_llm()
+    embed_model = LLMClientFactory.create_embed_llm()  # BaseEmbedding
 """
 
 # 基础组件

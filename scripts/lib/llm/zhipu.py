@@ -6,7 +6,7 @@ import re
 import logging
 import requests
 import threading
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 from .base import BaseLLMClient
 from .metrics import _track_timing, _with_circuit_breaker, _retry_with_backoff
@@ -188,65 +188,6 @@ class ZhipuClient(BaseLLMClient):
         except requests.exceptions.RequestException:
             return False
 
-    def _do_embed(self, texts: List[str], model: Optional[str] = None) -> List[List[float]]:
-        if not texts:
-            return []
-
-        valid_texts = [t for t in texts if t and t.strip()]
-        if not valid_texts:
-            return []
-
-        embedding_model = model or "embedding-3"
-
-        url = f"{self.base_url}/embeddings"
-        data = {
-            "model": embedding_model,
-            "input": valid_texts
-        }
-
-        session = self._get_session()
-        try:
-            response = session.post(url, json=data, timeout=self.timeout)
-
-            if response.status_code == 429:
-                raise requests.exceptions.RequestException(f"429 Rate limit exceeded: {response.text[:200]}")
-            if response.status_code >= 500:
-                raise requests.exceptions.RequestException(f"{response.status_code} Server error: {response.text[:200]}")
-
-            response.raise_for_status()
-            result = response.json()
-
-            if 'data' not in result:
-                raise ValueError(f"Unexpected response format: 'data' field missing. Response keys: {list(result.keys())}")
-
-            embeddings = [item['embedding'] for item in result['data']]
-
-            result_embeddings = []
-            text_index = 0
-            for text in texts:
-                if text and text.strip():
-                    result_embeddings.append(embeddings[text_index])
-                    text_index += 1
-                else:
-                    result_embeddings.append([0.0] * len(embeddings[0]) if embeddings else [])
-
-            return result_embeddings
-
-        except requests.exceptions.RequestException:
-            raise
-        except (KeyError, IndexError, ValueError) as e:
-            raise ValueError(f"Failed to parse embedding response: {e}")
-
-    @_track_timing("zhipu")
-    @_with_circuit_breaker("zhipu")
-    @_retry_with_backoff(
-        max_retries=LLMConstants.MAX_RETRIES,
-        base_delay=LLMConstants.RETRY_BASE_DELAY,
-        rate_limit_delay_mult=LLMConstants.RATE_LIMIT_DELAY_MULT
-    )
-    def embed(self, texts: List[str], model: Optional[str] = None) -> List[List[float]]:
-        return self._do_embed(texts, model)
-
     def _do_ocr_table(self, image_base64: str) -> str:
         """调用 GLM-OCR 识别表格为 Markdown。"""
         url = f"{self.base_url}/layout_parsing"
@@ -268,7 +209,6 @@ class ZhipuClient(BaseLLMClient):
 
         response.raise_for_status()
         result = response.json()
-        # GLM-OCR returns table content in md_results field
         return result.get("md_results", result.get("content", ""))
 
     @_track_timing("zhipu")
@@ -276,7 +216,7 @@ class ZhipuClient(BaseLLMClient):
     @_retry_with_backoff(
         max_retries=LLMConstants.MAX_RETRIES,
         base_delay=LLMConstants.RETRY_BASE_DELAY,
-        rate_limit_delay_mult=LLMConstants.RATE_LIMIT_DELAY_MULT,
+        rate_limit_delay_mult=LLMConstants.RATE_LIMIT_DELAY_MULT
     )
     def ocr_table(self, image_base64: str) -> str:
         return self._do_ocr_table(image_base64)

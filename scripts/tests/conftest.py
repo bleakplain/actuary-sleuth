@@ -33,3 +33,5 @@ try:
     from tests.utils.mocks import MockLLMClient
 except ImportError:
     pass
+
+pytest_plugins = ["tests.utils.rag_fixtures"]

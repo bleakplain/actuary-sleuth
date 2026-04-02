@@ -71,21 +71,19 @@ class ChatAdapter(BaseChatModel):
 
 
 class EmbeddingAdapter(Embeddings):
-    """LangChain Embeddings 适配器，委托给 BaseLLMClient.embed()"""
+    """将 BaseEmbedding 适配为 LangChain Embeddings"""
 
-    def __init__(self, client: BaseLLMClient):
-        self.client = client
+    def __init__(self, model: 'BaseEmbedding'):
+        self.model = model
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        return self.client.embed(texts)
+        return self.model.get_text_embeddings(texts)
 
     async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
-        return await asyncio.to_thread(self.client.embed, texts)
+        return await asyncio.to_thread(self.model.get_text_embeddings, texts)
 
     def embed_query(self, text: str) -> List[float]:
-        results = self.client.embed([text])
-        return results[0]
+        return self.model.get_text_embedding(text)
 
     async def aembed_query(self, text: str) -> List[float]:
-        results = await asyncio.to_thread(self.client.embed, [text])
-        return results[0]
+        return await asyncio.to_thread(self.model.get_text_embedding, text)

@@ -27,7 +27,7 @@ class Deduplicator:
     def _get_embedding_client(self):
         if not self._embedding_client_initialized:
             try:
-                self.embedding_client = LLMClientFactory.get_embedding_llm()
+                self.embedding_client = LLMClientFactory.create_embed_llm()
                 logger.info("Embedding 客户端初始化成功")
             except Exception as e:
                 logger.warning(f"Embedding 客户端初始化失败: {e}")
@@ -238,7 +238,7 @@ class Deduplicator:
             texts.append(text)
 
         try:
-            embeddings = client.embed(texts)
+            embeddings = client.get_text_embeddings(texts)
         except Exception as e:
             logger.warning(f"Embedding 计算失败: {e}，回退到指纹去重")
             return self._deduplicate_with_fingerprint(clauses)

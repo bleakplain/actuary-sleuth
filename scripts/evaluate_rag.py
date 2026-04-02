@@ -38,7 +38,7 @@ from lib.rag_engine.eval_dataset import (
     load_eval_dataset,
     DEFAULT_DATASET_PATH,
 )
-from lib.rag_engine.llamaindex_adapter import get_embedding_model, ClientLLMAdapter
+from lib.rag_engine.llamaindex_adapter import ClientLLMAdapter
 from lib.llm import LLMClientFactory
 from lib.llm.langchain_adapter import ChatAdapter, EmbeddingAdapter
 from llama_index.core import Settings
@@ -75,11 +75,9 @@ def setup_rag_engine(config: RAGConfig) -> 'RAGEngine':
     """创建 RAG 引擎（含 LLM + Embedding）"""
     _ensure_env()
 
-    llm_client = LLMClientFactory.get_qa_llm()
+    llm_client = LLMClientFactory.create_qa_llm()
     Settings.llm = ClientLLMAdapter(llm_client)
-    Settings.embed_model = get_embedding_model(
-        LLMClientFactory.get_embedding_config()
-    )
+    Settings.embed_model = LLMClientFactory.create_embed_llm()
 
     logger.info("LLM 和 Embedding 模型设置完成")
     return RAGEngine(config)
@@ -88,13 +86,13 @@ def setup_rag_engine(config: RAGConfig) -> 'RAGEngine':
 def create_ragas_llm():
     """创建 RAGAS 评估用的 Langchain LLM"""
     _ensure_env()
-    return ChatAdapter(client=LLMClientFactory.get_eval_llm())
+    return ChatAdapter(client=LLMClientFactory.create_eval_llm())
 
 
 def create_ragas_embeddings():
     """创建 RAGAS 评估用的 Langchain Embedding"""
     _ensure_env()
-    return EmbeddingAdapter(client=LLMClientFactory.get_embedding_llm())
+    return EmbeddingAdapter(LLMClientFactory.create_embed_llm())
 
 
 def export_report(report: RAGEvalReport, output_path: str):

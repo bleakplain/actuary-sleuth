@@ -8,7 +8,7 @@ import asyncio
 import logging
 import threading
 from pathlib import Path
-from typing import Callable, Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional
 
 try:
     from llama_index.core import Settings
@@ -17,7 +17,7 @@ except ImportError:
 
 from .config import RAGConfig
 from .index_manager import VectorIndexManager
-from .llamaindex_adapter import ClientLLMAdapter, get_embedding_model
+from .llamaindex_adapter import ClientLLMAdapter
 from .retrieval import hybrid_search
 from .bm25_index import BM25Index
 from .reranker import LLMReranker, RerankConfig
@@ -101,16 +101,15 @@ class RAGEngine:
     def __init__(
         self,
         config: RAGConfig = None,
-        llm_provider: Callable[[], BaseLLMClient] = None
+        llm_client: BaseLLMClient = None
     ):
         self.config = config or RAGConfig()
-        self.llm_provider = llm_provider or LLMClientFactory.get_qa_llm
         self.index_manager = VectorIndexManager(self.config)
         self.query_engine = None
 
         self._llm = None
         self._embed_model = None
-        self._llm_client: Optional[BaseLLMClient] = None
+        self._llm_client = llm_client
         self._preprocessor: Optional[QueryPreprocessor] = None
         self._reranker: Optional[LLMReranker] = None
         self._bm25_index: Optional[BM25Index] = None
@@ -120,11 +119,11 @@ class RAGEngine:
         self._setup_llm()
 
     def _setup_llm(self):
-        self._llm_client = self.llm_provider()
-        embed_config = LLMClientFactory.get_embedding_config()
+        if not self._llm_client:
+            self._llm_client = LLMClientFactory.create_qa_llm()
 
         self._llm = ClientLLMAdapter(self._llm_client)
-        self._embed_model = get_embedding_model(embed_config)
+        self._embed_model = LLMClientFactory.create_embed_llm()
 
         rerank_config = RerankConfig(
             enabled=self.config.hybrid_config.enable_rerank,
@@ -213,7 +212,7 @@ class RAGEngine:
                     'unverified_claims': [],
                 }
 
-            prompt, included_count = self._build_qa_prompt(question, search_results)
+            prompt, included_count = self._build_qa_prompt(self.config, question, search_results)
             if not self._llm_client:
                 raise RetrievalError("LLM 客户端未初始化")
             answer = self._llm_client.generate(prompt)
@@ -256,10 +255,11 @@ class RAGEngine:
         """异步问答模式"""
         return await asyncio.to_thread(self._do_ask, question, include_sources)
 
-    def _build_qa_prompt(self, question: str, search_results: List[Dict[str, Any]]) -> tuple[str, int]:
+    @staticmethod
+    def _build_qa_prompt(config: 'RAGConfig', question: str, search_results: List[Dict[str, Any]]) -> tuple[str, int]:
         context_parts: List[str] = []
         total_chars = 0
-        max_chars = self.config.max_context_chars
+        max_chars = config.max_context_chars
 
         for i, result in enumerate(search_results, 1):
             law_name = result.get('law_name', '未知法规')
@@ -434,7 +434,7 @@ def create_qa_engine(config: RAGConfig = None) -> RAGEngine:
     Returns:
         RAGEngine: 配置为问答模式的引擎实例
     """
-    return RAGEngine(config or RAGConfig(), LLMClientFactory.get_qa_llm)
+    return RAGEngine(config or RAGConfig(), LLMClientFactory.create_qa_llm())
 
 
 def create_audit_engine(config: RAGConfig = None) -> RAGEngine:
@@ -449,4 +449,4 @@ def create_audit_engine(config: RAGConfig = None) -> RAGEngine:
     Returns:
         RAGEngine: 配置为审计模式的引擎实例
     """
-    return RAGEngine(config or RAGConfig(), LLMClientFactory.get_audit_llm)
+    return RAGEngine(config or RAGConfig(), LLMClientFactory.create_audit_llm())
