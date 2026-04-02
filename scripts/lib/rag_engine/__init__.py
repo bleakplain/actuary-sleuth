@@ -30,6 +30,7 @@
     └── KBDataImporter: 数据导入编排
 """
 import logging
+from typing import Any
 
 # 配置日志
 logging.basicConfig(
@@ -44,6 +45,31 @@ from .reranker import LLMReranker, RerankConfig
 from .attribution import parse_citations, AttributionResult, Citation
 
 # Optional RAG engine components (require llama_index)
+RAGEngine: Any
+create_qa_engine: Any
+create_audit_engine: Any
+VectorIndexManager: Any
+KBDataImporter: Any
+hybrid_search: Any
+vector_search: Any
+reciprocal_rank_fusion: Any
+BM25Index: Any
+KBChecklistChunker: Any
+RetrievalEvaluator: Any
+GenerationEvaluator: Any
+RAGEvalReport: Any
+EvalSample: Any
+QuestionType: Any
+load_eval_dataset: Any
+create_default_eval_dataset: Any
+save_eval_dataset: Any
+DEFAULT_DATASET_PATH: Any
+detect_quality: Any
+compute_retrieval_relevance: Any
+compute_info_completeness: Any
+classify_badcase: Any
+assess_compliance_risk: Any
+
 try:
     from .rag_engine import RAGEngine, create_qa_engine, create_audit_engine
     from .index_manager import VectorIndexManager

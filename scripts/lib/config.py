@@ -382,6 +382,24 @@ class Config:
         self._regulation_search = RegulationSearchConfig(self._config)
         self._openclaw = OpenClawConfig(self._config)
 
+    # ===== 嵌套配置属性 =====
+
+    @property
+    def feishu(self) -> FeishuConfig:
+        return self._feishu
+
+    @property
+    def report(self) -> ReportConfig:
+        return self._report
+
+    @property
+    def llm(self) -> LLMConfig:
+        return self._llm
+
+    @property
+    def openclaw(self) -> OpenClawConfig:
+        return self._openclaw
+
     # ===== 业务属性 =====
 
     @property
@@ -500,7 +518,7 @@ class Config:
             value = config.get('unknown.key', 'default_value')
         """
         keys = key.split('.')
-        value = self._config
+        value: Any = self._config
 
         for k in keys:
             if isinstance(value, dict):
