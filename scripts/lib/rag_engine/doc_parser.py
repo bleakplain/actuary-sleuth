@@ -307,7 +307,7 @@ class RegulationDocParser:
             return []
 
         # 获取文件列表
-        md_files = sorted(self.regulations_dir.glob(file_pattern))
+        md_files = sorted(self.regulations_dir.rglob(file_pattern))
         if not md_files:
             logger.error(f"未找到匹配 {file_pattern} 的文件")
             return []

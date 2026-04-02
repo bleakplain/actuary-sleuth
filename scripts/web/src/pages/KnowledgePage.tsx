@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Card, Table, Button, Space, Modal, Typography, message, Progress, Statistic, Row, Col, Popconfirm, Descriptions, Tag, Spin, Drawer, Input, Badge } from 'antd';
-import { DatabaseOutlined, ReloadOutlined, ImportOutlined, PlusOutlined, UnorderedListOutlined, HistoryOutlined, DeleteOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Card, Table, Button, Space, Modal, Typography, message, Progress, Statistic, Row, Col, Popconfirm, Descriptions, Tag, Spin, Drawer, Input, Badge, Tree } from 'antd';
+import { DatabaseOutlined, ReloadOutlined, ImportOutlined, PlusOutlined, UnorderedListOutlined, HistoryOutlined, DeleteOutlined, CheckCircleOutlined, FolderOutlined, FileOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -32,10 +32,17 @@ export default function KnowledgePage() {
 
   // 分块查看状态
   const [chunksOpen, setChunksOpen] = useState(false);
-  const [chunksDocName, setChunksDocName] = useState('');
+  const [chunksFilePath, setChunksFilePath] = useState('');
   const [chunks, setChunks] = useState<ChunkItem[]>([]);
   const [selectedChunk, setSelectedChunk] = useState<ChunkItem | null>(null);
-  const [sourceContent, setSourceContent] = useState('');
+  const [rawContent, setRawContent] = useState('');
+
+  // 派生状态
+  const chunksDocName = chunksFilePath.split('/').pop() || chunksFilePath;
+  const sourceContent = useMemo(() => rawContent
+    .replace(/^---\s*\n[\s\S]*?\n---\s*\n/, '')
+    .replace(/^>\s*\*\*元数据\*\*.*$/gm, ''), [rawContent]);
+
   const [chunksLoading, setChunksLoading] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
@@ -50,14 +57,41 @@ export default function KnowledgePage() {
   const [createVersionModalOpen, setCreateVersionModalOpen] = useState(false);
   const [versionDescription, setVersionDescription] = useState('');
 
-  // highlightLines 变化时滚动到高亮行
+  // highlightLines 变化时在 ReactMarkdown DOM 中高亮对应段落并滚动
   useEffect(() => {
-    if (!highlightLines || !sourceRef.current) return;
+    const container = sourceRef.current;
+    if (!container) return;
+
+    // 清除旧高亮
+    container.querySelectorAll('.kb-highlight').forEach(el => el.classList.remove('kb-highlight'));
+
+    if (!highlightLines) return;
+
+    const lines = sourceContent.split('\n');
+    // 提取高亮区域的文本（去除空白后用于匹配）
+    const hlText = lines
+      .slice(highlightLines.start - 1, highlightLines.end)
+      .join('')
+      .replace(/\s+/g, '')
+      .slice(0, 200);
+
+    if (!hlText) return;
+
     requestAnimationFrame(() => {
-      const el = sourceRef.current?.querySelector('[data-highlight]');
-      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // 遍历 ReactMarkdown 渲染的所有块级元素，检查文本内容是否匹配
+      const blocks = container.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, blockquote, pre, tr');
+      for (const block of blocks) {
+        const text = block.textContent?.replace(/\s+/g, '') || '';
+        if (text.length > 10 && hlText.includes(text.slice(0, Math.min(text.length, 60)))) {
+          block.classList.add('kb-highlight');
+        }
+      }
+
+      // 滚动到第一个高亮元素
+      const first = container.querySelector('.kb-highlight');
+      first?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
-  }, [highlightLines]);
+  }, [highlightLines, sourceContent]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -71,8 +105,9 @@ export default function KnowledgePage() {
       setIndexStatus(status);
       setVersions(verData.versions);
       setActiveVersion(verData.active_version);
-    } catch (err) {
-      message.error(`加载失败: ${err}`);
+    } catch (err: any) {
+      console.error('KnowledgePage loadData error:', err);
+      message.error(`加载失败: ${err?.message || err}`);
     } finally {
       setLoading(false);
     }
@@ -149,45 +184,59 @@ export default function KnowledgePage() {
   };
 
   const locateInSource = useCallback((text: string) => {
-    // 在原文中按行查找条款位置
-    const articleMatch = text.match(/第[一二三四五六七八九十百千\d]+条[\s\S]*?/) || [text];
-    const articleText = articleMatch[0].slice(0, 500);
-    const snippet = articleText.replace(/\s+/g, '').slice(0, 80);
     const lines = sourceContent.split('\n');
+    const flatSource = sourceContent.replace(/\s+/g, '');
+    const snippet = text.replace(/\s+/g, '').slice(0, 80);
 
-    // 逐行匹配：去除空白后比较前80字符
+    // 在去空白的全文中定位 snippet
+    const pos = flatSource.indexOf(snippet);
+    if (pos < 0) return;
+
+    // 反算对应的源码行号
+    let charCount = 0;
     let startLine = -1;
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].replace(/\s+/g, '').startsWith(snippet)) {
+      const lineLen = lines[i].replace(/\s+/g, '').length;
+      if (charCount + lineLen > pos) {
         startLine = i;
         break;
       }
+      charCount += lineLen;
     }
     if (startLine < 0) return;
 
-    // 从起始行往下找下一个"第X条"作为结束行
+    // 从起始行往上找标题行（## 第N项 或 第X条）
+    let headerLine = startLine;
+    for (let i = startLine; i >= 0; i--) {
+      if (/^##\s*第\d+项/.test(lines[i]) || /^\s*第[一二三四五六七八九十百千\d]+条/.test(lines[i])) {
+        headerLine = i;
+        break;
+      }
+    }
+
+    // 从起始行往下找下一个标题作为结束行
     let endLine = lines.length;
     for (let i = startLine + 1; i < lines.length; i++) {
-      if (/^\s*[第（][一二三四五六七八九十百千\d]+[条）]/.test(lines[i])) {
+      if (/^##\s*第\d+项/.test(lines[i]) || /^\s*第[一二三四五六七八九十百千\d]+条/.test(lines[i])) {
         endLine = i;
         break;
       }
     }
-    setHighlightLines({ start: startLine, end: endLine });
+    setHighlightLines({ start: headerLine, end: endLine });
   }, [sourceContent]);
 
-  const handleViewChunks = async (name: string) => {
+  const handleViewChunks = async (filePath: string) => {
     setChunksLoading(true);
     setChunksOpen(true);
-    setChunksDocName(name);
+    setChunksFilePath(filePath);
     setSelectedChunk(null);
     setHighlightLines(null);
     try {
       const [previewResult, chunksResult] = await Promise.all([
-        kbApi.fetchDocumentPreview(name),
-        kbApi.fetchDocumentChunks(name),
+        kbApi.fetchDocumentPreview(filePath),
+        kbApi.fetchDocumentChunks(filePath),
       ]);
-      setSourceContent(previewResult.content);
+      setRawContent(previewResult.content);
       setChunks(chunksResult.chunks as ChunkItem[]);
     } catch (err) {
       message.error(`加载失败: ${err}`);
@@ -197,7 +246,7 @@ export default function KnowledgePage() {
   };
 
   const handleStartEdit = () => {
-    setEditContent(sourceContent);
+    setEditContent(rawContent);
     setEditing(true);
   };
 
@@ -209,14 +258,59 @@ export default function KnowledgePage() {
   const handleSaveEdit = async () => {
     setSaving(true);
     try {
-      await kbApi.saveDocument(chunksDocName, editContent);
-      setSourceContent(editContent);
+      await kbApi.saveDocument(chunksFilePath, editContent);
+      setRawContent(editContent);
       setEditing(false);
       message.success('保存成功，请重建索引以生效');
     } catch (err) {
       message.error(`保存失败: ${err}`);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const [selectedDir, setSelectedDir] = useState<string | null>(null);
+
+  // 从文档列表构建目录树
+  const treeData = useMemo(() => {
+    const dirMap = new Map<string, { count: number; clauses: number }>();
+    documents.forEach(doc => {
+      const parts = doc.file_path.split('/');
+      const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '根目录';
+      const existing = dirMap.get(dir) || { count: 0, clauses: 0 };
+      existing.count++;
+      existing.clauses += doc.clause_count;
+      dirMap.set(dir, existing);
+    });
+
+    return Array.from(dirMap.entries()).map(([dir, info]) => {
+      const dirName = dir.split('/').pop() || dir;
+      const docCount = info.count;
+      return {
+        key: dir,
+        title: (
+          <span>
+            <FolderOutlined style={{ marginRight: 6, color: '#1890ff' }} />
+            <span>{dirName}</span>
+            <Tag style={{ marginLeft: 8 }}>{docCount} 篇</Tag>
+            <Tag color="orange" style={{ marginLeft: 4 }}>{info.clauses} 条</Tag>
+          </span>
+        ),
+      };
+    });
+  }, [documents]);
+
+  // 根据选中目录过滤文档
+  const filteredDocuments = useMemo(() => {
+    if (!selectedDir) return documents;
+    return documents.filter(doc => doc.file_path.startsWith(selectedDir + '/'));
+  }, [documents, selectedDir]);
+
+  const handleTreeSelect = (selectedKeys: React.Key[]) => {
+    if (selectedKeys.length > 0) {
+      setSelectedDir(selectedKeys[0] as string);
+    } else {
+      setSelectedDir(null);
     }
   };
 
@@ -242,7 +336,7 @@ export default function KnowledgePage() {
       key: 'action',
       width: 100,
       render: (_: string, record: Document) => (
-        <Button type="link" icon={<UnorderedListOutlined />} onClick={() => handleViewChunks(record.name)}>
+        <Button type="link" icon={<UnorderedListOutlined />} onClick={() => handleViewChunks(record.file_path)}>
           查看
         </Button>
       ),
@@ -317,42 +411,72 @@ export default function KnowledgePage() {
       )}
 
       <Card>
-        <Table
-          dataSource={documents}
-          columns={columns}
-          rowKey="name"
-          loading={loading}
-          pagination={{ pageSize: 20 }}
-          size="middle"
-        />
+        <Row style={{ minHeight: 400 }}>
+          {/* 左栏：目录树 */}
+          <Col
+            span={6}
+            style={{
+              borderRight: '1px solid #f0f0f0',
+              maxHeight: 'calc(100vh - 320px)',
+              overflow: 'auto',
+            }}
+          >
+            <div style={{ padding: '8px 12px', fontWeight: 600, borderBottom: '1px solid #f0f0f0', marginBottom: 8 }}>
+              法规分类
+            </div>
+            <Tree
+              showLine
+              treeData={treeData}
+              onSelect={handleTreeSelect}
+              selectedKeys={selectedDir ? [selectedDir] : []}
+              defaultExpandAll
+            />
+          </Col>
+
+          {/* 右栏：文档列表 */}
+          <Col span={18}>
+            <div style={{ padding: '8px 12px', fontWeight: 600, borderBottom: '1px solid #f0f0f0', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>
+                {selectedDir
+                  ? <><FileOutlined style={{ marginRight: 6 }} />{selectedDir.split('/').pop()}</>
+                  : <><DatabaseOutlined style={{ marginRight: 6 }} />全部文档 ({documents.length})</>}
+              </span>
+              {selectedDir && (
+                <Button type="link" size="small" onClick={() => setSelectedDir(null)}>
+                  显示全部
+                </Button>
+              )}
+            </div>
+            <Table
+              dataSource={filteredDocuments}
+              columns={columns}
+              rowKey="name"
+              loading={loading}
+              pagination={{ pageSize: 20 }}
+              size="middle"
+            />
+          </Col>
+        </Row>
       </Card>
 
       <Modal
-        title={`分块验证 — ${chunksDocName} (${chunks.length} 块)`}
+        title={<span title={chunksDocName} style={{ display: 'inline-block', maxWidth: 'calc(95vw - 100px)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{`分块验证 — ${chunksDocName}`}</span>}
         open={chunksOpen}
         onCancel={() => { setChunksOpen(false); setSelectedChunk(null); setEditing(false); }}
         footer={null}
         width="95vw"
         style={{ top: 20, maxWidth: 1600 }}
-        bodyStyle={{ padding: 0, height: 'calc(100vh - 120px)' }}
+        styles={{ body: { padding: 0, height: 'calc(100vh - 120px)' } }}
       >
         {chunksLoading ? (
-          <div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" tip="加载中..." /></div>
+          <div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" /></div>
         ) : (
-          <Row style={{ height: '100%' }}>
+          <div style={{ display: 'flex', height: '100%' }}>
             {/* 左栏：md 原文 */}
-            <Col
-              span={10}
-              style={{
-                height: '100%',
-                borderRight: '1px solid #f0f0f0',
-                display: 'flex',
-                flexDirection: 'column',
-              }}
-            >
-              <div style={{ padding: '8px 12px', fontWeight: 600, borderBottom: '1px solid #f0f0f0', flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>原文 ({chunksDocName})</span>
-                <Space>
+            <div style={{ width: '45%', height: '100%', borderRight: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '6px 12px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, background: '#fafafa' }}>
+                <Text strong style={{ fontSize: 13 }}>原文</Text>
+                <Space size={4}>
                   {editing ? (
                     <>
                       <Button size="small" type="primary" loading={saving} onClick={handleSaveEdit}>保存</Button>
@@ -371,8 +495,7 @@ export default function KnowledgePage() {
                     style={{
                       width: '100%',
                       height: '100%',
-                      border: '1px solid #d9d9d9',
-                      borderRadius: 4,
+                      border: 'none',
                       padding: 8,
                       fontSize: 12,
                       lineHeight: 1.6,
@@ -387,17 +510,10 @@ export default function KnowledgePage() {
                   </div>
                 )}
               </div>
-            </Col>
+            </div>
 
             {/* 右栏：提取的条款列表 */}
-            <Col
-              span={14}
-              style={{
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-              }}
-            >
+            <div style={{ width: '55%', height: '100%', display: 'flex', flexDirection: 'column' }}>
               <div style={{ padding: '8px 12px', fontWeight: 600, borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
                 提取条款 ({chunks.length})
               </div>
@@ -424,9 +540,10 @@ export default function KnowledgePage() {
                     {selectedChunk.issuing_authority && (
                       <Descriptions.Item label="发文机关">{selectedChunk.issuing_authority}</Descriptions.Item>
                     )}
-                    {selectedChunk.effective_date && (
-                      <Descriptions.Item label="生效日期">{selectedChunk.effective_date}</Descriptions.Item>
-                    )}
+                    {Object.entries(selectedChunk)
+                      .filter(([k]) => !['law_name', 'article_number', 'category', 'hierarchy_path', 'source_file', 'doc_number', 'issuing_authority', 'effective_date', 'text', 'text_length', '_node_content', '_node_type', 'doc_id', 'document_id', 'ref_doc_id'].includes(k))
+                      .map(([k, v]) => v && <Descriptions.Item key={k} label={k}><Tag color="blue">{String(v)}</Tag></Descriptions.Item>)
+                    }
                     <Descriptions.Item label="字数">{selectedChunk.text_length}</Descriptions.Item>
                   </Descriptions>
                   <div
@@ -469,7 +586,7 @@ export default function KnowledgePage() {
                         title: '条款号',
                         dataIndex: 'article_number',
                         key: 'article_number',
-                        width: 200,
+                        width: 70,
                         ellipsis: true,
                         render: (v: string) => v === '未知' ? <Text type="secondary">{v}</Text> : v,
                       },
@@ -477,14 +594,15 @@ export default function KnowledgePage() {
                         title: '分类',
                         dataIndex: 'category',
                         key: 'category',
-                        width: 90,
+                        width: 80,
+                        ellipsis: true,
                         render: (v: string) => <Tag>{v}</Tag>,
                       },
                       {
                         title: '字数',
                         dataIndex: 'text_length',
                         key: 'text_length',
-                        width: 60,
+                        width: 50,
                       },
                       {
                         title: '内容摘要',
@@ -499,8 +617,8 @@ export default function KnowledgePage() {
                   />
                 </div>
               )}
-            </Col>
-          </Row>
+            </div>
+          </div>
         )}
       </Modal>
 

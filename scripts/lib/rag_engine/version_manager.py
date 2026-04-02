@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """知识库版本管理器
 
-管理法规知识库的多版本：每个版本独立保存源文件快照、向量索引和 BM25 索引。
+管理法规知识库的多版本：每个版本独立保存向量索引和 BM25 索引。
+源文件统一存放在外部目录（如项目根目录 references/），不随版本复制。
 """
 import json
 import shutil
@@ -24,6 +25,7 @@ class VersionMeta:
     chunk_count: int = 0
     active: bool = False
     description: str = ""
+    regulations_dir: str = ""
 
 
 @dataclass
@@ -99,22 +101,17 @@ class KBVersionManager:
 
     def create_version(
         self,
-        source_dir: str,
+        regulations_dir: str,
         description: str = "",
     ) -> VersionMeta:
-        """创建新版本：复制源文件快照到版本目录。"""
+        """创建新版本：仅管理索引，源文件保持在 regulations_dir。"""
         version_id = self.next_version_id()
         version_dir = self.base_dir / version_id
         version_dir.mkdir(parents=True, exist_ok=True)
 
-        refs_dir = version_dir / "references"
-        src_path = Path(source_dir)
-        if src_path.exists():
-            if refs_dir.exists():
-                shutil.rmtree(refs_dir)
-            shutil.copytree(src_path, refs_dir)
-
-        doc_count = len(list(refs_dir.glob("*.md"))) if refs_dir.exists() else 0
+        # 不再复制源文件，仅统计文档数
+        reg_path = Path(regulations_dir)
+        doc_count = len(list(reg_path.rglob("*.md"))) if reg_path.exists() else 0
 
         # 设为 active
         for v in self._registry.versions:
@@ -127,6 +124,7 @@ class KBVersionManager:
             chunk_count=0,
             active=True,
             description=description,
+            regulations_dir=str(reg_path),
         )
         self._registry.versions.append(meta)
         self._registry.active_version = version_id
@@ -181,8 +179,11 @@ class KBVersionManager:
     def get_version_paths(self, version_id: str) -> Dict[str, str]:
         """返回指定版本的路径映射。"""
         version_dir = self.base_dir / version_id
+        meta = self.get_version_meta(version_id)
+        # 优先使用版本元数据中存储的 regulations_dir 绝对路径
+        reg_dir = meta.regulations_dir if meta and meta.regulations_dir else str(version_dir / "references")
         return {
-            "regulations_dir": str(version_dir / "references"),
+            "regulations_dir": reg_dir,
             "vector_db_path": str(version_dir / "lancedb"),
             "bm25_index_path": str(version_dir / "bm25_index.pkl"),
         }

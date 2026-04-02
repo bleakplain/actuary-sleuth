@@ -66,3 +66,8 @@ body {
 .markdown-body strong {
   font-weight: 600;
 }
+
+.markdown-body .kb-highlight {
+  background: #fff3cd;
+  border-radius: 2px;
+}

@@ -56,10 +56,12 @@ try:
     from .doc_parser import RegulationDocParser
     from .index_manager import VectorIndexManager
     from .data_importer import RegulationDataImporter
+    from .data_importer import KBDataImporter
     from .retrieval import hybrid_search, vector_search
     from .fusion import reciprocal_rank_fusion
     from .bm25_index import BM25Index
     from .semantic_chunker import SemanticChunker
+    from .kb_chunker import KBChecklistChunker
     from .evaluator import RetrievalEvaluator, GenerationEvaluator, RAGEvalReport
     from .eval_dataset import EvalSample, QuestionType, load_eval_dataset, create_default_eval_dataset, save_eval_dataset, DEFAULT_DATASET_PATH
     from .quality_detector import detect_quality, compute_retrieval_relevance, compute_info_completeness
@@ -73,11 +75,13 @@ except ImportError:
     RegulationDocParser = None
     VectorIndexManager = None
     RegulationDataImporter = None
+    KBDataImporter = None
     hybrid_search = None
     vector_search = None
     reciprocal_rank_fusion = None
     BM25Index = None
     SemanticChunker = None
+    KBChecklistChunker = None
     RetrievalEvaluator = None
     GenerationEvaluator = None
     RAGEvalReport = None
@@ -114,11 +118,13 @@ __all__ = [
     'RegulationDocParser',
     'VectorIndexManager',
     'RegulationDataImporter',
+    'KBDataImporter',
     'hybrid_search',
     'vector_search',
     'reciprocal_rank_fusion',
     'BM25Index',
     'SemanticChunker',
+    'KBChecklistChunker',
     'RetrievalEvaluator',
     'GenerationEvaluator',
     'RAGEvalReport',
