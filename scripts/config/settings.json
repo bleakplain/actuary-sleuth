@@ -26,14 +26,12 @@
     "max_tokens": 16384
   },
   "llm": {
-    "chat": { "provider": "zhipu" },
+    "chat":  { "provider": "zhipu" },
     "embed": { "provider": "ollama" },
-    "scenes": {
-      "qa":             { "model": "glm-4-flash", "timeout": 60 },
-      "audit":          { "model": "glm-4-plus",  "timeout": 120 },
-      "eval":           { "model": "glm-4-flash", "timeout": 180 },
-      "doc_preprocess": { "model": null, "timeout": null }
-    }
+    "eval":  { "provider": "zhipu" },
+    "audit": { "provider": "zhipu" },
+    "qa":    { "provider": "zhipu" },
+    "doc_preprocess": { "provider": "zhipu" }
   },
   "report": {
     "default_format": "docx",

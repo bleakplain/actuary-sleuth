@@ -194,10 +194,10 @@ class LLMConfig:
         """嵌入场景配置：{provider}"""
         return self._config.get('embed', {'provider': 'zhipu'})
 
-    @property
-    def scenes(self) -> Dict[str, Dict[str, Any]]:
-        """场景配置：{scene_name: {model, timeout}}"""
-        return self._config.get('scenes', {})
+    def get_provider(self, scene: str) -> str:
+        """获取场景对应的 provider"""
+        scene_config = self._config.get(scene, {})
+        return scene_config.get('provider', self.chat.get('provider', 'zhipu'))
 
 
 class ZhipuConfig:
