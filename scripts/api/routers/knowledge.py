@@ -1,5 +1,6 @@
 """知识库管理路由 — 文档列表、导入、重建、预览。"""
 
+import re
 import uuid
 import json
 import asyncio
@@ -33,7 +34,6 @@ def _get_regulations_dir() -> Path:
 
 @router.get("/documents", response_model=list[DocumentOut])
 async def list_documents():
-    import re
     reg_dir = _get_regulations_dir()
     documents = []
     if reg_dir.exists():

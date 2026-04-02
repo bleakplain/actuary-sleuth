@@ -5,11 +5,15 @@
 """
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional, List, Dict
 
 from lib.common.database import get_connection
+
+logger = logging.getLogger(__name__)
 
 
 _SCHEMA_SQL = """
@@ -106,6 +110,16 @@ CREATE TABLE IF NOT EXISTS feedback (
 CREATE INDEX IF NOT EXISTS idx_feedback_message ON feedback(message_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status);
 CREATE INDEX IF NOT EXISTS idx_feedback_type ON feedback(classified_type);
+
+CREATE TABLE IF NOT EXISTS kb_versions (
+    version_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    document_count INTEGER NOT NULL DEFAULT 0,
+    chunk_count INTEGER NOT NULL DEFAULT 0,
+    description TEXT NOT NULL DEFAULT '',
+    regulations_dir TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -140,6 +154,30 @@ def _migrate_db():
             conn.execute("ALTER TABLE messages ADD COLUMN faithfulness_score REAL")
         if 'unverified_claims_json' not in cols:
             conn.execute("ALTER TABLE messages ADD COLUMN unverified_claims_json TEXT DEFAULT '[]'")
+
+    # JSON → SQLite 迁移：从 version_meta.json 导入已有版本数据
+    with get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM kb_versions").fetchone()[0]
+        if count == 0:
+            json_path = (
+                Path(__file__).parent.parent
+                / "lib" / "rag_engine" / "data" / "kb" / "version_meta.json"
+            )
+            if json_path.exists():
+                data = json.loads(json_path.read_text(encoding="utf-8"))
+                versions = data.get("versions", [])
+                for v in versions:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO kb_versions "
+                        "(version_id, created_at, document_count, chunk_count, "
+                        "description, regulations_dir, active) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (v["version_id"], v["created_at"],
+                         v.get("document_count", 0), v.get("chunk_count", 0),
+                         v.get("description", ""), v.get("regulations_dir", ""),
+                         1 if v.get("active") else 0),
+                    )
+                logger.info(f"迁移 {len(versions)} 个 KB 版本从 JSON 到 SQLite")
 
 
 def create_conversation(conversation_id: str, title: str = "") -> None:
