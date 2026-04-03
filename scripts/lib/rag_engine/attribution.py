@@ -41,12 +41,54 @@ class Citation:
     confidence: str = 'tagged'
 
 
+_VALUE_PATTERNS = [
+    re.compile(r'(\d+(?:\.\d+)?)\s*[%％]'),
+    re.compile(r'(\d+(?:\.\d+)?)\s*(?:倍|元|万元)'),
+    re.compile(r'(\d+)\s*(?:天|年|个月|周岁)'),
+]
+
+
+def _extract_numeric_values(text: str) -> Dict[str, str]:
+    values: Dict[str, str] = {}
+    for pattern in _VALUE_PATTERNS:
+        for match in pattern.finditer(text):
+            values[match.group(1)] = match.group(0)
+    return values
+
+
+def _check_content_mismatches(
+    answer: str,
+    sources: List[Dict[str, Any]],
+) -> List[Dict[str, str]]:
+    if not answer or not sources:
+        return []
+
+    answer_values = _extract_numeric_values(answer)
+    if not answer_values:
+        return []
+
+    source_values: set[str] = set()
+    for source in sources:
+        source_values.update(_extract_numeric_values(source.get("content", "")).keys())
+
+    mismatches = []
+    for value, original_text in answer_values.items():
+        if value not in source_values:
+            mismatches.append({
+                "value": original_text,
+                "type": "numeric_mismatch",
+            })
+
+    return mismatches
+
+
 @dataclass(frozen=True)
 class AttributionResult:
     """归因分析结果"""
     citations: List[Citation] = field(default_factory=list)
     unverified_claims: List[str] = field(default_factory=list)
     uncited_sources: List[int] = field(default_factory=list)
+    content_mismatches: List[Dict[str, str]] = field(default_factory=list)
 
 
 def parse_citations(
@@ -76,11 +118,13 @@ def parse_citations(
     uncited = sorted(all_indices - cited_indices)
 
     unverified = _detect_unverified_claims(answer)
+    mismatches = _check_content_mismatches(answer, sources)
 
     return AttributionResult(
         citations=citations,
         unverified_claims=unverified,
         uncited_sources=uncited,
+        content_mismatches=mismatches,
     )
 
 

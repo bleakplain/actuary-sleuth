@@ -59,16 +59,26 @@ def detect_quality(
     sources: List[Dict[str, Any]],
     faithfulness_score: Optional[float] = None,
 ) -> Dict[str, float]:
-    """三维度自动质量评分"""
+    """三维度自动质量评分
+
+    当 faithfulness_score 不可用时，自动将权重重新分配给
+    retrieval_relevance 和 completeness（各 50%）。
+    """
     faithfulness = faithfulness_score if faithfulness_score is not None else 0.0
     retrieval_relevance = compute_retrieval_relevance(query, sources)
     completeness = compute_info_completeness(query, answer)
 
-    overall = (
-        0.4 * faithfulness +
-        0.3 * retrieval_relevance +
-        0.3 * completeness
-    )
+    if faithfulness_score is not None:
+        overall = (
+            0.4 * faithfulness +
+            0.3 * retrieval_relevance +
+            0.3 * completeness
+        )
+    else:
+        overall = (
+            0.5 * retrieval_relevance +
+            0.5 * completeness
+        )
 
     return {
         "faithfulness": round(faithfulness, 4),

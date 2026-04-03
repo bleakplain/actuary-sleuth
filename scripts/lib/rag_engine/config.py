@@ -17,6 +17,7 @@ class HybridQueryConfig:
     rerank_top_k: int = 5
     reranker_type: str = "llm"
     max_chunks_per_article: int = 3
+    min_rrf_score: float = 0.0
 
     _VALID_RERANKER_TYPES = {"llm", "gguf", "none"}
 

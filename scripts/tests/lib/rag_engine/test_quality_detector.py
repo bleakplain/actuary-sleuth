@@ -76,6 +76,18 @@ class TestDetectQuality:
         result = detect_quality("query", "answer", [{"content": "query answer"}])
         assert result["faithfulness"] == 0.0
 
+    def test_none_faithfulness_uses_equal_weights(self):
+        result = detect_quality(
+            query="健康保险等待期",
+            answer="等待期不得超过90天",
+            sources=[{"content": "健康保险等待期不得超过90天"}],
+            faithfulness_score=None,
+        )
+        rr = result["retrieval_relevance"]
+        comp = result["completeness"]
+        expected = 0.5 * rr + 0.5 * comp
+        assert abs(result["overall"] - round(expected, 4)) < 0.0001
+
     def test_values_rounded_to_four_decimals(self):
         result = detect_quality(
             query="等待期",

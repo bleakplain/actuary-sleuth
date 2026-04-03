@@ -209,6 +209,60 @@ def compare_reports(report1: RAGEvalReport, report2: RAGEvalReport, label1: str 
     print("=" * 70 + "\n")
 
 
+def detect_regressions(current_report: Dict, baseline_report: Dict) -> Dict[str, Any]:
+    """检测指标退化
+
+    Args:
+        current_report: 当前评估报告（字典格式）
+        baseline_report: 基线评估报告（字典格式）
+
+    Returns:
+        包含 passed, degradations, improvements 的字典
+    """
+    TOLERANCE = 0.02
+
+    metrics_to_check = [
+        ("recall@5", ["retrieval", "recall@5"]),
+        ("faithfulness", ["generation", "faithfulness"]),
+        ("answer_correctness", ["generation", "answer_correctness"]),
+    ]
+
+    degradations: List[Dict[str, Any]] = []
+    improvements: List[Dict[str, Any]] = []
+
+    for display_name, key_path in metrics_to_check:
+        current_val: float = current_report
+        baseline_val: float = baseline_report
+        try:
+            for key in key_path:
+                current_val = current_val[key]
+                baseline_val = baseline_val[key]
+        except (KeyError, TypeError):
+            continue
+
+        delta = current_val - baseline_val
+        if delta < -TOLERANCE:
+            degradations.append({
+                "metric": display_name,
+                "baseline": baseline_val,
+                "current": current_val,
+                "delta": round(delta, 4),
+            })
+        elif delta > TOLERANCE:
+            improvements.append({
+                "metric": display_name,
+                "baseline": baseline_val,
+                "current": current_val,
+                "delta": round(delta, 4),
+            })
+
+    return {
+        "passed": len(degradations) == 0,
+        "degradations": degradations,
+        "improvements": improvements,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="RAG 知识库质量评估工具",

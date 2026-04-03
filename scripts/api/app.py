@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -60,6 +61,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"默认数据集初始化失败: {e}")
 
+    auto_classify_task = asyncio.create_task(_auto_classify_loop())
+
     try:
         _ensure_knowledge_base()
 
@@ -75,6 +78,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"RAG 引擎初始化失败（问答功能不可用）: {e}")
 
+    auto_classify_task.cancel()
     yield
 
     if rag_engine is not None:
@@ -83,6 +87,20 @@ async def lifespan(app: FastAPI):
 
     from api.dependencies import on_shutdown
     on_shutdown()
+
+
+async def _auto_classify_loop():
+    while True:
+        try:
+            from api.routers.feedback import classify_pending_badcases
+            result = await classify_pending_badcases()
+            if result["classified"] > 0:
+                logger.info(f"自动分类完成: {result}")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"自动分类任务失败: {e}")
+        await asyncio.sleep(3600)
 
 
 app = FastAPI(

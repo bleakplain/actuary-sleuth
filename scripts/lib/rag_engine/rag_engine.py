@@ -275,6 +275,7 @@ class RAGEngine:
                     for c in attribution.citations
                 ],
                 'unverified_claims': attribution.unverified_claims,
+                'content_mismatches': attribution.content_mismatches,
             }
 
             if self.config.enable_faithfulness:
@@ -391,6 +392,12 @@ class RAGEngine:
             keyword_weight=config.keyword_weight,
             max_chunks_per_article=config.max_chunks_per_article,
         )
+
+        if results and config.min_rrf_score > 0:
+            max_score = results[0].get('score', 0)
+            if max_score < config.min_rrf_score:
+                logger.debug(f"最高 RRF 分数 {max_score:.4f} 低于阈值 {config.min_rrf_score}")
+                return []
 
         if self._reranker:
             results = self._reranker.rerank(query_text, results, top_k=top_k)
