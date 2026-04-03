@@ -242,24 +242,8 @@ class JinaEmbeddingAdapter(BaseEmbedding):
         return await asyncio.to_thread(self._get_text_embeddings, texts)
 
 
-def get_embedding_model(config: dict):
-    """
-    创建嵌入模型适配器（工厂函数）
-
-    Args:
-        config: 嵌入模型配置
-            {
-                'provider': 'zhipu' | 'ollama',
-                'model': str,
-                'api_key': str,  # zhipu 需要
-                'base_url': str,  # zhipu 需要
-                'host': str,      # ollama 需要
-                'timeout': int,
-            }
-
-    Returns:
-        BaseEmbedding: LlamaIndex 嵌入模型实例
-    """
+def _create_embedding_model(config: dict):
+    """创建嵌入模型适配器（内部工厂函数，通过 LLMClientFactory.create_embed_model() 调用）"""
     from llama_index.embeddings.ollama import OllamaEmbedding
 
     provider = config.get('provider', 'ollama')

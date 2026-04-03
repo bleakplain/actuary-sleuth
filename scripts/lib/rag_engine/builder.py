@@ -10,8 +10,7 @@ from llama_index.core.schema import TextNode
 
 from .index_manager import VectorIndexManager
 from .config import RAGConfig
-from .llamaindex_adapter import get_embedding_model
-from lib.config import get_embed_llm_config
+from lib.llm import LLMClientFactory
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +34,7 @@ class KnowledgeBuilder:
 
     def _ensure_embedding_setup(self):
         if not self._embedding_setup_done:
-            embed_config = get_embed_llm_config()
-            Settings.embed_model = get_embedding_model(embed_config)
+            Settings.embed_model = LLMClientFactory.create_embed_model()
             self._embedding_setup_done = True
 
     def parse(self, file_pattern: str = "**/*.md") -> List:

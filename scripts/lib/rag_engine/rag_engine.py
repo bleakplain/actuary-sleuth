@@ -121,7 +121,7 @@ class RAGEngine:
             self._llm_client = LLMClientFactory.create_qa_llm()
 
         self._llm = ClientLLMAdapter(self._llm_client)
-        self._embed_model = LLMClientFactory.create_embed_llm()
+        self._embed_model = LLMClientFactory.create_embed_model()
 
         rerank_config = RerankConfig(
             enabled=self.config.hybrid_config.enable_rerank,

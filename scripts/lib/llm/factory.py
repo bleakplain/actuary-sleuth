@@ -41,6 +41,12 @@ class LLMClientFactory:
         return LLMClientFactory.create_client(get_embed_llm_config())
 
     @staticmethod
+    def create_embed_model():
+        """创建 LlamaIndex BaseEmbedding 实例，用于向量检索。"""
+        from lib.rag_engine.llamaindex_adapter import _create_embedding_model
+        return _create_embedding_model(get_embed_llm_config())
+
+    @staticmethod
     def create_client(config: Dict[str, Any]) -> BaseLLMClient:
         provider = config.get('provider', 'zhipu').lower()
 
