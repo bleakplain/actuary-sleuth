@@ -78,6 +78,8 @@ class ThreadLocalSettings:
     def apply(self) -> None:
         """应用线程配置到全局 Settings（线程安全）"""
         with self._lock:
+            if not hasattr(self._local, 'llm'):
+                return
             Settings.llm = self._local.llm
             Settings.embed_model = self._local.embed_model
 
