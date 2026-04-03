@@ -9,6 +9,8 @@ import re
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
+from .reranker_base import BaseReranker
+
 logger = logging.getLogger(__name__)
 
 _BATCH_RERANK_PROMPT = """请根据用户问题，对以下法规条款按相关性从高到低排序。
@@ -33,7 +35,7 @@ class RerankConfig:
     max_candidates: int = 20
 
 
-class LLMReranker:
+class LLMReranker(BaseReranker):
 
     def __init__(self, llm_client, config: Optional[RerankConfig] = None):
         self._llm = llm_client
@@ -53,9 +55,11 @@ class LLMReranker:
 
         ranked_indices, did_rerank = self._batch_rank(query, candidates)
         if not did_rerank:
-            fallback: List[Dict[str, Any]] = candidates[:top_k]
-            for r in fallback:
-                r['reranked'] = False
+            fallback: List[Dict[str, Any]] = []
+            for candidate in candidates[:top_k]:
+                item = dict(candidate)
+                item['reranked'] = False
+                fallback.append(item)
             return fallback
 
         results: List[Dict[str, Any]] = []

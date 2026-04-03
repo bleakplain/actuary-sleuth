@@ -20,7 +20,8 @@ from .index_manager import VectorIndexManager
 from .llamaindex_adapter import ClientLLMAdapter
 from .retrieval import hybrid_search
 from .bm25_index import BM25Index
-from .reranker import LLMReranker, RerankConfig
+from .reranker_base import BaseReranker
+from .llm_reranker import LLMReranker, RerankConfig
 from .query_preprocessor import QueryPreprocessor
 from .exceptions import EngineInitializationError, RetrievalError
 from .attribution import parse_citations, AttributionResult
@@ -109,7 +110,7 @@ class RAGEngine:
         self._embed_model = None
         self._llm_client = llm_client
         self._preprocessor: Optional[QueryPreprocessor] = None
-        self._reranker: Optional[LLMReranker] = None
+        self._reranker: Optional[BaseReranker] = None
         self._bm25_index: Optional[BM25Index] = None
         self._initialized = False
         self._init_lock = threading.Lock()
@@ -121,14 +122,41 @@ class RAGEngine:
             self._llm_client = LLMClientFactory.create_qa_llm()
 
         self._llm = ClientLLMAdapter(self._llm_client)
-        self._embed_model = LLMClientFactory.create_embed_model()
+        self._embed_model = LLMClientFactory.create_embed_llm()
+
+        self._reranker = self._create_reranker()
+        self._preprocessor = QueryPreprocessor(llm_client=self._llm_client)
+
+    def _create_reranker(self) -> Optional[BaseReranker]:
+        config = self.config.hybrid_config
+        assert config is not None
+
+        if not config.enable_rerank or config.reranker_type == "none":
+            return None
 
         rerank_config = RerankConfig(
-            enabled=self.config.hybrid_config.enable_rerank,
-            top_k=self.config.hybrid_config.rerank_top_k,
+            enabled=True,
+            top_k=config.rerank_top_k,
         )
-        self._reranker = LLMReranker(self._llm_client, rerank_config)
-        self._preprocessor = QueryPreprocessor(llm_client=self._llm_client)
+
+        if config.reranker_type == "llm":
+            if not self._llm_client:
+                self._llm_client = LLMClientFactory.create_qa_llm()
+            return LLMReranker(self._llm_client, rerank_config)
+
+        if config.reranker_type == "gguf":
+            from ._gguf_cli import GGUFReranker as GGUFCliReranker
+            try:
+                gguf = GGUFCliReranker()
+                from .gguf_reranker_adapter import GGUFReranker
+                return GGUFReranker(gguf)
+            except FileNotFoundError as e:
+                logger.warning(f"GGUF reranker 不可用，回退到 LLM reranker: {e}")
+                if not self._llm_client:
+                    self._llm_client = LLMClientFactory.create_qa_llm()
+                return LLMReranker(self._llm_client, rerank_config)
+
+        return None
 
     def initialize(self, force_rebuild: bool = False) -> bool:
         """初始化查询引擎（线程安全版本）"""

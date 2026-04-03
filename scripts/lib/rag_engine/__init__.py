@@ -25,7 +25,9 @@
 from .config import RAGConfig, get_config, HybridQueryConfig
 from .exceptions import RAGEngineError, EngineInitializationError, RetrievalError
 from .query_preprocessor import QueryPreprocessor, PreprocessedQuery
-from .reranker import LLMReranker, RerankConfig
+from .reranker_base import BaseReranker
+from .llm_reranker import LLMReranker, RerankConfig
+from .gguf_reranker_adapter import GGUFReranker
 from .attribution import parse_citations, AttributionResult, Citation
 
 from .rag_engine import RAGEngine, create_qa_engine
@@ -49,8 +51,10 @@ __all__ = [
     'RetrievalError',
     'QueryPreprocessor',
     'PreprocessedQuery',
+    'BaseReranker',
     'LLMReranker',
     'RerankConfig',
+    'GGUFReranker',
     'parse_citations',
     'AttributionResult',
     'Citation',

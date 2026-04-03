@@ -15,7 +15,10 @@ class HybridQueryConfig:
     keyword_weight: float = 1.0
     enable_rerank: bool = True
     rerank_top_k: int = 5
+    reranker_type: str = "llm"
     max_chunks_per_article: int = 3
+
+    _VALID_RERANKER_TYPES = {"llm", "gguf", "none"}
 
     def __post_init__(self):
         if self.vector_top_k < 1:
@@ -26,6 +29,11 @@ class HybridQueryConfig:
             raise ValueError(f"rrf_k must be >= 1, got {self.rrf_k}")
         if self.rerank_top_k < 1:
             raise ValueError(f"rerank_top_k must be >= 1, got {self.rerank_top_k}")
+        if self.reranker_type not in self._VALID_RERANKER_TYPES:
+            raise ValueError(
+                f"reranker_type must be one of {self._VALID_RERANKER_TYPES}, "
+                f"got {self.reranker_type}"
+            )
 
 
 @dataclass

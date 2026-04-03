@@ -5,6 +5,7 @@
 
 使用 Reciprocal Rank Fusion (RRF) 融合向量检索和关键词检索的结果。
 """
+import hashlib
 from collections import defaultdict
 from typing import List, Dict, Any
 
@@ -12,8 +13,12 @@ from llama_index.core.schema import NodeWithScore
 
 
 def _chunk_key(scored: NodeWithScore) -> str:
-    """生成 chunk 的稳定标识"""
-    return scored.node.node_id if scored.node.node_id else str(id(scored.node))
+    if scored.node.node_id:
+        return scored.node.node_id
+    content = scored.node.get_content() or ''
+    source = scored.node.metadata.get('source_file', '')
+    content_hash = hashlib.md5(content.encode('utf-8')).hexdigest()[:12]
+    return f"{source}:{content_hash}"
 
 
 def reciprocal_rank_fusion(
