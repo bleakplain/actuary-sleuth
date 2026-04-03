@@ -230,7 +230,7 @@ class JinaEmbeddingAdapter(BaseEmbedding):
 
     def _get_text_embeddings(self, texts: List[str]) -> List[List[float]]:
         prefixed = [self._PREFIX_PASSAGE + t for t in texts]
-        return self._ollama_embed.get_text_embeddings(prefixed)  # type: ignore[attr-defined]
+        return self._ollama_embed._get_text_embeddings(prefixed)  # type: ignore[attr-defined]
 
     async def _aget_query_embedding(self, query: str) -> List[float]:
         return await asyncio.to_thread(self._get_query_embedding, query)
