@@ -55,6 +55,7 @@ scripts/.coverage
 scripts/lib/rag_engine/data/kb/version_meta.json
 scripts/lib/rag_engine/data/kb/
 .pytest_cache/
+.mypy_cache/
 
 # Node.js
 node_modules/
