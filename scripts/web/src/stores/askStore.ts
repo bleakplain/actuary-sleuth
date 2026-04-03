@@ -98,7 +98,12 @@ export const useAskStore = create<AskState>((set, get) => ({
           set((s) => ({
             messages: s.messages.map((m) =>
               m.id === assistantMsg.id
-                ? { ...m, citations: doneData.citations || [], sources: doneData.sources || [] }
+                ? {
+                    ...m,
+                    id: doneData.message_id ?? m.id,
+                    citations: doneData.citations || [],
+                    sources: doneData.sources || [],
+                  }
                 : m,
             ),
             currentConversationId: doneData.conversation_id || currentConversationId,

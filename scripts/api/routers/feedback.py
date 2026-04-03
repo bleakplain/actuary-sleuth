@@ -163,7 +163,7 @@ async def verify_badcase(feedback_id: str):
         from lib.rag_engine.config import RAGConfig
         verify_config = RAGConfig(enable_faithfulness=True)
         from lib.rag_engine.rag_engine import RAGEngine
-        verify_engine = RAGEngine(config=verify_config, llm_provider=rag_engine.llm_provider)
+        verify_engine = RAGEngine(config=verify_config, llm_client=rag_engine._llm_client)
         verify_engine._initialized = True
         verify_engine.index_manager = rag_engine.index_manager
         verify_engine._bm25_index = rag_engine._bm25_index

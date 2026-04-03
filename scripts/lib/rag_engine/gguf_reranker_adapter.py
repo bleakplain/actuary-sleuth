@@ -37,9 +37,10 @@ class GGUFReranker(BaseReranker):
             )
         except FileNotFoundError as e:
             logger.warning(f"GGUF reranker 文件缺失: {e}")
+            return candidates[:top_k] if top_k else candidates
         except Exception as e:
             logger.warning(f"GGUF reranker 精排失败: {e}")
-        return candidates[:top_k] if top_k else candidates
+            return candidates[:top_k] if top_k else candidates
 
         results: List[Dict[str, Any]] = []
         for item in rerank_results:

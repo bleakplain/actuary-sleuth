@@ -7,8 +7,17 @@ vi.mock('../api/ask', () => ({
   fetchMessages: vi.fn(),
   deleteConversation: vi.fn(),
   chatSearch: vi.fn(),
-  chatSSE: vi.fn(() => {
+  chatSSE: vi.fn((_req, callbacks) => {
+    // Immediately call onDone with message_id for testability
     const ctrl = new AbortController();
+    setTimeout(() => {
+      callbacks.onDone({
+        conversation_id: 'conv_test',
+        message_id: 42,
+        citations: [],
+        sources: [],
+      });
+    }, 0);
     return ctrl;
   }),
 }));
@@ -107,6 +116,31 @@ describe('askStore', () => {
       const state = useAskStore.getState();
       expect(state.streaming).toBe(false);
       expect(state.messages[1].content).toContain('错误');
+    });
+  });
+
+  describe('sendMessage (qa mode — SSE message_id)', () => {
+    it('updates assistant message id from temp to real DB id after SSE done', async () => {
+      mockedFetchConversations.mockResolvedValueOnce([]);
+
+      useAskStore.getState().sendMessage('测试问题', 'qa');
+
+      // Immediately after sending, assistant has temp ID (Date.now() + 1)
+      const stateBefore = useAskStore.getState();
+      expect(stateBefore.messages).toHaveLength(2);
+      const tempId = stateBefore.messages[1].id;
+      expect(typeof tempId).toBe('number');
+      expect(tempId).toBeGreaterThan(Date.now() - 1000);
+
+      // Wait for SSE onDone callback
+      await new Promise((r) => setTimeout(r, 50));
+
+      const stateAfter = useAskStore.getState();
+      expect(stateAfter.streaming).toBe(false);
+      // Assistant message id should now be the real DB id (42)
+      expect(stateAfter.messages[1].id).toBe(42);
+      // conversation_id should be updated
+      expect(stateAfter.currentConversationId).toBe('conv_test');
     });
   });
 

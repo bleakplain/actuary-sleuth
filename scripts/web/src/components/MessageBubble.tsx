@@ -9,10 +9,16 @@ const { Text } = Typography;
 
 interface Props {
   message: Message;
-  onCitationClick?: (citation: Citation) => void;
+  onCitationClick?: (source: Source, messageSources: Source[]) => void;
 }
 
 export default function MessageBubble({ message, onCitationClick }: Props) {
+  const handleCitationClick = (citation: Citation) => {
+    const source = message.sources.find((_, i) => i === citation.source_idx);
+    if (source && onCitationClick) {
+      onCitationClick(source, message.sources);
+    }
+  };
   if (message.role === 'user') {
     return (
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
@@ -62,7 +68,7 @@ export default function MessageBubble({ message, onCitationClick }: Props) {
                   article_number: s.article_number,
                   content: s.content,
                 }}
-                onClick={onCitationClick}
+                onClick={handleCitationClick}
               />
             ))}
           </div>

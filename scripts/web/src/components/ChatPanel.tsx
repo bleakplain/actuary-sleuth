@@ -4,7 +4,7 @@ import { SendOutlined, DeleteOutlined } from '@ant-design/icons';
 import MessageBubble from './MessageBubble';
 import SourcePanel from './SourcePanel';
 import { useAskStore } from '../stores/askStore';
-import type { Citation, Source } from '../types';
+import type { Source } from '../types';
 
 const { TextArea } = Input;
 
@@ -15,7 +15,6 @@ export default function ChatPanel() {
   const {
     messages,
     streaming,
-    currentSources,
     currentConversationId,
     conversations,
     sendMessage,
@@ -26,6 +25,7 @@ export default function ChatPanel() {
 
   const [sourcePanelOpen, setSourcePanelOpen] = React.useState(false);
   const [selectedSource, setSelectedSource] = React.useState<Source | null>(null);
+  const [panelSources, setPanelSources] = React.useState<Source[]>([]);
 
   useEffect(() => {
     loadConversations();
@@ -42,12 +42,10 @@ export default function ChatPanel() {
     sendMessage(q, mode);
   };
 
-  const handleCitationClick = (citation: Citation) => {
-    const source = currentSources.find((_, i) => i === citation.source_idx);
-    if (source) {
-      setSelectedSource(source);
-      setSourcePanelOpen(true);
-    }
+  const handleCitationClick = (source: Source, messageSources: Source[]) => {
+    setSelectedSource(source);
+    setPanelSources(messageSources);
+    setSourcePanelOpen(true);
   };
 
   return (
@@ -160,7 +158,7 @@ export default function ChatPanel() {
 
       <SourcePanel
         open={sourcePanelOpen}
-        sources={currentSources}
+        sources={panelSources}
         selectedSource={selectedSource}
         onSelect={setSelectedSource}
         onClose={() => setSourcePanelOpen(false)}

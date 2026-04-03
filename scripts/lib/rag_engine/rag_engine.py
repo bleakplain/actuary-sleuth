@@ -72,14 +72,12 @@ class ThreadLocalSettings:
                 except AttributeError:
                     pass
 
-        if not hasattr(self._local, 'initialized'):
-            self._local.llm = llm
-            self._local.embed_model = embed_model
-            self._local.initialized = True
+        self._local.llm = llm
+        self._local.embed_model = embed_model
 
     def apply(self) -> None:
-        """应用线程配置到全局 Settings"""
-        if hasattr(self._local, 'initialized') and self._local.initialized:
+        """应用线程配置到全局 Settings（线程安全）"""
+        with self._lock:
             Settings.llm = self._local.llm
             Settings.embed_model = self._local.embed_model
 
@@ -122,7 +120,7 @@ class RAGEngine:
             self._llm_client = LLMClientFactory.create_qa_llm()
 
         self._llm = ClientLLMAdapter(self._llm_client)
-        self._embed_model = LLMClientFactory.create_embed_llm()
+        self._embed_model = LLMClientFactory.create_embed_model()
 
         self._reranker = self._create_reranker()
         self._preprocessor = QueryPreprocessor(llm_client=self._llm_client)
@@ -140,8 +138,6 @@ class RAGEngine:
         )
 
         if config.reranker_type == "llm":
-            if not self._llm_client:
-                self._llm_client = LLMClientFactory.create_qa_llm()
             return LLMReranker(self._llm_client, rerank_config)
 
         if config.reranker_type == "gguf":
@@ -152,8 +148,6 @@ class RAGEngine:
                 return GGUFReranker(gguf)
             except FileNotFoundError as e:
                 logger.warning(f"GGUF reranker 不可用，回退到 LLM reranker: {e}")
-                if not self._llm_client:
-                    self._llm_client = LLMClientFactory.create_qa_llm()
                 return LLMReranker(self._llm_client, rerank_config)
 
         return None

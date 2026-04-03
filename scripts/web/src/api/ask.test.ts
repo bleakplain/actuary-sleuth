@@ -99,7 +99,7 @@ describe('ask API', () => {
       // Mock fetch to return a ReadableStream
       const mockStream = new ReadableStream({
         start(controller) {
-          controller.enqueue(new TextEncoder().encode('data: {"type":"done","data":{"conversation_id":"c1","citations":[],"sources":[]}}\n\n'));
+          controller.enqueue(new TextEncoder().encode('data: {"type":"done","data":{"conversation_id":"c1","message_id":42,"citations":[],"sources":[]}}\n\n'));
           controller.close();
         },
       });
@@ -114,14 +114,14 @@ describe('ask API', () => {
       vi.unstubAllGlobals();
     });
 
-    it('parses SSE token events', async () => {
+    it('parses SSE token events and done with message_id', async () => {
       const onToken = vi.fn();
       const onDone = vi.fn();
 
       const sseData = [
         'data: {"type":"token","data":"你好"}\n',
         'data: {"type":"token","data":"世界"}\n',
-        'data: {"type":"done","data":{"conversation_id":"c1","citations":[],"sources":[]}}\n\n',
+        'data: {"type":"done","data":{"conversation_id":"c1","message_id":42,"citations":[],"sources":[]}}\n\n',
       ].join('');
 
       const mockStream = new ReadableStream({
@@ -139,7 +139,10 @@ describe('ask API', () => {
 
       expect(onToken).toHaveBeenCalledWith('你好');
       expect(onToken).toHaveBeenCalledWith('世界');
-      expect(onDone).toHaveBeenCalledWith(expect.objectContaining({ conversation_id: 'c1' }));
+      expect(onDone).toHaveBeenCalledWith(expect.objectContaining({
+        conversation_id: 'c1',
+        message_id: 42,
+      }));
       vi.unstubAllGlobals();
     });
 

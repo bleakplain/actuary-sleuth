@@ -56,23 +56,6 @@ async def chat(req: ChatRequest):
                 }
                 await asyncio.sleep(0.01)
 
-            yield {
-                "event": "message",
-                "data": json.dumps(
-                    {
-                        "type": "done",
-                        "data": {
-                            "conversation_id": conversation_id,
-                            "citations": result.get("citations", []),
-                            "sources": result.get("sources", []),
-                            "faithfulness_score": result.get("faithfulness_score"),
-                            "unverified_claims": result.get("unverified_claims", []),
-                        },
-                    },
-                    ensure_ascii=False,
-                ),
-            }
-
             msg_id = add_message(
                 conversation_id,
                 "assistant",
@@ -82,6 +65,24 @@ async def chat(req: ChatRequest):
                 faithfulness_score=result.get("faithfulness_score"),
                 unverified_claims=result.get("unverified_claims", []),
             )
+
+            yield {
+                "event": "message",
+                "data": json.dumps(
+                    {
+                        "type": "done",
+                        "data": {
+                            "conversation_id": conversation_id,
+                            "message_id": msg_id,
+                            "citations": result.get("citations", []),
+                            "sources": result.get("sources", []),
+                            "faithfulness_score": result.get("faithfulness_score"),
+                            "unverified_claims": result.get("unverified_claims", []),
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            }
             # 自动质量检测 — 低于阈值自动创建 feedback
             try:
                 from lib.rag_engine.quality_detector import detect_quality

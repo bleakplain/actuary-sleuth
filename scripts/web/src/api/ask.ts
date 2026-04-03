@@ -3,6 +3,7 @@ import type { Conversation, Message, Source, Citation } from '../types';
 
 interface ChatDoneData {
   conversation_id: string;
+  message_id?: number;
   citations: Citation[];
   sources: Source[];
   faithfulness_score?: number;

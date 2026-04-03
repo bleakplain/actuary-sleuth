@@ -20,7 +20,7 @@ export default function SourcePanel({ open, sources, selectedSource, onSelect, o
       open={open}
       onClose={onClose}
     >
-      {sources.length === 0 ? (
+      {!selectedSource ? (
         <Empty description="暂无来源" />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

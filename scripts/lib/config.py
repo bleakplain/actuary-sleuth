@@ -264,7 +264,6 @@ class Config:
     def llm(self) -> LLMConfig:
         return self._llm
 
-    @property
     # ===== 业务属性 =====
 
     @property
