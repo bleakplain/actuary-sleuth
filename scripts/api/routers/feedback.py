@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Optional
+from typing import Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -82,10 +82,19 @@ async def get_stats():
 @router.post("/badcases/classify")
 async def classify_badcases():
     """对所有 pending 状态的 badcase 执行自动分类"""
+    return await classify_pending_badcases()
+
+
+async def classify_pending_badcases() -> Dict[str, int]:
     from api.database import list_feedbacks, update_feedback, get_connection
+    from lib.rag_engine.badcase_classifier import classify_badcase, assess_compliance_risk
+    from lib.rag_engine.quality_detector import detect_quality
+    from api.dependencies import get_rag_engine
 
     pending = list_feedbacks(status="pending")
     classified_count = 0
+    engine = get_rag_engine()
+    llm_client = engine._llm_client if engine else None
 
     for fb in pending:
         if fb["rating"] != "down":
@@ -97,10 +106,8 @@ async def classify_badcases():
                 "SELECT role, content, sources_json, unverified_claims_json FROM messages WHERE id = ?",
                 (fb["message_id"],),
             ).fetchone()
-        if msgs is None:
-            continue
-
-        with get_connection() as conn:
+            if msgs is None:
+                continue
             user_msg = conn.execute(
                 "SELECT content FROM messages WHERE conversation_id = ? AND role = 'user' AND id < ? ORDER BY id DESC LIMIT 1",
                 (fb["conversation_id"], fb["message_id"]),
@@ -112,12 +119,9 @@ async def classify_badcases():
         unverified = json.loads(msgs["unverified_claims_json"]) if msgs["unverified_claims_json"] else []
 
         try:
-            from lib.rag_engine.badcase_classifier import classify_badcase, assess_compliance_risk
-            from lib.rag_engine.quality_detector import detect_quality
-
-            classification = classify_badcase(query, sources, answer, unverified)
+            classification = classify_badcase(query, sources, answer, unverified, llm_client=llm_client)
             quality = detect_quality(query, answer, sources)
-            risk = assess_compliance_risk(fb["reason"], answer)
+            risk = assess_compliance_risk(classification["type"], classification["reason"], answer)
 
             update_feedback(fb["id"], {
                 "classified_type": classification["type"],

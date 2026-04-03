@@ -6,7 +6,7 @@
 """
 import re
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -41,12 +41,54 @@ class Citation:
     confidence: str = 'tagged'
 
 
+_VALUE_PATTERNS = [
+    re.compile(r'(\d+(?:\.\d+)?)\s*[%％]'),
+    re.compile(r'(\d+(?:\.\d+)?)\s*(?:倍|元|万元)'),
+    re.compile(r'(\d+)\s*(?:天|年|个月|周岁)'),
+]
+
+
+def _extract_numeric_values(text: str) -> Dict[str, str]:
+    values: Dict[str, str] = {}
+    for pattern in _VALUE_PATTERNS:
+        for match in pattern.finditer(text):
+            values[match.group(1)] = match.group(0)
+    return values
+
+
+def _check_content_mismatches(
+    answer: str,
+    sources: List[Dict[str, Any]],
+) -> List[Dict[str, str]]:
+    if not answer or not sources:
+        return []
+
+    answer_values = _extract_numeric_values(answer)
+    if not answer_values:
+        return []
+
+    source_values: set[str] = set()
+    for source in sources:
+        source_values.update(_extract_numeric_values(source.get("content", "")).keys())
+
+    mismatches = []
+    for value, original_text in answer_values.items():
+        if value not in source_values:
+            mismatches.append({
+                "value": original_text,
+                "type": "numeric_mismatch",
+            })
+
+    return mismatches
+
+
 @dataclass(frozen=True)
 class AttributionResult:
     """归因分析结果"""
     citations: List[Citation] = field(default_factory=list)
     unverified_claims: List[str] = field(default_factory=list)
     uncited_sources: List[int] = field(default_factory=list)
+    content_mismatches: List[Dict[str, str]] = field(default_factory=list)
 
 
 def parse_citations(
@@ -75,55 +117,39 @@ def parse_citations(
     all_indices = set(range(len(sources)))
     uncited = sorted(all_indices - cited_indices)
 
-    unverified = _detect_unverified_claims(answer, cited_indices)
+    unverified = _detect_unverified_claims(answer)
+    mismatches = _check_content_mismatches(answer, sources)
 
     return AttributionResult(
         citations=citations,
         unverified_claims=unverified,
         uncited_sources=uncited,
+        content_mismatches=mismatches,
     )
 
 
-def _detect_unverified_claims(
-    answer: str,
-    cited_indices: set[int],
-) -> List[str]:
-    """检测未被引用标注覆盖的事实性陈述"""
+def _detect_unverified_claims(answer: str) -> List[str]:
     if not answer:
         return []
 
-    # 找到所有 [来源X] 标记的位置，标记已覆盖的文本范围
-    covered_spans: List[Tuple[int, int]] = []
-    for match in _SOURCE_TAG_PATTERN.finditer(answer):
-        covered_spans.append((match.start(), match.end()))
-
-    # 按 [来源X] 标记分割文本，检查每个段落
-    segments = _SOURCE_TAG_PATTERN.split(answer)
-    unverified: List[str] = []
-    pos = 0
-
-    for i, segment in enumerate(segments):
-        segment = segment.strip()
-        if not segment:
-            pos += len(segment) + (len(segments[i]) if i < len(segments) else 0)
-            continue
-
-        # 如果这个段落后紧跟 [来源X] 标记，说明它已被引用覆盖
-        if i < len(segments) and i + 1 <= len(_SOURCE_TAG_PATTERN.findall(answer)):
-            pos += len(segment)
-            continue
-
-        # 跳过纯数字残留（引用编号）
-        if segment[-1].isdigit():
-            pos += len(segment)
-            continue
-
+    tag_matches = list(_SOURCE_TAG_PATTERN.finditer(answer))
+    if not tag_matches:
         for pattern in _FACTUAL_PATTERNS:
-            if pattern.search(segment):
-                unverified.append(segment)
-                break
+            if pattern.search(answer):
+                return [answer.strip()]
+        return []
 
-        pos += len(segment)
+    last_tag_end = tag_matches[-1].end()
+    if last_tag_end >= len(answer):
+        return []
 
-    return unverified
+    tail = answer[last_tag_end:].strip()
+    if not tail or len(tail) < 5 or tail[-1].isdigit():
+        return []
+
+    for pattern in _FACTUAL_PATTERNS:
+        if pattern.search(tail):
+            return [tail]
+
+    return []
 

@@ -6,6 +6,7 @@ RAG 查询引擎（线程安全版本）
 """
 import asyncio
 import logging
+import re
 import threading
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -29,10 +30,19 @@ from lib.llm import BaseLLMClient, LLMClientFactory
 
 logger = logging.getLogger(__name__)
 
-_QA_PROMPT_TEMPLATE = """你是一位保险法规专家。请**仅依据**下方编号的法规条款回答用户问题。
-如果条款中没有足够信息，请坦诚说明"提供的法规条款中未找到相关信息"，不要自行补充外部知识。
+_SYSTEM_PROMPT = """你是一位保险法规专家。你必须**仅依据**用户提供的编号法规条款回答问题，不得使用任何外部知识。
 
-## 法规条款
+## 回答规则
+1. 只能使用法规条款中**明确提及**的信息，不得补充、推断或混合自身知识
+2. 每个事实性陈述（包括数字、金额、期限、比例、条款号、法规名称）必须在句末标注 [来源X]
+3. 引用时必须标注来源编号，编号对应上方法规条款的序号
+4. 对于关键数字（金额、天数、年限、比例），必须与原文**完全一致**，不得近似或四舍五入
+5. 如果不同条款存在矛盾，优先引用编号靠前的条款，并说明矛盾之处
+6. 如果法规条款中没有足够信息回答问题，直接说明"提供的法规条款中未找到相关信息"，不得猜测或编造
+7. 如果法规条款涉及多个不同法规文件，分别针对每个法规文件回答，明确标注信息来源
+8. 回答简洁专业，面向保险从业人员"""
+
+_USER_PROMPT_TEMPLATE = """## 法规条款
 
 {context}
 
@@ -40,18 +50,24 @@ _QA_PROMPT_TEMPLATE = """你是一位保险法规专家。请**仅依据**下方
 
 {question}
 
-## 回答要求
-1. **仅依据**上方编号的法规条款回答，不使用条款外的知识
-2. 引用信息时使用 [来源X] 标注来源
-3. 如果不同条款存在矛盾，优先引用编号靠前的条款并说明
-4. 每个事实性陈述（数字、条款规定、法律要求）必须在句末用 [来源X] 标注来源编号
-5. 不得包含法规条款中不存在的信息（包括但不限于条款号、数字、日期）
-6. 如果法规条款不足以回答问题，明确说明"以上法规条款未涉及此问题"，不要猜测
-7. 回答简洁专业，面向保险从业人员
+## 重要提醒
+请仅依据上方编号的法规条款回答。每个事实性陈述必须标注 [来源X]。如果条款中没有相关信息，请说明"提供的法规条款中未找到相关信息"。"""
 
-## 回答示例
-问：健康保险等待期有什么规定？
-答：根据《健康保险管理办法》第一条[来源1]，健康保险产品的等待期不得超过90天。等待期内发生保险事故，保险公司不承担保险责任。[来源1]"""
+_SENTENCE_BOUNDARY = re.compile(r'(?<=[。；！？\n])\s*')
+
+
+def _truncate_at_sentence_boundary(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+
+    truncated = text[:max_chars]
+    last_boundary = 0
+    for match in _SENTENCE_BOUNDARY.finditer(truncated):
+        last_boundary = match.end()
+
+    if last_boundary > max_chars * 0.5:
+        return truncated[:last_boundary].rstrip() + '\n[注：此条款内容已被截断]'
+    return truncated + '……'
 
 
 class ThreadLocalSettings:
@@ -232,10 +248,15 @@ class RAGEngine:
                     'unverified_claims': [],
                 }
 
-            prompt, included_count = self._build_qa_prompt(self.config, question, search_results)
+            user_prompt, included_count = self._build_qa_prompt(self.config, question, search_results)
             if not self._llm_client:
                 raise RetrievalError("LLM 客户端未初始化")
-            answer = self._llm_client.generate(prompt)
+
+            messages = [
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ]
+            answer = self._llm_client.chat(messages)
             answer_str = str(answer)
 
             included_sources = search_results[:included_count]
@@ -254,6 +275,7 @@ class RAGEngine:
                     for c in attribution.citations
                 ],
                 'unverified_claims': attribution.unverified_claims,
+                'content_mismatches': attribution.content_mismatches,
             }
 
             if self.config.enable_faithfulness:
@@ -291,7 +313,7 @@ class RAGEngine:
             if total_chars + len(full_part) > max_chars:
                 remaining = max_chars - total_chars - 50
                 if remaining > 100:
-                    truncated_content = content[:remaining] + '……'
+                    truncated_content = _truncate_at_sentence_boundary(content, remaining)
                     context_parts.append(header + truncated_content)
                 break
 
@@ -299,7 +321,8 @@ class RAGEngine:
             total_chars += len(full_part)
 
         context = "\n\n".join(context_parts)
-        return _QA_PROMPT_TEMPLATE.format(context=context, question=question), len(context_parts)
+        user_prompt = _USER_PROMPT_TEMPLATE.format(context=context, question=question)
+        return user_prompt, len(context_parts)
 
     @staticmethod
     def _compute_faithfulness(contexts: List[str], answer: str) -> float:
@@ -369,6 +392,12 @@ class RAGEngine:
             keyword_weight=config.keyword_weight,
             max_chunks_per_article=config.max_chunks_per_article,
         )
+
+        if results and config.min_rrf_score > 0:
+            max_score = results[0].get('score', 0)
+            if max_score < config.min_rrf_score:
+                logger.debug(f"最高 RRF 分数 {max_score:.4f} 低于阈值 {config.min_rrf_score}")
+                return []
 
         if self._reranker:
             results = self._reranker.rerank(query_text, results, top_k=top_k)

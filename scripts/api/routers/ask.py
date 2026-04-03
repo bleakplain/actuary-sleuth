@@ -78,6 +78,7 @@ async def chat(req: ChatRequest):
                             "sources": result.get("sources", []),
                             "faithfulness_score": result.get("faithfulness_score"),
                             "unverified_claims": result.get("unverified_claims", []),
+                            "content_mismatches": result.get("content_mismatches", []),
                         },
                     },
                     ensure_ascii=False,

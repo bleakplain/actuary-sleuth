@@ -33,6 +33,7 @@ class RerankConfig:
     enabled: bool = True
     top_k: int = 5
     max_candidates: int = 20
+    max_content_chars: int = 1500
 
 
 class LLMReranker(BaseReranker):
@@ -79,7 +80,7 @@ class LLMReranker(BaseReranker):
             content = candidate.get('content', '')
             law_name = candidate.get('law_name', '')
             article = candidate.get('article_number', '')
-            truncated = content[:800] if len(content) > 800 else content
+            truncated = content[:self._config.max_content_chars] if len(content) > self._config.max_content_chars else content
             parts.append(f"[{i}] 【{law_name}】{article}\n{truncated}")
 
         prompt = _BATCH_RERANK_PROMPT.format(
