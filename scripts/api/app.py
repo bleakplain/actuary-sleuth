@@ -3,6 +3,8 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 logger = logging.getLogger(__name__)
 
@@ -109,3 +111,15 @@ app.include_router(feedback.router)
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok", "rag_engine": _rag_initialized}
+
+# 托管前端静态文件（生产环境）
+_static_dir = Path(__file__).parent.parent / "web" / "dist"
+if _static_dir.is_dir():
+    app.mount("/assets", StaticFiles(directory=_static_dir / "assets"), name="static")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        file = _static_dir / full_path
+        if file.is_file():
+            return FileResponse(file)
+        return FileResponse(_static_dir / "index.html")
