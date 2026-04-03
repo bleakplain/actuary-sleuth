@@ -3,7 +3,7 @@ import re
 import logging
 from typing import List, Dict, Any, Optional
 
-from .tokenizer import tokenize_chinese
+from .evaluator import _token_bigrams
 
 logger = logging.getLogger(__name__)
 
@@ -15,10 +15,6 @@ def compute_retrieval_relevance(query: str, sources: List[Dict[str, Any]]) -> fl
     """计算 query 与检索结果的 bigram 重叠度"""
     if not query or not sources:
         return 0.0
-
-    def _token_bigrams(text: str) -> set:
-        tokens = tokenize_chinese(text)
-        return {tokens[i] + tokens[i + 1] for i in range(len(tokens) - 1)} if len(tokens) >= 2 else set()
 
     query_bigrams = _token_bigrams(query)
     if not query_bigrams:

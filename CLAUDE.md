@@ -139,3 +139,4 @@ Located at `scripts/config/settings.json`, overrideable via env vars.
 14. No over-engineering: avoid unnecessary config toggles and expansion points
 15. Layered validation: use fast deterministic checks first (structure markers, rules), fall back to expensive probabilistic checks (embedding similarity) only when no structural signal exists
 16. Dead code cleanup: remove unused code paths when default strategy makes them unreachable; delete deprecated modules directly rather than marking deprecated
+17. Eval dataset scope: evaluation samples focus on insurance product audit (clauses, pricing, exclusions, waiting periods, product design), not company operations (capital changes, actuary hiring, claims process, sales management)

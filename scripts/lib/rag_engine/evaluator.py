@@ -22,6 +22,43 @@ _RAGAS_METRICS = ('faithfulness', 'answer_relevancy', 'answer_correctness')
 
 _ANSWER_SENTENCE_PATTERN = re.compile(r'[^。！？\n]+[。！？\n]?')
 
+_SEMANTIC_RELEVANCE_THRESHOLD = 0.65
+_SENTENCE_COVERAGE_THRESHOLD = 0.4
+
+_embed_model_cache: Optional[Any] = None
+
+
+def _get_embed_model():
+    global _embed_model_cache
+    if _embed_model_cache is not None:
+        return _embed_model_cache
+    try:
+        from lib.rag_engine.llamaindex_adapter import get_embedding_model
+        from lib.config import get_embed_llm_config
+        _embed_model_cache = get_embedding_model(get_embed_llm_config())
+        return _embed_model_cache
+    except Exception as e:
+        logger.warning(f"Embedding 模型加载失败，将仅使用关键词匹配: {e}")
+        return None
+
+
+def _compute_embedding_similarity(text_a: str, text_b: str) -> float:
+    embed_model = _get_embed_model()
+    if embed_model is None:
+        return 0.0
+    try:
+        emb_a = embed_model.get_query_embedding(text_a)
+        emb_b = embed_model.get_query_embedding(text_b)
+        dot = sum(a * b for a, b in zip(emb_a, emb_b))
+        norm_a = math.sqrt(sum(a * a for a in emb_a))
+        norm_b = math.sqrt(sum(b * b for b in emb_b))
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)
+    except Exception as e:
+        logger.debug(f"Embedding 相似度计算失败: {e}")
+        return 0.0
+
 
 @dataclass
 class RetrievalEvalReport:
@@ -181,6 +218,12 @@ def _is_relevant(
                 elif source_file and source_file in doc_set:
                     return True
 
+    if evidence_keywords:
+        query_text = ' '.join(evidence_keywords)
+        similarity = _compute_embedding_similarity(query_text, content)
+        if similarity >= _SEMANTIC_RELEVANCE_THRESHOLD:
+            return True
+
     return False
 
 
@@ -301,7 +344,7 @@ class RetrievalEvaluator:
 
         precision = sum(relevance) / len(relevance)
 
-        recall = min(sum(relevance) / len(sample.evidence_docs), 1.0) if sample.evidence_docs else 0.0
+        recall = sum(relevance) / len(sample.evidence_docs) if sample.evidence_docs else 0.0
 
         mrr = 0.0
         first_relevant_rank = None
@@ -629,12 +672,12 @@ class GenerationEvaluator:
             if not sentence_bigrams:
                 continue
             covered = sentence_bigrams & context_bigrams
-            if len(covered) / len(sentence_bigrams) >= 0.3:
+            if len(covered) / len(sentence_bigrams) >= _SENTENCE_COVERAGE_THRESHOLD:
                 supported_count += 1
 
         sentence_coverage = supported_count / len(sentences)
         bigram_overlap = _bigram_overlap(answer_bigrams, context_bigrams)
-        return 0.6 * sentence_coverage + 0.4 * bigram_overlap
+        return 0.7 * sentence_coverage + 0.3 * bigram_overlap
 
     @staticmethod
     def _compute_correctness(answer: str, ground_truth: str) -> float:

@@ -68,27 +68,13 @@ def classify_badcase(
                 "fix_direction": "补充相关法规文档到知识库",
             }
 
-    if unverified_claims:
-        claims_preview = "；".join(unverified_claims[:3])
-        return {
-            "type": "hallucination",
-            "reason": f"回答包含 {len(unverified_claims)} 条未引用的事实性陈述: {claims_preview}",
-            "fix_direction": "加强 Prompt 忠实度约束，要求 LLM 严格引用来源",
-        }
+    from .evaluator import _token_bigrams, _bigram_overlap
 
-    from .tokenizer import tokenize_chinese
-    answer_bigrams = set()
-    tokens = tokenize_chinese(answer)
-    for i in range(len(tokens) - 1):
-        answer_bigrams.add(tokens[i] + tokens[i + 1])
-
-    context_bigrams = set()
-    ctx_tokens = tokenize_chinese(combined_content)
-    for i in range(len(ctx_tokens) - 1):
-        context_bigrams.add(ctx_tokens[i] + ctx_tokens[i + 1])
+    answer_bigrams = _token_bigrams(answer)
+    context_bigrams = _token_bigrams(combined_content)
 
     if answer_bigrams and context_bigrams:
-        bigram_overlap = len(answer_bigrams & context_bigrams) / len(answer_bigrams)
+        bigram_overlap = _bigram_overlap(answer_bigrams, context_bigrams)
         if bigram_overlap < 0.2:
             return {
                 "type": "hallucination",
