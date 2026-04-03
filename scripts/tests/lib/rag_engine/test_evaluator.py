@@ -105,7 +105,7 @@ class TestEvalDataset:
 
     def test_load_default_dataset(self):
         dataset = create_default_eval_dataset()
-        assert len(dataset) == 30
+        assert len(dataset) == 60
 
     def test_eval_sample_fields(self, sample_eval):
         assert sample_eval.id == "test001"
@@ -130,10 +130,10 @@ class TestEvalDataset:
             t = s.question_type.value
             type_counts[t] = type_counts.get(t, 0) + 1
 
-        assert type_counts['factual'] >= 10
-        assert type_counts['multi_hop'] >= 6
-        assert type_counts['negative'] >= 4
-        assert type_counts['colloquial'] >= 3
+        assert type_counts['factual'] >= 18
+        assert type_counts['multi_hop'] >= 12
+        assert type_counts['negative'] >= 12
+        assert type_counts['colloquial'] >= 8
 
     def test_to_dict_roundtrip(self, sample_eval):
         d = sample_eval.to_dict()
@@ -174,7 +174,7 @@ class TestEvalDataset:
 
     def test_load_eval_dataset_default_path_fallback(self):
         dataset = load_eval_dataset()
-        assert len(dataset) == 30
+        assert len(dataset) == 60
 
     def test_save_and_load_roundtrip(self, tmp_path):
         samples = create_default_eval_dataset()[:3]
@@ -260,6 +260,55 @@ class TestRetrievalMetrics:
         result = {'content': '任意内容', 'law_name': '未知', 'source_file': ''}
         assert _is_relevant(result, [], []) is False
 
+    def test_is_relevant_semantic_match(self, monkeypatch):
+        """同义表达但字面不匹配时，embedding 语义判定应识别为相关"""
+        def mock_similarity(text_a, text_b):
+            return 0.75
+        monkeypatch.setattr(
+            'lib.rag_engine.evaluator._compute_embedding_similarity',
+            mock_similarity,
+        )
+        result = {
+            'content': '观察期内发生保险事故不承担赔偿责任',
+            'law_name': '健康保险管理办法',
+            'source_file': 'other.md',
+        }
+        assert _is_relevant(result, ["05_健康保险产品开发.md"], ["等待期", "保险事故"]) is True
+
+    def test_is_relevant_semantic_below_threshold(self, monkeypatch):
+        """embedding 相似度低于阈值时仍判为不相关"""
+        def mock_similarity(text_a, text_b):
+            return 0.4
+        monkeypatch.setattr(
+            'lib.rag_engine.evaluator._compute_embedding_similarity',
+            mock_similarity,
+        )
+        result = {
+            'content': '分红型保险的分红水平不确定',
+            'law_name': '分红型人身保险',
+            'source_file': '07_分红型人身保险.md',
+        }
+        assert _is_relevant(result, ["05_健康保险产品开发.md"], ["等待期"]) is False
+
+    def test_is_relevant_keyword_match_still_first(self, monkeypatch):
+        """关键词匹配优先于 embedding 判定"""
+        call_count = 0
+        def mock_similarity(text_a, text_b):
+            nonlocal call_count
+            call_count += 1
+            return 0.0
+        monkeypatch.setattr(
+            'lib.rag_engine.evaluator._compute_embedding_similarity',
+            mock_similarity,
+        )
+        result = {
+            'content': '等待期规定相关内容，既往症人群的等待期不应有过大差距',
+            'law_name': '未知',
+            'source_file': 'other.md',
+        }
+        assert _is_relevant(result, ["05_健康保险产品开发.md"], ["等待期", "既往症"]) is True
+        assert call_count == 0
+
     def test_token_jaccard_identical(self):
         assert _compute_token_jaccard(
             "保险合同是投保人与保险人约定保险权利义务关系的协议",
@@ -322,7 +371,7 @@ class TestRetrievalEvaluator:
         result = evaluator.evaluate(sample_eval, top_k=2)
 
         assert result['precision'] == 1.0
-        assert result['recall'] == 1.0
+        assert result['recall'] == 2.0  # 2 relevant results / 1 evidence doc
         assert result['mrr'] == 1.0
         assert result['ndcg'] == 1.0
         assert result['first_relevant_rank'] == 1
@@ -337,7 +386,7 @@ class TestRetrievalEvaluator:
         result = evaluator.evaluate(sample_eval, top_k=4)
 
         assert result['precision'] == pytest.approx(0.5)
-        assert result['recall'] == pytest.approx(1.0)
+        assert result['recall'] == 2.0  # 2 relevant results / 1 evidence doc
         assert result['mrr'] == 1.0  # 第一条就命中
         assert result['ndcg'] > 0.0
         assert result['first_relevant_rank'] == 1
@@ -660,3 +709,32 @@ class TestGenerationEvalReport:
         report.print_report()
         captured = capsys.readouterr()
         assert 'Faithfulness' in captured.out
+
+
+class TestRunRetrievalEvaluation:
+    def test_run_with_all_failures(self, mock_rag_engine):
+        from lib.rag_engine.eval_dataset import create_default_eval_dataset
+        from lib.rag_engine.evaluator import run_retrieval_evaluation
+
+        mock_rag_engine.search.return_value = [
+            {'content': '不相关内容', 'law_name': '其他', 'source_file': 'other.md', 'score': 0.5},
+        ]
+        samples = create_default_eval_dataset()[:5]
+        report, failed = run_retrieval_evaluation(mock_rag_engine, samples, top_k=1)
+
+        assert report.precision_at_k == 0.0
+        assert len(failed) == 5
+        for f in failed:
+            assert f['failure_reason'] in (
+                '检索无结果', '结果不相关', '排序错误（相关文档排名靠后）'
+            )
+
+    def test_run_with_all_pass(self, mock_rag_engine, sample_eval):
+        from lib.rag_engine.evaluator import run_retrieval_evaluation
+
+        mock_rag_engine.search.return_value = [
+            {'content': '等待期规定相关内容', 'law_name': '健康保险产品开发', 'source_file': '05_健康保险产品开发.md', 'score': 0.9},
+        ]
+        report, failed = run_retrieval_evaluation(mock_rag_engine, [sample_eval], top_k=1)
+
+        assert len(failed) == 0
