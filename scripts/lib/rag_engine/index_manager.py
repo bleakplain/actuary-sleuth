@@ -26,7 +26,7 @@ class VectorIndexManager:
 
     def create_index(
         self,
-        documents: List,
+        documents: List[Any],
         force_rebuild: bool = False
     ) -> Optional[VectorStoreIndex]:
         if not force_rebuild:
@@ -52,7 +52,7 @@ class VectorIndexManager:
         logger.info(f"正在使用 {len(documents)} 条法规创建索引...")
 
         nodes = [
-            TextNode(text=doc.text, metadata=doc.metadata)
+            doc if isinstance(doc, TextNode) else TextNode(text=doc.text, metadata=doc.metadata)
             for doc in documents
         ]
         self.index = VectorStoreIndex(
@@ -62,6 +62,13 @@ class VectorIndexManager:
         )
 
         logger.info("索引创建成功")
+        return self.index
+
+    def load_index(self) -> Optional[VectorStoreIndex]:
+        """加载已有的向量索引（不创建新索引）。"""
+        loaded = self._load_existing_index()
+        if loaded:
+            self.index = loaded
         return self.index
 
     def _load_existing_index(self) -> Optional[VectorStoreIndex]:

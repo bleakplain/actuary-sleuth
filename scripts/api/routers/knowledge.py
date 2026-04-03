@@ -86,16 +86,11 @@ async def import_documents(req: ImportRequest):
             _tasks[task_id]["progress"] = "正在导入..."
 
             config = _get_config()
-            from lib.rag_engine.indexer import KBIndexer
-            importer = KBIndexer(config)
+            from lib.rag_engine.builder import KnowledgeBuilder
+            builder = KnowledgeBuilder(config)
 
-            if req.file_path:
-                documents = importer.parse_documents(file_pattern=f"**/{Path(req.file_path).name}")
-                chunks = importer.chunk_documents(documents)
-                importer.import_to_vector_db(chunks, force_rebuild=True)
-                result = {"parsed": len(documents), "vector": len(chunks), "bm25": 0}
-            else:
-                result = importer.import_all(file_pattern=req.file_pattern)
+            file_pattern = f"**/{Path(req.file_path).name}" if req.file_path else req.file_pattern
+            result = builder.build(file_pattern=file_pattern, force_rebuild=True)
 
             _tasks[task_id]["status"] = "completed"
             _tasks[task_id]["result"] = result if isinstance(result, dict) else {"stats": str(result)}
@@ -123,22 +118,20 @@ async def rebuild_index(req: RebuildRequest):
             vm = KBVersionManager()
             working_config = RAGConfig()
 
-            meta = vm.create_version(
+            result = vm.build_version(
                 regulations_dir=working_config.regulations_dir,
                 description="从当前源文件重建",
+                force_rebuild=True,
             )
-
-            version_config = vm.get_rag_config(meta.version_id)
-            from lib.rag_engine.indexer import KBIndexer
-            importer = KBIndexer(version_config)
-            stats = importer.import_all(force_rebuild=True)
-            vm.update_version_chunk_count(meta.version_id, stats.get("vector", 0))
 
             from api.routers.kb_version import reload_rag_engine
             reload_rag_engine(vm)
 
             _tasks[task_id]["status"] = "completed"
-            _tasks[task_id]["result"] = {"version_id": meta.version_id, "stats": stats}
+            _tasks[task_id]["result"] = {
+                "version_id": result["version_id"],
+                "stats": result["stats"],
+            }
         except Exception as e:
             _tasks[task_id]["status"] = "failed"
             _tasks[task_id]["progress"] = str(e)

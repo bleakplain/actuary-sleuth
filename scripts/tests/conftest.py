@@ -23,5 +23,9 @@ def pytest_configure(config):
                     key, value = line.split("=", 1)
                     os.environ.setdefault(key.strip(), value.strip())
 
-    # Register RAG fixtures plugin after sys.path is set
-    config.pluginmanager.import_plugin("tests.utils.rag_fixtures")
+    config.addinivalue_line("markers", "ragas: RAGAS evaluation tests (run with -m ragas)")
+
+    # 默认排除 RAGAS 测试，按需用 -m ragas 运行
+    if not config.getoption("-m", default=""):
+        config.option.markexpr = "not ragas"
+

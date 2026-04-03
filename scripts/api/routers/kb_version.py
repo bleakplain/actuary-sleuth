@@ -69,29 +69,21 @@ async def create_version(req: CreateVersionRequest):
 
             vm = _get_version_manager()
 
-            # 从工作目录 references/ 快照源文件
             from lib.rag_engine.config import RAGConfig
             working_config = RAGConfig()
-            meta = vm.create_version(
+
+            result = vm.build_version(
                 regulations_dir=working_config.regulations_dir,
                 description=req.description,
+                force_rebuild=True,
             )
-            _tasks[task_id]["progress"] = f"已创建 {meta.version_id}，正在构建索引..."
-
-            # 使用版本路径构建索引
-            version_config = vm.get_rag_config(meta.version_id)
-            from lib.rag_engine.indexer import KBIndexer
-            importer = KBIndexer(version_config)
-            stats = importer.import_all(force_rebuild=True)
-
-            vm.update_version_chunk_count(meta.version_id, stats.get("vector", 0))
 
             reload_rag_engine(vm)
 
             _tasks[task_id]["status"] = "completed"
             _tasks[task_id]["result"] = {
-                "version_id": meta.version_id,
-                "stats": stats,
+                "version_id": result["version_id"],
+                "stats": result["stats"],
             }
         except Exception as e:
             _tasks[task_id]["status"] = "failed"

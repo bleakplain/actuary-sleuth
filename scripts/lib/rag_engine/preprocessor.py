@@ -68,7 +68,7 @@ class ClauseEntry:
 
 
 @dataclass(frozen=True)
-class ImageInfo:
+class _ImageInfo:
     """Excel 内嵌图片信息。"""
     sheet_name: str
     row: int
@@ -99,7 +99,7 @@ def _is_number(value) -> bool:
     return False
 
 
-def list_content_sheets(excel_path: str) -> List[Dict]:
+def _list_content_sheets(excel_path: str) -> List[Dict]:
     """列出 Excel 中的内容 sheet（跳过'分工'和'相关法规'）。"""
     import openpyxl
 
@@ -271,7 +271,7 @@ def clauses_to_markdown(
     return "\n".join(lines)
 
 
-def extract_images_from_sheet(sheet, sheet_name: str) -> List[ImageInfo]:
+def extract_images_from_sheet(sheet, sheet_name: str) -> List[_ImageInfo]:
     """从 sheet 中提取所有嵌入图片。"""
     images = []
     for img in sheet._images:
@@ -289,7 +289,7 @@ def extract_images_from_sheet(sheet, sheet_name: str) -> List[ImageInfo]:
                 pil_img = PILImage.open(io.BytesIO(raw))
                 img_buf = io.BytesIO()
                 pil_img.save(img_buf, format="PNG")
-                images.append(ImageInfo(
+                images.append(_ImageInfo(
                     sheet_name=sheet_name,
                     row=row,
                     col=col,
@@ -301,7 +301,7 @@ def extract_images_from_sheet(sheet, sheet_name: str) -> List[ImageInfo]:
     return images
 
 
-def extract_images_from_excel(excel_path: str) -> List[ImageInfo]:
+def extract_images_from_excel(excel_path: str) -> List[_ImageInfo]:
     """从 Excel 中提取所有嵌入图片。"""
     import openpyxl
 
@@ -606,7 +606,7 @@ def _safe_filename(name: str) -> str:
 
 
 def _process_and_embed_images(
-    images: List[ImageInfo],
+    images: List[_ImageInfo],
     refs_dir: Path,
 ) -> None:
     """OCR 处理图片并嵌入到对应的 Markdown 文件。"""

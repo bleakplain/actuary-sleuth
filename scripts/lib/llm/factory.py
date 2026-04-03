@@ -41,10 +41,6 @@ class LLMClientFactory:
         return LLMClientFactory.create_client(get_embed_llm_config())
 
     @staticmethod
-    def get_embedding_config() -> dict:
-        return get_embed_llm_config()
-
-    @staticmethod
     def create_client(config: Dict[str, Any]) -> BaseLLMClient:
         provider = config.get('provider', 'zhipu').lower()
 

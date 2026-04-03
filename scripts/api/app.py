@@ -36,9 +36,9 @@ def _ensure_knowledge_base():
     vm_check = VectorIndexManager(config)
     if not vm_check.index_exists():
         logger.info(f"版本 {vm.active_version} 的向量库为空，开始导入...")
-        from lib.rag_engine.indexer import KBIndexer
-        importer = KBIndexer(config)
-        stats = importer.import_all()
+        from lib.rag_engine.builder import KnowledgeBuilder
+        builder = KnowledgeBuilder(config)
+        stats = builder.build()
         logger.info(
             f"知识库导入完成: 解析 {stats['parsed']} 块, "
             f"向量 {stats.get('vector', 0)} 块, BM25 {stats.get('bm25', 0)} 块"

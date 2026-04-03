@@ -13,7 +13,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, List, Dict, TYPE_CHECKING
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 
 from lib.config import get_kb_version_dir
 
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(frozen=True)
 class VersionMeta:
     """单个知识库版本的元数据"""
     version_id: str
@@ -40,6 +40,19 @@ def _get_connection():
     return get_connection()
 
 
+_KB_VERSIONS_DDL = """
+CREATE TABLE IF NOT EXISTS kb_versions (
+    version_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    document_count INTEGER NOT NULL DEFAULT 0,
+    chunk_count INTEGER NOT NULL DEFAULT 0,
+    description TEXT NOT NULL DEFAULT '',
+    regulations_dir TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+
 class KBVersionManager:
     """知识库版本管理器
 
@@ -54,12 +67,9 @@ class KBVersionManager:
         self._ensure_table()
 
     def _ensure_table(self) -> None:
-        """确保 kb_versions 表已创建（支持非 app 启动场景）。"""
-        try:
-            from api.database import init_db
-            init_db()
-        except Exception:
-            pass
+        """确保 kb_versions 表已创建。"""
+        with _get_connection() as conn:
+            conn.executescript(_KB_VERSIONS_DDL)
 
     # ── 辅助 ──────────────────────────────────────────────────
 
@@ -229,3 +239,38 @@ class KBVersionManager:
             regulations_dir=paths["regulations_dir"],
             vector_db_path=paths["vector_db_path"],
         )
+
+    def build_version(
+        self,
+        regulations_dir: str,
+        description: str = "",
+        file_pattern: str = "**/*.md",
+        force_rebuild: bool = False,
+        skip_vector: bool = False,
+    ) -> Dict[str, Any]:
+        """创建版本并构建索引。
+
+        Returns:
+            {"version_id": str, "meta": VersionMeta, "stats": dict}
+        """
+        meta = self.create_version(
+            regulations_dir=regulations_dir,
+            description=description,
+        )
+        version_config = self.get_rag_config(meta.version_id)
+
+        from .builder import KnowledgeBuilder
+        builder = KnowledgeBuilder(version_config)
+        stats = builder.build(
+            file_pattern=file_pattern,
+            force_rebuild=force_rebuild,
+            skip_vector=skip_vector,
+        )
+
+        self.update_version_chunk_count(
+            meta.version_id,
+            stats.get("vector", 0) or stats.get("bm25", 0),
+        )
+
+        logger.info(f"版本 {meta.version_id} 构建完成: {stats}")
+        return {"version_id": meta.version_id, "meta": meta, "stats": stats}

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RAG engine test fixtures - uses real databases."""
+"""RAG engine test fixtures."""
+import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import List
 
 import pytest
 
@@ -21,17 +22,37 @@ except ImportError:
 
 
 @pytest.fixture
-def temp_lancedb_dir():
-    """Temporary LanceDB directory."""
-    temp_dir = Path(tempfile.mkdtemp(prefix="test_lancedb_"))
-    yield temp_dir
-    if temp_dir.exists():
-        shutil.rmtree(temp_dir, ignore_errors=True)
+def require_llm():
+    """Opt-in fixture: 设置 Settings.llm 以便 as_query_engine() 不回退到 OpenAI。"""
+    from llama_index.core import Settings
+    from lib.llm import LLMClientFactory
+    from lib.rag_engine.llamaindex_adapter import ClientLLMAdapter
+    try:
+        llm_client = LLMClientFactory.create_qa_llm()
+        Settings.llm = ClientLLMAdapter(llm_client)
+    except Exception:
+        pytest.skip("LLM not available")
 
 
-@pytest.fixture
-def sample_regulation_documents() -> List[Document]:
-    """Sample regulation documents for testing."""
+@pytest.fixture(scope="session")
+def embedding_model():
+    """Session-scoped embedding model (Ollama → OpenAI fallback)."""
+    if not HAS_LLAMA_INDEX:
+        pytest.skip("llama_index not installed")
+
+    try:
+        return OllamaEmbedding(model_name="jinaai/jina-embeddings-v5-text-small")
+    except Exception:
+        try:
+            from llama_index.embeddings.openai import OpenAIEmbedding
+            return OpenAIEmbedding()
+        except Exception:
+            pytest.skip("No embedding model available")
+
+
+@pytest.fixture(scope="session")
+def sample_documents() -> List[Document]:
+    """5 sample regulation documents (immutable, shared across session)."""
     if not HAS_LLAMA_INDEX:
         return []
 
@@ -85,17 +106,19 @@ def sample_regulation_documents() -> List[Document]:
 
 
 @pytest.fixture
-def real_vector_index(temp_lancedb_dir, sample_regulation_documents):
-    """Create a real vector index for testing."""
+def temp_dir():
+    """Temporary directory with auto-cleanup."""
+    with tempfile.TemporaryDirectory(prefix="test_") as tmpdir:
+        yield Path(tmpdir)
+
+
+@pytest.fixture
+def vector_index(embedding_model, temp_dir, sample_documents):
+    """Vector index with real embedding model (function-scope, clean per test)."""
     if not HAS_LLAMA_INDEX:
         pytest.skip("llama_index not installed")
 
-    try:
-        embed_model = OllamaEmbedding(model_name="jinaai/jina-embeddings-v5-text-small")
-        Settings.embed_model = embed_model
-    except Exception:
-        pytest.skip("No embedding model available")
-
+    Settings.embed_model = embedding_model
     Settings.text_splitter = SentenceSplitter(
         chunk_size=500,
         chunk_overlap=50,
@@ -103,25 +126,22 @@ def real_vector_index(temp_lancedb_dir, sample_regulation_documents):
     )
 
     vector_store = LanceDBVectorStore(
-        uri=str(temp_lancedb_dir),
+        uri=str(temp_dir),
         table_name="test_regulations",
     )
-
     storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
-    index = VectorStoreIndex.from_documents(
-        sample_regulation_documents,
+    yield VectorStoreIndex.from_documents(
+        sample_documents,
         storage_context=storage_context,
         show_progress=False,
     )
 
-    yield index
-
 
 @pytest.fixture
-def temp_bm25_index(sample_regulation_documents, temp_lancedb_dir):
-    """Create a temporary BM25 index for testing."""
+def bm25_index(temp_dir, sample_documents):
+    """BM25 index built from sample documents."""
     from lib.rag_engine.bm25_index import BM25Index
 
-    index_path = temp_lancedb_dir / "test_bm25_index.pkl"
-    return BM25Index.build(sample_regulation_documents, index_path)
+    index_path = temp_dir / "test_bm25_index.pkl"
+    return BM25Index.build(sample_documents, index_path)

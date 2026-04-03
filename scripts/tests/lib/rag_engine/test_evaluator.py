@@ -547,6 +547,7 @@ class TestGenerationEvaluator:
         assert GenerationEvaluator._compute_correctness('', '保险合同') == 0.0
         assert GenerationEvaluator._compute_correctness('保险合同', '') == 0.0
 
+    @pytest.mark.ragas
     def test_evaluate_with_ragas(self, mock_rag_engine, sample_eval):
         """RAGAS 真实评估：验证 GenerationEvaluator 能正确调用 RAGAS 并返回指标"""
         import os

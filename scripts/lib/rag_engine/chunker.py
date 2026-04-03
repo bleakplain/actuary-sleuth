@@ -26,7 +26,6 @@ _BLOCKQUOTE_META = re.compile(r'^>\s*\*\*元数据\*\*\s*:\s*(.+)$', re.MULTILIN
 _KV_PAIR = re.compile(r'(\S+?)=([^|]+)')
 _MAX_CHUNK_CHARS = 3000
 _SENTENCE_SPLIT = re.compile(r'(?<=[。；！？\n])\s*')
-_FRONTMATTER_RE = re.compile(r'^---\s*\n', re.MULTILINE)
 
 
 class ChecklistChunker:
@@ -36,8 +35,8 @@ class ChecklistChunker:
     从 frontmatter 和 blockquote 中提取完整元数据。
     """
 
-    def __init__(self, config=None):
-        self.config = config
+    def __init__(self):
+        pass
 
     def chunk(self, documents: List[Document]) -> List[TextNode]:
         """分块入口，兼容 regulation 分块器接口。"""

@@ -28,8 +28,6 @@ from lib.llm import BaseLLMClient, LLMClientFactory
 
 logger = logging.getLogger(__name__)
 
-_engine_init_lock = threading.Lock()
-
 _QA_PROMPT_TEMPLATE = """你是一位保险法规专家。请**仅依据**下方编号的法规条款回答用户问题。
 如果条款中没有足够信息，请坦诚说明"提供的法规条款中未找到相关信息"，不要自行补充外部知识。
 
@@ -146,10 +144,7 @@ class RAGEngine:
                 _thread_settings.set(self._llm, self._embed_model)
                 _thread_settings.apply()
 
-                index = self.index_manager.create_index(
-                    documents=[],
-                    force_rebuild=force_rebuild
-                )
+                index = self.index_manager.load_index()
 
                 if index is None:
                     raise RuntimeError("索引初始化失败")
@@ -173,7 +168,7 @@ class RAGEngine:
 
     def cleanup(self) -> None:
         """显式清理引擎资源"""
-        with _engine_init_lock:
+        with self._init_lock:
             self._cleanup_resources()
             self.query_engine = None
             logger.info("RAG 引擎已清理")

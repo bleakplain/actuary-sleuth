@@ -8,109 +8,94 @@ from pathlib import Path
 EXCEL_PATH = Path(__file__).parent.parent.parent.parent.parent / "references" / "1.产品开发检查清单2025年.xlsx"
 
 
+@pytest.fixture(scope="session")
+def excel_workbook():
+    """Session-scoped Excel workbook for preprocessor tests."""
+    pytest.importorskip("openpyxl")
+    from openpyxl import load_workbook
+
+    wb = load_workbook(str(EXCEL_PATH), read_only=True, data_only=True)
+    yield wb
+    wb.close()
+
+
+def _find_sheet(wb, name_fragment):
+    """Find a sheet by name fragment."""
+    for name in wb.sheetnames:
+        if name_fragment in name:
+            return wb[name]
+    return None
+
+
 class TestSheetStructureParser:
     """Tests for parsing sheet structure from Excel."""
 
     def test_list_content_sheets(self):
         """Should return only content sheets (skip '分工' and '相关法规')."""
         pytest.importorskip("openpyxl")
-        from lib.rag_engine.preprocessor import list_content_sheets
+        from lib.rag_engine.preprocessor import _list_content_sheets
 
-        sheets = list_content_sheets(str(EXCEL_PATH))
+        sheets = _list_content_sheets(str(EXCEL_PATH))
         names = [s["name"] for s in sheets]
         assert "分工" not in names
         assert "相关法规" not in names
         assert len(sheets) == 11
         assert any("00" in n for n in names)
 
-    def test_detect_regulation_boundaries_standard(self):
+    def test_detect_regulation_boundaries_standard(self, excel_workbook):
         """Standard sheets (00, 02-05) have title in row 1, headers in row 2, regulation in row 3."""
-        pytest.importorskip("openpyxl")
         from lib.rag_engine.preprocessor import parse_sheet_structure
 
-        wb = __import__("openpyxl").load_workbook(str(EXCEL_PATH), read_only=True, data_only=True)
-        sheet = None
-        for name in wb.sheetnames:
-            if "00" in name:
-                sheet = wb[name]
-                break
+        sheet = _find_sheet(excel_workbook, "00")
         assert sheet is not None
 
         structure = parse_sheet_structure(sheet, "00. 对照样例")
         assert structure.header_row == 2
         assert structure.data_start_row == 4
         assert structure.regulation_name != ""
-        wb.close()
 
-    def test_detect_regulation_boundaries_with_owner(self):
+    def test_detect_regulation_boundaries_with_owner(self, excel_workbook):
         """Sheets with '产品开发责任人' row (01, 06-08) have headers in row 3, data in row 5."""
-        pytest.importorskip("openpyxl")
         from lib.rag_engine.preprocessor import parse_sheet_structure
 
-        wb = __import__("openpyxl").load_workbook(str(EXCEL_PATH), read_only=True, data_only=True)
-        sheet = None
-        for name in wb.sheetnames:
-            if "01" in name and "负面" in name:
-                sheet = wb[name]
-                break
+        sheet = _find_sheet(excel_workbook, "01")
         assert sheet is not None
 
         structure = parse_sheet_structure(sheet, "01. 对照样例")
         assert structure.header_row == 3
         assert structure.data_start_row == 5
-        wb.close()
 
-    def test_detect_sub_regulations_in_sheet_10(self):
+    def test_detect_sub_regulations_in_sheet_10(self, excel_workbook):
         """Sheet 10 has multiple regulation boundaries detected by non-numeric column A."""
-        pytest.importorskip("openpyxl")
         from lib.rag_engine.preprocessor import parse_sheet_structure
 
-        wb = __import__("openpyxl").load_workbook(str(EXCEL_PATH), read_only=True, data_only=True)
-        sheet = None
-        for name in wb.sheetnames:
-            if "10" in name and "其他" in name:
-                sheet = wb[name]
-                break
+        sheet = _find_sheet(excel_workbook, "10")
         assert sheet is not None
 
         structure = parse_sheet_structure(sheet, "10. 对照样例")
         # Sheet 10 should have multiple sub-regulations
         assert len(structure.sub_regulations) >= 5
-        wb.close()
 
-    def test_extract_metadata_columns(self):
+    def test_extract_metadata_columns(self, excel_workbook):
         """Should correctly identify metadata column indices (B-G)."""
-        pytest.importorskip("openpyxl")
         from lib.rag_engine.preprocessor import parse_sheet_structure
 
-        wb = __import__("openpyxl").load_workbook(str(EXCEL_PATH), read_only=True, data_only=True)
-        sheet = None
-        for name in wb.sheetnames:
-            if "00" in name:
-                sheet = wb[name]
-                break
+        sheet = _find_sheet(excel_workbook, "00")
         assert sheet is not None
 
         structure = parse_sheet_structure(sheet, "00. 对照样例")
         headers = structure.headers
         assert "项目" in headers.values() or any("项目" in str(v) for v in headers.values())
-        wb.close()
 
 
 class TestClauseExtraction:
     """Tests for clause extraction and sub-regulation filtering."""
 
-    def test_extract_clauses_returns_entries(self):
+    def test_extract_clauses_returns_entries(self, excel_workbook):
         """Should extract non-empty clause entries with sequence numbers."""
-        pytest.importorskip("openpyxl")
         from lib.rag_engine.preprocessor import parse_sheet_structure, extract_clauses
 
-        wb = __import__("openpyxl").load_workbook(str(EXCEL_PATH), read_only=True, data_only=True)
-        sheet = None
-        for name in wb.sheetnames:
-            if "00" in name:
-                sheet = wb[name]
-                break
+        sheet = _find_sheet(excel_workbook, "00")
         assert sheet is not None
 
         structure = parse_sheet_structure(sheet, "00. 对照样例")
@@ -119,39 +104,27 @@ class TestClauseExtraction:
         assert all(c.sequence > 0 for c in clauses)
         assert all(c.content for c in clauses)
         assert all(c.row > 0 for c in clauses)
-        wb.close()
 
-    def test_extract_clauses_includes_metadata(self):
+    def test_extract_clauses_includes_metadata(self, excel_workbook):
         """Should extract metadata columns when present."""
-        pytest.importorskip("openpyxl")
         from lib.rag_engine.preprocessor import parse_sheet_structure, extract_clauses
 
-        wb = __import__("openpyxl").load_workbook(str(EXCEL_PATH), read_only=True, data_only=True)
-        sheet = None
-        for name in wb.sheetnames:
-            if "00" in name:
-                sheet = wb[name]
-                break
+        sheet = _find_sheet(excel_workbook, "00")
+        assert sheet is not None
 
         structure = parse_sheet_structure(sheet, "00. 对照样例")
         clauses = extract_clauses(sheet, structure)
         clauses_with_meta = [c for c in clauses if c.metadata]
         assert len(clauses_with_meta) > 0
-        wb.close()
 
-    def test_sheet_10_sub_regulation_filtering(self):
+    def test_sheet_10_sub_regulation_filtering(self, excel_workbook):
         """Sheet 10 sub-regulations should produce separate clause groups."""
-        pytest.importorskip("openpyxl")
         from lib.rag_engine.preprocessor import (
             parse_sheet_structure, extract_clauses, _filter_clauses_for_sub_reg,
         )
 
-        wb = __import__("openpyxl").load_workbook(str(EXCEL_PATH), read_only=True, data_only=True)
-        sheet = None
-        for name in wb.sheetnames:
-            if "10" in name and "其他" in name:
-                sheet = wb[name]
-                break
+        sheet = _find_sheet(excel_workbook, "10")
+        assert sheet is not None
 
         structure = parse_sheet_structure(sheet, "10. 对照样例")
         all_clauses = extract_clauses(sheet, structure)
@@ -162,7 +135,6 @@ class TestClauseExtraction:
             total_filtered += len(filtered)
 
         assert total_filtered == len(all_clauses)
-        wb.close()
 
 
 class TestMarkdownGeneration:
@@ -433,4 +405,3 @@ class TestFrontmatterWithMetadata:
         assert "发文机关:" not in fm
         assert "文号:" not in fm
         assert "险种类型" not in fm
-

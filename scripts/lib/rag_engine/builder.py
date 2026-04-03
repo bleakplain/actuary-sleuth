@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""知识库索引构建模块，将法规文档导入到向量数据库和 BM25 索引。"""
+"""知识库构建模块，将法规文档构建为向量索引和 BM25 索引。"""
 import logging
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 
 from llama_index.core import Settings
-from llama_index.core import Document
+from llama_index.core.schema import TextNode
 
 from .index_manager import VectorIndexManager
 from .config import RAGConfig
 from .llamaindex_adapter import get_embedding_model
-from lib.llm import LLMClientFactory
+from lib.config import get_embed_llm_config
 
 logger = logging.getLogger(__name__)
 
 
-class KBIndexer:
-    """知识库索引构建器
+class KnowledgeBuilder:
+    """知识库构建器
 
-    将 preprocessor.py 生成的预处理 Markdown 文件导入到：
+    将 preprocessor.py 生成的预处理 Markdown 文件构建为：
     1. 向量数据库 (LanceDB) - 用于语义检索
     2. BM25 索引 - 用于关键词检索
 
-    使用 ChecklistChunker 按 ## 第N项 分块，提取 frontmatter 和 blockquote 元数据。
+    使用 RegulationChunker 按 ## 第N项 分块，提取 frontmatter 和 blockquote 元数据。
     """
 
     def __init__(self, config: Optional[RAGConfig] = None):
@@ -35,19 +35,11 @@ class KBIndexer:
 
     def _ensure_embedding_setup(self):
         if not self._embedding_setup_done:
-            embed_config = LLMClientFactory.get_embedding_config()
+            embed_config = get_embed_llm_config()
             Settings.embed_model = get_embedding_model(embed_config)
             self._embedding_setup_done = True
 
-    def import_to_vector_db(self, documents: List, force_rebuild: bool = False) -> bool:
-        self._ensure_embedding_setup()
-        index = self.index_manager.create_index(
-            documents=documents,
-            force_rebuild=force_rebuild
-        )
-        return index is not None
-
-    def parse_documents(self, file_pattern: str = "**/*.md") -> List:
+    def parse(self, file_pattern: str = "**/*.md") -> List:
         regulations_dir = Path(self.config.regulations_dir)
         if not regulations_dir.exists():
             logger.error(f"目录不存在: {regulations_dir}")
@@ -64,11 +56,10 @@ class KBIndexer:
         logger.info(f"从 {regulations_dir} 加载了 {len(documents)} 个文档")
         return documents
 
-    def chunk_documents(self, documents: List) -> List:
-        text_nodes = self.chunker.chunk(documents)
-        return [Document(text=node.text, metadata=node.metadata) for node in text_nodes]
+    def chunk(self, documents: List) -> List[TextNode]:
+        return self.chunker.chunk(documents)
 
-    def import_all(
+    def build(
         self,
         file_pattern: str = "**/*.md",
         force_rebuild: bool = False,
@@ -77,14 +68,14 @@ class KBIndexer:
         stats = {'parsed': 0, 'vector': 0, 'bm25': 0}
 
         logger.info("步骤 1: 加载文档")
-        documents = self.parse_documents(file_pattern)
+        documents = self.parse(file_pattern)
         stats['parsed'] = len(documents)
         if not documents:
             logger.warning("没有找到任何文档")
             return stats
 
         logger.info(f"步骤 2: 分块 ({len(documents)} 个文档)")
-        chunks = self.chunk_documents(documents)
+        chunks = self.chunk(documents)
         logger.info(f"生成 {len(chunks)} 个 chunk")
         if not chunks:
             return stats
@@ -113,5 +104,5 @@ class KBIndexer:
                     f"索引一致性检查失败: 向量 {stats['vector']}, BM25 {stats['bm25']}"
                 )
 
-        logger.info(f"导入完成: 文档 {stats['parsed']}, 向量 {stats['vector']}, BM25 {stats['bm25']}")
+        logger.info(f"构建完成: 文档 {stats['parsed']}, 向量 {stats['vector']}, BM25 {stats['bm25']}")
         return stats
