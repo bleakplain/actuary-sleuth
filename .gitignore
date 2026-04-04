@@ -63,7 +63,6 @@ package-lock.json
 
 # Database (runtime data, not source)
 data/actuary.db
-scripts/data/actuary.db
 data/lancedb/
 
 # Environment variables (contains sensitive data)
@@ -82,9 +81,6 @@ plan.md
 # Playwright / test results
 scripts/web/test-results/
 scripts/test-results/
-
-# Local data files
-scripts/data/
 
 # Reranker model files (large binaries, not tracked)
 scripts/lib/rag_engine/models/reranker/*.gguf
