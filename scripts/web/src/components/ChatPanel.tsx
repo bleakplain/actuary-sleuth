@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Input, Button, Radio, Space, Popconfirm } from 'antd';
-import { SendOutlined, DeleteOutlined, CloseOutlined } from '@ant-design/icons';
+import { Input, Button, Radio, Space, Popconfirm, Switch } from 'antd';
+import { SendOutlined, DeleteOutlined, CloseOutlined, BugOutlined } from '@ant-design/icons';
 import MessageBubble from './MessageBubble';
 import SourcePanel from './SourcePanel';
 import TracePanel from './TracePanel';
@@ -29,6 +29,8 @@ export default function ChatPanel() {
     activeTraceMessageId,
     traceLoading,
     closeTrace,
+    debugMode,
+    toggleDebugMode,
   } = useAskStore();
 
   const [sourcePanelOpen, setSourcePanelOpen] = React.useState(false);
@@ -157,7 +159,7 @@ export default function ChatPanel() {
           )}
           {messages.map((msg) => (
             <div key={msg.id}>
-              <MessageBubble message={msg} onCitationClick={handleCitationClick} />
+              <MessageBubble message={msg} streaming={streaming} onCitationClick={handleCitationClick} />
             </div>
           ))}
           <div ref={messagesEndRef} />
@@ -173,6 +175,11 @@ export default function ChatPanel() {
               <Radio.Button value="qa">智能问答</Radio.Button>
               <Radio.Button value="search">精确检索</Radio.Button>
             </Radio.Group>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: debugMode ? '#1677ff' : '#8c8c8c' }}>
+              <BugOutlined />
+              <span>调试</span>
+              <Switch size="small" checked={debugMode} onChange={toggleDebugMode} />
+            </span>
           </Space>
           <div style={{ display: 'flex', gap: 8 }}>
             <TextArea

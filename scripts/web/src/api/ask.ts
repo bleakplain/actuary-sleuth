@@ -25,7 +25,7 @@ export async function deleteConversation(conversationId: string): Promise<void> 
 }
 
 export function chatSSE(
-  req: { question: string; conversation_id?: string; mode: 'qa' | 'search' },
+  req: { question: string; conversation_id?: string; mode: 'qa' | 'search'; debug?: boolean },
   callbacks: {
     onToken: (token: string) => void;
     onDone: (data: ChatDoneData) => void;

@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
 from .reranker_base import BaseReranker
+from lib.llm.trace import trace_span
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +90,6 @@ class LLMReranker(BaseReranker):
         )
 
         try:
-            from lib.llm.trace import trace_span
-
             with trace_span("llm_rerank", "rerank", model=getattr(self._llm, 'model', ''), candidate_count=len(candidates)) as span:
                 span.metadata.update({
                     "reranker_type": "llm",

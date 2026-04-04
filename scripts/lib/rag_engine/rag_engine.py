@@ -26,7 +26,11 @@ from .llm_reranker import LLMReranker, RerankConfig
 from .query_preprocessor import QueryPreprocessor
 from .exceptions import EngineInitializationError, RetrievalError
 from .attribution import parse_citations, AttributionResult
+from ._gguf_cli import GGUFReranker as GGUFCliReranker
+from .gguf_reranker_adapter import GGUFReranker
+from .evaluator import GenerationEvaluator
 from lib.llm import BaseLLMClient, LLMClientFactory
+from lib.llm.trace import trace_span
 
 logger = logging.getLogger(__name__)
 
@@ -159,10 +163,8 @@ class RAGEngine:
             return LLMReranker(self._llm_client, rerank_config)
 
         if config.reranker_type == "gguf":
-            from ._gguf_cli import GGUFReranker as GGUFCliReranker
             try:
                 gguf = GGUFCliReranker()
-                from .gguf_reranker_adapter import GGUFReranker
                 return GGUFReranker(gguf)
             except FileNotFoundError as e:
                 logger.warning(f"GGUF reranker 不可用，回退到 LLM reranker: {e}")
@@ -237,7 +239,6 @@ class RAGEngine:
                 raise EngineInitializationError("RAG 引擎初始化失败")
 
         _thread_settings.apply()
-        from lib.llm.trace import trace_span
 
         try:
             search_results = self._hybrid_search(question, top_k=self.config.top_k_results)
@@ -338,7 +339,6 @@ class RAGEngine:
     def _compute_faithfulness(contexts: List[str], answer: str) -> float:
         if not contexts or not answer:
             return 0.0
-        from lib.rag_engine.evaluator import GenerationEvaluator
         return GenerationEvaluator._compute_faithfulness(contexts, answer)
 
     def search(

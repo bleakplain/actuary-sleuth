@@ -42,6 +42,7 @@ export interface ChatRequest {
   question: string;
   conversation_id?: string;
   mode: 'qa' | 'search';
+  debug?: boolean;
 }
 
 export interface Document {

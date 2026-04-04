@@ -10,6 +10,7 @@ interface AskState {
   currentSources: Source[];
   activeTraceMessageId: number | null;
   traceLoading: boolean;
+  debugMode: boolean;
 
   loadConversations: () => Promise<void>;
   selectConversation: (id: string) => Promise<void>;
@@ -17,6 +18,7 @@ interface AskState {
   deleteConversation: (id: string) => Promise<void>;
   openTrace: (messageId: number) => void;
   closeTrace: () => void;
+  toggleDebugMode: () => void;
 }
 
 export const useAskStore = create<AskState>((set, get) => ({
@@ -27,6 +29,7 @@ export const useAskStore = create<AskState>((set, get) => ({
   currentSources: [],
   activeTraceMessageId: null,
   traceLoading: false,
+  debugMode: false,
 
   loadConversations: async () => {
     const conversations = await askApi.fetchConversations();
@@ -90,7 +93,7 @@ export const useAskStore = create<AskState>((set, get) => ({
 
     let fullAnswer = '';
     askApi.chatSSE(
-      { question, conversation_id: currentConversationId || undefined, mode: 'qa' },
+      { question, conversation_id: currentConversationId || undefined, mode: 'qa', debug: get().debugMode },
       {
         onToken: (token) => {
           fullAnswer += token;
@@ -172,5 +175,9 @@ export const useAskStore = create<AskState>((set, get) => ({
 
   closeTrace: () => {
     set({ activeTraceMessageId: null });
+  },
+
+  toggleDebugMode: () => {
+    set((s) => ({ debugMode: !s.debugMode }));
   },
 }));

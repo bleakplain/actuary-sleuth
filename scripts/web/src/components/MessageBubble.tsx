@@ -11,11 +11,12 @@ const { Text } = Typography;
 
 interface Props {
   message: Message;
+  streaming?: boolean;
   onCitationClick?: (source: Source, messageSources: Source[]) => void;
 }
 
-export default function MessageBubble({ message, onCitationClick }: Props) {
-  const { activeTraceMessageId, openTrace } = useAskStore();
+export default function MessageBubble({ message, streaming, onCitationClick }: Props) {
+  const { activeTraceMessageId, openTrace, debugMode } = useAskStore();
 
   const handleCitationClick = (citation: Citation) => {
     const source = message.sources.find((_, i) => i === citation.source_idx);
@@ -46,6 +47,7 @@ export default function MessageBubble({ message, onCitationClick }: Props) {
   const content = message.content || '';
   const hasSources = message.sources && message.sources.length > 0;
   const isActive = activeTraceMessageId === message.id;
+  const isThinking = streaming && !content;
 
   return (
     <div style={{ marginBottom: 16 }}>
@@ -79,18 +81,20 @@ export default function MessageBubble({ message, onCitationClick }: Props) {
             ))}
           </div>
         )}
-        {message.role === 'assistant' && (
+        {message.role === 'assistant' && !isThinking && (
           <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
             <FeedbackButtons messageId={message.id} />
-            <Button
-              type="text"
-              size="small"
-              icon={<BugOutlined />}
-              onClick={() => openTrace(message.id)}
-              style={{ color: isActive ? '#1677ff' : undefined }}
-            >
-              调试
-            </Button>
+            {debugMode && (
+              <Button
+                type="text"
+                size="small"
+                icon={<BugOutlined />}
+                onClick={() => openTrace(message.id)}
+                style={{ color: isActive ? '#1677ff' : undefined }}
+              >
+                调试
+              </Button>
+            )}
           </div>
         )}
       </div>

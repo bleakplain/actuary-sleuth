@@ -15,6 +15,7 @@ from llama_index.core.schema import NodeWithScore
 
 from .fusion import reciprocal_rank_fusion
 from .query_preprocessor import QueryPreprocessor
+from lib.llm.trace import trace_span
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,6 @@ def vector_search(
     filters: Optional[Dict[str, Any]] = None
 ) -> List:
     """向量检索"""
-    from lib.llm.trace import trace_span
-
     with trace_span("vector_search", "retrieval", top_k=top_k) as span:
         span.input = {"query": query_text, "top_k": top_k}
         metadata_filters = None
@@ -102,8 +101,6 @@ def hybrid_search(
     max_chunks_per_article: int = 3,
 ) -> List[Dict[str, Any]]:
     """混合检索（向量 + BM25 关键词，RRF 融合 + Query 预处理）"""
-    from lib.llm.trace import trace_span
-
     if not index or not bm25_index:
         return []
 

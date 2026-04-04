@@ -120,14 +120,15 @@ CREATE TABLE IF NOT EXISTS kb_versions (
 CREATE TABLE IF NOT EXISTS traces (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     trace_id TEXT NOT NULL,
-    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    message_id INTEGER,
+    conversation_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_traces_trace_id ON traces(trace_id);
 
 CREATE TABLE IF NOT EXISTS spans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    trace_id TEXT NOT NULL REFERENCES traces(trace_id) ON DELETE CASCADE,
+    trace_id TEXT NOT NULL,
     span_id TEXT NOT NULL,
     parent_span_id TEXT,
     name TEXT NOT NULL,
@@ -141,6 +142,7 @@ CREATE TABLE IF NOT EXISTS spans (
     status TEXT NOT NULL DEFAULT 'ok' CHECK(status IN ('ok', 'error')),
     error TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_spans_trace_span ON spans(trace_id, span_id);
 CREATE INDEX IF NOT EXISTS idx_spans_trace_id ON spans(trace_id);
 CREATE INDEX IF NOT EXISTS idx_spans_parent ON spans(parent_span_id);
 """
@@ -177,6 +179,10 @@ def _migrate_db():
             conn.execute("ALTER TABLE messages ADD COLUMN faithfulness_score REAL")
         if 'unverified_claims_json' not in cols:
             conn.execute("ALTER TABLE messages ADD COLUMN unverified_claims_json TEXT DEFAULT '[]'")
+
+        trace_cols = {row[1] for row in conn.execute("PRAGMA table_info(traces)").fetchall()}
+        if 'conversation_id' not in trace_cols:
+            conn.execute("ALTER TABLE traces ADD COLUMN conversation_id TEXT")
 
 
 def create_conversation(conversation_id: str, title: str = "") -> None:
@@ -643,11 +649,11 @@ def get_feedback_stats() -> Dict:
     }
 
 
-def save_trace(trace_id: str, message_id: int, root_span_dict: Optional[Dict] = None) -> None:
+def save_trace(trace_id: str, message_id: int, conversation_id: str = "", root_span_dict: Optional[Dict] = None) -> None:
     with get_connection() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO traces (trace_id, message_id) VALUES (?, ?)",
-            (trace_id, message_id),
+            "INSERT OR IGNORE INTO traces (trace_id, message_id, conversation_id) VALUES (?, ?, ?)",
+            (trace_id, message_id, conversation_id),
         )
 
 
@@ -706,7 +712,8 @@ def get_trace(message_id: int) -> Optional[Dict]:
     if root is None:
         return None
 
-    llm_count = sum(1 for s in span_dicts if s["category"] in ("llm", "rerank"))
+    root_meta = root.get("metadata") or {}
+    llm_count = root_meta.get("llm_call_count", 0)
     error_count = sum(1 for s in span_dicts if s["status"] == "error")
 
     return {

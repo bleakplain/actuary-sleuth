@@ -27,5 +27,6 @@
   "feishu": {
     "app_id": "",
     "target_group_id": "oc_d7b83e1f9eb58c6797b061dcc33d212f"
-  }
+  },
+  "debug": false
 }

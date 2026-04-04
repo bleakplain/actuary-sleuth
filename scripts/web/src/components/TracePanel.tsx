@@ -212,7 +212,8 @@ function MetaTable({ entries }: { entries: [string, unknown][] }) {
 /* ── span detail panel ── */
 
 function SpanDetails({ span, depth }: { span: TraceSpan; depth: number }) {
-  const cat = getCategoryStyle(span.category);
+  const catStyle = getCategoryStyle(span.category);
+  const cat = span.category;
   const metaEntries = span.metadata && Object.keys(span.metadata).length > 0
     ? Object.entries(span.metadata).filter(([k]) => k !== 'prompt') : [];
   const out = span.output && typeof span.output === 'object' ? span.output : null;
@@ -220,8 +221,8 @@ function SpanDetails({ span, depth }: { span: TraceSpan; depth: number }) {
   return (
     <div style={{
       marginLeft: depth * 16, paddingLeft: 44, paddingRight: 12, paddingBottom: 8,
-      borderLeft: `3px solid ${cat.color}`,
-      background: cat.bg,
+      borderLeft: `3px solid ${catStyle.color}`,
+      background: catStyle.bg,
     }}>
       <MetaTable entries={metaEntries} />
 
@@ -382,6 +383,13 @@ function SpanRow({ span, depth, maxDuration }: {
           {span.name}
         </span>
         <span style={{
+          fontSize: 10, color: '#bfbfbf',
+          fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
+          flexShrink: 0,
+        }}>
+          {span.span_id}<CopyBtn text={span.span_id} />
+        </span>
+        <span style={{
           fontSize: 10, color: cat.color, background: cat.bg,
           padding: '0 6px', borderRadius: 3, lineHeight: '18px', flexShrink: 0,
         }}>
@@ -479,6 +487,13 @@ export default function TracePanel({ trace, loading }: Props) {
         padding: '8px 16px', borderBottom: '1px solid #f0f0f0',
         flexWrap: 'wrap',
       }}>
+        <span style={{
+          fontSize: 11, color: '#595959', background: '#f5f5f5',
+          padding: '2px 8px', borderRadius: 10,
+          fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
+        }}>
+          trace:{' '}{trace.trace_id}<CopyBtn text={trace.trace_id} />
+        </span>
         <span style={{
           fontSize: 11, color: '#fff', background: '#262626',
           padding: '2px 8px', borderRadius: 10,

@@ -15,6 +15,8 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
+from lib.llm.trace import trace_span
+
 _SYNONYMS_FILE = Path(__file__).parent / 'data' / 'synonyms.json'
 
 
@@ -88,8 +90,6 @@ class QueryPreprocessor:
         if len(query) <= _SIMPLE_QUERY_THRESHOLD:
             return None
         try:
-            from lib.llm.trace import trace_span
-
             with trace_span("query_rewrite", "preprocessing", model=getattr(self._llm, 'model', '')) as span:
                 span.input = {"query": query}
                 prompt = _REWRITE_PROMPT.format(query=query)

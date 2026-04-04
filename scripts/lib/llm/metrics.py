@@ -18,6 +18,8 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+from lib.llm.trace import increment_llm_call_count
+
 
 class CircuitState(Enum):
     """熔断器状态"""
@@ -169,6 +171,11 @@ def _track_timing(api_name: str) -> Callable[[Callable], Callable]:
             try:
                 result = func(*args, **kwargs)
                 success = True
+                if func.__name__ in ("generate", "chat"):
+                    try:
+                        increment_llm_call_count()
+                    except Exception:
+                        pass
                 return result
             finally:
                 latency = time.time() - start_time
