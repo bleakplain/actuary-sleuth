@@ -1,20 +1,18 @@
-# Ignore test files and directories (but keep our structured tests)
-# tests/unit/
-# tests/integration/
-test_*.py
-*_test.py
-e2e_test*.py
-scoring_comparison.py
-run_tests.py
-complete_test*.py
+# Temporary test scripts (root-level only, scripts/tests/ is tracked)
+/test_*.py
+/*_test.py
+/e2e_test*.py
+/complete_test*.py
+/run_tests.py
+/scoring_comparison.py
 
-# Fix and backup scripts
-fix_*.py
-*_fixed.py
-*_old.py
-rebuild_*.py
-*_final*.py
-import_*.py
+# Temporary fix/backup scripts
+/fix_*.py
+/*_fixed.py
+/*_old.py
+/rebuild_*.py
+/*_final*.py
+/import_*.py
 
 # Python
 __pycache__/
@@ -42,12 +40,9 @@ Thumbs.db
 *.log
 
 # Test data files
-test_*.json
+/test_*.json
 
 # Test outputs
-tests/htmlcov/
-tests/coverage.xml
-tests/.coverage
 .coverage
 scripts/.coverage
 *.db-shm
