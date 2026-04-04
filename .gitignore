@@ -84,8 +84,7 @@ scripts/web/test-results/
 scripts/test-results/
 
 # Local data files
-scripts/data/bm25_index.pkl
-scripts/data/lancedb/
+scripts/data/
 
 # Reranker model files (large binaries, not tracked)
 scripts/lib/rag_engine/models/reranker/*.gguf
