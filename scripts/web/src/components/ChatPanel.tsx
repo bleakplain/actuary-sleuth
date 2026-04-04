@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Input, Button, Radio, Space, Popconfirm, Switch } from 'antd';
+import { Input, Button, Radio, Popconfirm, Switch } from 'antd';
 import { SendOutlined, DeleteOutlined, CloseOutlined, BugOutlined } from '@ant-design/icons';
 import MessageBubble from './MessageBubble';
 import SourcePanel from './SourcePanel';
@@ -27,7 +27,7 @@ function formatConvTime(ts: string): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-const DEFAULT_TRACE_WIDTH = 520;
+const DEFAULT_TRACE_WIDTH = 600;
 const MIN_TRACE_WIDTH = 360;
 const MAX_TRACE_WIDTH = 800;
 
@@ -189,7 +189,7 @@ export default function ChatPanel() {
         </div>
 
         <div style={{ borderTop: '1px solid #f0f0f0', padding: '12px 24px' }}>
-          <Space style={{ marginBottom: 8 }}>
+          <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Radio.Group
               value={mode}
               onChange={(e) => setMode(e.target.value)}
@@ -203,7 +203,7 @@ export default function ChatPanel() {
               <span>调试</span>
               <Switch size="small" checked={debugMode} onChange={toggleDebugMode} />
             </span>
-          </Space>
+          </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <TextArea
               value={input}

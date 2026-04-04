@@ -33,11 +33,13 @@ function formatDuration(ms: number): string {
 function formatTimestamp(ts: number): string {
   if (!ts) return '-';
   const d = new Date(ts * 1000);
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
   const h = String(d.getHours()).padStart(2, '0');
   const m = String(d.getMinutes()).padStart(2, '0');
   const s = String(d.getSeconds()).padStart(2, '0');
   const ms = String(d.getMilliseconds()).padStart(3, '0');
-  return `${h}:${m}:${s}.${ms}`;
+  return `${mo}-${dd} ${h}:${m}:${s}.${ms}`;
 }
 
 /* ── copy button ── */
@@ -236,32 +238,6 @@ function SpanDetails({ span, depth }: { span: TraceSpan; depth: number }) {
     }}>
       <MetaTable entries={metaEntries} />
 
-      {/* timing info */}
-      <div style={{
-        margin: '4px 0 0', fontSize: 11, color: '#8c8c8c',
-        display: 'flex', alignItems: 'center', gap: 12,
-      }}>
-        <span>
-          <span style={{ color: '#bfbfbf' }}>开始</span>{' '}
-          <span style={{
-            color: '#595959', fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
-          }}>{formatTimestamp(span.start_time)}</span>
-        </span>
-        <span>
-          <span style={{ color: '#bfbfbf' }}>结束</span>{' '}
-          <span style={{
-            color: '#595959', fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
-          }}>{formatTimestamp(span.end_time)}</span>
-        </span>
-        <span>
-          <span style={{ color: '#bfbfbf' }}>耗时</span>{' '}
-          <span style={{
-            color: catStyle.color, fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
-            fontWeight: 500,
-          }}>{formatDuration(span.duration_ms)}</span>
-        </span>
-      </div>
-
       {/* retrieval */}
       {cat === 'retrieval' && out && (
         <>
@@ -417,6 +393,13 @@ function SpanRow({ span, depth, maxDuration }: {
         )}
         <span style={{ fontWeight: 500, fontSize: 13, color: '#262626', flexShrink: 0 }}>
           {span.name}
+        </span>
+        <span style={{
+          fontSize: 10, color: '#bfbfbf', fontVariantNumeric: 'tabular-nums',
+          fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
+          flexShrink: 0,
+        }}>
+          {formatTimestamp(span.start_time)}
         </span>
         <span style={{
           fontSize: 10, color: '#bfbfbf',

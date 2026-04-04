@@ -3,6 +3,7 @@
 
 import sys
 import os
+import time
 from pathlib import Path
 
 if __name__ == "__main__":
@@ -19,6 +20,28 @@ if __name__ == "__main__":
                 if line and not line.startswith('#') and '=' in line:
                     key, value = line.split('=', 1)
                     os.environ.setdefault(key.strip(), value.strip())
+
+    import subprocess
+
+    # 若端口 8000 已占用，先停服
+    def stop_service(port: int):
+        try:
+            result = subprocess.run(["lsof", "-ti", f":{port}"], capture_output=True, text=True)
+            pids = result.stdout.strip().split("\n") if result.stdout.strip() else []
+            for pid in pids:
+                pid = pid.strip()
+                if pid:
+                    os.kill(int(pid), 9)
+                    print(f"已停止占用端口 {port} 的进程 (PID {pid})")
+            return len(pids) > 0
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            return False
+
+    if stop_service(8000):
+        for _ in range(10):
+            if not subprocess.run(["lsof", "-ti", ":8000"], capture_output=True, text=True).stdout.strip():
+                break
+            time.sleep(0.5)
 
     import uvicorn
 
