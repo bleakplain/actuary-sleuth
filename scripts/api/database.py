@@ -835,7 +835,7 @@ def search_traces(
 
         rows = conn.execute(
             f"SELECT t.trace_id, t.message_id, t.conversation_id, t.created_at, "
-            f"COALESCE(sa.has_error, 0) AS status, "
+            f"CASE WHEN COALESCE(sa.has_error, 0) = 1 THEN 'error' ELSE 'ok' END AS status, "
             f"COALESCE(sa.total_duration_ms, 0) AS total_duration_ms, "
             f"COALESCE(sa.span_count, 0) AS span_count "
             f"FROM traces t "
