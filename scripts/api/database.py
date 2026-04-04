@@ -254,6 +254,53 @@ def delete_conversation(conversation_id: str) -> int:
         return msg_count
 
 
+def search_conversations(search: str = "", page: int = 1, size: int = 20) -> tuple:
+    """分页搜索对话，按标题 LIKE 匹配。
+
+    Returns:
+        (rows, total_count)，rows 中每条记录包含 id, title, created_at, message_count。
+    """
+    offset = (page - 1) * size
+    where_clause = ""
+    params: list = []
+    if search:
+        where_clause = "WHERE c.title LIKE ?"
+        params.append(f"%{search}%")
+
+    with get_connection() as conn:
+        count_row = conn.execute(
+            f"SELECT COUNT(*) AS cnt FROM conversations c {where_clause}", params
+        ).fetchone()
+        total = count_row["cnt"]
+
+        rows = conn.execute(f"""
+            SELECT c.id, c.title, c.created_at,
+                   COUNT(m.id) AS message_count
+            FROM conversations c
+            LEFT JOIN messages m ON m.conversation_id = c.id
+            {where_clause}
+            GROUP BY c.id
+            ORDER BY c.created_at DESC
+            LIMIT ? OFFSET ?
+        """, params + [size, offset]).fetchall()
+        return [dict(r) for r in rows], total
+
+
+def batch_delete_conversations(ids: list) -> int:
+    """批量删除对话及其关联消息。返回实际删除的对话数。"""
+    if not ids:
+        return 0
+    placeholders = ",".join("?" for _ in ids)
+    with get_connection() as conn:
+        conn.execute(
+            f"DELETE FROM messages WHERE conversation_id IN ({placeholders})", ids
+        )
+        cur = conn.execute(
+            f"DELETE FROM conversations WHERE id IN ({placeholders})", ids
+        )
+        return cur.rowcount
+
+
 def get_eval_samples(
     question_type: Optional[str] = None,
     difficulty: Optional[str] = None,
