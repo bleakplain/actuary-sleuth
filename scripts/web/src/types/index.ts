@@ -28,6 +28,7 @@ export interface Message {
   timestamp: string;
   faithfulness_score?: number;
   unverified_claims?: string[];
+  trace?: TraceData | null;
 }
 
 export interface Conversation {
@@ -174,4 +175,33 @@ export interface FeedbackStats {
   by_type: Record<string, number>;
   by_status: Record<string, number>;
   by_risk: Record<string, number>;
+}
+
+export interface TraceSpan {
+  span_id: string;
+  trace_id: string;
+  parent_span_id: string | null;
+  name: string;
+  category: string;
+  input: Record<string, unknown> | null;
+  output: Record<string, unknown> | null;
+  metadata: Record<string, unknown>;
+  duration_ms: number;
+  status: 'ok' | 'error';
+  error: string | null;
+  children: TraceSpan[];
+}
+
+export interface TraceSummary {
+  total_duration_ms: number;
+  span_count: number;
+  llm_call_count: number;
+  error_count: number;
+}
+
+export interface TraceData {
+  trace_id: string;
+  root: TraceSpan;
+  spans: TraceSpan[];
+  summary: TraceSummary;
 }

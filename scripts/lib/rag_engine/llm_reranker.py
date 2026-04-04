@@ -89,8 +89,34 @@ class LLMReranker(BaseReranker):
         )
 
         try:
-            response = self._llm.generate(prompt)
-            return self._parse_ranking(str(response).strip(), len(candidates)), True
+            from lib.llm.trace import trace_span
+
+            with trace_span("llm_rerank", "rerank", model=getattr(self._llm, 'model', ''), candidate_count=len(candidates)) as span:
+                span.metadata.update({
+                    "reranker_type": "llm",
+                    "top_k": self._config.top_k,
+                    "max_candidates": self._config.max_candidates,
+                })
+                span.input = {"query": query, "candidate_count": len(candidates), "prompt": prompt}
+                response = self._llm.generate(prompt)
+                response_str = str(response).strip()
+                ranked = self._parse_ranking(response_str, len(candidates))
+                span.output = {
+                    "ranked_indices": ranked,
+                    "did_rerank": True,
+                    "raw_response": response_str,
+                    "final_top_k": self._config.top_k,
+                    "results": [
+                        {
+                            "rank": rank + 1,
+                            "law_name": candidates[idx].get("law_name", ""),
+                            "article_number": candidates[idx].get("article_number", ""),
+                            "rerank_score": round(1.0 / (rank + 1), 4),
+                        }
+                        for rank, idx in enumerate(ranked[:self._config.top_k])
+                    ],
+                }
+            return ranked, True
         except Exception as e:
             logger.warning(f"Rerank 批量排序失败: {e}")
             return list(range(len(candidates))), False

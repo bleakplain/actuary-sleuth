@@ -88,9 +88,14 @@ class QueryPreprocessor:
         if len(query) <= _SIMPLE_QUERY_THRESHOLD:
             return None
         try:
-            prompt = _REWRITE_PROMPT.format(query=query)
-            response = self._llm.generate(prompt)
-            result = str(response).strip()
+            from lib.llm.trace import trace_span
+
+            with trace_span("query_rewrite", "preprocessing", model=getattr(self._llm, 'model', '')) as span:
+                span.input = {"query": query}
+                prompt = _REWRITE_PROMPT.format(query=query)
+                response = self._llm.generate(prompt)
+                result = str(response).strip()
+                span.output = {"rewritten_query": result}
             if result and len(result) > 2:
                 return result
             return None

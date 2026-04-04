@@ -54,16 +54,14 @@ export default function FeedbackButtons({ messageId, existingFeedback }: Props) 
 
   if (feedback === 'up' && !showReason) {
     return (
-      <div style={{ marginTop: 4 }}>
-        <Button type="text" size="small" icon={<LikeOutlined />} style={{ color: '#52c41a' }}>
-          已标记有用
-        </Button>
-      </div>
+      <Button type="text" size="small" icon={<LikeOutlined />} style={{ color: '#52c41a' }}>
+        已标记有用
+      </Button>
     );
   }
 
   return (
-    <div style={{ marginTop: 4 }}>
+    <>
       <Space size={4}>
         <Button
           type="text"
@@ -113,6 +111,6 @@ export default function FeedbackButtons({ messageId, existingFeedback }: Props) 
           </Space>
         </div>
       )}
-    </div>
+    </>
   );
 }

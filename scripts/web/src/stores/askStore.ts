@@ -8,11 +8,15 @@ interface AskState {
   messages: Message[];
   streaming: boolean;
   currentSources: Source[];
+  activeTraceMessageId: number | null;
+  traceLoading: boolean;
 
   loadConversations: () => Promise<void>;
   selectConversation: (id: string) => Promise<void>;
   sendMessage: (question: string, mode: 'qa' | 'search') => void;
   deleteConversation: (id: string) => Promise<void>;
+  openTrace: (messageId: number) => void;
+  closeTrace: () => void;
 }
 
 export const useAskStore = create<AskState>((set, get) => ({
@@ -21,6 +25,8 @@ export const useAskStore = create<AskState>((set, get) => ({
   messages: [],
   streaming: false,
   currentSources: [],
+  activeTraceMessageId: null,
+  traceLoading: false,
 
   loadConversations: async () => {
     const conversations = await askApi.fetchConversations();
@@ -28,7 +34,7 @@ export const useAskStore = create<AskState>((set, get) => ({
   },
 
   selectConversation: async (id: string) => {
-    set({ currentConversationId: id, currentSources: [] });
+    set({ currentConversationId: id, currentSources: [], activeTraceMessageId: null, traceLoading: false });
     const messages = await askApi.fetchMessages(id);
     set({ messages });
   },
@@ -54,7 +60,7 @@ export const useAskStore = create<AskState>((set, get) => ({
       sources: [],
       timestamp: new Date().toISOString(),
     };
-    set({ messages: [...messages, userMsg, assistantMsg], streaming: true, currentSources: [] });
+    set({ messages: [...messages, userMsg, assistantMsg], streaming: true, currentSources: [], activeTraceMessageId: null, traceLoading: false });
 
     if (mode === 'search') {
       askApi
@@ -103,6 +109,7 @@ export const useAskStore = create<AskState>((set, get) => ({
                     id: doneData.message_id ?? m.id,
                     citations: doneData.citations || [],
                     sources: doneData.sources || [],
+                    trace: doneData.trace ?? undefined,
                   }
                 : m,
             ),
@@ -128,8 +135,42 @@ export const useAskStore = create<AskState>((set, get) => ({
     await askApi.deleteConversation(id);
     const { currentConversationId } = get();
     if (currentConversationId === id) {
-      set({ currentConversationId: null, messages: [] });
+      set({ currentConversationId: null, messages: [], activeTraceMessageId: null, traceLoading: false });
     }
     get().loadConversations();
+  },
+
+  openTrace: (messageId: number) => {
+    const { messages, traceLoading, activeTraceMessageId } = get();
+    if (activeTraceMessageId === messageId) {
+      set({ activeTraceMessageId: null });
+      return;
+    }
+    set({ activeTraceMessageId: messageId });
+    const msg = messages.find((m) => m.id === messageId);
+    if (msg?.trace) return;
+    if (traceLoading) return;
+    set({ traceLoading: true });
+    askApi.fetchTrace(messageId)
+      .then((trace) => {
+        set((s) => ({
+          messages: s.messages.map((m) =>
+            m.id === messageId ? { ...m, trace } : m,
+          ),
+          traceLoading: false,
+        }));
+      })
+      .catch(() => {
+        set((s) => ({
+          messages: s.messages.map((m) =>
+            m.id === messageId ? { ...m, trace: null } : m,
+          ),
+          traceLoading: false,
+        }));
+      });
+  },
+
+  closeTrace: () => {
+    set({ activeTraceMessageId: null });
   },
 }));

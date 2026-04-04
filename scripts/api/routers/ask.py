@@ -17,6 +17,33 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ask", tags=["法规问答"])
 
 
+def _persist_trace(root_span, message_id: int) -> None:
+    """将 trace 树中所有 span 批量写入数据库。"""
+    from api.database import save_trace, save_spans
+
+    save_trace(root_span.trace_id, message_id)
+    spans_data = [s.to_dict() for s in root_span.iter_spans()]
+    save_spans(spans_data)
+
+
+def _build_trace_payload(root_span) -> dict:
+    """从 trace 树构建 SSE 推送的 trace 数据（与 TraceData 格式对齐）。"""
+    spans = list(root_span.iter_spans())
+    llm_count = sum(1 for s in spans if s.status == "error" or s.error)
+    error_count = sum(1 for s in spans if s.status == "error")
+    return {
+        "trace_id": root_span.trace_id,
+        "root": root_span.to_dict(),
+        "spans": [s.to_dict() for s in spans],
+        "summary": {
+            "total_duration_ms": root_span.duration_ms,
+            "span_count": len(spans),
+            "llm_call_count": sum(1 for s in spans if s.category in ("llm", "rerank")),
+            "error_count": error_count,
+        },
+    }
+
+
 @router.post("/chat")
 async def chat(req: ChatRequest):
     conversation_id = req.conversation_id or f"conv_{uuid.uuid4().hex[:8]}"
@@ -42,8 +69,27 @@ async def chat(req: ChatRequest):
             raise HTTPException(status_code=500, detail=f"检索失败: {e}")
 
     async def event_stream():
+        from lib.llm.trace import trace_span
+
         try:
-            result = await asyncio.to_thread(engine.ask, req.question)
+            with trace_span("root", "root") as root_span:
+                root_span.input = {"question": req.question, "mode": req.mode}
+                result = await asyncio.to_thread(engine.ask, req.question)
+                root_span.output = {
+                    "answer_length": len(result.get("answer", "")),
+                    "answer": result.get("answer", ""),
+                    "source_count": len(result.get("sources", [])),
+                }
+                # metadata: pipeline summary
+                engine_config = engine.config
+                hc = engine_config.hybrid_config
+                root_span.metadata = {
+                    "mode": req.mode,
+                    "retrieval": "hybrid",
+                    "reranker": hc.reranker_type if hc else None,
+                    "source_count": len(result.get("sources", [])),
+                }
+
             answer = result.get("answer", "")
             chunk_size = 4
             for i in range(0, len(answer), chunk_size):
@@ -66,6 +112,9 @@ async def chat(req: ChatRequest):
                 unverified_claims=result.get("unverified_claims", []),
             )
 
+            trace_summary = _build_trace_payload(root_span)
+            _persist_trace(root_span, msg_id)
+
             yield {
                 "event": "message",
                 "data": json.dumps(
@@ -79,6 +128,7 @@ async def chat(req: ChatRequest):
                             "faithfulness_score": result.get("faithfulness_score"),
                             "unverified_claims": result.get("unverified_claims", []),
                             "content_mismatches": result.get("content_mismatches", []),
+                            "trace": trace_summary,
                         },
                     },
                     ensure_ascii=False,
@@ -140,3 +190,12 @@ async def delete_conversation(conversation_id: str):
     if count == 0:
         raise HTTPException(status_code=404, detail="对话不存在")
     return {"deleted_messages": count}
+
+
+@router.get("/messages/{message_id}/trace")
+async def get_message_trace(message_id: int):
+    from api.database import get_trace
+    trace = get_trace(message_id)
+    if trace is None:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    return trace

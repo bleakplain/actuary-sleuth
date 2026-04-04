@@ -1,5 +1,5 @@
 import client from './client';
-import type { Conversation, Message, Source, Citation } from '../types';
+import type { Conversation, Message, Source, Citation, TraceData } from '../types';
 
 interface ChatDoneData {
   conversation_id: string;
@@ -7,6 +7,7 @@ interface ChatDoneData {
   citations: Citation[];
   sources: Source[];
   faithfulness_score?: number;
+  trace?: TraceData;
 }
 
 export async function fetchConversations(): Promise<Conversation[]> {
@@ -84,5 +85,10 @@ export async function chatSearch(
     conversation_id: conversationId,
     mode: 'search',
   });
+  return data;
+}
+
+export async function fetchTrace(messageId: number): Promise<TraceData> {
+  const { data } = await client.get(`/api/ask/messages/${messageId}/trace`);
   return data;
 }

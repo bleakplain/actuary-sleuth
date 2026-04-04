@@ -1,12 +1,17 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Input, Button, Radio, Space, Popconfirm } from 'antd';
-import { SendOutlined, DeleteOutlined } from '@ant-design/icons';
+import { SendOutlined, DeleteOutlined, CloseOutlined } from '@ant-design/icons';
 import MessageBubble from './MessageBubble';
 import SourcePanel from './SourcePanel';
+import TracePanel from './TracePanel';
 import { useAskStore } from '../stores/askStore';
 import type { Source } from '../types';
 
 const { TextArea } = Input;
+
+const DEFAULT_TRACE_WIDTH = 520;
+const MIN_TRACE_WIDTH = 360;
+const MAX_TRACE_WIDTH = 800;
 
 export default function ChatPanel() {
   const [input, setInput] = React.useState('');
@@ -21,11 +26,18 @@ export default function ChatPanel() {
     selectConversation,
     deleteConversation,
     loadConversations,
+    activeTraceMessageId,
+    traceLoading,
+    closeTrace,
   } = useAskStore();
 
   const [sourcePanelOpen, setSourcePanelOpen] = React.useState(false);
   const [selectedSource, setSelectedSource] = React.useState<Source | null>(null);
   const [panelSources, setPanelSources] = React.useState<Source[]>([]);
+  const [traceWidth, setTraceWidth] = useState(DEFAULT_TRACE_WIDTH);
+  const [dragging, setDragging] = useState(false);
+  const dragStartX = useRef(0);
+  const dragStartWidth = useRef(0);
 
   useEffect(() => {
     loadConversations();
@@ -34,6 +46,32 @@ export default function ChatPanel() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragStartX.current = e.clientX;
+    dragStartWidth.current = traceWidth;
+    setDragging(true);
+
+    const handleDragMove = (ev: MouseEvent) => {
+      const delta = dragStartX.current - ev.clientX;
+      const newWidth = Math.min(MAX_TRACE_WIDTH, Math.max(MIN_TRACE_WIDTH, dragStartWidth.current + delta));
+      setTraceWidth(newWidth);
+    };
+
+    const handleDragEnd = () => {
+      setDragging(false);
+      document.removeEventListener('mousemove', handleDragMove);
+      document.removeEventListener('mouseup', handleDragEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', handleDragMove);
+    document.addEventListener('mouseup', handleDragEnd);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [traceWidth]);
 
   const handleSend = () => {
     const q = input.trim();
@@ -47,6 +85,10 @@ export default function ChatPanel() {
     setPanelSources(messageSources);
     setSourcePanelOpen(true);
   };
+
+  const activeMessage = activeTraceMessageId
+    ? messages.find((m) => m.id === activeTraceMessageId)
+    : null;
 
   return (
     <div style={{ display: 'flex', height: '100%' }}>
@@ -105,7 +147,7 @@ export default function ChatPanel() {
         ))}
       </div>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <div style={{ flex: 1, overflow: 'auto', padding: '16px 24px' }}>
           {messages.length === 0 && (
             <div style={{ textAlign: 'center', color: '#999', marginTop: 100 }}>
@@ -114,7 +156,9 @@ export default function ChatPanel() {
             </div>
           )}
           {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} onCitationClick={handleCitationClick} />
+            <div key={msg.id}>
+              <MessageBubble message={msg} onCitationClick={handleCitationClick} />
+            </div>
           ))}
           <div ref={messagesEndRef} />
         </div>
@@ -155,6 +199,89 @@ export default function ChatPanel() {
           </div>
         </div>
       </div>
+
+      {activeTraceMessageId != null && (
+        <>
+          {/* Drag handle */}
+          <div
+            onMouseDown={handleDragStart}
+            style={{
+              width: 4,
+              cursor: 'col-resize',
+              background: dragging ? '#1677ff' : 'transparent',
+              borderLeft: '1px solid #e8e8e8',
+              transition: dragging ? 'none' : 'background 0.2s',
+              position: 'relative',
+              flexShrink: 0,
+            }}
+            onMouseEnter={(e) => {
+              if (!dragging) {
+                (e.currentTarget as HTMLDivElement).style.background = '#d9d9d9';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!dragging) {
+                (e.currentTarget as HTMLDivElement).style.background = 'transparent';
+              }
+            }}
+          >
+            {/* Center grip indicator */}
+            <div
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: -1,
+                transform: 'translateY(-50%)',
+                width: 6,
+                height: 32,
+                borderRadius: 3,
+                background: dragging ? '#1677ff' : '#d9d9d9',
+                opacity: 0.6,
+                transition: dragging ? 'none' : 'opacity 0.2s',
+              }}
+            />
+          </div>
+
+          {/* Right trace panel */}
+          <div
+            style={{
+              width: traceWidth,
+              flexShrink: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              background: '#fff',
+            }}
+          >
+            <div
+              style={{
+                padding: '10px 16px',
+                borderBottom: '1px solid #f0f0f0',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <span style={{ fontWeight: 600, fontSize: 14, color: '#262626' }}>
+                调试
+              </span>
+              <Button
+                type="text"
+                size="small"
+                icon={<CloseOutlined />}
+                onClick={closeTrace}
+                style={{ color: '#8c8c8c' }}
+              />
+            </div>
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              <TracePanel
+                trace={activeMessage?.trace ?? null}
+                loading={traceLoading}
+              />
+            </div>
+          </div>
+        </>
+      )}
 
       <SourcePanel
         open={sourcePanelOpen}

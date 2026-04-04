@@ -75,7 +75,9 @@ data/lancedb/
 .claude/worktrees/
 
 # Vite / web build cache
+.vite/
 scripts/.vite/
+plan.md
 
 # Playwright / test results
 scripts/web/test-results/

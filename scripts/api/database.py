@@ -7,7 +7,7 @@
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, List, Dict
+from typing import Any, Optional, List, Dict
 
 from lib.common.database import get_connection
 
@@ -116,6 +116,33 @@ CREATE TABLE IF NOT EXISTS kb_versions (
     regulations_dir TEXT NOT NULL DEFAULT '',
     active INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS traces (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trace_id TEXT NOT NULL,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_traces_trace_id ON traces(trace_id);
+
+CREATE TABLE IF NOT EXISTS spans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trace_id TEXT NOT NULL REFERENCES traces(trace_id) ON DELETE CASCADE,
+    span_id TEXT NOT NULL,
+    parent_span_id TEXT,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT '',
+    input_json TEXT,
+    output_json TEXT,
+    metadata_json TEXT DEFAULT '{}',
+    start_time REAL NOT NULL,
+    end_time REAL,
+    duration_ms REAL,
+    status TEXT NOT NULL DEFAULT 'ok' CHECK(status IN ('ok', 'error')),
+    error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_spans_trace_id ON spans(trace_id);
+CREATE INDEX IF NOT EXISTS idx_spans_parent ON spans(parent_span_id);
 """
 
 
@@ -613,4 +640,83 @@ def get_feedback_stats() -> Dict:
         "by_type": by_type,
         "by_status": by_status,
         "by_risk": by_risk,
+    }
+
+
+def save_trace(trace_id: str, message_id: int, root_span_dict: Optional[Dict] = None) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO traces (trace_id, message_id) VALUES (?, ?)",
+            (trace_id, message_id),
+        )
+
+
+_SPAN_JSON_FIELDS = {"input": "input_json", "output": "output_json", "metadata": "metadata_json"}
+
+
+def save_spans(spans_data: List[Dict]) -> None:
+    with get_connection() as conn:
+        conn.executemany(
+            "INSERT INTO spans "
+            "(trace_id, span_id, parent_span_id, name, category, "
+            "input_json, output_json, metadata_json, start_time, end_time, duration_ms, status, error) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    s["trace_id"], s["span_id"], s["parent_span_id"], s["name"], s["category"],
+                    json.dumps(s["input"], ensure_ascii=False) if s.get("input") is not None else None,
+                    json.dumps(s["output"], ensure_ascii=False) if s.get("output") is not None else None,
+                    json.dumps(s.get("metadata") or {}, ensure_ascii=False),
+                    s["start_time"], s["end_time"], s["duration_ms"], s["status"], s.get("error"),
+                )
+                for s in spans_data
+            ],
+        )
+
+
+def get_trace(message_id: int) -> Optional[Dict]:
+    with get_connection() as conn:
+        trace_row = conn.execute(
+            "SELECT trace_id FROM traces WHERE message_id = ? ORDER BY id DESC LIMIT 1",
+            (message_id,),
+        ).fetchone()
+        if trace_row is None:
+            return None
+        trace_id = trace_row["trace_id"]
+
+        span_rows = conn.execute(
+            "SELECT span_id, parent_span_id, name, category, input_json, output_json, "
+            "metadata_json, start_time, end_time, duration_ms, status, error "
+            "FROM spans WHERE trace_id = ? ORDER BY start_time",
+            (trace_id,),
+        ).fetchall()
+
+        span_dicts = [_deserialize_json_fields(dict(r), _SPAN_JSON_FIELDS) for r in span_rows]
+
+    span_map: Dict[str, Dict] = {s["span_id"]: {**s, "children": []} for s in span_dicts}
+    roots: List[Dict] = []
+    for s in span_dicts:
+        parent_id = s.get("parent_span_id")
+        if parent_id and parent_id in span_map:
+            span_map[parent_id]["children"].append(span_map[s["span_id"]])
+        else:
+            roots.append(span_map[s["span_id"]])
+
+    root = roots[0] if roots else None
+    if root is None:
+        return None
+
+    llm_count = sum(1 for s in span_dicts if s["category"] in ("llm", "rerank"))
+    error_count = sum(1 for s in span_dicts if s["status"] == "error")
+
+    return {
+        "trace_id": trace_id,
+        "root": root,
+        "spans": span_dicts,
+        "summary": {
+            "total_duration_ms": root.get("duration_ms") or 0,
+            "span_count": len(span_dicts),
+            "llm_call_count": llm_count,
+            "error_count": error_count,
+        },
     }

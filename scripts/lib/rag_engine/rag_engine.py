@@ -237,6 +237,7 @@ class RAGEngine:
                 raise EngineInitializationError("RAG 引擎初始化失败")
 
         _thread_settings.apply()
+        from lib.llm.trace import trace_span
 
         try:
             search_results = self._hybrid_search(question, top_k=self.config.top_k_results)
@@ -256,8 +257,17 @@ class RAGEngine:
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
             ]
-            answer = self._llm_client.chat(messages)
-            answer_str = str(answer)
+
+            with trace_span("llm_generate", "llm", model=getattr(self._llm_client, 'model', '')) as span:
+                span.input = {
+                    "question": question,
+                    "context_chunk_count": len(search_results),
+                    "system_prompt": _SYSTEM_PROMPT,
+                    "user_prompt": user_prompt,
+                }
+                answer = self._llm_client.chat(messages)
+                answer_str = str(answer)
+                span.output = {"answer_length": len(answer_str), "answer": answer_str}
 
             included_sources = search_results[:included_count]
             attribution = parse_citations(answer_str, included_sources) if include_sources else AttributionResult()
