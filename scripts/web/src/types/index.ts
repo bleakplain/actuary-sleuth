@@ -88,7 +88,7 @@ export interface EvalSnapshot {
   created_at: string;
 }
 
-export interface EvalRun {
+export interface Evaluation {
   id: string;
   mode: 'retrieval' | 'generation' | 'full';
   status: 'pending' | 'running' | 'completed' | 'failed';
@@ -101,7 +101,7 @@ export interface EvalRun {
 
 export interface SampleResult {
   id: number;
-  run_id: string;
+  evaluation_id: string;
   sample_id: string;
   retrieved_docs: Source[];
   generated_answer: string;

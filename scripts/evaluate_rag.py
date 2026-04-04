@@ -29,7 +29,7 @@ from lib.rag_engine.evaluator import (
     GenerationEvaluator,
     GenerationEvalReport,
     RAGEvalReport,
-    run_retrieval_evaluation,
+    evaluate_retrieval,
 )
 from lib.rag_engine.eval_dataset import (
     EvalSample,
@@ -350,7 +350,7 @@ def main():
         logger.info(f"RAG 引擎初始化完成（分块策略: {args.chunking}）")
 
         logger.info("开始检索评估...")
-        retrieval_report, failed_samples = run_retrieval_evaluation(
+        retrieval_report, failed_samples = evaluate_retrieval(
             rag_engine, samples, top_k=args.top_k
         )
 

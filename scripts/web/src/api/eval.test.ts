@@ -8,13 +8,13 @@ import {
   fetchSnapshots,
   createSnapshot,
   restoreSnapshot,
-  createEvalRun,
-  fetchEvalRunStatus,
-  fetchEvalRunReport,
-  fetchEvalRunDetails,
-  fetchEvalRuns,
-  compareEvalRuns,
-  exportEvalReport,
+  createEvaluation,
+  fetchEvaluationStatus,
+  fetchEvaluationReport,
+  fetchEvaluationDetails,
+  fetchEvaluations,
+  compareEvaluations,
+  exportEvaluationReport,
 } from './eval';
 
 vi.mock('./client', () => {
@@ -111,64 +111,64 @@ describe('eval API', () => {
     expect(result).toEqual({ restored: 10 });
   });
 
-  it('createEvalRun creates an eval run', async () => {
-    mockedClient.post.mockResolvedValueOnce({ data: { run_id: 'r1' } });
+  it('createEvaluation creates an evaluation', async () => {
+    mockedClient.post.mockResolvedValueOnce({ data: { evaluation_id: 'e1' } });
 
-    const result = await createEvalRun({ mode: 'retrieval', top_k: 5 });
-    expect(result).toEqual({ run_id: 'r1' });
+    const result = await createEvaluation({ mode: 'retrieval', top_k: 5 });
+    expect(result).toEqual({ evaluation_id: 'e1' });
   });
 
-  it('fetchEvalRunStatus returns run status', async () => {
-    const status = { run_id: 'r1', mode: 'retrieval', status: 'completed' };
+  it('fetchEvaluationStatus returns evaluation status', async () => {
+    const status = { id: 'e1', mode: 'retrieval', status: 'completed' };
     mockedClient.get.mockResolvedValueOnce({ data: status });
 
-    const result = await fetchEvalRunStatus('r1');
+    const result = await fetchEvaluationStatus('e1');
     expect(result).toEqual(status);
   });
 
-  it('fetchEvalRunReport returns report', async () => {
+  it('fetchEvaluationReport returns report', async () => {
     const report = { retrieval: { precision_at_k: 0.8 } };
     mockedClient.get.mockResolvedValueOnce({ data: report });
 
-    const result = await fetchEvalRunReport('r1');
+    const result = await fetchEvaluationReport('e1');
     expect(result).toEqual(report);
   });
 
-  it('fetchEvalRunDetails returns details', async () => {
-    const details = { run_id: 'r1', details: [] };
+  it('fetchEvaluationDetails returns details', async () => {
+    const details = { evaluation_id: 'e1', details: [] };
     mockedClient.get.mockResolvedValueOnce({ data: details });
 
-    const result = await fetchEvalRunDetails('r1');
+    const result = await fetchEvaluationDetails('e1');
     expect(result).toEqual(details);
   });
 
-  it('fetchEvalRuns returns run list', async () => {
-    const runs = [{ id: 'r1', status: 'completed' }];
-    mockedClient.get.mockResolvedValueOnce({ data: runs });
+  it('fetchEvaluations returns evaluation list', async () => {
+    const evaluations = [{ id: 'e1', status: 'completed' }];
+    mockedClient.get.mockResolvedValueOnce({ data: evaluations });
 
-    const result = await fetchEvalRuns();
-    expect(result).toEqual(runs);
+    const result = await fetchEvaluations();
+    expect(result).toEqual(evaluations);
   });
 
-  it('compareEvalRuns compares two runs', async () => {
+  it('compareEvaluations compares two evaluations', async () => {
     const diff = { improved: ['retrieval.precision_at_k'], regressed: [] };
     mockedClient.post.mockResolvedValueOnce({ data: diff });
 
-    const result = await compareEvalRuns('r1', 'r2');
+    const result = await compareEvaluations('e1', 'e2');
     expect(result).toEqual(diff);
-    expect(mockedClient.post).toHaveBeenCalledWith('/api/eval/runs/compare', {
-      baseline_id: 'r1',
-      compare_id: 'r2',
+    expect(mockedClient.post).toHaveBeenCalledWith('/api/eval/evaluations/compare', {
+      baseline_id: 'e1',
+      compare_id: 'e2',
     });
   });
 
-  it('exportEvalReport returns blob for json', async () => {
+  it('exportEvaluationReport returns blob for json', async () => {
     const blob = new Blob(['{"report":{}}'], { type: 'application/json' });
     mockedClient.get.mockResolvedValueOnce({ data: blob });
 
-    const result = await exportEvalReport('r1', 'json');
+    const result = await exportEvaluationReport('e1', 'json');
     expect(result).toBe(blob);
-    expect(mockedClient.get).toHaveBeenCalledWith('/api/eval/runs/r1/export', {
+    expect(mockedClient.get).toHaveBeenCalledWith('/api/eval/evaluations/e1/export', {
       params: { format: 'json' },
       responseType: 'blob',
     });

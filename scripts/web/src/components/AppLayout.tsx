@@ -14,8 +14,7 @@ const { Sider, Content, Header } = Layout;
 const menuItems = [
   { key: '/ask', icon: <MessageOutlined />, label: '法规问答' },
   { key: '/knowledge', icon: <DatabaseOutlined />, label: '知识库管理' },
-  { key: '/eval/dataset', icon: <BarChartOutlined />, label: '评估数据集' },
-  { key: '/eval/runs', icon: <BarChartOutlined />, label: '评估运行' },
+  { key: '/eval', icon: <BarChartOutlined />, label: 'RAG 评估' },
   { key: '/compliance', icon: <SafetyCertificateOutlined />, label: '合规检查' },
   { key: '/feedback', icon: <DislikeOutlined />, label: '问题反馈' },
 ];

@@ -26,7 +26,7 @@ from lib.rag_engine.evaluator import (
     _is_relevant,
     _compute_token_jaccard,
     _compute_redundancy_rate,
-    run_retrieval_evaluation,
+    evaluate_retrieval,
 )
 
 
@@ -711,16 +711,16 @@ class TestGenerationEvalReport:
         assert 'Faithfulness' in captured.out
 
 
-class TestRunRetrievalEvaluation:
+class TestEvaluateRetrieval:
     def test_run_with_all_failures(self, mock_rag_engine):
         from lib.rag_engine.eval_dataset import create_default_eval_dataset
-        from lib.rag_engine.evaluator import run_retrieval_evaluation
+        from lib.rag_engine.evaluator import evaluate_retrieval
 
         mock_rag_engine.search.return_value = [
             {'content': '不相关内容', 'law_name': '其他', 'source_file': 'other.md', 'score': 0.5},
         ]
         samples = create_default_eval_dataset()[:5]
-        report, failed = run_retrieval_evaluation(mock_rag_engine, samples, top_k=1)
+        report, failed = evaluate_retrieval(mock_rag_engine, samples, top_k=1)
 
         assert report.precision_at_k == 0.0
         assert len(failed) == 5
@@ -730,11 +730,11 @@ class TestRunRetrievalEvaluation:
             )
 
     def test_run_with_all_pass(self, mock_rag_engine, sample_eval):
-        from lib.rag_engine.evaluator import run_retrieval_evaluation
+        from lib.rag_engine.evaluator import evaluate_retrieval
 
         mock_rag_engine.search.return_value = [
             {'content': '等待期规定相关内容', 'law_name': '健康保险产品开发', 'source_file': '05_健康保险产品开发.md', 'score': 0.9},
         ]
-        report, failed = run_retrieval_evaluation(mock_rag_engine, [sample_eval], top_k=1)
+        report, failed = evaluate_retrieval(mock_rag_engine, [sample_eval], top_k=1)
 
         assert len(failed) == 0

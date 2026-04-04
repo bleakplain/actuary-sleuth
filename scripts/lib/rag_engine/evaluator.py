@@ -686,7 +686,7 @@ class GenerationEvaluator:
         return _bigram_overlap(_token_bigrams(ground_truth), _token_bigrams(answer))
 
 
-def run_retrieval_evaluation(
+def evaluate_retrieval(
     rag_engine,
     samples: List[EvalSample],
     top_k: int = 5,

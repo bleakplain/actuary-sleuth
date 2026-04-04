@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS eval_snapshots (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS eval_runs (
+CREATE TABLE IF NOT EXISTS evaluations (
     id TEXT PRIMARY KEY,
     mode TEXT NOT NULL CHECK(mode IN ('retrieval', 'generation', 'full')),
     status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'running', 'completed', 'failed')),
@@ -66,14 +66,14 @@ CREATE TABLE IF NOT EXISTS eval_runs (
 
 CREATE TABLE IF NOT EXISTS eval_sample_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id TEXT NOT NULL REFERENCES eval_runs(id) ON DELETE CASCADE,
+    evaluation_id TEXT NOT NULL REFERENCES evaluations(id) ON DELETE CASCADE,
     sample_id TEXT NOT NULL,
     retrieved_docs_json TEXT NOT NULL DEFAULT '[]',
     generated_answer TEXT NOT NULL DEFAULT '',
     retrieval_metrics_json TEXT NOT NULL DEFAULT '{}',
     generation_metrics_json TEXT NOT NULL DEFAULT '{}'
 );
-CREATE INDEX IF NOT EXISTS idx_eval_results_run ON eval_sample_results(run_id);
+CREATE INDEX IF NOT EXISTS idx_eval_results_evaluation ON eval_sample_results(evaluation_id);
 
 CREATE TABLE IF NOT EXISTS compliance_reports (
     id TEXT PRIMARY KEY,
@@ -183,6 +183,26 @@ def _migrate_db():
         trace_cols = {row[1] for row in conn.execute("PRAGMA table_info(traces)").fetchall()}
         if 'conversation_id' not in trace_cols:
             conn.execute("ALTER TABLE traces ADD COLUMN conversation_id TEXT")
+
+    # Migration: rename eval_runs → evaluations
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute("ALTER TABLE eval_sample_results RENAME COLUMN run_id TO evaluation_id")
+        except Exception:
+            pass
+        try:
+            cursor.execute("ALTER TABLE eval_runs RENAME TO evaluations")
+        except Exception:
+            pass
+        try:
+            cursor.execute("DROP INDEX IF EXISTS idx_eval_results_run")
+        except Exception:
+            pass
+        try:
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_eval_results_evaluation ON eval_sample_results(evaluation_id)")
+        except Exception:
+            pass
 
 
 def create_conversation(conversation_id: str, title: str = "") -> None:
@@ -449,16 +469,16 @@ def restore_snapshot(snapshot_id: str) -> int:
         return count
 
 
-def create_eval_run(run_id: str, mode: str, config: Dict) -> None:
+def create_evaluation(evaluation_id: str, mode: str, config: Dict) -> None:
     with get_connection() as conn:
         conn.execute(
-            "INSERT INTO eval_runs (id, mode, status, config_json) VALUES (?, ?, 'pending', ?)",
-            (run_id, mode, json.dumps(config, ensure_ascii=False)),
+            "INSERT INTO evaluations (id, mode, status, config_json) VALUES (?, ?, 'pending', ?)",
+            (evaluation_id, mode, json.dumps(config, ensure_ascii=False)),
         )
 
 
-def update_eval_run_status(
-    run_id: str, status: str, progress: int = 0, total: int = 0
+def update_evaluation_status(
+    evaluation_id: str, status: str, progress: int = 0, total: int = 0
 ) -> None:
     with get_connection() as conn:
         sets = ["status = ?"]
@@ -470,22 +490,22 @@ def update_eval_run_status(
         elif status in ("completed", "failed"):
             sets.append("finished_at = datetime('now')")
             sets.append("progress = total")
-        params.append(run_id)
+        params.append(evaluation_id)
         conn.execute(
-            f"UPDATE eval_runs SET {', '.join(sets)} WHERE id = ?", params
+            f"UPDATE evaluations SET {', '.join(sets)} WHERE id = ?", params
         )
 
 
-def save_eval_report(run_id: str, report: Dict) -> None:
+def save_evaluation_report(evaluation_id: str, report: Dict) -> None:
     with get_connection() as conn:
         conn.execute(
-            "UPDATE eval_runs SET report_json = ? WHERE id = ?",
-            (json.dumps(report, ensure_ascii=False), run_id),
+            "UPDATE evaluations SET report_json = ? WHERE id = ?",
+            (json.dumps(report, ensure_ascii=False), evaluation_id),
         )
 
 
 def save_sample_result(
-    run_id: str,
+    evaluation_id: str,
     sample_id: str,
     retrieved_docs: Optional[List] = None,
     generated_answer: str = "",
@@ -495,11 +515,11 @@ def save_sample_result(
     with get_connection() as conn:
         conn.execute(
             "INSERT INTO eval_sample_results "
-            "(run_id, sample_id, retrieved_docs_json, generated_answer, "
+            "(evaluation_id, sample_id, retrieved_docs_json, generated_answer, "
             "retrieval_metrics_json, generation_metrics_json) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             (
-                run_id, sample_id,
+                evaluation_id, sample_id,
                 json.dumps(retrieved_docs or [], ensure_ascii=False),
                 generated_answer,
                 json.dumps(retrieval_metrics or {}, ensure_ascii=False),
@@ -508,10 +528,10 @@ def save_sample_result(
         )
 
 
-def get_eval_run(run_id: str) -> Optional[Dict]:
+def get_evaluation(evaluation_id: str) -> Optional[Dict]:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM eval_runs WHERE id = ?", (run_id,)
+            "SELECT * FROM evaluations WHERE id = ?", (evaluation_id,)
         ).fetchone()
         if row is None:
             return None
@@ -520,20 +540,20 @@ def get_eval_run(run_id: str) -> Optional[Dict]:
         return d
 
 
-def get_eval_runs() -> List[Dict]:
+def get_evaluations() -> List[Dict]:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT id, mode, status, progress, total, started_at, finished_at, config_json "
-            "FROM eval_runs ORDER BY started_at DESC"
+            "FROM evaluations ORDER BY started_at DESC"
         ).fetchall()
         return [_deserialize_json_fields(dict(r), {"config": "config_json"}) for r in rows]
 
 
-def get_sample_results(run_id: str) -> List[Dict]:
+def get_sample_results(evaluation_id: str) -> List[Dict]:
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM eval_sample_results WHERE run_id = ? ORDER BY id",
-            (run_id,),
+            "SELECT * FROM eval_sample_results WHERE evaluation_id = ? ORDER BY id",
+            (evaluation_id,),
         ).fetchall()
         return [_deserialize_json_fields(dict(r), _RESULT_JSON_FIELDS) for r in rows]
 

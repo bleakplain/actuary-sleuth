@@ -1,5 +1,5 @@
 import client from './client';
-import type { EvalSample, EvalSnapshot, EvalRun, SampleResult } from '../types';
+import type { EvalSample, EvalSnapshot, Evaluation, SampleResult } from '../types';
 
 export async function fetchEvalSamples(params?: {
   question_type?: string;
@@ -44,52 +44,52 @@ export async function restoreSnapshot(snapshotId: string): Promise<{ restored: n
   return data;
 }
 
-export async function createEvalRun(config: {
+export async function createEvaluation(config: {
   mode: 'retrieval' | 'generation' | 'full';
   top_k?: number;
   chunking?: string;
-}): Promise<{ run_id: string }> {
-  const { data } = await client.post('/api/eval/runs', config);
+}): Promise<{ evaluation_id: string }> {
+  const { data } = await client.post('/api/eval/evaluations', config);
   return data;
 }
 
-export async function fetchEvalRunStatus(runId: string): Promise<EvalRun> {
-  const { data } = await client.get(`/api/eval/runs/${runId}/status`);
+export async function fetchEvaluationStatus(evaluationId: string): Promise<Evaluation> {
+  const { data } = await client.get(`/api/eval/evaluations/${evaluationId}/status`);
   return data;
 }
 
-export async function fetchEvalRunReport(runId: string): Promise<Record<string, Record<string, number>>> {
-  const { data } = await client.get(`/api/eval/runs/${runId}/report`);
+export async function fetchEvaluationReport(evaluationId: string): Promise<Record<string, Record<string, number>>> {
+  const { data } = await client.get(`/api/eval/evaluations/${evaluationId}/report`);
   return data;
 }
 
-export async function fetchEvalRunDetails(runId: string): Promise<{
-  run_id: string;
+export async function fetchEvaluationDetails(evaluationId: string): Promise<{
+  evaluation_id: string;
   mode: string;
   status: string;
   total_samples: number;
   details: SampleResult[];
 }> {
-  const { data } = await client.get(`/api/eval/runs/${runId}/details`);
+  const { data } = await client.get(`/api/eval/evaluations/${evaluationId}/details`);
   return data;
 }
 
-export async function fetchEvalRuns(): Promise<EvalRun[]> {
-  const { data } = await client.get('/api/eval/runs');
+export async function fetchEvaluations(): Promise<Evaluation[]> {
+  const { data } = await client.get('/api/eval/evaluations');
   return data;
 }
 
-export async function compareEvalRuns(baselineId: string, compareId: string): Promise<{
+export async function compareEvaluations(baselineId: string, compareId: string): Promise<{
   metrics_diff: Record<string, { baseline: number; compare: number; delta: number; pct_change: number }>;
   improved: string[];
   regressed: string[];
 }> {
-  const { data } = await client.post('/api/eval/runs/compare', { baseline_id: baselineId, compare_id: compareId });
+  const { data } = await client.post('/api/eval/evaluations/compare', { baseline_id: baselineId, compare_id: compareId });
   return data;
 }
 
-export async function exportEvalReport(runId: string, format: 'json' | 'md' = 'json'): Promise<Blob> {
-  const { data } = await client.get(`/api/eval/runs/${runId}/export`, {
+export async function exportEvaluationReport(evaluationId: string, format: 'json' | 'md' = 'json'): Promise<Blob> {
+  const { data } = await client.get(`/api/eval/evaluations/${evaluationId}/export`, {
     params: { format },
     responseType: 'blob',
   });

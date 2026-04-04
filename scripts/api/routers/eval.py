@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from api.schemas.eval import (
     EvalSampleCreate, EvalSampleOut, ImportSamplesRequest,
-    EvalRunRequest, CompareRequest, SnapshotCreate,
+    EvaluationRequest, CompareRequest, SnapshotCreate,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,29 +115,29 @@ async def restore_snapshot(snapshot_id: str):
 # ── 评估运行 ─────────────────────────────────────────
 
 
-@router.post("/runs")
-async def create_eval_run(req: EvalRunRequest):
-    run_id = f"eval_{uuid.uuid4().hex[:8]}"
+@router.post("/evaluations")
+async def create_evaluation(req: EvaluationRequest):
+    evaluation_id = f"eval_{uuid.uuid4().hex[:8]}"
 
-    from api.database import create_eval_run
-    create_eval_run(run_id, req.mode, {
+    from api.database import create_evaluation
+    create_evaluation(evaluation_id, req.mode, {
         "top_k": req.top_k,
         "chunking": req.chunking,
     })
 
-    _eval_tasks[run_id] = {"status": "pending"}
+    _eval_tasks[evaluation_id] = {"status": "pending"}
 
     async def _run_eval():
         try:
-            _eval_tasks[run_id]["status"] = "running"
+            _eval_tasks[evaluation_id]["status"] = "running"
 
             from api.app import rag_engine
             if rag_engine is None:
                 raise RuntimeError("RAG 引擎未就绪")
 
             from api.database import (
-                get_eval_samples, update_eval_run_status,
-                save_eval_report, save_sample_result,
+                get_eval_samples, update_evaluation_status,
+                save_evaluation_report, save_sample_result,
             )
             from lib.rag_engine import RetrievalEvaluator, GenerationEvaluator
             from lib.rag_engine.eval_dataset import EvalSample, QuestionType
@@ -157,7 +157,7 @@ async def create_eval_run(req: EvalRunRequest):
                 for s in samples_data
             ]
             total = len(samples)
-            update_eval_run_status(run_id, "running", progress=0, total=total)
+            update_evaluation_status(evaluation_id, "running", progress=0, total=total)
 
             if req.mode in ("retrieval", "full"):
                 ret_eval = RetrievalEvaluator(rag_engine)
@@ -165,12 +165,12 @@ async def create_eval_run(req: EvalRunRequest):
                 for detail in ret_details:
                     sample_id = detail.get("sample_id", "")
                     save_sample_result(
-                        run_id, sample_id,
+                        evaluation_id, sample_id,
                         retrieval_metrics=detail,
                     )
-                    current = _eval_tasks[run_id].get("progress", 0) + 1
-                    _eval_tasks[run_id]["progress"] = current
-                    update_eval_run_status(run_id, "running", progress=current, total=total)
+                    current = _eval_tasks[evaluation_id].get("progress", 0) + 1
+                    _eval_tasks[evaluation_id]["progress"] = current
+                    update_evaluation_status(evaluation_id, "running", progress=current, total=total)
 
             gen_report = None
             if req.mode in ("generation", "full"):
@@ -184,7 +184,7 @@ async def create_eval_run(req: EvalRunRequest):
                         result.get("answer", ""),
                     )
                     save_sample_result(
-                        run_id, sample.id,
+                        evaluation_id, sample.id,
                         retrieved_docs=result.get("sources", []),
                         generated_answer=result.get("answer", ""),
                         generation_metrics=gen_detail,
@@ -198,29 +198,29 @@ async def create_eval_run(req: EvalRunRequest):
             report["total_samples"] = total
             report["failed_samples"] = []
 
-            save_eval_report(run_id, report)
-            update_eval_run_status(run_id, "completed")
-            _eval_tasks[run_id]["status"] = "completed"
+            save_evaluation_report(evaluation_id, report)
+            update_evaluation_status(evaluation_id, "completed")
+            _eval_tasks[evaluation_id]["status"] = "completed"
 
         except Exception as e:
-            logger.error(f"Eval run {run_id} failed: {e}")
-            from api.database import update_eval_run_status
-            update_eval_run_status(run_id, "failed")
-            _eval_tasks[run_id]["status"] = "failed"
-            _eval_tasks[run_id]["error"] = str(e)
+            logger.error(f"Eval run {evaluation_id} failed: {e}")
+            from api.database import update_evaluation_status
+            update_evaluation_status(evaluation_id, "failed")
+            _eval_tasks[evaluation_id]["status"] = "failed"
+            _eval_tasks[evaluation_id]["error"] = str(e)
 
     asyncio.create_task(_run_eval())
-    return {"run_id": run_id, "status": "pending"}
+    return {"evaluation_id": evaluation_id, "status": "pending"}
 
 
-@router.get("/runs/{run_id}/status")
-async def get_eval_run_status(run_id: str):
-    from api.database import get_eval_run
-    run = get_eval_run(run_id)
+@router.get("/evaluations/{evaluation_id}/status")
+async def get_evaluation_status(evaluation_id: str):
+    from api.database import get_evaluation
+    run = get_evaluation(evaluation_id)
     if run is None:
         raise HTTPException(status_code=404, detail="评估运行不存在")
     return {
-        "run_id": run["id"],
+        "evaluation_id": run["id"],
         "mode": run["mode"],
         "status": run["status"],
         "progress": run["progress"],
@@ -230,10 +230,10 @@ async def get_eval_run_status(run_id: str):
     }
 
 
-@router.get("/runs/{run_id}/report")
-async def get_eval_report(run_id: str):
-    from api.database import get_eval_run
-    run = get_eval_run(run_id)
+@router.get("/evaluations/{evaluation_id}/report")
+async def get_evaluation_report(evaluation_id: str):
+    from api.database import get_evaluation
+    run = get_evaluation(evaluation_id)
     if run is None:
         raise HTTPException(status_code=404, detail="评估运行不存在")
     if run["status"] != "completed":
@@ -241,15 +241,15 @@ async def get_eval_report(run_id: str):
     return run.get("report", {})
 
 
-@router.get("/runs/{run_id}/details")
-async def get_eval_details(run_id: str):
-    from api.database import get_eval_run, get_sample_results
-    run = get_eval_run(run_id)
+@router.get("/evaluations/{evaluation_id}/details")
+async def get_evaluation_details(evaluation_id: str):
+    from api.database import get_evaluation, get_sample_results
+    run = get_evaluation(evaluation_id)
     if run is None:
         raise HTTPException(status_code=404, detail="评估运行不存在")
-    results = get_sample_results(run_id)
+    results = get_sample_results(evaluation_id)
     return {
-        "run_id": run_id,
+        "evaluation_id": evaluation_id,
         "mode": run["mode"],
         "status": run["status"],
         "total_samples": run["total"],
@@ -257,18 +257,18 @@ async def get_eval_details(run_id: str):
     }
 
 
-@router.get("/runs")
-async def list_eval_runs():
-    from api.database import get_eval_runs
-    return get_eval_runs()
+@router.get("/evaluations")
+async def list_evaluations():
+    from api.database import get_evaluations
+    return get_evaluations()
 
 
-@router.post("/runs/compare")
-async def compare_eval_runs(req: CompareRequest):
-    from api.database import get_eval_run
+@router.post("/evaluations/compare")
+async def compare_evaluations(req: CompareRequest):
+    from api.database import get_evaluation
 
-    baseline = get_eval_run(req.baseline_id)
-    compare = get_eval_run(req.compare_id)
+    baseline = get_evaluation(req.baseline_id)
+    compare = get_evaluation(req.compare_id)
     if baseline is None or compare is None:
         raise HTTPException(status_code=404, detail="评估运行不存在")
 
@@ -312,12 +312,12 @@ async def compare_eval_runs(req: CompareRequest):
     }
 
 
-@router.get("/runs/{run_id}/export")
-async def export_eval_report(run_id: str, format: str = "json"):
-    from api.database import get_eval_run
+@router.get("/evaluations/{evaluation_id}/export")
+async def export_evaluation_report(evaluation_id: str, format: str = "json"):
+    from api.database import get_evaluation
     from fastapi.responses import JSONResponse, Response
 
-    run = get_eval_run(run_id)
+    run = get_evaluation(evaluation_id)
     if run is None:
         raise HTTPException(status_code=404, detail="评估运行不存在")
     if run["status"] != "completed":
@@ -330,7 +330,7 @@ async def export_eval_report(run_id: str, format: str = "json"):
             "report": report,
         })
     elif format == "md":
-        lines = [f"# 评估报告 {run_id}", f"模式: {run['mode']}", f"时间: {run['started_at']}", ""]
+        lines = [f"# 评估报告 {evaluation_id}", f"模式: {run['mode']}", f"时间: {run['started_at']}", ""]
         for section, metrics in report.items():
             if isinstance(metrics, dict):
                 lines.append(f"## {section}")
