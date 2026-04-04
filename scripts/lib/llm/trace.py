@@ -1,9 +1,14 @@
 """LLM 调用链路追踪。
 
-提供 TraceSpan 模型和 contextvars 传播机制，
+提供 TraceSpan 模型和跨线程传播机制，
 用于记录 RAG 管线中各环节的输入、输出、耗时和错误信息。
 参考 OpenTelemetry 规范设计，支持 span 级别持久化。
+
+跨线程传播：ContextVar 只在 asyncio.to_thread 中自动复制，
+对 llama_index 内部线程池等场景不生效。因此 trace_span 使用
+_active_trace_id 全局变量作为跨线程 fallback。
 """
+import logging
 import threading
 import time
 import uuid
@@ -11,13 +16,15 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Optional
 
+logger = logging.getLogger(__name__)
+
 _trace_context: ContextVar[Optional["TraceSpan"]] = ContextVar("trace", default=None)
 
 # 跨线程计数器（按 trace_id 隔离，线程安全）
 _counters: dict[str, dict[str, int]] = {}
 _counters_lock = threading.Lock()
 
-# 当前活跃的 trace_id（线程安全，供非 ContextVar 线程访问）
+# 当前活跃的 trace_id（线程安全，供 ContextVar 无法传播的线程访问）
 _active_trace_id: Optional[str] = None
 _active_trace_id_lock = threading.Lock()
 
@@ -25,18 +32,6 @@ _active_trace_id_lock = threading.Lock()
 def _get_counter(trace_id: str, key: str) -> int:
     with _counters_lock:
         return _counters.setdefault(trace_id, {}).get(key, 0)
-
-
-def _get_active_trace_id() -> Optional[str]:
-    global _active_trace_id
-    with _active_trace_id_lock:
-        return _active_trace_id
-
-
-def _set_active_trace_id(tid: Optional[str]) -> None:
-    global _active_trace_id
-    with _active_trace_id_lock:
-        _active_trace_id = tid
 
 
 def _set_counter(trace_id: str, key: str, value: int) -> None:
@@ -51,6 +46,18 @@ def _increment_counter(trace_id: str, key: str) -> int:
         return bucket[key]
 
 
+def _get_active_trace_id() -> Optional[str]:
+    global _active_trace_id
+    with _active_trace_id_lock:
+        return _active_trace_id
+
+
+def _set_active_trace_id(tid: Optional[str]) -> None:
+    global _active_trace_id
+    with _active_trace_id_lock:
+        _active_trace_id = tid
+
+
 def reset_llm_call_count() -> None:
     """重置当前 trace 的 LLM 调用计数。"""
     tid = _get_active_trace_id()
@@ -58,7 +65,7 @@ def reset_llm_call_count() -> None:
         _set_counter(tid, "llm_calls", 0)
 
 
-def increment_llm_call_count() -> None:
+def incr_llm_call_count() -> None:
     """在当前 trace 中累加 LLM 调用计数（线程安全）。"""
     tid = _get_active_trace_id()
     if tid:
@@ -154,25 +161,40 @@ class TraceSpan:
 class trace_span:
     """Context manager for recording a trace span.
 
-    Automatically builds a tree structure via contextvars propagation.
-    Each span records its parent_span_id for database persistence.
+    跨线程传播策略：
+    1. 优先使用 ContextVar（asyncio.to_thread 自动复制）
+    2. ContextVar 丢失时（llama_index 线程池等），fallback 到 _active_trace_id
+    3. 子 span 在跨线程场景下无法挂载到父 span 的 children 中，
+       但仍共享同一 trace_id，数据通过 _active_trace_id 关联
     """
 
     def __init__(self, name: str, category: str, **metadata):
         self.span = TraceSpan(name=name, category=category, metadata=metadata)
         self._parent: Optional[TraceSpan] = None
+        self._is_root: bool = False
 
     def __enter__(self) -> TraceSpan:
         parent = _trace_context.get()
+        active_tid = _get_active_trace_id()
+
         if parent:
+            # ContextVar 正常传播，挂载到父 span
             self.span.trace_id = parent.trace_id
             self.span.parent_span_id = parent.span_id
             parent.children.append(self.span)
             self.span.span_id = _id_generator.new_span_id(self.span.trace_id)
+        elif active_tid:
+            # ContextVar 未传播（跨线程），但全局 trace_id 存在
+            self.span.trace_id = active_tid
+            self.span.span_id = _id_generator.new_span_id(active_tid)
+            # 无法挂载到父 span.children（跨线程无引用）
         else:
+            # 真正的 root span
             self.span.trace_id = _id_generator.new_trace_id()
             self.span.span_id = self.span.trace_id
             _set_active_trace_id(self.span.trace_id)
+            self._is_root = True
+
         self._parent = parent
         _trace_context.set(self.span)
         self.span.start_time = time.time()
@@ -183,7 +205,7 @@ class trace_span:
         if exc_val is not None:
             self.span.error = str(exc_val)
         _trace_context.set(self._parent)
-        if self._parent is None:
+        if self._is_root:
             _set_active_trace_id(None)
         return False
 
