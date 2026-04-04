@@ -774,3 +774,194 @@ def get_trace(message_id: int) -> Optional[Dict]:
             "error_count": error_count,
         },
     }
+
+
+def search_traces(
+    trace_id: str = "",
+    conversation_id: str = "",
+    message_id: int = 0,
+    status: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    page: int = 1,
+    size: int = 20,
+) -> tuple:
+    """分页搜索 trace，支持按 trace_id / conversation_id / message_id / status / 日期范围过滤。
+
+    Returns:
+        (rows, total_count)，rows 中每条记录包含 trace_id, message_id,
+        conversation_id, created_at, status, total_duration_ms, span_count。
+    """
+    clauses: list[str] = []
+    params: list = []
+
+    if trace_id:
+        clauses.append("t.trace_id LIKE ?")
+        params.append(f"%{trace_id}%")
+    if conversation_id:
+        clauses.append("t.conversation_id = ?")
+        params.append(conversation_id)
+    if message_id:
+        clauses.append("t.message_id = ?")
+        params.append(message_id)
+    if start_date:
+        clauses.append("t.created_at >= ?")
+        params.append(start_date)
+    if end_date:
+        end_val = end_date
+        if len(end_date) == 10:
+            end_val = f"{end_date} 23:59:59"
+        clauses.append("t.created_at <= ?")
+        params.append(end_val)
+
+    # Always join with span aggregation to get duration/status/span_count
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    if status:
+        status_clause = "sa.has_error = 1" if status == "error" else "sa.has_error = 0"
+        where = f"{where} {'AND' if clauses else 'WHERE'} {status_clause}"
+
+    offset = (page - 1) * size
+
+    with get_connection() as conn:
+        count_row = conn.execute(
+            f"SELECT COUNT(*) AS cnt FROM traces t "
+            f"LEFT JOIN (SELECT trace_id, MAX(CASE WHEN status='error' THEN 1 ELSE 0 END) AS has_error, "
+            f"MAX(duration_ms) AS total_duration_ms, COUNT(*) AS span_count FROM spans GROUP BY trace_id) sa "
+            f"ON sa.trace_id = t.trace_id {where}",
+            params,
+        ).fetchone()
+        total = count_row["cnt"]
+
+        rows = conn.execute(
+            f"SELECT t.trace_id, t.message_id, t.conversation_id, t.created_at, "
+            f"COALESCE(sa.has_error, 0) AS status, "
+            f"COALESCE(sa.total_duration_ms, 0) AS total_duration_ms, "
+            f"COALESCE(sa.span_count, 0) AS span_count "
+            f"FROM traces t "
+            f"LEFT JOIN (SELECT trace_id, MAX(CASE WHEN status='error' THEN 1 ELSE 0 END) AS has_error, "
+            f"MAX(duration_ms) AS total_duration_ms, COUNT(*) AS span_count FROM spans GROUP BY trace_id) sa "
+            f"ON sa.trace_id = t.trace_id {where} "
+            f"ORDER BY t.created_at DESC LIMIT ? OFFSET ?",
+            params + [size, offset],
+        ).fetchall()
+        return [dict(r) for r in rows], total
+
+
+def get_trace_by_trace_id(trace_id: str) -> Optional[Dict]:
+    """通过 trace_id 获取完整 trace 数据。返回格式与 get_trace() 一致。"""
+    with get_connection() as conn:
+        trace_row = conn.execute(
+            "SELECT trace_id FROM traces WHERE trace_id = ?",
+            (trace_id,),
+        ).fetchone()
+        if trace_row is None:
+            return None
+
+        span_rows = conn.execute(
+            "SELECT span_id, parent_span_id, name, category, input_json, output_json, "
+            "metadata_json, start_time, end_time, duration_ms, status, error "
+            "FROM spans WHERE trace_id = ? ORDER BY start_time",
+            (trace_id,),
+        ).fetchall()
+
+        span_dicts = [_deserialize_json_fields(dict(r), _SPAN_JSON_FIELDS) for r in span_rows]
+
+    span_map: Dict[str, Dict] = {s["span_id"]: {**s, "children": []} for s in span_dicts}
+    roots: List[Dict] = []
+    for s in span_dicts:
+        parent_id = s.get("parent_span_id")
+        if parent_id and parent_id in span_map:
+            span_map[parent_id]["children"].append(span_map[s["span_id"]])
+        else:
+            roots.append(span_map[s["span_id"]])
+
+    root = roots[0] if roots else None
+    if root is None:
+        return None
+
+    root_meta = root.get("metadata") or {}
+    llm_count = root_meta.get("llm_call_count", 0)
+    error_count = sum(1 for s in span_dicts if s["status"] == "error")
+
+    return {
+        "trace_id": trace_id,
+        "root": root,
+        "spans": span_dicts,
+        "summary": {
+            "total_duration_ms": root.get("duration_ms") or 0,
+            "span_count": len(span_dicts),
+            "llm_call_count": llm_count,
+            "error_count": error_count,
+        },
+    }
+
+
+def batch_delete_traces(trace_ids: list) -> int:
+    """批量删除 trace 及其关联 spans。返回实际删除的 trace 数。"""
+    if not trace_ids:
+        return 0
+    placeholders = ",".join("?" for _ in trace_ids)
+    with get_connection() as conn:
+        conn.execute(
+            f"DELETE FROM spans WHERE trace_id IN ({placeholders})", trace_ids
+        )
+        cur = conn.execute(
+            f"DELETE FROM traces WHERE trace_id IN ({placeholders})", trace_ids
+        )
+        return cur.rowcount
+
+
+def count_traces_for_cleanup(
+    start_date: str, end_date: str, status: str = ""
+) -> int:
+    """统计满足条件的 trace 数量（用于清理预览）。"""
+    clauses: list[str] = []
+    params: list = []
+
+    if start_date:
+        clauses.append("created_at >= ?")
+        params.append(start_date)
+    if end_date:
+        end_val = end_date
+        if len(end_date) == 10:
+            end_val = f"{end_date} 23:59:59"
+        clauses.append("created_at <= ?")
+        params.append(end_val)
+    if status:
+        clauses.append("trace_id IN (SELECT trace_id FROM spans WHERE status = ?)")
+        params.append(status)
+
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    with get_connection() as conn:
+        row = conn.execute(f"SELECT COUNT(*) AS cnt FROM traces{where}", params).fetchone()
+        return row["cnt"]
+
+
+def cleanup_traces(
+    start_date: str, end_date: str, status: str = ""
+) -> int:
+    """按条件删除 trace 及其 spans。先查找匹配的 trace_id，再调用 batch_delete_traces。"""
+    clauses: list[str] = []
+    params: list = []
+
+    if start_date:
+        clauses.append("created_at >= ?")
+        params.append(start_date)
+    if end_date:
+        end_val = end_date
+        if len(end_date) == 10:
+            end_val = f"{end_date} 23:59:59"
+        clauses.append("created_at <= ?")
+        params.append(end_val)
+    if status:
+        clauses.append("trace_id IN (SELECT trace_id FROM spans WHERE status = ?)")
+        params.append(status)
+
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"SELECT trace_id FROM traces{where}", params
+        ).fetchall()
+    trace_ids = [r["trace_id"] for r in rows]
+    return batch_delete_traces(trace_ids)
