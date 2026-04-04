@@ -166,9 +166,9 @@ _RESULT_JSON_FIELDS = {
 
 
 def init_db():
+    _migrate_db()
     with get_connection() as conn:
         conn.executescript(_SCHEMA_SQL)
-    _migrate_db()
 
 
 def _migrate_db():
