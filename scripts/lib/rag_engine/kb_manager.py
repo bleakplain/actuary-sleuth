@@ -53,10 +53,10 @@ CREATE TABLE IF NOT EXISTS kb_versions (
 """
 
 
-class KBVersionManager:
-    """知识库版本管理器
+class KBManager:
+    """知识库管理器
 
-    管理版本创建、激活、删除，以及版本路径到 RAGConfig 的映射。
+    管理知识库版本创建、激活、删除，以及版本路径到 RAGConfig 的映射。
     """
 
     def __init__(self, base_dir: Optional[str] = None):
@@ -228,19 +228,19 @@ class KBVersionManager:
             return None
         return self.get_version_paths(vid)
 
-    def get_rag_config(self, version_id: Optional[str] = None) -> "RAGConfig":
+    def load_kb(self, version_id: Optional[str] = None) -> "RAGConfig":
         """创建指定版本的 RAGConfig 实例。"""
         from .config import RAGConfig
         vid = version_id or self.active_version
         if not vid:
-            return RAGConfig()
+            raise ValueError("无可用知识库版本，请先创建版本并构建索引")
         paths = self.get_version_paths(vid)
         return RAGConfig(
             regulations_dir=paths["regulations_dir"],
             vector_db_path=paths["vector_db_path"],
         )
 
-    def build_version(
+    def build_kb(
         self,
         regulations_dir: str,
         description: str = "",
@@ -257,7 +257,7 @@ class KBVersionManager:
             regulations_dir=regulations_dir,
             description=description,
         )
-        version_config = self.get_rag_config(meta.version_id)
+        version_config = self.load_kb(meta.version_id)
 
         from .builder import KnowledgeBuilder
         builder = KnowledgeBuilder(version_config)

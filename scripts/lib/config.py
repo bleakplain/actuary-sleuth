@@ -173,11 +173,6 @@ class DatabaseConfig:
         return self._config.get('sqlite_db', '../../data/actuary.db')
 
     @property
-    def lancedb_uri(self) -> str:
-        """LanceDB 连接字符串"""
-        return self._config.get('lancedb_uri', '../../data/lancedb')
-
-    @property
     def regulations_dir(self) -> str:
         """法规文件目录"""
         return self._config.get('regulations_dir', 'references')
@@ -291,11 +286,6 @@ class Config:
         """SQLite 数据库路径"""
         return self._data_paths.sqlite_db
 
-    @property
-    def lancedb_path(self) -> str:
-        """LanceDB 连接字符串"""
-        return self._data_paths.lancedb_uri
-
     # ===== 通用方法 =====
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -349,10 +339,6 @@ class Config:
         """获取知识库版本目录的绝对路径。"""
         return self._resolve_path(self._data_paths.kb_version_dir)
 
-    def get_vector_db_path(self) -> str:
-        """获取向量数据库的绝对路径。"""
-        return self._resolve_path(self._data_paths.lancedb_uri)
-
     def get_sqlite_db_path(self) -> str:
         """获取 SQLite 数据库的绝对路径。"""
         return self._resolve_path(self._data_paths.sqlite_db)
@@ -393,10 +379,6 @@ def get_config(config_path: Optional[Path] = None) -> Config:
 def get_sqlite_db_path() -> str:
     """获取 SQLite 数据库的绝对路径。"""
     return get_config().get_sqlite_db_path()
-
-def get_vector_db_path() -> str:
-    """获取向量数据库的绝对路径。"""
-    return get_config().get_vector_db_path()
 
 def get_regulations_dir() -> str:
     """获取法规文件目录的绝对路径。"""

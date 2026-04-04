@@ -30,6 +30,16 @@ function formatDuration(ms: number): string {
   return `${(ms / 60000).toFixed(1)}m`;
 }
 
+function formatTimestamp(ts: number): string {
+  if (!ts) return '-';
+  const d = new Date(ts * 1000);
+  const h = String(d.getHours()).padStart(2, '0');
+  const m = String(d.getMinutes()).padStart(2, '0');
+  const s = String(d.getSeconds()).padStart(2, '0');
+  const ms = String(d.getMilliseconds()).padStart(3, '0');
+  return `${h}:${m}:${s}.${ms}`;
+}
+
 /* ── copy button ── */
 
 function CopyBtn({ text }: { text: string }) {
@@ -225,6 +235,32 @@ function SpanDetails({ span, depth }: { span: TraceSpan; depth: number }) {
       background: catStyle.bg,
     }}>
       <MetaTable entries={metaEntries} />
+
+      {/* timing info */}
+      <div style={{
+        margin: '4px 0 0', fontSize: 11, color: '#8c8c8c',
+        display: 'flex', alignItems: 'center', gap: 12,
+      }}>
+        <span>
+          <span style={{ color: '#bfbfbf' }}>开始</span>{' '}
+          <span style={{
+            color: '#595959', fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
+          }}>{formatTimestamp(span.start_time)}</span>
+        </span>
+        <span>
+          <span style={{ color: '#bfbfbf' }}>结束</span>{' '}
+          <span style={{
+            color: '#595959', fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
+          }}>{formatTimestamp(span.end_time)}</span>
+        </span>
+        <span>
+          <span style={{ color: '#bfbfbf' }}>耗时</span>{' '}
+          <span style={{
+            color: catStyle.color, fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
+            fontWeight: 500,
+          }}>{formatDuration(span.duration_ms)}</span>
+        </span>
+      </div>
 
       {/* retrieval */}
       {cat === 'retrieval' && out && (

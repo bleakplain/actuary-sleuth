@@ -1,8 +1,7 @@
 {
   "version": "3.0.0",
   "data_paths": {
-    "sqlite_db": "data/actuary.db",
-    "lancedb_uri": "data/lancedb",
+    "sqlite_db": "../data/actuary.db",
     "regulations_dir": "../references",
     "kb_version_dir": "lib/rag_engine/data/kb"
   },

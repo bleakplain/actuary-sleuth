@@ -187,6 +187,8 @@ export interface TraceSpan {
   input: Record<string, unknown> | null;
   output: Record<string, unknown> | null;
   metadata: Record<string, unknown>;
+  start_time: number;
+  end_time: number;
   duration_ms: number;
   status: 'ok' | 'error';
   error: string | null;

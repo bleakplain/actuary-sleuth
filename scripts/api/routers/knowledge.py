@@ -22,8 +22,8 @@ _tasks: Dict[str, Dict[str, object]] = {}
 
 
 def _get_config():
-    from lib.rag_engine.version_manager import KBVersionManager
-    return KBVersionManager().get_rag_config()
+    from lib.rag_engine.kb_manager import KBManager
+    return KBManager().load_kb()
 
 
 def _get_regulations_dir() -> Path:
@@ -113,19 +113,19 @@ async def rebuild_index(req: RebuildRequest):
             _tasks[task_id]["status"] = "running"
             _tasks[task_id]["progress"] = "正在创建新版本并重建索引..."
 
-            from lib.rag_engine.version_manager import KBVersionManager
+            from lib.rag_engine.kb_manager import KBManager
             from lib.rag_engine.config import RAGConfig
-            vm = KBVersionManager()
+            kb_mgr = KBManager()
             working_config = RAGConfig()
 
-            result = vm.build_version(
+            result = kb_mgr.build_kb(
                 regulations_dir=working_config.regulations_dir,
                 description="从当前源文件重建",
                 force_rebuild=True,
             )
 
             from api.routers.kb_version import reload_rag_engine
-            reload_rag_engine(vm)
+            reload_rag_engine(kb_mgr)
 
             _tasks[task_id]["status"] = "completed"
             _tasks[task_id]["result"] = {

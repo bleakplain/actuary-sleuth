@@ -58,11 +58,7 @@ class RAGConfig:
     collection_name: str = "regulations_vectors"
 
     def __post_init__(self):
-        from lib.config import get_vector_db_path, get_regulations_dir
-
-        # vector_db_path：参数 > settings.json > 默认
-        if self.vector_db_path is None:
-            self.vector_db_path = get_vector_db_path()
+        from lib.config import get_regulations_dir
 
         # regulations_dir：参数 > settings.json > 默认
         if not self.regulations_dir:

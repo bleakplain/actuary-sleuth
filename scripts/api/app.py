@@ -15,18 +15,18 @@ _rag_initialized = False
 
 def _ensure_knowledge_base():
     """初始化知识库：创建初始版本。"""
-    from lib.rag_engine.version_manager import KBVersionManager
+    from lib.rag_engine.kb_manager import KBManager
     from lib.rag_engine.config import RAGConfig
     from lib.rag_engine.index_manager import VectorIndexManager
 
-    vm = KBVersionManager()
+    kb_mgr = KBManager()
 
     # 无版本时从当前 references 创建 v1
-    if not vm.list_versions():
+    if not kb_mgr.list_versions():
         working_config = RAGConfig()
         refs_dir = Path(working_config.regulations_dir)
         if refs_dir.exists() and list(refs_dir.glob("**/*.md")):
-            vm.create_version(
+            kb_mgr.create_version(
                 regulations_dir=working_config.regulations_dir,
                 description="初始版本",
             )
@@ -35,10 +35,10 @@ def _ensure_knowledge_base():
             return
 
     # 检查 active 版本是否有索引
-    config = vm.get_rag_config()
-    vm_check = VectorIndexManager(config)
-    if not vm_check.index_exists():
-        logger.info(f"版本 {vm.active_version} 的向量库为空，开始导入...")
+    config = kb_mgr.load_kb()
+    index_check = VectorIndexManager(config)
+    if not index_check.index_exists():
+        logger.info(f"版本 {kb_mgr.active_version} 的向量库为空，开始导入...")
         from lib.rag_engine.builder import KnowledgeBuilder
         builder = KnowledgeBuilder(config)
         stats = builder.build()
@@ -66,10 +66,10 @@ async def lifespan(app: FastAPI):
     try:
         _ensure_knowledge_base()
 
-        from lib.rag_engine.version_manager import KBVersionManager
-        vm = KBVersionManager()
+        from lib.rag_engine.kb_manager import KBManager
+        kb_mgr = KBManager()
         from lib.rag_engine import create_qa_engine
-        rag_engine = create_qa_engine(vm.get_rag_config())
+        rag_engine = create_qa_engine(kb_mgr.load_kb())
         _rag_initialized = rag_engine.initialize()
         if _rag_initialized:
             logger.info("RAG 引擎初始化完成")
@@ -117,13 +117,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from api.routers import ask, knowledge, eval as eval_router, compliance, kb_version, feedback
+from api.routers import ask, knowledge, eval as eval_router, compliance, kb_version, feedback, observability
 app.include_router(ask.router)
 app.include_router(knowledge.router)
 app.include_router(eval_router.router)
 app.include_router(compliance.router)
 app.include_router(kb_version.router)
 app.include_router(feedback.router)
+app.include_router(observability.router)
 
 
 @app.get("/api/health")

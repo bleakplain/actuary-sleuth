@@ -17,12 +17,12 @@ router = APIRouter(prefix="/api/kb/versions", tags=["知识库版本管理"])
 _tasks: Dict[str, Dict[str, object]] = {}
 
 
-def _get_version_manager():
-    from lib.rag_engine.version_manager import KBVersionManager
-    return KBVersionManager()
+def _get_kb_manager():
+    from lib.rag_engine.kb_manager import KBManager
+    return KBManager()
 
 
-def reload_rag_engine(version_manager):
+def reload_rag_engine(kb_mgr):
     """热替换全局 RAG 引擎为指定版本的实例。"""
     import api.app as app_module
     try:
@@ -30,7 +30,7 @@ def reload_rag_engine(version_manager):
         if old_engine is not None:
             old_engine.cleanup()
 
-        config = version_manager.get_rag_config()
+        config = kb_mgr.load_kb()
         from lib.rag_engine import create_qa_engine
         new_engine = create_qa_engine(config)
         initialized = new_engine.initialize()
@@ -38,7 +38,7 @@ def reload_rag_engine(version_manager):
             app_module.rag_engine = new_engine
             app_module._rag_initialized = True
             logger.info(
-                f"RAG 引擎已切换到版本 {version_manager.active_version}"
+                f"RAG 引擎已切换到版本 {kb_mgr.active_version}"
             )
         else:
             logger.warning("RAG 引擎初始化失败")
@@ -48,11 +48,11 @@ def reload_rag_engine(version_manager):
 
 @router.get("", response_model=VersionListOut)
 async def list_versions():
-    vm = _get_version_manager()
-    versions = vm.list_versions()
+    kb_mgr = _get_kb_manager()
+    versions = kb_mgr.list_versions()
     return VersionListOut(
         versions=[VersionOut(**vars(v)) for v in versions],
-        active_version=vm.active_version or "",
+        active_version=kb_mgr.active_version or "",
     )
 
 
@@ -67,18 +67,18 @@ async def create_version(req: CreateVersionRequest):
             _tasks[task_id]["status"] = "running"
             _tasks[task_id]["progress"] = "正在创建版本..."
 
-            vm = _get_version_manager()
+            kb_mgr = _get_kb_manager()
 
             from lib.rag_engine.config import RAGConfig
             working_config = RAGConfig()
 
-            result = vm.build_version(
+            result = kb_mgr.build_kb(
                 regulations_dir=working_config.regulations_dir,
                 description=req.description,
                 force_rebuild=True,
             )
 
-            reload_rag_engine(vm)
+            reload_rag_engine(kb_mgr)
 
             _tasks[task_id]["status"] = "completed"
             _tasks[task_id]["result"] = {
@@ -96,18 +96,18 @@ async def create_version(req: CreateVersionRequest):
 
 @router.post("/{version_id}/activate")
 async def activate_version(version_id: str):
-    vm = _get_version_manager()
-    if not vm.get_version_meta(version_id):
+    kb_mgr = _get_kb_manager()
+    if not kb_mgr.get_version_meta(version_id):
         raise HTTPException(status_code=404, detail="版本不存在")
-    vm.activate_version(version_id)
-    reload_rag_engine(vm)
+    kb_mgr.activate_version(version_id)
+    reload_rag_engine(kb_mgr)
     return {"status": "activated", "version_id": version_id}
 
 
 @router.delete("/{version_id}")
 async def delete_version(version_id: str):
-    vm = _get_version_manager()
-    if not vm.delete_version(version_id):
+    kb_mgr = _get_kb_manager()
+    if not kb_mgr.delete_version(version_id):
         raise HTTPException(status_code=400, detail="不能删除当前激活的版本")
     return {"status": "deleted", "version_id": version_id}
 

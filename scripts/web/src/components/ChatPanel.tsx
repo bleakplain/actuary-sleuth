@@ -9,6 +9,24 @@ import type { Source } from '../types';
 
 const { TextArea } = Input;
 
+function formatConvTime(ts: string): string {
+  if (!ts) return '';
+  const date = new Date(ts.replace(' ', 'T'));
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.floor((today.getTime() - target.getTime()) / 86400000);
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  const time = `${hh}:${mm}`;
+
+  if (diffDays === 0) return time;
+  if (diffDays === 1) return `昨天 ${time}`;
+  if (date.getFullYear() === now.getFullYear())
+    return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${time}`;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 const DEFAULT_TRACE_WIDTH = 520;
 const MIN_TRACE_WIDTH = 360;
 const MAX_TRACE_WIDTH = 800;
@@ -118,17 +136,22 @@ export default function ChatPanel() {
               alignItems: 'center',
             }}
           >
-            <span
-              style={{
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                flex: 1,
-                fontSize: 13,
-              }}
-            >
-              {conv.title || conv.id}
-            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontSize: 13,
+                }}
+              >
+                {conv.title || conv.id}
+              </div>
+              <div style={{ fontSize: 11, color: '#bfbfbf', marginTop: 2 }}>
+                {formatConvTime(conv.created_at)}
+                {conv.message_count > 0 && ` · ${conv.message_count} 条`}
+              </div>
+            </div>
             <Popconfirm
               title="确定删除？"
               onConfirm={(e) => {

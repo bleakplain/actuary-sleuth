@@ -9,6 +9,13 @@ import type { Message, Citation, Source } from '../types';
 
 const { Text } = Typography;
 
+function formatMsgTime(ts: string): string {
+  if (!ts) return '';
+  const parts = ts.split(' ');
+  if (parts.length < 2) return ts;
+  return parts[1].slice(0, 5);
+}
+
 interface Props {
   message: Message;
   streaming?: boolean;
@@ -39,6 +46,9 @@ export default function MessageBubble({ message, streaming, onCitationClick }: P
           }}
         >
           {message.content}
+          <div style={{ fontSize: 11, opacity: 0.7, textAlign: 'right', marginTop: 4 }}>
+            {formatMsgTime(message.timestamp)}
+          </div>
         </div>
       </div>
     );
@@ -83,6 +93,9 @@ export default function MessageBubble({ message, streaming, onCitationClick }: P
         )}
         {message.role === 'assistant' && !isThinking && (
           <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, color: '#bfbfbf', marginRight: 4 }}>
+              {formatMsgTime(message.timestamp)}
+            </span>
             <FeedbackButtons messageId={message.id} />
             {debugMode && (
               <Button
