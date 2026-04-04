@@ -52,7 +52,6 @@ tests/.coverage
 scripts/.coverage
 *.db-shm
 *.db-wal
-scripts/lib/rag_engine/data/kb/version_meta.json
 scripts/lib/rag_engine/data/kb/
 .pytest_cache/
 .mypy_cache/
