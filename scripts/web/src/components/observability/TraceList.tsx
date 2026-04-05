@@ -4,6 +4,8 @@ import { SearchOutlined, DeleteOutlined, ClearOutlined, ThunderboltOutlined } fr
 import { useObservabilityStore } from '../../stores/observabilityStore';
 import type { Dayjs } from 'dayjs';
 
+const PAGE_SIZE = 20;
+
 interface Props {
   onCleanupOpen: () => void;
 }
@@ -47,10 +49,14 @@ export default function TraceList({ onCleanupOpen }: Props) {
     loadTraces({ page: 1 });
   };
 
-  const handleBatchDelete = () => {
-    deleteTraces(selectedIds);
-    setSelectedIds([]);
-    message.success('已删除');
+  const handleBatchDelete = async () => {
+    try {
+      await deleteTraces(selectedIds);
+      setSelectedIds([]);
+      message.success('已删除');
+    } catch {
+      message.error('删除失败');
+    }
   };
 
   const toggleSelect = (id: string, checked: boolean) => {
@@ -144,13 +150,13 @@ export default function TraceList({ onCleanupOpen }: Props) {
         )}
       </div>
 
-      {traceTotal > 20 && (
+      {traceTotal > PAGE_SIZE && (
         <div style={{ padding: '8px 12px', borderTop: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: '#8c8c8c' }}>
           <span>共 {traceTotal} 条</span>
           <Space size={4}>
             <Button size="small" disabled={tracePage <= 1} onClick={() => setPage(tracePage - 1)}>上一页</Button>
             <span>{tracePage}</span>
-            <Button size="small" disabled={tracePage * 20 >= traceTotal} onClick={() => setPage(tracePage + 1)}>下一页</Button>
+            <Button size="small" disabled={tracePage * PAGE_SIZE >= traceTotal} onClick={() => setPage(tracePage + 1)}>下一页</Button>
           </Space>
         </div>
       )}

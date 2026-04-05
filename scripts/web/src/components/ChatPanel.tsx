@@ -92,10 +92,14 @@ export default function ChatPanel() {
     setSourcePanelOpen(true);
   };
 
-  const handleBatchDelete = () => {
-    batchDeleteConversations(selectedConvIds);
-    setSelectedConvIds([]);
-    message.success('已删除');
+  const handleBatchDelete = async () => {
+    try {
+      await batchDeleteConversations(selectedConvIds);
+      setSelectedConvIds([]);
+      message.success('已删除');
+    } catch {
+      message.error('删除失败');
+    }
   };
 
   const activeMessage = activeTraceMessageId

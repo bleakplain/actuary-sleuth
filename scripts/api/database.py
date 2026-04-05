@@ -796,8 +796,8 @@ def search_traces(
     params: list = []
 
     if trace_id:
-        clauses.append("t.trace_id LIKE ?")
-        params.append(f"%{trace_id}%")
+        clauses.append("t.trace_id = ?")
+        params.append(trace_id)
     if conversation_id:
         clauses.append("t.conversation_id = ?")
         params.append(conversation_id)
@@ -912,29 +912,42 @@ def batch_delete_traces(trace_ids: list) -> int:
         return cur.rowcount
 
 
-def count_traces_for_cleanup(
-    start_date: str, end_date: str, status: str = ""
-) -> int:
-    """统计满足条件的 trace 数量（用于清理预览）。"""
+def _build_cleanup_filter(start_date: str, end_date: str, status: str = "") -> tuple:
+    """构建清理/统计查询的 WHERE 子句，与 search_traces 使用相同的 has_error 语义。"""
     clauses: list[str] = []
     params: list = []
 
     if start_date:
-        clauses.append("created_at >= ?")
+        clauses.append("t.created_at >= ?")
         params.append(start_date)
     if end_date:
         end_val = end_date
         if len(end_date) == 10:
             end_val = f"{end_date} 23:59:59"
-        clauses.append("created_at <= ?")
+        clauses.append("t.created_at <= ?")
         params.append(end_val)
-    if status:
-        clauses.append("trace_id IN (SELECT trace_id FROM spans WHERE status = ?)")
-        params.append(status)
 
-    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    if status:
+        status_clause = "sa.has_error = 1" if status == "error" else "sa.has_error = 0"
+        where = f"{where} {'AND' if clauses else 'WHERE'} {status_clause}"
+
+    return where, params
+
+
+def count_traces_for_cleanup(
+    start_date: str, end_date: str, status: str = ""
+) -> int:
+    """统计满足条件的 trace 数量（用于清理预览）。"""
+    where, params = _build_cleanup_filter(start_date, end_date, status)
     with get_connection() as conn:
-        row = conn.execute(f"SELECT COUNT(*) AS cnt FROM traces{where}", params).fetchone()
+        row = conn.execute(
+            f"SELECT COUNT(*) AS cnt FROM traces t "
+            f"LEFT JOIN (SELECT trace_id, MAX(CASE WHEN status='error' THEN 1 ELSE 0 END) AS has_error "
+            f"FROM spans GROUP BY trace_id) sa ON sa.trace_id = t.trace_id {where}",
+            params,
+        ).fetchone()
         return row["cnt"]
 
 
@@ -942,26 +955,13 @@ def cleanup_traces(
     start_date: str, end_date: str, status: str = ""
 ) -> int:
     """按条件删除 trace 及其 spans。先查找匹配的 trace_id，再调用 batch_delete_traces。"""
-    clauses: list[str] = []
-    params: list = []
-
-    if start_date:
-        clauses.append("created_at >= ?")
-        params.append(start_date)
-    if end_date:
-        end_val = end_date
-        if len(end_date) == 10:
-            end_val = f"{end_date} 23:59:59"
-        clauses.append("created_at <= ?")
-        params.append(end_val)
-    if status:
-        clauses.append("trace_id IN (SELECT trace_id FROM spans WHERE status = ?)")
-        params.append(status)
-
-    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    where, params = _build_cleanup_filter(start_date, end_date, status)
     with get_connection() as conn:
         rows = conn.execute(
-            f"SELECT trace_id FROM traces{where}", params
+            f"SELECT t.trace_id FROM traces t "
+            f"LEFT JOIN (SELECT trace_id, MAX(CASE WHEN status='error' THEN 1 ELSE 0 END) AS has_error "
+            f"FROM spans GROUP BY trace_id) sa ON sa.trace_id = t.trace_id {where}",
+            params,
         ).fetchall()
     trace_ids = [r["trace_id"] for r in rows]
     return batch_delete_traces(trace_ids)
