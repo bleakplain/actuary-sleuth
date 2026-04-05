@@ -438,6 +438,7 @@ export default function EvalPage() {
                         rowKey="id"
                         loading={evaluationsLoading}
                         size="small"
+                        scroll={{ y: 400 }}
                         pagination={{ pageSize: 15 }}
                         scroll={{ x: 850 }}
                         onRow={(evaluation) => ({
