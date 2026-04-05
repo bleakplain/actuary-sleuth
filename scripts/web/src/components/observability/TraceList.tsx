@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Input, Select, Button, Checkbox, Badge, Space, DatePicker, Popconfirm, message } from 'antd';
 import { SearchOutlined, DeleteOutlined, ClearOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useObservabilityStore } from '../../stores/observabilityStore';
-import dayjs, { Dayjs } from 'dayjs';
+import type { Dayjs } from 'dayjs';
 
 interface Props {
   onCleanupOpen: () => void;

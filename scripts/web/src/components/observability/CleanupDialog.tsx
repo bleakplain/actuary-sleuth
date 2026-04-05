@@ -3,7 +3,7 @@ import { Modal, DatePicker, Select, Button, Space, Typography, message } from 'a
 import { DeleteOutlined } from '@ant-design/icons';
 import { cleanupTraces } from '../../api/observability';
 import type { CleanupResponse } from '../../types';
-import dayjs, { Dayjs } from 'dayjs';
+import type { Dayjs } from 'dayjs';
 
 interface Props {
   open: boolean;
