@@ -183,3 +183,33 @@ def _find_event_by_type(events: list, event_type: str):
         if event.get("type") == event_type:
             return event
     return None
+
+
+class TestConversationSearch:
+    def test_search_conversations(self, app_client, make_conversation):
+        make_conversation("conv_a", "健康保险等待期")
+        make_conversation("conv_b", "免责条款")
+        resp = app_client.get("/api/ask/conversations?search=等待期")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["title"] == "健康保险等待期"
+
+    def test_search_conversations_empty(self, app_client, make_conversation):
+        make_conversation("conv_a", "测试")
+        resp = app_client.get("/api/ask/conversations?search=不存在")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+
+class TestBatchDeleteConversations:
+    def test_batch_delete(self, app_client, make_conversation, make_message):
+        make_conversation("conv_del1", "删除1")
+        make_message("conv_del1", "user", "问题1")
+        make_conversation("conv_del2", "删除2")
+        make_conversation("conv_keep", "保留")
+        resp = app_client.delete("/api/ask/conversations?ids=conv_del1,conv_del2")
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] == 2
+        resp2 = app_client.get("/api/ask/conversations")
+        assert len(resp2.json()) == 1

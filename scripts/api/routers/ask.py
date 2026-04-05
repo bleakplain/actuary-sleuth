@@ -5,11 +5,12 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from sse_starlette.sse import EventSourceResponse
 
 from api.database import (
     add_message,
+    batch_delete_conversations,
     create_conversation,
     create_feedback,
     delete_conversation,
@@ -18,6 +19,7 @@ from api.database import (
     get_trace,
     save_spans,
     save_trace,
+    search_conversations,
     update_feedback,
 )
 from api.dependencies import get_rag_engine
@@ -184,7 +186,10 @@ async def chat(req: ChatRequest):
 
 
 @router.get("/conversations", response_model=list[ConversationOut])
-async def list_conversations():
+async def list_conversations(search: str = Query("", description="按标题模糊搜索")):
+    if search:
+        rows, _ = search_conversations(search=search, page=1, size=100)
+        return rows
     return get_conversations()
 
 
@@ -202,6 +207,13 @@ async def remove_conversation(conversation_id: str):
     if count == 0:
         raise HTTPException(status_code=404, detail="对话不存在")
     return {"deleted_messages": count}
+
+
+@router.delete("/conversations")
+async def batch_remove_conversations(ids: str = Query(..., description="逗号分隔的会话 ID")):
+    conversation_ids = [cid.strip() for cid in ids.split(",") if cid.strip()]
+    deleted = batch_delete_conversations(conversation_ids)
+    return {"deleted": deleted}
 
 
 @router.get("/messages/{message_id}/trace")
