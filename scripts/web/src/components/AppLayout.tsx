@@ -6,6 +6,7 @@ import {
   BarChartOutlined,
   SafetyCertificateOutlined,
   DislikeOutlined,
+  ExperimentOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 
@@ -18,6 +19,7 @@ const menuItems = [
   { key: '/eval/runs', icon: <BarChartOutlined />, label: '评估运行' },
   { key: '/compliance', icon: <SafetyCertificateOutlined />, label: '合规检查' },
   { key: '/feedback', icon: <DislikeOutlined />, label: '问题反馈' },
+  { key: '/observability', icon: <ExperimentOutlined />, label: '可观测性' },
 ];
 
 export default function AppLayout() {

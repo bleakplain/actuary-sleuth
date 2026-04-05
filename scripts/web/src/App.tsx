@@ -8,6 +8,7 @@ import EvalDatasetPage from './pages/EvalDatasetPage';
 import EvalRunPage from './pages/EvalRunPage';
 import CompliancePage from './pages/CompliancePage';
 import FeedbackPage from './pages/FeedbackPage';
+import ObservabilityPage from './pages/ObservabilityPage';
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
             <Route path="/eval/runs" element={<EvalRunPage />} />
             <Route path="/compliance" element={<CompliancePage />} />
             <Route path="/feedback" element={<FeedbackPage />} />
+            <Route path="/observability" element={<ObservabilityPage />} />
           </Route>
         </Routes>
       </BrowserRouter>
