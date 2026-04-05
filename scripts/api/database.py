@@ -449,7 +449,7 @@ def restore_snapshot(snapshot_id: str) -> int:
         return count
 
 
-def create_eval_run(run_id: str, mode: str, config: Dict) -> None:
+def create_evaluation(run_id: str, mode: str, config: Dict) -> None:
     with get_connection() as conn:
         conn.execute(
             "INSERT INTO eval_runs (id, mode, status, config_json) VALUES (?, ?, 'pending', ?)",
@@ -457,7 +457,7 @@ def create_eval_run(run_id: str, mode: str, config: Dict) -> None:
         )
 
 
-def update_eval_run_status(
+def update_evaluation_status(
     run_id: str, status: str, progress: int = 0, total: int = 0
 ) -> None:
     with get_connection() as conn:
@@ -476,7 +476,7 @@ def update_eval_run_status(
         )
 
 
-def save_eval_report(run_id: str, report: Dict) -> None:
+def save_evaluation_report(run_id: str, report: Dict) -> None:
     with get_connection() as conn:
         conn.execute(
             "UPDATE eval_runs SET report_json = ? WHERE id = ?",
@@ -508,7 +508,7 @@ def save_sample_result(
         )
 
 
-def get_eval_run(run_id: str) -> Optional[Dict]:
+def get_evaluation(run_id: str) -> Optional[Dict]:
     with get_connection() as conn:
         row = conn.execute(
             "SELECT * FROM eval_runs WHERE id = ?", (run_id,)
@@ -520,7 +520,7 @@ def get_eval_run(run_id: str) -> Optional[Dict]:
         return d
 
 
-def get_eval_runs() -> List[Dict]:
+def get_evaluations() -> List[Dict]:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT id, mode, status, progress, total, started_at, finished_at, config_json "

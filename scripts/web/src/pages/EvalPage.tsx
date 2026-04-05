@@ -388,6 +388,7 @@ export default function EvalPage() {
                         loading={samplesLoading}
                         pagination={{ pageSize: 20 }}
                         size="middle"
+                        scroll={{ x: 650 }}
                       />
                     </Card>
                   </Col>
@@ -438,6 +439,7 @@ export default function EvalPage() {
                         loading={evaluationsLoading}
                         size="small"
                         pagination={{ pageSize: 15 }}
+                        scroll={{ x: 850 }}
                         onRow={(evaluation) => ({
                           onClick: () => view_evaluation(evaluation),
                           style: {
@@ -452,7 +454,7 @@ export default function EvalPage() {
                   <Col span={14}>
                     {selectedEvaluation ? (
                       <>
-                        <Descriptions title={`评估报告 - ${selectedEvaluation.id}`} size="small" style={{ marginBottom: 16 }}>
+                        <Descriptions title={`评估报告 - ${selectedEvaluation.id}`} size="small" column={{ xs: 1, sm: 2, md: 3 }} style={{ marginBottom: 16 }}>
                           <Descriptions.Item label="模式">{selectedEvaluation.mode}</Descriptions.Item>
                           <Descriptions.Item label="状态">
                             <Tag color={STATUS_MAP[selectedEvaluation.status]?.color}>{STATUS_MAP[selectedEvaluation.status]?.label}</Tag>
@@ -480,6 +482,7 @@ export default function EvalPage() {
                                 rowKey="id"
                                 size="small"
                                 pagination={{ pageSize: 20 }}
+                                scroll={{ x: 550 }}
                                 expandable={{
                                   expandedRowRender: (record) => (
                                     <div>
