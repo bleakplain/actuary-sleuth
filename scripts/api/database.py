@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS eval_snapshots (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS evaluations (
+CREATE TABLE IF NOT EXISTS eval_runs (
     id TEXT PRIMARY KEY,
     mode TEXT NOT NULL CHECK(mode IN ('retrieval', 'generation', 'full')),
     status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'running', 'completed', 'failed')),
@@ -66,14 +66,14 @@ CREATE TABLE IF NOT EXISTS evaluations (
 
 CREATE TABLE IF NOT EXISTS eval_sample_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    evaluation_id TEXT NOT NULL REFERENCES evaluations(id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL REFERENCES eval_runs(id) ON DELETE CASCADE,
     sample_id TEXT NOT NULL,
     retrieved_docs_json TEXT NOT NULL DEFAULT '[]',
     generated_answer TEXT NOT NULL DEFAULT '',
     retrieval_metrics_json TEXT NOT NULL DEFAULT '{}',
     generation_metrics_json TEXT NOT NULL DEFAULT '{}'
 );
-CREATE INDEX IF NOT EXISTS idx_eval_results_evaluation ON eval_sample_results(evaluation_id);
+CREATE INDEX IF NOT EXISTS idx_eval_results_run ON eval_sample_results(run_id);
 
 CREATE TABLE IF NOT EXISTS compliance_reports (
     id TEXT PRIMARY KEY,
@@ -166,9 +166,9 @@ _RESULT_JSON_FIELDS = {
 
 
 def init_db():
-    _migrate_db()
     with get_connection() as conn:
         conn.executescript(_SCHEMA_SQL)
+    _migrate_db()
 
 
 def _migrate_db():
@@ -183,26 +183,6 @@ def _migrate_db():
         trace_cols = {row[1] for row in conn.execute("PRAGMA table_info(traces)").fetchall()}
         if 'conversation_id' not in trace_cols:
             conn.execute("ALTER TABLE traces ADD COLUMN conversation_id TEXT")
-
-    # Migration: rename eval_runs → evaluations
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        try:
-            cursor.execute("ALTER TABLE eval_sample_results RENAME COLUMN run_id TO evaluation_id")
-        except Exception:
-            pass
-        try:
-            cursor.execute("ALTER TABLE eval_runs RENAME TO evaluations")
-        except Exception:
-            pass
-        try:
-            cursor.execute("DROP INDEX IF EXISTS idx_eval_results_run")
-        except Exception:
-            pass
-        try:
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_eval_results_evaluation ON eval_sample_results(evaluation_id)")
-        except Exception:
-            pass
 
 
 def create_conversation(conversation_id: str, title: str = "") -> None:
@@ -469,16 +449,16 @@ def restore_snapshot(snapshot_id: str) -> int:
         return count
 
 
-def create_evaluation(evaluation_id: str, mode: str, config: Dict) -> None:
+def create_eval_run(run_id: str, mode: str, config: Dict) -> None:
     with get_connection() as conn:
         conn.execute(
-            "INSERT INTO evaluations (id, mode, status, config_json) VALUES (?, ?, 'pending', ?)",
-            (evaluation_id, mode, json.dumps(config, ensure_ascii=False)),
+            "INSERT INTO eval_runs (id, mode, status, config_json) VALUES (?, ?, 'pending', ?)",
+            (run_id, mode, json.dumps(config, ensure_ascii=False)),
         )
 
 
-def update_evaluation_status(
-    evaluation_id: str, status: str, progress: int = 0, total: int = 0
+def update_eval_run_status(
+    run_id: str, status: str, progress: int = 0, total: int = 0
 ) -> None:
     with get_connection() as conn:
         sets = ["status = ?"]
@@ -490,22 +470,22 @@ def update_evaluation_status(
         elif status in ("completed", "failed"):
             sets.append("finished_at = datetime('now')")
             sets.append("progress = total")
-        params.append(evaluation_id)
+        params.append(run_id)
         conn.execute(
-            f"UPDATE evaluations SET {', '.join(sets)} WHERE id = ?", params
+            f"UPDATE eval_runs SET {', '.join(sets)} WHERE id = ?", params
         )
 
 
-def save_evaluation_report(evaluation_id: str, report: Dict) -> None:
+def save_eval_report(run_id: str, report: Dict) -> None:
     with get_connection() as conn:
         conn.execute(
-            "UPDATE evaluations SET report_json = ? WHERE id = ?",
-            (json.dumps(report, ensure_ascii=False), evaluation_id),
+            "UPDATE eval_runs SET report_json = ? WHERE id = ?",
+            (json.dumps(report, ensure_ascii=False), run_id),
         )
 
 
 def save_sample_result(
-    evaluation_id: str,
+    run_id: str,
     sample_id: str,
     retrieved_docs: Optional[List] = None,
     generated_answer: str = "",
@@ -515,11 +495,11 @@ def save_sample_result(
     with get_connection() as conn:
         conn.execute(
             "INSERT INTO eval_sample_results "
-            "(evaluation_id, sample_id, retrieved_docs_json, generated_answer, "
+            "(run_id, sample_id, retrieved_docs_json, generated_answer, "
             "retrieval_metrics_json, generation_metrics_json) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             (
-                evaluation_id, sample_id,
+                run_id, sample_id,
                 json.dumps(retrieved_docs or [], ensure_ascii=False),
                 generated_answer,
                 json.dumps(retrieval_metrics or {}, ensure_ascii=False),
@@ -528,10 +508,10 @@ def save_sample_result(
         )
 
 
-def get_evaluation(evaluation_id: str) -> Optional[Dict]:
+def get_eval_run(run_id: str) -> Optional[Dict]:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM evaluations WHERE id = ?", (evaluation_id,)
+            "SELECT * FROM eval_runs WHERE id = ?", (run_id,)
         ).fetchone()
         if row is None:
             return None
@@ -540,20 +520,20 @@ def get_evaluation(evaluation_id: str) -> Optional[Dict]:
         return d
 
 
-def get_evaluations() -> List[Dict]:
+def get_eval_runs() -> List[Dict]:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT id, mode, status, progress, total, started_at, finished_at, config_json "
-            "FROM evaluations ORDER BY started_at DESC"
+            "FROM eval_runs ORDER BY started_at DESC"
         ).fetchall()
         return [_deserialize_json_fields(dict(r), {"config": "config_json"}) for r in rows]
 
 
-def get_sample_results(evaluation_id: str) -> List[Dict]:
+def get_sample_results(run_id: str) -> List[Dict]:
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM eval_sample_results WHERE evaluation_id = ? ORDER BY id",
-            (evaluation_id,),
+            "SELECT * FROM eval_sample_results WHERE run_id = ? ORDER BY id",
+            (run_id,),
         ).fetchall()
         return [_deserialize_json_fields(dict(r), _RESULT_JSON_FIELDS) for r in rows]
 
@@ -796,9 +776,6 @@ def get_trace(message_id: int) -> Optional[Dict]:
     }
 
 
-# ===== Trace 管理（可测性页面）=====
-
-
 def search_traces(
     trace_id: str = "",
     conversation_id: str = "",
@@ -809,10 +786,11 @@ def search_traces(
     page: int = 1,
     size: int = 20,
 ) -> tuple:
-    """分页搜索 trace，支持多条件过滤。
+    """分页搜索 trace，支持按 trace_id / conversation_id / message_id / status / 日期范围过滤。
 
     Returns:
-        (rows, total_count)
+        (rows, total_count)，rows 中每条记录包含 trace_id, message_id,
+        conversation_id, created_at, status, total_duration_ms, span_count。
     """
     clauses: list[str] = []
     params: list = []
@@ -826,63 +804,56 @@ def search_traces(
     if message_id:
         clauses.append("t.message_id = ?")
         params.append(message_id)
-    if status:
-        clauses.append("s_agg.status = ?")
-        params.append(status)
     if start_date:
         clauses.append("t.created_at >= ?")
         params.append(start_date)
     if end_date:
+        end_val = end_date
+        if len(end_date) == 10:
+            end_val = f"{end_date} 23:59:59"
         clauses.append("t.created_at <= ?")
-        params.append(end_date + "T23:59:59")
+        params.append(end_val)
 
-    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    # Always join with span aggregation to get duration/status/span_count
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    if status:
+        status_clause = "sa.has_error = 1" if status == "error" else "sa.has_error = 0"
+        where = f"{where} {'AND' if clauses else 'WHERE'} {status_clause}"
+
     offset = (page - 1) * size
 
     with get_connection() as conn:
         count_row = conn.execute(
-            f"""
-            SELECT COUNT(*) AS cnt FROM traces t
-            LEFT JOIN (
-                SELECT trace_id,
-                       MAX(CASE WHEN status = 'error' THEN 'error' ELSE 'ok' END) AS status
-                FROM spans GROUP BY trace_id
-            ) s_agg ON t.trace_id = s_agg.trace_id
-            {where}
-            """,
+            f"SELECT COUNT(*) AS cnt FROM traces t "
+            f"LEFT JOIN (SELECT trace_id, MAX(CASE WHEN status='error' THEN 1 ELSE 0 END) AS has_error, "
+            f"MAX(duration_ms) AS total_duration_ms, COUNT(*) AS span_count FROM spans GROUP BY trace_id) sa "
+            f"ON sa.trace_id = t.trace_id {where}",
             params,
         ).fetchone()
         total = count_row["cnt"]
 
         rows = conn.execute(
-            f"""
-            SELECT t.trace_id, t.message_id, t.conversation_id, t.created_at,
-                   s_agg.status,
-                   COALESCE(s_agg.total_duration_ms, 0) AS total_duration_ms,
-                   COALESCE(s_agg.span_count, 0) AS span_count
-            FROM traces t
-            LEFT JOIN (
-                SELECT trace_id,
-                       MAX(CASE WHEN status = 'error' THEN 'error' ELSE 'ok' END) AS status,
-                       MAX(duration_ms) AS total_duration_ms,
-                       COUNT(*) AS span_count
-                FROM spans GROUP BY trace_id
-            ) s_agg ON t.trace_id = s_agg.trace_id
-            {where}
-            ORDER BY t.created_at DESC
-            LIMIT ? OFFSET ?
-            """,
+            f"SELECT t.trace_id, t.message_id, t.conversation_id, t.created_at, "
+            f"CASE WHEN COALESCE(sa.has_error, 0) = 1 THEN 'error' ELSE 'ok' END AS status, "
+            f"COALESCE(sa.total_duration_ms, 0) AS total_duration_ms, "
+            f"COALESCE(sa.span_count, 0) AS span_count "
+            f"FROM traces t "
+            f"LEFT JOIN (SELECT trace_id, MAX(CASE WHEN status='error' THEN 1 ELSE 0 END) AS has_error, "
+            f"MAX(duration_ms) AS total_duration_ms, COUNT(*) AS span_count FROM spans GROUP BY trace_id) sa "
+            f"ON sa.trace_id = t.trace_id {where} "
+            f"ORDER BY t.created_at DESC LIMIT ? OFFSET ?",
             params + [size, offset],
         ).fetchall()
-
         return [dict(r) for r in rows], total
 
 
 def get_trace_by_trace_id(trace_id: str) -> Optional[Dict]:
-    """获取完整 trace 详情，包含 span 树。"""
+    """通过 trace_id 获取完整 trace 数据。返回格式与 get_trace() 一致。"""
     with get_connection() as conn:
         trace_row = conn.execute(
-            "SELECT * FROM traces WHERE trace_id = ?", (trace_id,)
+            "SELECT trace_id FROM traces WHERE trace_id = ?",
+            (trace_id,),
         ).fetchone()
         if trace_row is None:
             return None
@@ -906,20 +877,24 @@ def get_trace_by_trace_id(trace_id: str) -> Optional[Dict]:
             roots.append(span_map[s["span_id"]])
 
     root = roots[0] if roots else None
-    root_meta = (root.get("metadata") or {}) if root else {}
+    if root is None:
+        return None
+
+    root_meta = root.get("metadata") or {}
     llm_count = root_meta.get("llm_call_count", 0)
     error_count = sum(1 for s in span_dicts if s["status"] == "error")
 
-    trace_dict = dict(trace_row)
-    trace_dict["spans"] = span_dicts
-    trace_dict["root"] = root
-    trace_dict["summary"] = {
-        "total_duration_ms": (root.get("duration_ms") or 0) if root else 0,
-        "span_count": len(span_dicts),
-        "llm_call_count": llm_count,
-        "error_count": error_count,
+    return {
+        "trace_id": trace_id,
+        "root": root,
+        "spans": span_dicts,
+        "summary": {
+            "total_duration_ms": root.get("duration_ms") or 0,
+            "span_count": len(span_dicts),
+            "llm_call_count": llm_count,
+            "error_count": error_count,
+        },
     }
-    return trace_dict
 
 
 def batch_delete_traces(trace_ids: list) -> int:
@@ -937,10 +912,8 @@ def batch_delete_traces(trace_ids: list) -> int:
         return cur.rowcount
 
 
-def count_traces_for_cleanup(
-    start_date: str = "", end_date: str = "", status: str = ""
-) -> int:
-    """统计符合条件的 trace 数量（用于预览）。"""
+def _build_cleanup_filter(start_date: str, end_date: str, status: str = "") -> tuple:
+    """构建清理/统计查询的 WHERE 子句，与 search_traces 使用相同的 has_error 语义。"""
     clauses: list[str] = []
     params: list = []
 
@@ -948,57 +921,47 @@ def count_traces_for_cleanup(
         clauses.append("t.created_at >= ?")
         params.append(start_date)
     if end_date:
+        end_val = end_date
+        if len(end_date) == 10:
+            end_val = f"{end_date} 23:59:59"
         clauses.append("t.created_at <= ?")
-        params.append(end_date + "T23:59:59")
+        params.append(end_val)
+
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
     if status:
-        clauses.append("s_agg.status = ?")
-        params.append(status)
+        status_clause = "sa.has_error = 1" if status == "error" else "sa.has_error = 0"
+        where = f"{where} {'AND' if clauses else 'WHERE'} {status_clause}"
 
-    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    return where, params
 
+
+def count_traces_for_cleanup(
+    start_date: str, end_date: str, status: str = ""
+) -> int:
+    """统计满足条件的 trace 数量（用于清理预览）。"""
+    where, params = _build_cleanup_filter(start_date, end_date, status)
     with get_connection() as conn:
         row = conn.execute(
-            f"""
-            SELECT COUNT(*) AS cnt FROM traces t
-            LEFT JOIN (
-                SELECT trace_id,
-                       MAX(CASE WHEN status = 'error' THEN 'error' ELSE 'ok' END) AS status
-                FROM spans GROUP BY trace_id
-            ) s_agg ON t.trace_id = s_agg.trace_id
-            {where}
-            """,
+            f"SELECT COUNT(*) AS cnt FROM traces t "
+            f"LEFT JOIN (SELECT trace_id, MAX(CASE WHEN status='error' THEN 1 ELSE 0 END) AS has_error "
+            f"FROM spans GROUP BY trace_id) sa ON sa.trace_id = t.trace_id {where}",
             params,
         ).fetchone()
         return row["cnt"]
 
 
 def cleanup_traces(
-    start_date: str = "", end_date: str = "", status: str = ""
+    start_date: str, end_date: str, status: str = ""
 ) -> int:
-    """按条件批量清理 trace。返回实际删除数。"""
-    clauses: list[str] = []
-    params: list = []
-
-    if start_date:
-        clauses.append("created_at >= ?")
-        params.append(start_date)
-    if end_date:
-        clauses.append("created_at <= ?")
-        params.append(end_date + "T23:59:59")
-    if status:
-        clauses.append("trace_id IN (SELECT trace_id FROM spans WHERE status = ?)")
-        params.append(status)
-
-    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-
+    """按条件删除 trace 及其 spans。先查找匹配的 trace_id，再调用 batch_delete_traces。"""
+    where, params = _build_cleanup_filter(start_date, end_date, status)
     with get_connection() as conn:
-        ids_to_delete = [
-            row["trace_id"]
-            for row in conn.execute(
-                f"SELECT trace_id FROM traces{where}", params
-            ).fetchall()
-        ]
-
-    if not ids_to_delete:
-        return 0
-    return batch_delete_traces(ids_to_delete)
+        rows = conn.execute(
+            f"SELECT t.trace_id FROM traces t "
+            f"LEFT JOIN (SELECT trace_id, MAX(CASE WHEN status='error' THEN 1 ELSE 0 END) AS has_error "
+            f"FROM spans GROUP BY trace_id) sa ON sa.trace_id = t.trace_id {where}",
+            params,
+        ).fetchall()
+    trace_ids = [r["trace_id"] for r in rows]
+    return batch_delete_traces(trace_ids)

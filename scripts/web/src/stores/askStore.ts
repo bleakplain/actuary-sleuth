@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import type { Conversation, Message, Source } from '../types';
 import * as askApi from '../api/ask';
 
+let _searchTimer: ReturnType<typeof setTimeout> | null = null;
+
 interface AskState {
   conversations: Conversation[];
   currentConversationId: string | null;
@@ -183,7 +185,11 @@ export const useAskStore = create<AskState>((set, get) => ({
 
   setConversationSearch: (search: string) => {
     set({ conversationSearch: search });
-    get().loadConversations(search);
+    if (_searchTimer) clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => {
+      get().loadConversations(search);
+      _searchTimer = null;
+    }, 300);
   },
 
   batchDeleteConversations: async (ids: string[]) => {

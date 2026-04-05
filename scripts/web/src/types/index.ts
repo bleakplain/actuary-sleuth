@@ -208,3 +208,32 @@ export interface TraceData {
   spans: TraceSpan[];
   summary: TraceSummary;
 }
+
+// ── Observability ──
+
+export interface TraceListItem {
+  trace_id: string;
+  message_id: number | null;
+  conversation_id: string | null;
+  created_at: string;
+  status: 'ok' | 'error';
+  total_duration_ms: number;
+  span_count: number;
+}
+
+export interface TraceListResponse {
+  items: TraceListItem[];
+  total: number;
+}
+
+export interface CleanupRequest {
+  start_date: string;
+  end_date: string;
+  status: string;
+  preview: boolean;
+}
+
+export interface CleanupResponse {
+  count?: number;
+  deleted?: number;
+}

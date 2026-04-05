@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Input, Button, Radio, Popconfirm, Switch, Space, Checkbox, message } from 'antd';
+import { Input, Button, Radio, Space, Popconfirm, Switch, Checkbox, message } from 'antd';
 import { SendOutlined, DeleteOutlined, CloseOutlined, BugOutlined, SearchOutlined } from '@ant-design/icons';
 import MessageBubble from './MessageBubble';
 import SourcePanel from './SourcePanel';
@@ -9,25 +9,7 @@ import type { Source } from '../types';
 
 const { TextArea } = Input;
 
-function formatConvTime(ts: string): string {
-  if (!ts) return '';
-  const date = new Date(ts.replace(' ', 'T'));
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const diffDays = Math.floor((today.getTime() - target.getTime()) / 86400000);
-  const hh = String(date.getHours()).padStart(2, '0');
-  const mm = String(date.getMinutes()).padStart(2, '0');
-  const time = `${hh}:${mm}`;
-
-  if (diffDays === 0) return time;
-  if (diffDays === 1) return `昨天 ${time}`;
-  if (date.getFullYear() === now.getFullYear())
-    return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${time}`;
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-const DEFAULT_TRACE_WIDTH = 600;
+const DEFAULT_TRACE_WIDTH = 520;
 const MIN_TRACE_WIDTH = 360;
 const MAX_TRACE_WIDTH = 800;
 
@@ -110,10 +92,14 @@ export default function ChatPanel() {
     setSourcePanelOpen(true);
   };
 
-  const handleBatchDelete = () => {
-    batchDeleteConversations(selectedConvIds);
-    setSelectedConvIds([]);
-    message.success('已删除');
+  const handleBatchDelete = async () => {
+    try {
+      await batchDeleteConversations(selectedConvIds);
+      setSelectedConvIds([]);
+      message.success('已删除');
+    } catch {
+      message.error('删除失败');
+    }
   };
 
   const activeMessage = activeTraceMessageId
@@ -232,7 +218,7 @@ export default function ChatPanel() {
         </div>
 
         <div style={{ borderTop: '1px solid #f0f0f0', padding: '12px 24px' }}>
-          <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Space style={{ marginBottom: 8 }}>
             <Radio.Group
               value={mode}
               onChange={(e) => setMode(e.target.value)}
@@ -246,7 +232,7 @@ export default function ChatPanel() {
               <span>调试</span>
               <Switch size="small" checked={debugMode} onChange={toggleDebugMode} />
             </span>
-          </div>
+          </Space>
           <div style={{ display: 'flex', gap: 8 }}>
             <TextArea
               value={input}
