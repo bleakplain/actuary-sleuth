@@ -11,8 +11,9 @@ _active_trace_id 全局变量作为跨线程 fallback。
 import logging
 import threading
 import time
-import uuid
 from contextvars import ContextVar
+
+from lib.common.id_generator import _id_generator
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -78,34 +79,6 @@ def get_llm_call_count() -> int:
     if tid:
         return _get_counter(tid, "llm_calls")
     return 0
-
-
-class IDGenerator:
-    """生成 trace/span 唯一标识。
-
-    trace_id: uuid4 hex (16 chars)
-    span_id: {trace_id}-{seq} (同一 trace 下严格递增)
-    """
-
-    def __init__(self) -> None:
-        self._seq: dict[str, int] = {}
-        self._lock = threading.Lock()
-
-    def new_trace_id(self) -> str:
-        return uuid.uuid4().hex[:16]
-
-    def new_span_id(self, trace_id: str) -> str:
-        with self._lock:
-            seq = self._seq.get(trace_id, 0) + 1
-            self._seq[trace_id] = seq
-        return f"{trace_id}-{seq}"
-
-
-_id_generator = IDGenerator()
-
-
-def get_id_generator() -> IDGenerator:
-    return _id_generator
 
 
 @dataclass
@@ -182,15 +155,15 @@ class trace_span:
             self.span.trace_id = parent.trace_id
             self.span.parent_span_id = parent.span_id
             parent.children.append(self.span)
-            self.span.span_id = _id_generator.new_span_id(self.span.trace_id)
+            self.span.span_id = _id_generator.new_id()
         elif active_tid:
             # ContextVar 未传播（跨线程），但全局 trace_id 存在
             self.span.trace_id = active_tid
-            self.span.span_id = _id_generator.new_span_id(active_tid)
+            self.span.span_id = _id_generator.new_id()
             # 无法挂载到父 span.children（跨线程无引用）
         else:
             # 真正的 root span
-            self.span.trace_id = _id_generator.new_trace_id()
+            self.span.trace_id = _id_generator.new_id()
             self.span.span_id = self.span.trace_id
             _set_active_trace_id(self.span.trace_id)
             self._is_root = True
@@ -207,6 +180,8 @@ class trace_span:
         _trace_context.set(self._parent)
         if self._is_root:
             _set_active_trace_id(None)
+            with _counters_lock:
+                _counters.pop(self.span.trace_id, None)
         return False
 
 

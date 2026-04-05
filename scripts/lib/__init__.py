@@ -4,13 +4,11 @@
 Infrastructure package init
 """
 from .common.database import get_connection
-from .common.id_generator import IDGenerator
 from .common.exceptions import *
 from .common.logger import AuditLogger, AuditStepLogger, get_logger, get_audit_logger
 
 __all__ = [
     'get_connection',
-    'IDGenerator',
     # Exceptions
     'ActuarySleuthException',
     'ValidationException',

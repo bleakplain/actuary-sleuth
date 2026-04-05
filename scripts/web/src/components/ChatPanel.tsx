@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Input, Button, Radio, Space, Popconfirm, Switch, Checkbox, message } from 'antd';
+import { Input, Button, Radio, Popconfirm, Switch, Checkbox, message } from 'antd';
 import { SendOutlined, DeleteOutlined, CloseOutlined, BugOutlined, SearchOutlined } from '@ant-design/icons';
 import MessageBubble from './MessageBubble';
 import SourcePanel from './SourcePanel';
@@ -218,7 +218,7 @@ export default function ChatPanel() {
         </div>
 
         <div style={{ borderTop: '1px solid #f0f0f0', padding: '12px 24px' }}>
-          <Space style={{ marginBottom: 8 }}>
+          <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Radio.Group
               value={mode}
               onChange={(e) => setMode(e.target.value)}
@@ -232,7 +232,7 @@ export default function ChatPanel() {
               <span>调试</span>
               <Switch size="small" checked={debugMode} onChange={toggleDebugMode} />
             </span>
-          </Space>
+          </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <TextArea
               value={input}

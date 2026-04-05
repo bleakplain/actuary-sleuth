@@ -14,6 +14,7 @@ interface ObservabilityState {
 
   loadTraces: (params?: TraceSearchParams) => Promise<void>;
   selectTrace: (traceId: string) => void;
+  closeDetail: () => void;
   setPage: (page: number) => void;
   deleteTraces: (ids: string[]) => Promise<void>;
 }
@@ -37,8 +38,20 @@ export const useObservabilityStore = create<ObservabilityState>((set, get) => ({
   selectTrace: (traceId: string) => {
     set({ selectedTraceId: traceId, traceLoading: true });
     api.fetchTraceDetail(traceId)
-      .then((detail) => set({ traceDetail: detail, traceLoading: false }))
-      .catch(() => set({ traceDetail: null, traceLoading: false }));
+      .then((detail) => {
+        if (get().selectedTraceId === traceId) {
+          set({ traceDetail: detail, traceLoading: false });
+        }
+      })
+      .catch(() => {
+        if (get().selectedTraceId === traceId) {
+          set({ traceDetail: null, traceLoading: false });
+        }
+      });
+  },
+
+  closeDetail: () => {
+    set({ selectedTraceId: null, traceDetail: null });
   },
 
   setPage: (page: number) => {
@@ -50,7 +63,7 @@ export const useObservabilityStore = create<ObservabilityState>((set, get) => ({
     await api.batchDeleteTraces(ids);
     const { selectedTraceId } = get();
     if (selectedTraceId && ids.includes(selectedTraceId)) {
-      set({ selectedTraceId: null, traceDetail: null });
+      get().closeDetail();
     }
     get().loadTraces();
   },

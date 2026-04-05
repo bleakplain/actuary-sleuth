@@ -14,7 +14,6 @@ from .models import (
 )
 from .database import get_connection
 from .logger import get_logger, get_audit_logger, AuditLogger, AuditStepLogger
-from .id_generator import IDGenerator
 from .exceptions import (
     ActuarySleuthException,
     ValidationException,
@@ -56,8 +55,6 @@ __all__ = [
     'get_audit_logger',
     'AuditLogger',
     'AuditStepLogger',
-    # ID Generator
-    'IDGenerator',
     # Exceptions
     'ActuarySleuthException',
     'ValidationException',
