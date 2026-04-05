@@ -10,8 +10,10 @@ interface ChatDoneData {
   trace?: TraceData;
 }
 
-export async function fetchConversations(): Promise<Conversation[]> {
-  const { data } = await client.get('/api/ask/conversations');
+export async function fetchConversations(search?: string): Promise<Conversation[]> {
+  const { data } = await client.get('/api/ask/conversations', {
+    params: search ? { search } : undefined,
+  });
   return data;
 }
 
@@ -22,6 +24,13 @@ export async function fetchMessages(conversationId: string): Promise<Message[]> 
 
 export async function deleteConversation(conversationId: string): Promise<void> {
   await client.delete(`/api/ask/conversations/${conversationId}`);
+}
+
+export async function batchDeleteConversations(ids: string[]): Promise<{ deleted: number }> {
+  const { data } = await client.delete('/api/ask/conversations', {
+    params: { ids: ids.join(',') },
+  });
+  return data;
 }
 
 export function chatSSE(

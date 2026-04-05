@@ -11,14 +11,17 @@ interface AskState {
   activeTraceMessageId: number | null;
   traceLoading: boolean;
   debugMode: boolean;
+  conversationSearch: string;
 
-  loadConversations: () => Promise<void>;
+  loadConversations: (search?: string) => Promise<void>;
   selectConversation: (id: string) => Promise<void>;
   sendMessage: (question: string, mode: 'qa' | 'search') => void;
   deleteConversation: (id: string) => Promise<void>;
   openTrace: (messageId: number) => void;
   closeTrace: () => void;
   toggleDebugMode: () => void;
+  setConversationSearch: (search: string) => void;
+  batchDeleteConversations: (ids: string[]) => Promise<void>;
 }
 
 export const useAskStore = create<AskState>((set, get) => ({
@@ -30,9 +33,10 @@ export const useAskStore = create<AskState>((set, get) => ({
   activeTraceMessageId: null,
   traceLoading: false,
   debugMode: false,
+  conversationSearch: "",
 
-  loadConversations: async () => {
-    const conversations = await askApi.fetchConversations();
+  loadConversations: async (search?: string) => {
+    const conversations = await askApi.fetchConversations(search);
     set({ conversations });
   },
 
@@ -175,6 +179,20 @@ export const useAskStore = create<AskState>((set, get) => ({
 
   closeTrace: () => {
     set({ activeTraceMessageId: null });
+  },
+
+  setConversationSearch: (search: string) => {
+    set({ conversationSearch: search });
+    get().loadConversations(search);
+  },
+
+  batchDeleteConversations: async (ids: string[]) => {
+    await askApi.batchDeleteConversations(ids);
+    const { currentConversationId } = get();
+    if (ids.includes(currentConversationId || "")) {
+      set({ currentConversationId: null, messages: [], activeTraceMessageId: null, traceLoading: false });
+    }
+    get().loadConversations(get().conversationSearch || undefined);
   },
 
   toggleDebugMode: () => {
