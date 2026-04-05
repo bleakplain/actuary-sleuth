@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Input, Button, Radio, Popconfirm, Switch } from 'antd';
-import { SendOutlined, DeleteOutlined, CloseOutlined, BugOutlined } from '@ant-design/icons';
+import { Input, Button, Radio, Popconfirm, Switch, Space, Checkbox, message } from 'antd';
+import { SendOutlined, DeleteOutlined, CloseOutlined, BugOutlined, SearchOutlined } from '@ant-design/icons';
 import MessageBubble from './MessageBubble';
 import SourcePanel from './SourcePanel';
 import TracePanel from './TracePanel';
@@ -49,6 +49,9 @@ export default function ChatPanel() {
     closeTrace,
     debugMode,
     toggleDebugMode,
+    conversationSearch,
+    setConversationSearch,
+    batchDeleteConversations,
   } = useAskStore();
 
   const [sourcePanelOpen, setSourcePanelOpen] = React.useState(false);
@@ -56,6 +59,7 @@ export default function ChatPanel() {
   const [panelSources, setPanelSources] = React.useState<Source[]>([]);
   const [traceWidth, setTraceWidth] = useState(DEFAULT_TRACE_WIDTH);
   const [dragging, setDragging] = useState(false);
+  const [selectedConvIds, setSelectedConvIds] = React.useState<string[]>([]);
   const dragStartX = useRef(0);
   const dragStartWidth = useRef(0);
 
@@ -106,6 +110,12 @@ export default function ChatPanel() {
     setSourcePanelOpen(true);
   };
 
+  const handleBatchDelete = () => {
+    batchDeleteConversations(selectedConvIds);
+    setSelectedConvIds([]);
+    message.success('已删除');
+  };
+
   const activeMessage = activeTraceMessageId
     ? messages.find((m) => m.id === activeTraceMessageId)
     : null;
@@ -117,59 +127,92 @@ export default function ChatPanel() {
           width: 220,
           borderRight: '1px solid #f0f0f0',
           overflow: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
         }}
       >
         <div style={{ padding: '8px 12px', fontWeight: 600, fontSize: 14 }}>
           对话历史
         </div>
-        {conversations.map((conv) => (
-          <div
-            key={conv.id}
-            onClick={() => selectConversation(conv.id)}
-            style={{
-              padding: '8px 12px',
-              cursor: 'pointer',
-              background: currentConversationId === conv.id ? '#e6f4ff' : '#fff',
-              borderBottom: '1px solid #f5f5f5',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
+        <div style={{ padding: '0 8px 8px' }}>
+          <Input
+            placeholder="搜索会话..."
+            prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
+            size="small"
+            allowClear
+            value={conversationSearch}
+            onChange={(e) => setConversationSearch(e.target.value)}
+          />
+        </div>
+        {selectedConvIds.length > 0 && (
+          <div style={{ padding: '0 8px 8px' }}>
+            <Popconfirm
+              title={`确定删除选中的 ${selectedConvIds.length} 个会话？`}
+              onConfirm={handleBatchDelete}
+            >
+              <Button type="primary" danger size="small" icon={<DeleteOutlined />} block>
+                删除 ({selectedConvIds.length})
+              </Button>
+            </Popconfirm>
+          </div>
+        )}
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          {conversations.map((conv) => (
+            <div
+              key={conv.id}
+              onClick={() => selectConversation(conv.id)}
+              style={{
+                padding: '8px 12px',
+                cursor: 'pointer',
+                background: currentConversationId === conv.id ? '#e6f4ff' : '#fff',
+                borderBottom: '1px solid #f5f5f5',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <Checkbox
+                checked={selectedConvIds.includes(conv.id)}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelectedConvIds([...selectedConvIds, conv.id]);
+                  } else {
+                    setSelectedConvIds(selectedConvIds.filter((id) => id !== conv.id));
+                  }
+                }}
+                style={{ marginRight: 4 }}
+              />
+              <span
                 style={{
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
+                  flex: 1,
                   fontSize: 13,
                 }}
               >
                 {conv.title || conv.id}
-              </div>
-              <div style={{ fontSize: 11, color: '#bfbfbf', marginTop: 2 }}>
-                {formatConvTime(conv.created_at)}
-                {conv.message_count > 0 && ` · ${conv.message_count} 条`}
-              </div>
+              </span>
+              <Popconfirm
+                title="确定删除？"
+                onConfirm={(e) => {
+                  e?.stopPropagation();
+                  deleteConversation(conv.id);
+                }}
+                onCancel={(e) => e?.stopPropagation()}
+              >
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<DeleteOutlined />}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ color: '#999' }}
+                />
+              </Popconfirm>
             </div>
-            <Popconfirm
-              title="确定删除？"
-              onConfirm={(e) => {
-                e?.stopPropagation();
-                deleteConversation(conv.id);
-              }}
-              onCancel={(e) => e?.stopPropagation()}
-            >
-              <Button
-                type="text"
-                size="small"
-                icon={<DeleteOutlined />}
-                onClick={(e) => e.stopPropagation()}
-                style={{ color: '#999' }}
-              />
-            </Popconfirm>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
