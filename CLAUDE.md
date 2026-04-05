@@ -140,3 +140,53 @@ Located at `scripts/config/settings.json`, overrideable via env vars.
 15. Layered validation: use fast deterministic checks first (structure markers, rules), fall back to expensive probabilistic checks (embedding similarity) only when no structural signal exists
 16. Dead code cleanup: remove unused code paths when default strategy makes them unreachable; delete deprecated modules directly rather than marking deprecated
 17. Eval dataset scope: evaluation samples focus on insurance product audit (clauses, pricing, exclusions, waiting periods, product design), not company operations (capital changes, actuary hiring, claims process, sales management)
+
+## Development Workflow (SDD)
+
+采用 Spec-Driven Development，以 spec.md 为中心产物驱动开发。
+
+### 工作流阶段
+
+```
+[可选] /gen-specify  — 需求 → spec.md（自动创建 worktree）
+/gen-research        — 代码/需求分析 → research.md
+/gen-plan            — 技术方案 → plan.md
+/exec-plan           — 任务分解 + 实现 → tasks.md + 代码
+/fix-plan            — 审查 + 批注处理
+```
+
+### Worktree 策略
+
+- 始终基于 `origin/master` 创建 worktree，保证每个 feature 是干净起点
+- worktree 目录：`.claude/worktrees/<feature-name>/`
+- 分支编号：扫描本地+远程分支取 max+1，格式 `NNN-feature-name`
+- 分支名 = `specs/` 子目录名
+
+### 产物规范
+
+所有 SDD 产物统一输出到 `specs/<feature-name>/` 下，不再输出到项目根目录：
+
+```
+specs/<feature-name>/
+├── spec.md          # gen-specify 输出（可选）
+├── research.md      # gen-research 输出
+├── plan.md          # gen-plan 输出
+└── tasks.md         # exec-plan 生成
+```
+
+### 模式检测
+
+从当前 git branch 名提取 feature-name，检查 `specs/<feature-name>/spec.md` 是否存在：
+- 存在 → SDD 模式（需求驱动）
+- 不存在 → 兼容模式（问题驱动，保持原有行为）
+
+### 治理原则（Constitution Check）
+
+gen-plan 必须通过以下治理原则合规检查：
+
+1. **Library-First** — 优先复用现有库和模块，避免重复造轮子
+2. **测试优先** — 核心功能必须有测试覆盖
+3. **简单优先** — 选择最简单的可行方案，除非有明确理由
+4. **显式优于隐式** — 代码自文档化，避免魔法
+5. **可追溯性** — plan.md 每个实现阶段必须回溯到 spec.md 的 User Story
+6. **独立可测试** — 每个 User Story 必须能独立测试和交付

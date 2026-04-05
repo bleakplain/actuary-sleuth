@@ -2,7 +2,7 @@
 description: 基于plan.md拆分todolist，逐任务实现，持续类型检查，完成前不停
 arguments:
   - name: source
-    description: 方案文件路径（默认plan.md）
+    description: 方案文件路径（默认自动检测 specs/<feature-name>/plan.md）
     required: false
 ---
 
@@ -23,87 +23,173 @@ arguments:
 ## 用法
 
 ```bash
-/exec-plan              # 基于 plan.md 执行
+/exec-plan              # 自动检测 plan.md
 /exec-plan fix.md       # 指定方案文件
 ```
 
 ---
 
-## 执行步骤
+## 模式检测
 
-### 第一步：读取并解析方案文件
+读取 plan.md 内容，检测是否包含 "Implementation Phases" 或 "User Story" 回溯标记。
 
-1. 读取方案文件（默认 `plan.md`）
-2. 解析所有章节和任务条目
-3. 识别任务间的依赖关系和执行顺序
-4. 提取每个任务的：
-   - 任务标题和描述
-   - 涉及文件路径
-   - 代码变更示例
-   - 验收标准
+| 模式 | 触发条件 | 行为 |
+|------|---------|------|
+| **SDD 模式** | plan.md 包含 Implementation Phases / User Story 回溯 | 先生成 tasks.md，再逐任务执行 |
+| **兼容模式** | 无上述标记 | 直接按 plan.md 逐任务执行（原有行为） |
 
-### 第二步：拆分 todolist
+---
 
-使用 TaskCreate 工具将方案拆分为任务列表：
+## SDD 模式执行步骤
 
-1. **按章节分组** — 每个章节对应一组任务
-2. **按优先级排序** — P0 → P1 → P2 → P3
+### 第一步：读取并解析 plan.md
+
+1. 读取 `specs/<feature-name>/plan.md`
+2. 提取所有 Implementation Phases
+3. 识别每个 Phase 对应的 User Story
+4. 提取任务间的依赖关系
+
+### 第二步：生成 tasks.md
+
+输出到 `specs/<feature-name>/tasks.md`：
+
+```markdown
+# Tasks: [FEATURE NAME]
+
+**Input**: plan.md
+**Prerequisites**: plan.md ✅, spec.md (如有)
+
+## Format: `[ID] [P?] [Story] Description`
+
+- **[P]**: 可并行执行（不同文件，无依赖）
+- **[Story]**: 所属用户故事 (US1, US2, ...)
+- 包含精确文件路径
+
+## Phase 1: Setup
+
+- [ ] T001 创建项目结构
+- [ ] T002 [P] 配置依赖
+
+## Phase 2: User Story 1 - [标题] (P1)
+
+- [ ] T003 [P] [US1] 创建数据模型 in path/to/models.py
+- [ ] T004 [US1] 实现核心逻辑 in path/to/service.py (depends on T003)
+- [ ] T005 [US1] 添加 API 端点 in path/to/api.py
+- [ ] T006 [US1] 编写测试 in tests/test_feature.py
+
+**Checkpoint**: User Story 1 可独立测试
+
+## Phase 3: User Story 2 - [标题] (P2)
+
+...
+
+## Dependencies & Execution Order
+
+### Phase Dependencies
+- Setup (Phase 1): No dependencies
+- US1 (Phase 2): Depends on Setup
+- US2 (Phase 3): Depends on Setup, can parallel with US1 if independent
+
+### Within Each Story
+- Models before services
+- Services before endpoints
+- Core implementation before tests
+```
+
+### 第三步：创建 todolist
+
+使用 TaskCreate 工具将 tasks.md 拆分为任务列表：
+
+1. **按 Phase 分组** — 每个 Phase 对应一组任务
+2. **按优先级排序** — P1 → P2 → P3
 3. **设置依赖关系** — 被阻塞的任务设置 blockedBy
 4. **任务粒度** — 每个任务应是一个可独立验证的原子变更
 
-任务创建规则：
-- subject 使用祈使句（如「添加 URL 白名单验证」）
-- description 包含文件路径、代码变更要点、验收标准
-- 有明确依赖关系的任务设置 blockedBy
+### 第四步：逐任务执行
+
+对于每个任务：
+
+1. **标记为 in_progress**
+2. **读取相关文件** — 理解当前代码上下文
+3. **实施代码变更** — 严格按照方案执行
+4. **运行类型检查** — `mypy scripts/lib/`
+5. **运行相关测试** — `pytest scripts/tests/`
+6. **标记为 completed**
+
+### 第五步：更新 tasks.md
+
+每完成一个任务：
+- 在 tasks.md 对应任务前添加 ✅ 标记
+- Phase 完成后添加阶段完成标记
+
+### 第六步：Checkpoint 验证
+
+每个 User Story 的 Phase 完成后：
+
+1. **独立测试** — 验证该 User Story 可独立运行
+2. **验收标准检查** — 对照 spec.md 的 Acceptance Scenarios
+3. **类型检查** — `mypy scripts/lib/`
+
+### 第七步：代码审查（强制）
+
+所有任务完成后，**必须**执行 `/simplify` 命令：
+
+1. `/simplify` 审查代码质量（复用性、可读性、效率、潜在 bug）
+2. **根据反馈修复所有问题**，不跳过任何建议
+3. 修复后重新运行类型检查和测试
+
+### 第八步：完成验证
+
+1. **运行完整类型检查** — `mypy scripts/lib/`
+2. **运行完整测试套件** — `pytest scripts/tests/`
+3. **汇总变更** — 列出所有修改/新增/删除的文件
+4. **输出执行报告**
+
+---
+
+## 兼容模式执行步骤
+
+### 第一步：读取并解析方案文件
+
+1. 读取方案文件（默认 `specs/<feature-name>/plan.md`）
+2. 解析所有章节和任务条目
+3. 识别任务间的依赖关系和执行顺序
+
+### 第二步：创建 todolist
+
+使用 TaskCreate 工具拆分任务：
+
+1. **按章节分组**
+2. **按优先级排序** — P0 → P1 → P2 → P3
+3. **设置依赖关系**
+4. **任务粒度** — 可独立验证的原子变更
 
 ### 第三步：逐任务执行
 
 对于每个任务：
 
-1. **标记为 in_progress** — 使用 TaskUpdate
-2. **读取相关文件** — 理解当前代码上下文
-3. **实施代码变更** — 严格按照方案执行
-4. **运行类型检查** — `mypy scripts/lib/` 确保不引入新问题
-5. **运行相关测试** — `pytest scripts/tests/` 验证不破坏现有功能
-6. **标记为 completed** — 使用 TaskUpdate
+1. **标记为 in_progress**
+2. **读取相关文件**
+3. **实施代码变更**
+4. **运行类型检查** — `mypy scripts/lib/`
+5. **运行相关测试** — `pytest scripts/tests/`
+6. **标记为 completed**
 
 ### 第四步：更新方案文档
 
 每完成一个任务或阶段：
-
-1. 在方案文档对应任务标题后添加 ✅ 标记
-2. 在阶段标题后添加完成标记（如 `## 一、问题修复方案 ✅`）
-3. 更新文档末尾的执行进度
-
-标记格式：
-```markdown
-### 问题 1.1: 缺少输入验证 ✅
-
-### 问题 1.2: 异常处理不够细致 ✅
-
-## 一、问题修复方案 ✅
-```
+- 在方案文档对应任务标题后添加 ✅ 标记
+- 在阶段标题后添加完成标记
 
 ### 第五步：代码审查（强制）
 
-所有任务完成后，**必须**执行 `/simplify` 命令进行 code review：
-
-1. 执行 `/simplify` 命令进行代码审查
-2. `/simplify` 会自动审查本次所有变更的代码质量，包括：
-   - 代码复用性
-   - 可读性和一致性
-   - 效率问题
-   - 潜在 bug
-3. **根据 `/simplify` 反馈修复所有问题**，不跳过任何建议
-4. 修复后重新运行类型检查和测试确认无回归
+所有任务完成后，**必须**执行 `/simplify` 命令。
 
 ### 第六步：完成验证
 
-代码审查修复完成后：
-
 1. **运行完整类型检查** — `mypy scripts/lib/`
 2. **运行完整测试套件** — `pytest scripts/tests/`
-3. **汇总变更** — 列出所有修改/新增/删除的文件
+3. **汇总变更**
 4. **输出执行报告**
 
 ---
@@ -135,7 +221,7 @@ arguments:
 ```
 📋 执行报告
 ═══════════════════════════════════
-方案文件: plan.md
+方案文件: specs/<feature-name>/plan.md
 完成时间: YYYY-MM-DD HH:MM
 
 ✅ 任务完成统计
@@ -154,18 +240,9 @@ arguments:
 
 ---
 
-## 注意事项
-
-1. **严格遵循方案** — 按 plan.md 中的代码示例和步骤执行，不自行发挥
-2. **持续类型检查** — 每个任务完成后运行 mypy，确保不引入新问题
-3. **原子提交** — 每个任务对应一次 git commit（如需要）
-4. **文档同步** — 实时在 plan.md 中标记完成状态
-5. **不中断** — 所有任务完成前不要停下询问
-
----
-
 ## 相关文件
 
-- `plan.md` - 修复方案（源）
-- `CLAUDE.md` - 项目编码规范（参考）
-- `research.md` - 问题研究报告（参考）
+- `specs/<feature-name>/plan.md` — 实现方案（源）
+- `specs/<feature-name>/tasks.md` — 任务列表（SDD 模式生成）
+- `specs/<feature-name>/spec.md` — 需求规格（SDD 模式参考）
+- `CLAUDE.md` — 项目编码规范（参考）
