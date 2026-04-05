@@ -4,8 +4,8 @@ import {
   CloseCircleFilled,
   DownOutlined,
   RightOutlined,
-  CopyOutlined,
 } from '@ant-design/icons';
+import CopyBtn from './CopyBtn';
 import type { TraceSpan, TraceData } from '../types';
 
 /* ── category visual config ── */
@@ -40,24 +40,6 @@ function formatTimestamp(ts: number): string {
   const s = String(d.getSeconds()).padStart(2, '0');
   const ms = String(d.getMilliseconds()).padStart(3, '0');
   return `${mo}-${dd} ${h}:${m}:${s}.${ms}`;
-}
-
-/* ── copy button ── */
-
-function CopyBtn({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = () => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-  return (
-    <CopyOutlined
-      style={{ fontSize: 11, color: '#d9d9d9', cursor: 'pointer', marginLeft: 4 }}
-      onClick={(e) => { e.stopPropagation(); handleCopy(); }}
-      title={copied ? '已复制' : '复制'}
-    />
-  );
 }
 
 /* ── collapsible text block ── */
@@ -511,7 +493,7 @@ export default function TracePanel({ trace, loading }: Props) {
           padding: '2px 8px', borderRadius: 10,
           fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
         }}>
-          trace:{' '}{trace.trace_id}<CopyBtn text={trace.trace_id} />
+          Trace ID:{' '}{trace.trace_id}<CopyBtn text={trace.trace_id} />
         </span>
         <span style={{
           fontSize: 11, color: '#fff', background: '#262626',
@@ -529,7 +511,7 @@ export default function TracePanel({ trace, loading }: Props) {
           fontSize: 11, color: '#595959', background: '#f5f5f5',
           padding: '2px 8px', borderRadius: 10,
         }}>
-          {formatDuration(trace.summary.total_duration_ms)}
+          耗时 {formatDuration(trace.summary.total_duration_ms)}
         </span>
         {trace.summary.error_count > 0 && (
           <span style={{

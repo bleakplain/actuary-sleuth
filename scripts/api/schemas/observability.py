@@ -10,6 +10,8 @@ class TraceListItem(BaseModel):
     status: str = "ok"
     total_duration_ms: float = 0
     span_count: int = 0
+    llm_call_count: int = 0
+    trace_name: Optional[str] = None
 
 
 class TraceListResponse(BaseModel):

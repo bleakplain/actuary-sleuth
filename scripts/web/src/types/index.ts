@@ -219,6 +219,8 @@ export interface TraceListItem {
   status: 'ok' | 'error';
   total_duration_ms: number;
   span_count: number;
+  llm_call_count: number;
+  trace_name: string | null;
 }
 
 export interface TraceListResponse {

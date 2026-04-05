@@ -32,9 +32,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ask", tags=["法规问答"])
 
 
-def _persist_trace(root_span, message_id: int, conversation_id: str = "") -> None:
+def _persist_trace(root_span, message_id: int, conversation_id: str = "", name: str = "") -> None:
     """将 trace 树中所有 span 批量写入数据库。"""
-    save_trace(root_span.trace_id, message_id, conversation_id)
+    save_trace(root_span.trace_id, message_id, conversation_id, name)
     spans_data = [s.to_dict() for s in root_span.iter_spans()]
     save_spans(spans_data)
 
@@ -134,7 +134,7 @@ async def chat(req: ChatRequest):
             trace_summary = None
             if root_span:
                 trace_summary = _build_trace_payload(root_span)
-                _persist_trace(root_span, msg_id, conversation_id)
+                _persist_trace(root_span, msg_id, conversation_id, name=req.question)
 
             done_data: dict = {
                 "conversation_id": conversation_id,

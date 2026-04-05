@@ -183,6 +183,8 @@ def _migrate_db():
         trace_cols = {row[1] for row in conn.execute("PRAGMA table_info(traces)").fetchall()}
         if 'conversation_id' not in trace_cols:
             conn.execute("ALTER TABLE traces ADD COLUMN conversation_id TEXT")
+        if 'name' not in trace_cols:
+            conn.execute("ALTER TABLE traces ADD COLUMN name TEXT")
 
 
 def create_conversation(conversation_id: str, title: str = "") -> None:
@@ -696,11 +698,11 @@ def get_feedback_stats() -> Dict:
     }
 
 
-def save_trace(trace_id: str, message_id: int, conversation_id: str = "", root_span_dict: Optional[Dict] = None) -> None:
+def save_trace(trace_id: str, message_id: int, conversation_id: str = "", name: str = "", root_span_dict: Optional[Dict] = None) -> None:
     with get_connection() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO traces (trace_id, message_id, conversation_id) VALUES (?, ?, ?)",
-            (trace_id, message_id, conversation_id),
+            "INSERT OR IGNORE INTO traces (trace_id, message_id, conversation_id, name) VALUES (?, ?, ?, ?)",
+            (trace_id, message_id, conversation_id, name),
         )
 
 
@@ -827,7 +829,8 @@ def search_traces(
         count_row = conn.execute(
             f"SELECT COUNT(*) AS cnt FROM traces t "
             f"LEFT JOIN (SELECT trace_id, MAX(CASE WHEN status='error' THEN 1 ELSE 0 END) AS has_error, "
-            f"MAX(duration_ms) AS total_duration_ms, COUNT(*) AS span_count FROM spans GROUP BY trace_id) sa "
+            f"MAX(duration_ms) AS total_duration_ms, COUNT(*) AS span_count "
+            f"FROM spans GROUP BY trace_id) sa "
             f"ON sa.trace_id = t.trace_id {where}",
             params,
         ).fetchone()
@@ -837,11 +840,15 @@ def search_traces(
             f"SELECT t.trace_id, t.message_id, t.conversation_id, t.created_at, "
             f"CASE WHEN COALESCE(sa.has_error, 0) = 1 THEN 'error' ELSE 'ok' END AS status, "
             f"COALESCE(sa.total_duration_ms, 0) AS total_duration_ms, "
-            f"COALESCE(sa.span_count, 0) AS span_count "
+            f"COALESCE(sa.span_count, 0) AS span_count, "
+            f"COALESCE(json_extract(rs.metadata_json, '$.llm_call_count'), 0) AS llm_call_count, "
+            f"t.name AS trace_name "
             f"FROM traces t "
             f"LEFT JOIN (SELECT trace_id, MAX(CASE WHEN status='error' THEN 1 ELSE 0 END) AS has_error, "
-            f"MAX(duration_ms) AS total_duration_ms, COUNT(*) AS span_count FROM spans GROUP BY trace_id) sa "
-            f"ON sa.trace_id = t.trace_id {where} "
+            f"MAX(duration_ms) AS total_duration_ms, COUNT(*) AS span_count "
+            f"FROM spans GROUP BY trace_id) sa "
+            f"ON sa.trace_id = t.trace_id "
+            f"LEFT JOIN spans rs ON rs.trace_id = t.trace_id AND rs.parent_span_id IS NULL {where} "
             f"ORDER BY t.created_at DESC LIMIT ? OFFSET ?",
             params + [size, offset],
         ).fetchall()
