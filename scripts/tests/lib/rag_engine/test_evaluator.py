@@ -105,7 +105,7 @@ class TestEvalDataset:
 
     def test_load_default_dataset(self):
         dataset = create_default_eval_dataset()
-        assert len(dataset) == 60
+        assert len(dataset) == 150
 
     def test_eval_sample_fields(self, sample_eval):
         assert sample_eval.id == "test001"
@@ -130,10 +130,10 @@ class TestEvalDataset:
             t = s.question_type.value
             type_counts[t] = type_counts.get(t, 0) + 1
 
-        assert type_counts['factual'] >= 18
-        assert type_counts['multi_hop'] >= 12
-        assert type_counts['negative'] >= 12
-        assert type_counts['colloquial'] >= 8
+        assert type_counts['factual'] >= 40
+        assert type_counts['multi_hop'] >= 35
+        assert type_counts['negative'] >= 30
+        assert type_counts['colloquial'] >= 25
 
     def test_to_dict_roundtrip(self, sample_eval):
         d = sample_eval.to_dict()
@@ -174,7 +174,7 @@ class TestEvalDataset:
 
     def test_load_eval_dataset_default_path_fallback(self):
         dataset = load_eval_dataset()
-        assert len(dataset) == 60
+        assert len(dataset) == 150
 
     def test_save_and_load_roundtrip(self, tmp_path):
         samples = create_default_eval_dataset()[:3]

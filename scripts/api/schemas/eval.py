@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -31,9 +31,10 @@ class ImportSamplesRequest(BaseModel):
 
 
 class EvaluationRequest(BaseModel):
-    mode: str = Field("full", pattern="^(retrieval|generation|full)$")
+    mode: str = Field("full", pattern="^(retrieval|generation|full|llm_judge)$")
     top_k: int = Field(5, ge=1, le=20)
     chunking: str = Field("semantic", pattern="^(semantic|fixed)$")
+    num_samples: int = Field(1, ge=1, le=5)
 
 
 class CompareRequest(BaseModel):
@@ -44,3 +45,13 @@ class CompareRequest(BaseModel):
 class SnapshotCreate(BaseModel):
     name: str = Field(..., min_length=1)
     description: str = ""
+
+
+class HumanReviewCreate(BaseModel):
+    evaluation_id: str
+    sample_id: str
+    reviewer: str = ""
+    faithfulness_score: Optional[float] = Field(None, ge=0.0, le=1.0)
+    correctness_score: Optional[float] = Field(None, ge=0.0, le=1.0)
+    relevancy_score: Optional[float] = Field(None, ge=0.0, le=1.0)
+    comment: str = ""

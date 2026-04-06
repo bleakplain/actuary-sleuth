@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Query
 from api.schemas.eval import (
     EvalSampleCreate, EvalSampleOut, ImportSamplesRequest,
     EvaluationRequest, CompareRequest, SnapshotCreate,
+    HumanReviewCreate,
 )
 
 logger = logging.getLogger(__name__)
@@ -140,22 +141,11 @@ async def create_evaluation(req: EvaluationRequest):
                 save_evaluation_report, save_sample_result,
             )
             from lib.rag_engine import RetrievalEvaluator, GenerationEvaluator
-            from lib.rag_engine.eval_dataset import EvalSample, QuestionType
+            from lib.rag_engine.llm_judge import LLMPJudge
+            from lib.llm import LLMClientFactory
 
             samples_data = get_eval_samples()
-            samples = [
-                EvalSample(
-                    id=s["id"],
-                    question=s["question"],
-                    ground_truth=s["ground_truth"],
-                    evidence_docs=s["evidence_docs"],
-                    evidence_keywords=s["evidence_keywords"],
-                    question_type=QuestionType(s["question_type"]),
-                    difficulty=s["difficulty"],
-                    topic=s["topic"],
-                )
-                for s in samples_data
-            ]
+            samples = [EvalSample.from_dict(s) for s in samples_data]
             total = len(samples)
             update_evaluation_status(evaluation_id, "running", progress=0, total=total)
 
@@ -173,22 +163,13 @@ async def create_evaluation(req: EvaluationRequest):
                     update_evaluation_status(evaluation_id, "running", progress=current, total=total)
 
             gen_report = None
-            if req.mode in ("generation", "full"):
-                gen_eval = GenerationEvaluator(rag_engine=rag_engine)
+            if req.mode in ("generation", "full", "llm_judge"):
+                llm_judge = None
+                if req.mode == "llm_judge":
+                    eval_llm = LLMClientFactory.create_eval_llm()
+                    llm_judge = LLMPJudge(eval_llm)
+                gen_eval = GenerationEvaluator(rag_engine=rag_engine, llm_judge=llm_judge)
                 gen_report = gen_eval.evaluate_batch(samples, rag_engine=rag_engine)
-                for i, sample in enumerate(samples):
-                    result = rag_engine.ask(sample.question)
-                    gen_detail = gen_eval.evaluate(
-                        sample,
-                        [s.get("content", "") for s in result.get("sources", [])],
-                        result.get("answer", ""),
-                    )
-                    save_sample_result(
-                        evaluation_id, sample.id,
-                        retrieved_docs=result.get("sources", []),
-                        generated_answer=result.get("answer", ""),
-                        generation_metrics=gen_detail,
-                    )
 
             report: Dict = {}
             if req.mode in ("retrieval", "full"):
@@ -330,6 +311,8 @@ async def export_evaluation_report(evaluation_id: str, format: str = "json"):
             "report": report,
         })
     elif format == "md":
+        from lib.rag_engine.eval_guide import generate_eval_summary
+
         lines = [f"# 评估报告 {evaluation_id}", f"模式: {run['mode']}", f"时间: {run['started_at']}", ""]
         for section, metrics in report.items():
             if isinstance(metrics, dict):
@@ -337,6 +320,56 @@ async def export_evaluation_report(evaluation_id: str, format: str = "json"):
                 for k, v in metrics.items():
                     if isinstance(v, (int, float)):
                         lines.append(f"- {k}: {v:.4f}" if isinstance(v, float) else f"- {k}: {v}")
+        summary = generate_eval_summary(report)
+        lines.append("\n## 评估摘要")
+        for level, label in [('excellent', '优秀'), ('good', '良好'), ('needs_improvement', '需改进')]:
+            items = summary.get(level, [])
+            if items:
+                lines.append(f"\n### {label}")
+                for item in items:
+                    lines.append(f"- **{item['metric']}**: {item['value']}")
+                    if item['suggestion']:
+                        lines.append(f"  - {item['suggestion']}")
         return Response(content="\n".join(lines), media_type="text/markdown")
     else:
         raise HTTPException(status_code=400, detail="不支持的格式，可选: json, md")
+
+
+# ── 数据集质量审查 ─────────────────────────────────────
+
+
+@router.get("/dataset/audit")
+async def audit_dataset():
+    from api.database import get_eval_samples
+    from lib.rag_engine.dataset_validator import validate_dataset
+
+    samples_data = get_eval_samples()
+    samples = [EvalSample.from_dict(s) for s in samples_data]
+    report = validate_dataset(samples)
+    return report.to_dict()
+
+
+# ── 人工抽检 ──────────────────────────────────────────
+
+
+@router.post("/human-reviews")
+async def create_human_review(req: HumanReviewCreate):
+    from api.database import create_human_review as db_create
+    review_id = db_create(
+        evaluation_id=req.evaluation_id,
+        sample_id=req.sample_id,
+        reviewer=req.reviewer,
+        faithfulness_score=req.faithfulness_score,
+        correctness_score=req.correctness_score,
+        relevancy_score=req.relevancy_score,
+        comment=req.comment,
+    )
+    return {"review_id": review_id}
+
+
+@router.get("/human-reviews/{evaluation_id}")
+async def list_human_reviews(evaluation_id: str):
+    from api.database import get_human_reviews, get_human_review_stats
+    reviews = get_human_reviews(evaluation_id)
+    stats = get_human_review_stats(evaluation_id)
+    return {"reviews": reviews, "stats": stats}

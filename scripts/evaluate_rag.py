@@ -31,6 +31,7 @@ from lib.rag_engine.evaluator import (
     RAGEvalReport,
     evaluate_retrieval,
 )
+from lib.rag_engine.llm_judge import LLMPJudge
 from lib.rag_engine.eval_dataset import (
     EvalSample,
     QuestionType,
@@ -222,7 +223,7 @@ def detect_regressions(current_report: Dict, baseline_report: Dict) -> Dict[str,
     TOLERANCE = 0.02
 
     metrics_to_check = [
-        ("recall@5", ["retrieval", "recall@5"]),
+        ("recall_at_k", ["retrieval", "recall_at_k"]),
         ("faithfulness", ["generation", "faithfulness"]),
         ("answer_correctness", ["generation", "answer_correctness"]),
     ]
@@ -281,9 +282,9 @@ def main():
     parser.add_argument(
         '--mode',
         type=str,
-        choices=['retrieval', 'generation', 'full'],
+        choices=['retrieval', 'generation', 'full', 'llm_judge'],
         default='full',
-        help='评估模式: retrieval(仅检索)/generation(仅生成)/full(完整，默认)'
+        help='评估模式: retrieval(仅检索)/generation(仅生成)/full(完整，默认)/llm_judge(LLM Judge)'
     )
 
     parser.add_argument(
@@ -325,11 +326,26 @@ def main():
         help='分块策略（默认: semantic）'
     )
 
+    parser.add_argument(
+        '--llm-judge',
+        action='store_true',
+        help='使用 LLM Judge 进行生成评估（等价于 --mode llm_judge）'
+    )
+
+    parser.add_argument(
+        '--num-samples',
+        type=int,
+        default=1,
+        help='LLM Judge 多次采样取均值（默认: 1）'
+    )
+
     args = parser.parse_args()
 
     # 确定评估模式
     if args.retrieval_only:
         mode = 'retrieval'
+    elif args.llm_judge:
+        mode = 'llm_judge'
     else:
         mode = args.mode
 
@@ -354,16 +370,25 @@ def main():
             rag_engine, samples, top_k=args.top_k
         )
 
-    if mode == 'generation' or (mode == 'full'):
+    if mode in ('generation', 'full', 'llm_judge'):
         if mode == 'generation':
             rag_engine = setup_rag_engine(config)
             logger.info(f"RAG 引擎初始化完成（分块策略: {args.chunking}）")
 
-        logger.info("开始生成评估...")
-        ragas_llm = create_ragas_llm()
-        ragas_embeddings = create_ragas_embeddings()
-        gen_evaluator = GenerationEvaluator(rag_engine, llm=ragas_llm, embeddings=ragas_embeddings)
-        generation_report = gen_evaluator.evaluate_batch(samples, rag_engine)
+        if mode == 'llm_judge':
+            logger.info("开始 LLM Judge 评估...")
+            eval_llm = LLMClientFactory.create_eval_llm()
+            llm_judge = LLMPJudge(eval_llm)
+            gen_evaluator = GenerationEvaluator(
+                rag_engine=rag_engine, llm_judge=llm_judge,
+            )
+        else:
+            logger.info("开始生成评估...")
+            ragas_llm = create_ragas_llm()
+            ragas_embeddings = create_ragas_embeddings()
+            gen_evaluator = GenerationEvaluator(rag_engine, llm=ragas_llm, embeddings=ragas_embeddings)
+
+        generation_report = gen_evaluator.evaluate_batch(samples, rag_engine=rag_engine)
     else:
         generation_report = GenerationEvalReport()
 

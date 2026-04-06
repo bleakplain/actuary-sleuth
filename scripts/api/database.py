@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS eval_snapshots (
 
 CREATE TABLE IF NOT EXISTS eval_runs (
     id TEXT PRIMARY KEY,
-    mode TEXT NOT NULL CHECK(mode IN ('retrieval', 'generation', 'full')),
+    mode TEXT NOT NULL CHECK(mode IN ('retrieval', 'generation', 'full', 'llm_judge')),
     status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'running', 'completed', 'failed')),
     progress INTEGER NOT NULL DEFAULT 0,
     total INTEGER NOT NULL DEFAULT 0,
@@ -74,6 +74,19 @@ CREATE TABLE IF NOT EXISTS eval_sample_results (
     generation_metrics_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_eval_results_run ON eval_sample_results(run_id);
+
+CREATE TABLE IF NOT EXISTS human_reviews (
+    id TEXT PRIMARY KEY,
+    evaluation_id TEXT NOT NULL REFERENCES eval_runs(id) ON DELETE CASCADE,
+    sample_id TEXT NOT NULL,
+    reviewer TEXT NOT NULL DEFAULT '',
+    faithfulness_score REAL,
+    correctness_score REAL,
+    relevancy_score REAL,
+    comment TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_human_reviews_eval ON human_reviews(evaluation_id);
 
 CREATE TABLE IF NOT EXISTS compliance_reports (
     id TEXT PRIMARY KEY,
@@ -972,3 +985,55 @@ def cleanup_traces(
         ).fetchall()
     trace_ids = [r["trace_id"] for r in rows]
     return batch_delete_traces(trace_ids)
+
+
+def create_human_review(
+    evaluation_id: str,
+    sample_id: str,
+    reviewer: str = "",
+    faithfulness_score: Optional[float] = None,
+    correctness_score: Optional[float] = None,
+    relevancy_score: Optional[float] = None,
+    comment: str = "",
+) -> str:
+    review_id = f"hr_{uuid.uuid4().hex[:8]}"
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO human_reviews "
+            "(id, evaluation_id, sample_id, reviewer, faithfulness_score, "
+            "correctness_score, relevancy_score, comment) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (review_id, evaluation_id, sample_id, reviewer,
+             faithfulness_score, correctness_score, relevancy_score, comment),
+        )
+    return review_id
+
+
+def get_human_reviews(evaluation_id: str) -> List[Dict]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM human_reviews WHERE evaluation_id = ? ORDER BY created_at DESC",
+            (evaluation_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_human_review_stats(evaluation_id: str) -> Dict:
+    with get_connection() as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM human_reviews WHERE evaluation_id = ?",
+            (evaluation_id,),
+        ).fetchone()[0]
+        if total == 0:
+            return {'total': 0, 'faithfulness': None, 'correctness': None, 'relevancy': None}
+        row = conn.execute(
+            "SELECT AVG(faithfulness_score), AVG(correctness_score), AVG(relevancy_score) "
+            "FROM human_reviews WHERE evaluation_id = ?",
+            (evaluation_id,),
+        ).fetchone()
+        return {
+            'total': total,
+            'faithfulness': round(row[0], 4) if row[0] is not None else None,
+            'correctness': round(row[1], 4) if row[1] is not None else None,
+            'relevancy': round(row[2], 4) if row[2] is not None else None,
+        }

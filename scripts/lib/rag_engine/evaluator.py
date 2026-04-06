@@ -429,16 +429,18 @@ class RetrievalEvaluator:
 class GenerationEvaluator:
     """生成质量评估器
 
-    RAGAS 可用时使用 RAGAS 批量评估，不可用时使用轻量级 token 覆盖率指标。
+    优先级: llm_judge > ragas > lightweight
 
     Args:
         rag_engine: 用于生成答案的 RAG 引擎
         llm: RAGAS 评估用 LLM，由调用方注入
         embeddings: RAGAS 评估用 Embedding，由调用方注入
+        llm_judge: LLMPJudge 实例，由调用方注入
     """
 
-    def __init__(self, rag_engine=None, llm=None, embeddings=None):
+    def __init__(self, rag_engine=None, llm=None, embeddings=None, llm_judge=None):
         self.rag_engine = rag_engine
+        self._llm_judge = llm_judge
         self._ragas_available = False
         self._eval_llm = llm
         self._eval_embeddings = embeddings
@@ -513,10 +515,18 @@ class GenerationEvaluator:
             logger.warning("未提供 RAG 引擎，跳过生成评估")
             return GenerationEvalReport()
 
-        if not self._ragas_available:
-            logger.info("RAGAS 不可用，使用轻量级指标进行生成评估")
+        if self._llm_judge is not None:
+            return self._llm_judge_evaluate_batch(engine, samples)
+        elif self._ragas_available:
+            return self._ragas_evaluate_batch(engine, samples)
+        else:
             return self._lightweight_evaluate_batch(engine, samples)
 
+    def _ragas_evaluate_batch(
+        self,
+        engine,
+        samples: List[EvalSample],
+    ) -> GenerationEvalReport:
         from datasets import Dataset
 
         questions = []
@@ -589,6 +599,19 @@ class GenerationEvaluator:
                 report.by_type[qtype] = type_metrics
 
         return report
+
+    def _llm_judge_evaluate_batch(
+        self,
+        engine,
+        samples: List[EvalSample],
+    ) -> GenerationEvalReport:
+        batch_report = self._llm_judge.judge_batch(samples, engine)
+        return GenerationEvalReport(
+            faithfulness=batch_report.faithfulness,
+            answer_relevancy=batch_report.relevancy,
+            answer_correctness=batch_report.correctness,
+            by_type=batch_report.by_type,
+        )
 
     def _lightweight_evaluate(
         self,
