@@ -1,15 +1,16 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Card, Table, Button, Space, Select, Tag, Modal, Form, Input,
+  Card, Table, Button, Space, Select, Tag, Modal, Form, Input, InputNumber, Switch,
   Typography, message, Row, Col, Popconfirm, Progress, Descriptions, Tabs,
 } from 'antd';
 import {
   PlusOutlined, ImportOutlined, SaveOutlined, RollbackOutlined,
-  PlayCircleOutlined, DownloadOutlined, SwapOutlined,
+  PlayCircleOutlined, DownloadOutlined, SwapOutlined, SettingOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import * as evalApi from '../api/eval';
-import MetricsChart, { formatMetric } from '../components/MetricsChart';
-import type { EvalSample, EvalSnapshot, Evaluation, SampleResult, MetricsDiff } from '../types';
+import MetricsChart, { formatMetric, ComparisonChart, TrendChart } from '../components/MetricsChart';
+import type { EvalSample, EvalSnapshot, Evaluation, EvalConfig, SampleResult, MetricsDiff } from '../types';
 
 const { Title, Text } = Typography;
 
@@ -54,6 +55,8 @@ export default function EvalPage() {
 
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [evaluationsLoading, setEvaluationsLoading] = useState(false);
+  const [evalConfigs, setEvalConfigs] = useState<EvalConfig[]>([]);
+  const [selectedConfigId, setSelectedConfigId] = useState<number | null>(null);
   const [selectedEvaluation, setSelectedEvaluation] = useState<Evaluation | null>(null);
   const [report, setReport] = useState<Record<string, Record<string, number>> | null>(null);
   const [details, setDetails] = useState<SampleResult[]>([]);
@@ -64,21 +67,48 @@ export default function EvalPage() {
     improved: string[];
     regressed: string[];
   } | null>(null);
+  const [dimensionFilter, setDimensionFilter] = useState<string>('overall');
+  const [trendMetric, setTrendMetric] = useState<string>('retrieval.precision_at_k');
+  const [trendData, setTrendData] = useState<{ run_id: string; label: string; value: number; timestamp: string }[]>([]);
+  const [configModalOpen, setConfigModalOpen] = useState(false);
+  const [configForm] = Form.useForm();
 
   const flattenedMetrics = useMemo((): Record<string, number> => {
     const result: Record<string, number> = {};
-    if (report) {
-      for (const [section, metrics] of Object.entries(report)) {
-        if (typeof metrics === 'object' && metrics !== null) {
-          for (const [key, val] of Object.entries(metrics)) {
-            if (typeof val === 'number') {
-              result[`${section}.${key}`] = val;
-            }
-          }
+    if (!report) return result;
+    for (const [section, metrics] of Object.entries(report)) {
+      if (typeof metrics !== 'object' || metrics === null || Array.isArray(metrics)) continue;
+      let source: Record<string, unknown> = metrics;
+      if (dimensionFilter !== 'overall' && 'by_type' in source) {
+        const byType = source.by_type as Record<string, Record<string, number>> | undefined;
+        if (byType && byType[dimensionFilter]) {
+          source = byType[dimensionFilter];
+        }
+      }
+      for (const [key, val] of Object.entries(source)) {
+        if (key === 'by_type') continue;
+        if (typeof val === 'number') {
+          result[`${section}.${key}`] = val;
         }
       }
     }
     return result;
+  }, [report, dimensionFilter]);
+
+  const availableDimensions = useMemo((): string[] => {
+    if (!report) return ['overall'];
+    const dims = ['overall'];
+    for (const section of Object.values(report)) {
+      if (typeof section === 'object' && section !== null && 'by_type' in section) {
+        const byType = (section as Record<string, unknown>).by_type as Record<string, Record<string, number>> | undefined;
+        if (byType) {
+          for (const qtype of Object.keys(byType)) {
+            if (!dims.includes(qtype)) dims.push(qtype);
+          }
+        }
+      }
+    }
+    return dims;
   }, [report]);
 
   const completedEvaluationsOptions = useMemo(() =>
@@ -222,22 +252,61 @@ export default function EvalPage() {
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'runs') refresh_evaluation_history();
+    if (activeTab === 'runs') {
+      refresh_evaluation_history();
+      if (evalConfigs.length === 0) {
+        evalApi.fetchEvalConfigs().then(setEvalConfigs).catch(() => {});
+      }
+    }
   }, [activeTab, refresh_evaluation_history]);
 
+  const trendMetricOptions = useMemo(() => {
+    const opts: { value: string; label: string }[] = [];
+    const seen = new Set<string>();
+    for (const e of evaluations) {
+      const report = (e as Record<string, unknown>).report as Record<string, Record<string, number>> | undefined;
+      if (!report) continue;
+      for (const [section, metrics] of Object.entries(report)) {
+        if (typeof metrics !== 'object' || metrics === null) continue;
+        for (const key of Object.keys(metrics)) {
+          if (key === 'by_type' || key === 'total_samples' || key === 'failed_samples') continue;
+          const full = `${section}.${key}`;
+          if (!seen.has(full)) {
+            seen.add(full);
+            opts.push({ value: full, label: full });
+          }
+        }
+      }
+    }
+    return opts;
+  }, [evaluations]);
+
   useEffect(() => {
-    if (activeTab !== 'runs') return;
-    const pending_evaluations = evaluations.filter((e) => e.status === 'running' || e.status === 'pending');
-    if (pending_evaluations.length === 0) return;
-    const timer = setInterval(async () => {
-      await refresh_evaluation_history();
-    }, 3000);
+    if (activeTab !== 'runs' || !trendMetric) return;
+    evalApi.fetchEvaluationTrends(trendMetric).then(setTrendData).catch(() => {});
+  }, [activeTab, trendMetric]);
+
+  const hasRunning = useMemo(
+    () => evaluations.some((e) => e.status === 'running' || e.status === 'pending'),
+    [evaluations],
+  );
+
+  useEffect(() => {
+    if (activeTab !== 'runs' || !hasRunning) return;
+    const timer = setInterval(refresh_evaluation_history, 3000);
     return () => clearInterval(timer);
-  }, [activeTab, evaluations, refresh_evaluation_history]);
+  }, [activeTab, hasRunning, refresh_evaluation_history]);
 
   const start_evaluation = async (mode: 'retrieval' | 'generation' | 'full') => {
+    if (!selectedConfigId) {
+      message.warning('请先选择评测配置');
+      return;
+    }
     try {
-      const { evaluation_id } = await evalApi.createEvaluation({ mode, top_k: 5 });
+      const { evaluation_id } = await evalApi.createEvaluation({
+        mode,
+        config_id: selectedConfigId,
+      });
       message.success(`评估任务已创建: ${evaluation_id}`);
       refresh_evaluation_history();
     } catch (err) {
@@ -247,6 +316,7 @@ export default function EvalPage() {
 
   const view_evaluation = async (evaluation: Evaluation) => {
     setSelectedEvaluation(evaluation);
+    setDimensionFilter('overall');
     if (evaluation.status === 'completed') {
       try {
         const [rpt, det] = await Promise.all([
@@ -288,6 +358,66 @@ export default function EvalPage() {
       setCompareResult(result);
     } catch (err) {
       message.error(`对比失败: ${err}`);
+    }
+  };
+
+  const open_config_modal = () => {
+    configForm.resetFields();
+    configForm.setFieldsValue({
+      retrieval_vector_top_k: 20,
+      retrieval_keyword_top_k: 20,
+      retrieval_rrf_k: 60,
+      retrieval_max_chunks_per_article: 3,
+      retrieval_min_rrf_score: 0,
+      rerank_enable_rerank: true,
+      rerank_reranker_type: 'gguf',
+      rerank_rerank_top_k: 5,
+      rerank_rerank_min_score: 0,
+      generation_max_context_chars: 12000,
+    });
+    setConfigModalOpen(true);
+  };
+
+  const create_config = async () => {
+    try {
+      const values = await configForm.validateFields();
+      await evalApi.createEvalConfig({
+        name: values.name,
+        description: values.description || '',
+        retrieval: {
+          vector_top_k: values.retrieval_vector_top_k,
+          keyword_top_k: values.retrieval_keyword_top_k,
+          rrf_k: values.retrieval_rrf_k,
+          max_chunks_per_article: values.retrieval_max_chunks_per_article,
+          min_rrf_score: values.retrieval_min_rrf_score,
+        },
+        rerank: {
+          enable_rerank: values.rerank_enable_rerank,
+          reranker_type: values.rerank_reranker_type,
+          rerank_top_k: values.rerank_rerank_top_k,
+          rerank_min_score: values.rerank_rerank_min_score,
+        },
+        generation: {
+          max_context_chars: values.generation_max_context_chars,
+        },
+      });
+      message.success('配置创建成功');
+      setConfigModalOpen(false);
+      const configs = await evalApi.fetchEvalConfigs();
+      setEvalConfigs(configs);
+    } catch (err) {
+      message.error(`创建配置失败: ${err}`);
+    }
+  };
+
+  const delete_config = async (configId: number) => {
+    try {
+      await evalApi.deleteEvalConfig(configId);
+      message.success('配置已删除');
+      setEvalConfigs((prev) => prev.filter((c) => c.id !== configId));
+      if (selectedConfigId === configId) setSelectedConfigId(null);
+    } catch (err) {
+      message.error(`删除失败: ${err}`);
     }
   };
 
@@ -423,11 +553,41 @@ export default function EvalPage() {
             children: (
               <>
                 <Space style={{ marginBottom: 16 }}>
-                  <Button icon={<PlayCircleOutlined />} onClick={() => start_evaluation('retrieval')}>检索评估</Button>
-                  <Button icon={<PlayCircleOutlined />} onClick={() => start_evaluation('generation')}>生成评估</Button>
-                  <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => start_evaluation('full')}>完整评估</Button>
+                  <Select
+                    placeholder="选择配置"
+                    allowClear
+                    style={{ width: 180 }}
+                    value={selectedConfigId ?? undefined}
+                    onChange={(v) => setSelectedConfigId(v ?? null)}
+                    options={evalConfigs
+                      .filter((c) => c.is_active)
+                      .map((c) => ({
+                        value: c.id,
+                        label: `${c.name} (v${c.version})`,
+                      }))}
+                  />
+                  <Button icon={<SettingOutlined />} onClick={open_config_modal}>配置管理</Button>
+                  <Button icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('retrieval')}>检索评估</Button>
+                  <Button icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('generation')}>生成评估</Button>
+                  <Button type="primary" icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('full')}>完整评估</Button>
                   <Button icon={<SwapOutlined />} onClick={() => setCompareModalOpen(true)}>版本对比</Button>
                 </Space>
+
+                {trendMetricOptions.length > 0 && (
+                  <Card size="small" style={{ marginBottom: 16 }}>
+                    <Space style={{ marginBottom: 8 }}>
+                      <Text type="secondary">趋势指标：</Text>
+                      <Select
+                        size="small"
+                        value={trendMetric}
+                        onChange={setTrendMetric}
+                        style={{ width: 240 }}
+                        options={trendMetricOptions}
+                      />
+                    </Space>
+                    <TrendChart data={trendData} metricName={trendMetric} title="指标趋势" />
+                  </Card>
+                )}
 
                 <Row gutter={16}>
                   <Col span={10}>
@@ -438,9 +598,8 @@ export default function EvalPage() {
                         rowKey="id"
                         loading={evaluationsLoading}
                         size="small"
-                        scroll={{ y: 400 }}
+                        scroll={{ x: 850, y: 400 }}
                         pagination={{ pageSize: 15 }}
-                        scroll={{ x: 850 }}
                         onRow={(evaluation) => ({
                           onClick: () => view_evaluation(evaluation),
                           style: {
@@ -475,6 +634,21 @@ export default function EvalPage() {
 
                         {report && (
                           <>
+                            {availableDimensions.length > 1 && (
+                              <Space style={{ marginBottom: 12 }}>
+                                <Text type="secondary">维度：</Text>
+                                <Select
+                                  size="small"
+                                  value={dimensionFilter}
+                                  onChange={setDimensionFilter}
+                                  style={{ width: 140 }}
+                                  options={availableDimensions.map((d) => ({
+                                    value: d,
+                                    label: d === 'overall' ? '整体' : d,
+                                  }))}
+                                />
+                              </Space>
+                            )}
                             <MetricsChart metrics={flattenedMetrics} title="聚合指标" />
                             <Card title="逐题详情" size="small" style={{ marginTop: 16 }}>
                               <Table
@@ -594,7 +768,7 @@ export default function EvalPage() {
         title="版本对比"
         open={compareModalOpen}
         onCancel={() => { setCompareModalOpen(false); setCompareResult(null); }}
-        width={700}
+        width={800}
         footer={null}
       >
         <Space style={{ marginBottom: 16 }}>
@@ -614,27 +788,168 @@ export default function EvalPage() {
           <Button type="primary" onClick={compare_eval_results}>对比</Button>
         </Space>
 
-        {compareResult && (
-          <Table
-            dataSource={Object.entries(compareResult.metrics_diff || {}).map(([key, val]) => ({
-              key,
-              metric: key,
-              ...val,
-              trend: val.delta > 0 ? '\u2191' : val.delta < 0 ? '\u2193' : '\u2192',
-            }))}
-            columns={[
-              { title: '指标', dataIndex: 'metric', key: 'metric' },
-              { title: '基准', dataIndex: 'baseline', key: 'baseline', render: (v: number) => (v * 100).toFixed(2) + '%' },
-              { title: '对比', dataIndex: 'compare', key: 'compare', render: (v: number) => (v * 100).toFixed(2) + '%' },
-              { title: '变化', dataIndex: 'pct_change', key: 'pct_change',
-                render: (v: number) => <span style={{ color: v > 0 ? '#52c41a' : v < 0 ? '#ff4d4f' : '#999' }}>{v > 0 ? '+' : ''}{v.toFixed(1)}%</span> },
-              { title: '趋势', dataIndex: 'trend', key: 'trend', width: 60,
-                render: (v: string) => <span style={{ color: v === '\u2191' ? '#52c41a' : v === '\u2193' ? '#ff4d4f' : '#999', fontWeight: 600 }}>{v}</span> },
-            ]}
-            size="small"
-            pagination={false}
-          />
-        )}
+        {compareResult && (() => {
+          const comparisonItems = Object.entries(compareResult.metrics_diff || {}).map(([key, val]) => ({
+            key,
+            metric: key,
+            ...val,
+            trend: val.delta > 0 ? '\u2191' : val.delta < 0 ? '\u2193' : '\u2192',
+          }));
+          return (
+            <>
+              <ComparisonChart data={comparisonItems} />
+              <Table dataSource={comparisonItems}
+              columns={[
+                { title: '指标', dataIndex: 'metric', key: 'metric' },
+                { title: '基准', dataIndex: 'baseline', key: 'baseline', render: (v: number) => (v * 100).toFixed(2) + '%' },
+                { title: '对比', dataIndex: 'compare', key: 'compare', render: (v: number) => (v * 100).toFixed(2) + '%' },
+                { title: '变化', dataIndex: 'pct_change', key: 'pct_change',
+                  render: (v: number) => <span style={{ color: v > 0 ? '#52c41a' : v < 0 ? '#ff4d4f' : '#999' }}>{v > 0 ? '+' : ''}{v.toFixed(1)}%</span> },
+                { title: '趋势', dataIndex: 'trend', key: 'trend', width: 60,
+                  render: (v: string) => <span style={{ color: v === '\u2191' ? '#52c41a' : v === '\u2193' ? '#ff4d4f' : '#999', fontWeight: 600 }}>{v}</span> },
+              ]}
+              size="small"
+              pagination={false}
+            />
+            </>
+          );
+        })()}
+      </Modal>
+
+      <Modal
+        title="配置管理"
+        open={configModalOpen}
+        onCancel={() => setConfigModalOpen(false)}
+        width={700}
+        footer={null}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text strong>已有配置</Text>
+          {evalConfigs.length === 0 ? (
+            <Text type="secondary" style={{ marginLeft: 8 }}>暂无配置</Text>
+          ) : (
+            <Table
+              dataSource={evalConfigs}
+              rowKey="id"
+              size="small"
+              pagination={false}
+              style={{ marginTop: 8 }}
+              columns={[
+                { title: '名称', dataIndex: 'name', key: 'name' },
+                { title: '版本', dataIndex: 'version', key: 'version', width: 60 },
+                {
+                  title: '状态', key: 'is_active', width: 70,
+                  render: (_: unknown, r: EvalConfig) => (
+                    <Tag color={r.is_active ? 'green' : 'default'}>{r.is_active ? '激活' : '停用'}</Tag>
+                  ),
+                },
+                { title: '说明', dataIndex: 'description', key: 'description', ellipsis: true },
+                {
+                  title: '操作', key: 'action', width: 70,
+                  render: (_: unknown, r: EvalConfig) => r.is_active ? (
+                    <Text type="secondary" style={{ fontSize: 12 }}>当前激活</Text>
+                  ) : (
+                    <Popconfirm title="确定删除此配置？" onConfirm={() => delete_config(r.id)}>
+                      <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+                    </Popconfirm>
+                  ),
+                },
+              ]}
+            />
+          )}
+        </div>
+
+        <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 16 }}>
+          <Text strong>新建配置</Text>
+          <Form form={configForm} layout="vertical" style={{ marginTop: 8 }}>
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item name="name" label="配置名称" rules={[{ required: true, message: '请输入配置名称' }]}>
+                  <Input placeholder="如 默认" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="description" label="说明">
+                  <Input placeholder="配置说明" />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            <Text type="secondary" style={{ fontSize: 13 }}>检索参数</Text>
+            <Row gutter={16}>
+              <Col span={8}>
+                <Form.Item name="retrieval_vector_top_k" label="向量 Top-K">
+                  <InputNumber min={1} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="retrieval_keyword_top_k" label="关键词 Top-K">
+                  <InputNumber min={1} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="retrieval_rrf_k" label="RRF K">
+                  <InputNumber min={1} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Row gutter={16}>
+              <Col span={8}>
+                <Form.Item name="retrieval_max_chunks_per_article" label="单篇最大 Chunk">
+                  <InputNumber min={1} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="retrieval_min_rrf_score" label="最小 RRF 分数">
+                  <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            <Text type="secondary" style={{ fontSize: 13 }}>重排序参数</Text>
+            <Row gutter={16}>
+              <Col span={8}>
+                <Form.Item name="rerank_enable_rerank" label="启用重排序" valuePropName="checked">
+                  <Switch checkedChildren="开" unCheckedChildren="关" />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="rerank_reranker_type" label="重排序器">
+                  <Select options={[
+                    { value: 'gguf', label: 'GGUF' },
+                    { value: 'llm', label: 'LLM' },
+                    { value: 'none', label: 'None' },
+                  ]} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="rerank_rerank_top_k" label="重排序 Top-K">
+                  <InputNumber min={1} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Row gutter={16}>
+              <Col span={8}>
+                <Form.Item name="rerank_rerank_min_score" label="最小重排序分数">
+                  <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            <Text type="secondary" style={{ fontSize: 13 }}>生成参数</Text>
+            <Row gutter={16}>
+              <Col span={8}>
+                <Form.Item name="generation_max_context_chars" label="最大上下文字符数">
+                  <InputNumber min={500} max={50000} step={1000} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            <Form.Item style={{ marginBottom: 0, marginTop: 8 }}>
+              <Button type="primary" onClick={create_config}>创建配置</Button>
+            </Form.Item>
+          </Form>
+        </div>
       </Modal>
     </div>
   );

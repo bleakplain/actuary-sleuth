@@ -1,5 +1,7 @@
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
+
+from lib.rag_engine.config import config_to_dict, RetrievalConfig, RerankConfig, GenerationConfig
 
 
 class EvalSampleCreate(BaseModel):
@@ -32,9 +34,20 @@ class ImportSamplesRequest(BaseModel):
 
 class EvaluationRequest(BaseModel):
     mode: str = Field("full", pattern="^(retrieval|generation|full|llm_judge)$")
-    top_k: int = Field(5, ge=1, le=20)
-    chunking: str = Field("semantic", pattern="^(semantic|fixed)$")
-    num_samples: int = Field(1, ge=1, le=5)
+    config_id: int
+    snapshot_id: Optional[str] = None
+    filters: Optional[Dict[str, str]] = None
+
+
+class EvalConfigCreate(BaseModel):
+    name: str = Field(..., min_length=1)
+    description: str = ""
+    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
+    rerank: RerankConfig = Field(default_factory=RerankConfig)
+    generation: GenerationConfig = Field(default_factory=GenerationConfig)
+
+    def to_config_dict(self) -> dict:
+        return config_to_dict(self.retrieval, self.rerank, self.generation)
 
 
 class CompareRequest(BaseModel):

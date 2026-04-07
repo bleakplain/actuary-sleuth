@@ -1,5 +1,5 @@
 import client from './client';
-import type { EvalSample, EvalSnapshot, Evaluation, SampleResult } from '../types';
+import type { EvalSample, EvalSnapshot, Evaluation, EvalConfig, SampleResult } from '../types';
 
 export async function fetchEvalSamples(params?: {
   question_type?: string;
@@ -44,16 +44,46 @@ export async function restoreSnapshot(snapshotId: string): Promise<{ restored: n
   return data;
 }
 
+// ── 评测配置 ──────────────────────────────────────────
+
+export async function fetchEvalConfigs(name?: string): Promise<EvalConfig[]> {
+  const { data } = await client.get('/api/eval/configs', { params: name ? { name } : undefined });
+  return data;
+}
+
+export async function fetchActiveConfig(name: string): Promise<EvalConfig> {
+  const { data } = await client.get(`/api/eval/configs/${name}/active`);
+  return data;
+}
+
+export async function deleteEvalConfig(configId: number): Promise<void> {
+  await client.delete(`/api/eval/configs/${configId}`);
+}
+
+export async function createEvalConfig(config: {
+  name: string;
+  description?: string;
+  retrieval?: Record<string, unknown>;
+  rerank?: Record<string, unknown>;
+  generation?: Record<string, unknown>;
+}): Promise<{ id: number; name: string }> {
+  const { data } = await client.post('/api/eval/configs', config);
+  return data;
+}
+
+// ── 评估运行 ──────────────────────────────────────────
+
 export async function createEvaluation(config: {
-  mode: 'retrieval' | 'generation' | 'full';
-  top_k?: number;
-  chunking?: string;
+  mode: 'retrieval' | 'generation' | 'full' | 'llm_judge';
+  config_id: number;
+  snapshot_id?: string;
+  filters?: Record<string, string>;
 }): Promise<{ evaluation_id: string }> {
   const { data } = await client.post('/api/eval/evaluations', config);
   return data;
 }
 
-export async function fetchEvaluationStatus(evaluationId: string): Promise<Evaluation> {
+export async function fetchEvaluationStatus(evaluationId: string): Promise<Evaluation & { config?: Evaluation['config'] }> {
   const { data } = await client.get(`/api/eval/evaluations/${evaluationId}/status`);
   return data;
 }
@@ -76,6 +106,16 @@ export async function fetchEvaluationDetails(evaluationId: string): Promise<{
 
 export async function fetchEvaluations(): Promise<Evaluation[]> {
   const { data } = await client.get('/api/eval/evaluations');
+  return data;
+}
+
+export async function fetchEvaluationTrends(metric: string, limit = 20): Promise<{
+  run_id: string;
+  label: string;
+  value: number;
+  timestamp: string;
+}[]> {
+  const { data } = await client.get('/api/eval/evaluations/trends', { params: { metric, limit } });
   return data;
 }
 

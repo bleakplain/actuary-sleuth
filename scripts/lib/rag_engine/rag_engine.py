@@ -28,7 +28,6 @@ from .exceptions import EngineInitializationError, RetrievalError
 from .attribution import parse_citations, AttributionResult
 from ._gguf_cli import GGUFReranker as GGUFCliReranker
 from .gguf_reranker_adapter import GGUFReranker
-from .evaluator import GenerationEvaluator
 from lib.llm import BaseLLMClient, LLMClientFactory
 from lib.llm.trace import trace_span
 
@@ -148,21 +147,20 @@ class RAGEngine:
         self._preprocessor = QueryPreprocessor(llm_client=self._llm_client)
 
     def _create_reranker(self) -> Optional[BaseReranker]:
-        config = self.config.hybrid_config
-        assert config is not None
+        rc = self.config.rerank
 
-        if not config.enable_rerank or config.reranker_type == "none":
+        if not rc.enable_rerank or rc.reranker_type == "none":
             return None
 
         rerank_config = RerankConfig(
             enabled=True,
-            top_k=config.rerank_top_k,
+            top_k=rc.rerank_top_k,
         )
 
-        if config.reranker_type == "llm":
+        if rc.reranker_type == "llm":
             return LLMReranker(self._llm_client, rerank_config)
 
-        if config.reranker_type == "gguf":
+        if rc.reranker_type == "gguf":
             try:
                 gguf = GGUFCliReranker()
                 return GGUFReranker(gguf)
@@ -250,7 +248,7 @@ class RAGEngine:
                     'unverified_claims': [],
                 }
 
-            user_prompt, included_count = self._build_qa_prompt(self.config, question, search_results)
+            user_prompt, included_count = self._build_qa_prompt(self.config.generation, question, search_results)
             if not self._llm_client:
                 raise RetrievalError("LLM 客户端未初始化")
 
@@ -289,10 +287,6 @@ class RAGEngine:
                 'content_mismatches': attribution.content_mismatches,
             }
 
-            if self.config.enable_faithfulness:
-                included_contexts = [r.get('content', '') for r in included_sources]
-                result['faithfulness_score'] = self._compute_faithfulness(included_contexts, answer_str)
-
             return result
 
         except EngineInitializationError:
@@ -309,10 +303,10 @@ class RAGEngine:
         return await asyncio.to_thread(self._do_ask, question, include_sources)
 
     @staticmethod
-    def _build_qa_prompt(config: 'RAGConfig', question: str, search_results: List[Dict[str, Any]]) -> tuple[str, int]:
+    def _build_qa_prompt(generation: 'GenerationConfig', question: str, search_results: List[Dict[str, Any]]) -> tuple[str, int]:
         context_parts: List[str] = []
         total_chars = 0
-        max_chars = config.max_context_chars
+        max_chars = generation.max_context_chars
 
         for i, result in enumerate(search_results, 1):
             law_name = result.get('law_name', '未知法规')
@@ -334,12 +328,6 @@ class RAGEngine:
         context = "\n\n".join(context_parts)
         user_prompt = _USER_PROMPT_TEMPLATE.format(context=context, question=question)
         return user_prompt, len(context_parts)
-
-    @staticmethod
-    def _compute_faithfulness(contexts: List[str], answer: str) -> float:
-        if not contexts or not answer:
-            return 0.0
-        return GenerationEvaluator._compute_faithfulness(contexts, answer)
 
     def search(
         self,
@@ -383,8 +371,8 @@ class RAGEngine:
         filters: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """混合检索（向量 + BM25 关键词 + RRF 融合 + Rerank）"""
-        config = self.config.hybrid_config
-        assert config is not None
+        rc = self.config.retrieval
+        rk = self.config.rerank
         index = self.index_manager.get_index()
         if not index:
             return []
@@ -393,33 +381,33 @@ class RAGEngine:
             index=index,
             bm25_index=self._bm25_index,
             query_text=query_text,
-            vector_top_k=config.vector_top_k,
-            keyword_top_k=config.keyword_top_k,
-            k=config.rrf_k,
+            vector_top_k=rc.vector_top_k,
+            keyword_top_k=rc.keyword_top_k,
+            k=rc.rrf_k,
             filters=filters,
             preprocessor=self._preprocessor,
-            max_chunks_per_article=config.max_chunks_per_article,
+            max_chunks_per_article=rc.max_chunks_per_article,
         )
 
-        if results and config.min_rrf_score > 0:
+        if results and rc.min_rrf_score > 0:
             max_score = results[0].get('score', 0)
-            if max_score < config.min_rrf_score:
-                logger.debug(f"最高 RRF 分数 {max_score:.4f} 低于阈值 {config.min_rrf_score}")
+            if max_score < rc.min_rrf_score:
+                logger.debug(f"最高 RRF 分数 {max_score:.4f} 低于阈值 {rc.min_rrf_score}")
                 return []
 
         if self._reranker:
             results = self._reranker.rerank(query_text, results, top_k=top_k)
 
-        if results and config.rerank_min_score > 0:
+        if results and rk.rerank_min_score > 0:
             filtered = [
                 r for r in results
                 if not r.get('reranked', False)
-                or r.get('rerank_score', 0) >= config.rerank_min_score
+                or r.get('rerank_score', 0) >= rk.rerank_min_score
             ]
             if len(filtered) < len(results):
                 logger.debug(
                     f"Reranker 阈值过滤: {len(results)} → {len(filtered)} "
-                    f"(阈值={config.rerank_min_score})"
+                    f"(阈值={rk.rerank_min_score})"
                 )
             results = filtered
 

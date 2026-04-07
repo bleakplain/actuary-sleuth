@@ -22,7 +22,7 @@
     ├── VectorIndexManager: 向量索引管理
     └── KnowledgeBuilder: 知识库构建编排
 """
-from .config import RAGConfig, get_config, HybridQueryConfig
+from .config import RAGConfig, get_config, config_to_dict, RetrievalConfig, RerankConfig, GenerationConfig
 from .exceptions import RAGEngineError, EngineInitializationError, RetrievalError
 from .query_preprocessor import QueryPreprocessor, PreprocessedQuery
 from .reranker_base import BaseReranker
@@ -48,7 +48,10 @@ from .badcase_classifier import classify_badcase, assess_compliance_risk
 __all__ = [
     'RAGConfig',
     'get_config',
-    'HybridQueryConfig',
+    'config_to_dict',
+    'RetrievalConfig',
+    'RerankConfig',
+    'GenerationConfig',
     'RAGEngineError',
     'EngineInitializationError',
     'RetrievalError',
