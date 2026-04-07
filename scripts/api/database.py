@@ -694,6 +694,17 @@ def get_sample_results(run_id: str) -> List[Dict]:
         return [_deserialize_json_fields(dict(r), _RESULT_JSON_FIELDS) for r in rows]
 
 
+def batch_delete_evaluations(evaluation_ids: List[str]) -> int:
+    """删除评测运行及其关联的样本结果。"""
+    if not evaluation_ids:
+        return 0
+    placeholders = ",".join("?" * len(evaluation_ids))
+    with get_connection() as conn:
+        conn.execute(f"DELETE FROM eval_sample_results WHERE run_id IN ({placeholders})", evaluation_ids)
+        cursor = conn.execute(f"DELETE FROM eval_runs WHERE id IN ({placeholders})", evaluation_ids)
+        return cursor.rowcount
+
+
 def save_compliance_report(
     report_id: str,
     product_name: str,

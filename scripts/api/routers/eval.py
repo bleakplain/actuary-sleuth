@@ -24,6 +24,7 @@ from api.database import (
     insert_eval_config, remove_eval_config,
     insert_human_review,
     get_human_reviews, get_human_review_stats,
+    batch_delete_evaluations,
 )
 from lib.rag_engine.config import RAGConfig
 from lib.rag_engine.rag_engine import RAGEngine
@@ -281,6 +282,15 @@ async def get_evaluation_details(evaluation_id: str):
 @router.get("/evaluations")
 async def list_evaluations():
     return get_evaluations()
+
+
+@router.delete("/evaluations")
+async def batch_delete_evaluations(ids: str = Query(..., description="逗号分隔的评测ID列表")):
+    evaluation_ids = [eid.strip() for eid in ids.split(",") if eid.strip()]
+    if not evaluation_ids:
+        raise HTTPException(status_code=400, detail="未提供有效的评测ID")
+    deleted = batch_delete_evaluations(evaluation_ids)
+    return {"deleted": deleted}
 
 
 @router.get("/evaluations/trends")

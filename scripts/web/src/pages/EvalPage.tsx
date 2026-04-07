@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Card, Table, Button, Space, Select, Tag, Modal, Form, Input, InputNumber, Switch,
-  Typography, message, Row, Col, Popconfirm, Progress, Descriptions, Tabs,
+  Typography, message, Row, Col, Popconfirm, Progress, Descriptions, Tabs, Tooltip,
 } from 'antd';
 import {
   PlusOutlined, ImportOutlined, SaveOutlined, RollbackOutlined,
@@ -11,6 +11,7 @@ import {
 import * as evalApi from '../api/eval';
 import MetricsChart, { formatMetric, ComparisonChart, TrendChart } from '../components/MetricsChart';
 import type { EvalSample, EvalSnapshot, Evaluation, EvalConfig, SampleResult, MetricsDiff } from '../types';
+import { resolveMetricMeta } from '../utils/evalMetrics';
 
 const { Title, Text } = Typography;
 
@@ -58,6 +59,7 @@ export default function EvalPage() {
   const [evalConfigs, setEvalConfigs] = useState<EvalConfig[]>([]);
   const [selectedConfigId, setSelectedConfigId] = useState<number | null>(null);
   const [selectedEvaluation, setSelectedEvaluation] = useState<Evaluation | null>(null);
+  const [selectedEvalIds, setSelectedEvalIds] = useState<string[]>([]);
   const [report, setReport] = useState<Record<string, Record<string, number>> | null>(null);
   const [details, setDetails] = useState<SampleResult[]>([]);
   const [compareModalOpen, setCompareModalOpen] = useState(false);
@@ -72,6 +74,11 @@ export default function EvalPage() {
   const [trendData, setTrendData] = useState<{ run_id: string; label: string; value: number; timestamp: string }[]>([]);
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [configForm] = Form.useForm();
+
+  const evalK = useMemo((): number => {
+    if (!selectedEvaluation?.config?.rerank) return 5;
+    return (selectedEvaluation.config.rerank as Record<string, unknown>).rerank_top_k as number ?? 5;
+  }, [selectedEvaluation]);
 
   const flattenedMetrics = useMemo((): Record<string, number> => {
     const result: Record<string, number> = {};
@@ -117,6 +124,8 @@ export default function EvalPage() {
     })),
     [evaluations]
   );
+
+  const hasSelection = selectedEvalIds.length > 0;
 
   const load_samples = useCallback(async () => {
     setSamplesLoading(true);
@@ -264,16 +273,17 @@ export default function EvalPage() {
     const opts: { value: string; label: string }[] = [];
     const seen = new Set<string>();
     for (const e of evaluations) {
-      const report = (e as Record<string, unknown>).report as Record<string, Record<string, number>> | undefined;
-      if (!report) continue;
-      for (const [section, metrics] of Object.entries(report)) {
+      const rpt = (e as Record<string, unknown>).report as Record<string, Record<string, number>> | undefined;
+      if (!rpt) continue;
+      for (const [section, metrics] of Object.entries(rpt)) {
         if (typeof metrics !== 'object' || metrics === null) continue;
         for (const key of Object.keys(metrics)) {
           if (key === 'by_type' || key === 'total_samples' || key === 'failed_samples') continue;
           const full = `${section}.${key}`;
           if (!seen.has(full)) {
             seen.add(full);
-            opts.push({ value: full, label: full });
+            const ml = resolveMetricMeta(key);
+            opts.push({ value: full, label: `${section}.${ml.label}` });
           }
         }
       }
@@ -307,7 +317,7 @@ export default function EvalPage() {
         mode,
         config_id: selectedConfigId,
       });
-      message.success(`评估任务已创建: ${evaluation_id}`);
+      message.success(`评测任务已创建: ${evaluation_id}`);
       refresh_evaluation_history();
     } catch (err) {
       message.error(`启动失败: ${err}`);
@@ -316,6 +326,7 @@ export default function EvalPage() {
 
   const view_evaluation = async (evaluation: Evaluation) => {
     setSelectedEvaluation(evaluation);
+    setSelectedEvalIds([]);
     setDimensionFilter('overall');
     if (evaluation.status === 'completed') {
       try {
@@ -331,6 +342,22 @@ export default function EvalPage() {
     } else {
       setReport(null);
       setDetails([]);
+    }
+  };
+
+  const handle_batch_delete_evals = async () => {
+    try {
+      const { deleted } = await evalApi.deleteEvaluations(selectedEvalIds);
+      message.success(`已删除 ${deleted} 条评测`);
+      if (selectedEvaluation && selectedEvalIds.includes(selectedEvaluation.id)) {
+        setSelectedEvaluation(null);
+        setReport(null);
+        setDetails([]);
+      }
+      setSelectedEvalIds([]);
+      refresh_evaluation_history();
+    } catch (err) {
+      message.error(`删除失败: ${err}`);
     }
   };
 
@@ -350,7 +377,7 @@ export default function EvalPage() {
 
   const compare_eval_results = async () => {
     if (!compareIds.baseline || !compareIds.compare) {
-      message.warning('请选择两个评估');
+      message.warning('请选择两个评测');
       return;
     }
     try {
@@ -435,37 +462,41 @@ export default function EvalPage() {
       },
     },
     {
-      title: '进度', key: 'progress', width: 150,
+      title: '进度', key: 'progress', width: 120,
       render: (_: undefined, e: Evaluation) => {
         if (e.status === 'completed') return <Text>100%</Text>;
         if (e.total > 0) return <Progress percent={Math.round((e.progress / e.total) * 100)} size="small" />;
         return <Text type="secondary">-</Text>;
       },
     },
-    { title: '启动时间', dataIndex: 'started_at', key: 'started_at', width: 180, ellipsis: true },
-    { title: '完成时间', dataIndex: 'finished_at', key: 'finished_at', width: 180 },
+    { title: '启动时间', dataIndex: 'started_at', key: 'started_at', width: 160, ellipsis: true },
   ];
 
   const detailColumns = [
     { title: '样本ID', dataIndex: 'sample_id', key: 'sample_id', width: 80 },
     {
-      title: 'Precision', key: 'precision', width: 90,
+      title: <Tooltip title={METRIC_LABELS.precision_at_k?.tooltip}>Precision@{evalK}</Tooltip>,
+      key: 'precision', width: 100,
       render: (_: undefined, r: SampleResult) => formatMetric(r.retrieval_metrics.precision),
     },
     {
-      title: 'Recall', key: 'recall', width: 90,
+      title: <Tooltip title={METRIC_LABELS.recall_at_k?.tooltip}>Recall@{evalK}</Tooltip>,
+      key: 'recall', width: 100,
       render: (_: undefined, r: SampleResult) => formatMetric(r.retrieval_metrics.recall),
     },
     {
-      title: 'MRR', key: 'mrr', width: 90,
+      title: <Tooltip title={METRIC_LABELS.mrr?.tooltip}>MRR</Tooltip>,
+      key: 'mrr', width: 90,
       render: (_: undefined, r: SampleResult) => formatMetric(r.retrieval_metrics.mrr),
     },
     {
-      title: 'NDCG', key: 'ndcg', width: 90,
+      title: <Tooltip title={METRIC_LABELS.ndcg?.tooltip}>NDCG</Tooltip>,
+      key: 'ndcg', width: 90,
       render: (_: undefined, r: SampleResult) => formatMetric(r.retrieval_metrics.ndcg),
     },
     {
-      title: 'Faithfulness', key: 'faithfulness', width: 110,
+      title: <Tooltip title={METRIC_LABELS.faithfulness?.tooltip}>忠实度</Tooltip>,
+      key: 'faithfulness', width: 100,
       render: (_: undefined, r: SampleResult) => formatMetric(r.generation_metrics.faithfulness),
     },
   ];
@@ -478,39 +509,40 @@ export default function EvalPage() {
         items={[
           {
             key: 'dataset',
-            label: '数据集',
+            label: '评测数据集',
             children: (
               <>
-                <Space style={{ marginBottom: 16 }}>
-                  <Select
-                    placeholder="问题类型" allowClear style={{ width: 160 }}
-                    value={filters.question_type}
-                    onChange={(v) => setFilters({ ...filters, question_type: v })}
-                    options={QUESTION_TYPE_OPTIONS}
-                  />
-                  <Select
-                    placeholder="难度" allowClear style={{ width: 100 }}
-                    value={filters.difficulty}
-                    onChange={(v) => setFilters({ ...filters, difficulty: v })}
-                    options={DIFFICULTY_OPTIONS}
-                  />
-                  <Input
-                    placeholder="主题筛选" style={{ width: 120 }}
-                    value={filters.topic}
-                    onChange={(e) => setFilters({ ...filters, topic: e.target.value || undefined })}
-                    onPressEnter={load_samples}
-                  />
-                </Space>
-
-                <Space style={{ marginBottom: 16 }}>
-                  <Button type="primary" icon={<PlusOutlined />} onClick={create_sample}>新增</Button>
-                  <Button icon={<ImportOutlined />} onClick={() => setImportModalOpen(true)}>批量导入</Button>
-                  <Button icon={<SaveOutlined />} onClick={() => setSnapshotModalOpen(true)}>创建快照</Button>
-                </Space>
+                <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Space>
+                    <Select
+                      placeholder="问题类型" allowClear style={{ width: 160 }}
+                      value={filters.question_type}
+                      onChange={(v) => setFilters({ ...filters, question_type: v })}
+                      options={QUESTION_TYPE_OPTIONS}
+                    />
+                    <Select
+                      placeholder="难度" allowClear style={{ width: 100 }}
+                      value={filters.difficulty}
+                      onChange={(v) => setFilters({ ...filters, difficulty: v })}
+                      options={DIFFICULTY_OPTIONS}
+                    />
+                    <Input
+                      placeholder="主题筛选" style={{ width: 120 }}
+                      value={filters.topic}
+                      onChange={(e) => setFilters({ ...filters, topic: e.target.value || undefined })}
+                      onPressEnter={load_samples}
+                    />
+                  </Space>
+                  <Space>
+                    <Button type="primary" icon={<PlusOutlined />} onClick={create_sample}>新增</Button>
+                    <Button icon={<ImportOutlined />} onClick={() => setImportModalOpen(true)}>批量导入</Button>
+                    <Button icon={<SaveOutlined />} onClick={() => setSnapshotModalOpen(true)}>创建快照</Button>
+                  </Space>
+                </div>
 
                 <Row gutter={16}>
                   <Col span={16}>
-                    <Card>
+                    <Card bodyStyle={{ padding: 0 }} style={{ overflow: 'hidden' }}>
                       <Table
                         dataSource={samples}
                         columns={datasetColumns}
@@ -549,34 +581,36 @@ export default function EvalPage() {
           },
           {
             key: 'runs',
-            label: '评估',
+            label: '评测历史',
             children: (
               <>
-                <Space style={{ marginBottom: 16 }}>
-                  <Select
-                    placeholder="选择配置"
-                    allowClear
-                    style={{ width: 180 }}
-                    value={selectedConfigId ?? undefined}
-                    onChange={(v) => setSelectedConfigId(v ?? null)}
-                    options={evalConfigs
-                      .filter((c) => c.is_active)
-                      .map((c) => ({
-                        value: c.id,
-                        label: `${c.name} (v${c.version})`,
-                      }))}
-                  />
-                  <Button icon={<SettingOutlined />} onClick={open_config_modal}>配置管理</Button>
-                  <Button icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('retrieval')}>检索评估</Button>
-                  <Button icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('generation')}>生成评估</Button>
-                  <Button type="primary" icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('full')}>完整评估</Button>
-                  <Button icon={<SwapOutlined />} onClick={() => setCompareModalOpen(true)}>版本对比</Button>
-                </Space>
+                <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Space>
+                    <Select
+                      placeholder="选择配置"
+                      allowClear
+                      style={{ width: 180 }}
+                      value={selectedConfigId ?? undefined}
+                      onChange={(v) => setSelectedConfigId(v ?? null)}
+                      options={evalConfigs
+                        .filter((c) => c.is_active)
+                        .map((c) => ({
+                          value: c.id,
+                          label: `${c.name} (v${c.version})`,
+                        }))}
+                    />
+                    <Button icon={<SettingOutlined />} onClick={open_config_modal}>配置管理</Button>
+                    <Button icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('retrieval')}>检索评测</Button>
+                    <Button icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('generation')}>生成评测</Button>
+                    <Button type="primary" icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('full')}>完整评测</Button>
+                    <Button icon={<SwapOutlined />} onClick={() => setCompareModalOpen(true)}>版本对比</Button>
+                  </Space>
+                </div>
 
                 {trendMetricOptions.length > 0 && (
-                  <Card size="small" style={{ marginBottom: 16 }}>
-                    <Space style={{ marginBottom: 8 }}>
-                      <Text type="secondary">趋势指标：</Text>
+                  <Card size="small" style={{ marginBottom: 12 }} bodyStyle={{ paddingBottom: 0 }}>
+                    <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text type="secondary">指标趋势</Text>
                       <Select
                         size="small"
                         value={trendMetric}
@@ -584,22 +618,26 @@ export default function EvalPage() {
                         style={{ width: 240 }}
                         options={trendMetricOptions}
                       />
-                    </Space>
-                    <TrendChart data={trendData} metricName={trendMetric} title="指标趋势" />
+                    </div>
+                    <TrendChart data={trendData} metricName={trendMetric} />
                   </Card>
                 )}
 
                 <Row gutter={16}>
                   <Col span={10}>
-                    <Card title="评估历史" size="small">
+                    <Card title="评测记录" size="small" bodyStyle={{ padding: 0, overflow: 'hidden' }}>
                       <Table
                         dataSource={evaluations}
                         columns={evaluationColumns}
                         rowKey="id"
                         loading={evaluationsLoading}
                         size="small"
-                        scroll={{ x: 850, y: 400 }}
+                        scroll={{ x: 620, y: 400 }}
                         pagination={{ pageSize: 15 }}
+                        rowSelection={{
+                          selectedRowKeys: selectedEvalIds,
+                          onChange: (keys) => setSelectedEvalIds(keys as string[]),
+                        }}
                         onRow={(evaluation) => ({
                           onClick: () => view_evaluation(evaluation),
                           style: {
@@ -608,20 +646,40 @@ export default function EvalPage() {
                           },
                         })}
                       />
+                      {hasSelection && (
+                        <div style={{
+                          position: 'sticky', bottom: 0, background: '#fff', borderTop: '1px solid #f0f0f0',
+                          padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 1,
+                        }}>
+                          <Text type="secondary">{selectedEvalIds.length} 项</Text>
+                          <Popconfirm
+                            title={`确定删除 ${selectedEvalIds.length} 条评测？`}
+                            onConfirm={handle_batch_delete_evals}
+                          >
+                            <Button type="primary" danger size="small" icon={<DeleteOutlined />}>删除</Button>
+                          </Popconfirm>
+                        </div>
+                      )}
                     </Card>
                   </Col>
 
                   <Col span={14}>
                     {selectedEvaluation ? (
                       <>
-                        <Descriptions title={`评估报告 - ${selectedEvaluation.id}`} size="small" column={{ xs: 1, sm: 2, md: 3 }} style={{ marginBottom: 16 }}>
+                        <Descriptions
+                          title={`评测报告 - ${selectedEvaluation.id}`}
+                          size="small"
+                          column={{ xs: 1, sm: 2, md: 3 }}
+                          bordered
+                          style={{ marginBottom: 16 }}
+                        >
                           <Descriptions.Item label="模式">{selectedEvaluation.mode}</Descriptions.Item>
                           <Descriptions.Item label="状态">
                             <Tag color={STATUS_MAP[selectedEvaluation.status]?.color}>{STATUS_MAP[selectedEvaluation.status]?.label}</Tag>
                           </Descriptions.Item>
                           <Descriptions.Item label="启动时间">{selectedEvaluation.started_at}</Descriptions.Item>
                           {selectedEvaluation.status === 'completed' && (
-                            <Descriptions.Item label="操作">
+                            <Descriptions.Item label="操作" span={3}>
                               <Space>
                                 <Button size="small" icon={<DownloadOutlined />}
                                   onClick={() => download_eval_report(selectedEvaluation.id, 'json')}>JSON</Button>
@@ -635,32 +693,32 @@ export default function EvalPage() {
                         {report && (
                           <>
                             {availableDimensions.length > 1 && (
-                              <Space style={{ marginBottom: 12 }}>
-                                <Text type="secondary">维度：</Text>
+                              <div style={{ marginBottom: 12 }}>
+                                <Text type="secondary">维度筛选：</Text>
                                 <Select
                                   size="small"
                                   value={dimensionFilter}
                                   onChange={setDimensionFilter}
-                                  style={{ width: 140 }}
+                                  style={{ width: 140, marginLeft: 8 }}
                                   options={availableDimensions.map((d) => ({
                                     value: d,
                                     label: d === 'overall' ? '整体' : d,
                                   }))}
                                 />
-                              </Space>
+                              </div>
                             )}
-                            <MetricsChart metrics={flattenedMetrics} title="聚合指标" />
-                            <Card title="逐题详情" size="small" style={{ marginTop: 16 }}>
+                            <MetricsChart metrics={flattenedMetrics} k={evalK} />
+                            <Card title="逐题详情" size="small" style={{ marginTop: 16 }} bodyStyle={{ padding: 0, overflow: 'hidden' }}>
                               <Table
                                 dataSource={details}
                                 columns={detailColumns}
                                 rowKey="id"
                                 size="small"
                                 pagination={{ pageSize: 20 }}
-                                scroll={{ x: 550 }}
+                                scroll={{ x: 570 }}
                                 expandable={{
                                   expandedRowRender: (record) => (
-                                    <div>
+                                    <div style={{ padding: '8px 16px' }}>
                                       <Text strong>生成回答：</Text>
                                       <div style={{ marginTop: 4, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
                                         {record.generated_answer || '-'}
@@ -685,7 +743,7 @@ export default function EvalPage() {
                       </>
                     ) : (
                       <Card style={{ textAlign: 'center', padding: 40 }}>
-                        <Text type="secondary">选择一个评估查看详情</Text>
+                        <Text type="secondary">选择一条评测记录查看详情</Text>
                       </Card>
                     )}
                   </Col>
@@ -797,10 +855,13 @@ export default function EvalPage() {
           }));
           return (
             <>
-              <ComparisonChart data={comparisonItems} />
+              <ComparisonChart data={comparisonItems} k={evalK} />
               <Table dataSource={comparisonItems}
               columns={[
-                { title: '指标', dataIndex: 'metric', key: 'metric' },
+                { title: '指标', dataIndex: 'metric', key: 'metric', render: (v: string) => {
+                  const [, metric] = v.split('.');
+                  return resolveMetricMeta(metric).label;
+                }},
                 { title: '基准', dataIndex: 'baseline', key: 'baseline', render: (v: number) => (v * 100).toFixed(2) + '%' },
                 { title: '对比', dataIndex: 'compare', key: 'compare', render: (v: number) => (v * 100).toFixed(2) + '%' },
                 { title: '变化', dataIndex: 'pct_change', key: 'pct_change',

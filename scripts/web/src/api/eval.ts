@@ -109,6 +109,13 @@ export async function fetchEvaluations(): Promise<Evaluation[]> {
   return data;
 }
 
+export async function deleteEvaluations(ids: string[]): Promise<{ deleted: number }> {
+  const { data } = await client.delete('/api/eval/evaluations', {
+    params: { ids: ids.join(',') },
+  });
+  return data;
+}
+
 export async function fetchEvaluationTrends(metric: string, limit = 20): Promise<{
   run_id: string;
   label: string;
