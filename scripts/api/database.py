@@ -656,7 +656,7 @@ def get_evaluations() -> List[Dict]:
         return [_deserialize_json_fields(dict(r), {"config": "config_json"}) for r in rows]
 
 
-def get_evaluation_trends(metric: str, limit: int = 20) -> List[Dict]:
+def fetch_evaluation_trends(metric: str, limit: int = 20) -> List[Dict]:
     """获取指定指标在历次已完成评测中的值。"""
     with get_connection() as conn:
         rows = conn.execute(

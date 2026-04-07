@@ -20,7 +20,7 @@ from api.database import (
     insert_evaluation, get_evaluation, get_evaluations,
     update_evaluation_status, update_evaluation_config,
     save_evaluation_report, save_sample_result, get_sample_results,
-    get_evaluation_trends, get_eval_config, get_active_config, get_eval_configs,
+    fetch_evaluation_trends, get_eval_config, get_active_config, get_eval_configs,
     insert_eval_config, remove_eval_config,
     insert_human_review,
     get_human_reviews, get_human_review_stats,
@@ -288,7 +288,7 @@ async def get_evaluation_trends(
     metric: str = Query(..., description="指标名，如 retrieval.precision_at_k"),
     limit: int = Query(20, ge=1, le=50),
 ):
-    return get_evaluation_trends(metric, limit)
+    return fetch_evaluation_trends(metric, limit)
 
 
 @router.post("/evaluations/compare")
