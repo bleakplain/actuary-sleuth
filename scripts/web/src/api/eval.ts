@@ -60,6 +60,16 @@ export async function deleteEvalConfig(configId: number): Promise<void> {
   await client.delete(`/api/eval/configs/${configId}`);
 }
 
+export async function fetchEvalConfig(configId: number): Promise<EvalConfig> {
+  const { data } = await client.get(`/api/eval/configs/${configId}`);
+  return data;
+}
+
+export async function activateEvalConfig(configId: number): Promise<{ id: number; name: string }> {
+  const { data } = await client.post(`/api/eval/configs/${configId}/activate`);
+  return data;
+}
+
 export async function createEvalConfig(config: {
   name: string;
   description?: string;

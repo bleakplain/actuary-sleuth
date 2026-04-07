@@ -21,7 +21,7 @@ from api.database import (
     update_evaluation_status, update_evaluation_config,
     save_evaluation_report, save_sample_result, get_sample_results,
     fetch_evaluation_trends, get_eval_config, get_active_config, get_eval_configs,
-    insert_eval_config, remove_eval_config,
+    insert_eval_config, remove_eval_config, activate_eval_config,
     insert_human_review,
     get_human_reviews, get_human_review_stats,
     batch_delete_evaluations,
@@ -411,6 +411,24 @@ async def add_eval_config(req: EvalConfigCreate):
 async def deactivate_eval_config(config_id: int):
     if not remove_eval_config(config_id):
         raise HTTPException(status_code=400, detail="只能删除非激活版本的配置")
+
+
+@router.get("/configs/{config_id}")
+async def get_single_eval_config(config_id: int):
+    cfg = get_eval_config(config_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="配置不存在")
+    return cfg
+
+
+@router.post("/configs/{config_id}/activate")
+async def activate_config(config_id: int):
+    cfg = get_eval_config(config_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="配置不存在")
+    if not activate_eval_config(config_id):
+        raise HTTPException(status_code=500, detail="激活失败")
+    return {"id": config_id, "name": cfg["name"]}
 
 
 # ── 数据集质量审查 ─────────────────────────────────────

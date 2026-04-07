@@ -559,6 +559,17 @@ def remove_eval_config(config_id: int) -> bool:
         return True
 
 
+def activate_eval_config(config_id: int) -> bool:
+    """将指定配置设为激活版本，同名的其他版本自动停用。"""
+    with get_connection() as conn:
+        row = conn.execute("SELECT name FROM eval_configs WHERE id = ?", (config_id,)).fetchone()
+        if row is None:
+            return False
+        conn.execute("UPDATE eval_configs SET is_active = 0 WHERE name = ?", (row["name"],))
+        conn.execute("UPDATE eval_configs SET is_active = 1 WHERE id = ?", (config_id,))
+        return True
+
+
 def _ensure_default_config():
     """启动时检查，如果 eval_configs 为空则插入默认配置。"""
     with get_connection() as conn:

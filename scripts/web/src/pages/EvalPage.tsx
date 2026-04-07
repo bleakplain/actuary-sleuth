@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Card, Table, Button, Space, Select, Tag, Modal, Form, Input, InputNumber, Switch,
   Typography, message, Row, Col, Popconfirm, Progress, Descriptions, Tabs, Tooltip,
+  Drawer, Badge, Collapse, Divider, Checkbox,
 } from 'antd';
 import {
   PlusOutlined, ImportOutlined, SaveOutlined, RollbackOutlined,
   PlayCircleOutlined, DownloadOutlined, SwapOutlined, SettingOutlined,
-  DeleteOutlined,
+  DeleteOutlined, CopyOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
 import * as evalApi from '../api/eval';
 import MetricsChart, { formatMetric, ComparisonChart, TrendChart } from '../components/MetricsChart';
@@ -72,8 +73,12 @@ export default function EvalPage() {
   const [dimensionFilter, setDimensionFilter] = useState<string>('overall');
   const [trendMetric, setTrendMetric] = useState<string>('retrieval.precision_at_k');
   const [trendData, setTrendData] = useState<{ run_id: string; label: string; value: number; timestamp: string }[]>([]);
-  const [configModalOpen, setConfigModalOpen] = useState(false);
-  const [configForm] = Form.useForm();
+  const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
+  const [rightPanelMode, setRightPanelMode] = useState<'empty' | 'view' | 'edit'>('empty');
+  const [selectedVersion, setSelectedVersion] = useState<EvalConfig | null>(null);
+  const [selectedVersionConfigJson, setSelectedVersionConfigJson] = useState<EvalConfig['config_json'] | null>(null);
+  const [expandedConfigName, setExpandedConfigName] = useState<string | null>(null);
+  const [editForm] = Form.useForm();
 
   const evalK = useMemo((): number => {
     if (!selectedEvaluation?.config?.rerank) return 5;
@@ -125,7 +130,19 @@ export default function EvalPage() {
     [evaluations]
   );
 
+  const [evalPage, setEvalPage] = useState(1);
+  const EVAL_PAGE_SIZE = 15;
+
   const hasSelection = selectedEvalIds.length > 0;
+  const evalPaged = useMemo(
+    () => evaluations.slice((evalPage - 1) * EVAL_PAGE_SIZE, evalPage * EVAL_PAGE_SIZE),
+    [evaluations, evalPage],
+  );
+  const evalAllSelected = evalPaged.length > 0 && evalPaged.every((e) => selectedEvalIds.includes(e.id));
+
+  const toggle_eval_selection = (id: string, checked: boolean) => {
+    setSelectedEvalIds((prev) => checked ? [...prev, id] : prev.filter((x) => x !== id));
+  };
 
   const load_samples = useCallback(async () => {
     setSamplesLoading(true);
@@ -253,6 +270,8 @@ export default function EvalPage() {
     try {
       const data = await evalApi.fetchEvaluations();
       setEvaluations(data);
+      setEvalPage(1);
+      setSelectedEvalIds([]);
     } catch (err) {
       message.error(`加载失败: ${err}`);
     } finally {
@@ -388,9 +407,73 @@ export default function EvalPage() {
     }
   };
 
-  const open_config_modal = () => {
-    configForm.resetFields();
-    configForm.setFieldsValue({
+  const configGroups = useMemo(() => {
+    const map = new Map<string, EvalConfig[]>();
+    for (const c of evalConfigs) {
+      if (!map.has(c.name)) map.set(c.name, []);
+      map.get(c.name)!.push(c);
+    }
+    return Array.from(map.entries()).map(([name, versions]) => ({
+      name,
+      versions: versions.sort((a, b) => b.version - a.version),
+    }));
+  }, [evalConfigs]);
+
+  const refresh_configs = useCallback(async () => {
+    const configs = await evalApi.fetchEvalConfigs();
+    setEvalConfigs(configs);
+    return configs;
+  }, []);
+
+  const open_config_drawer = () => {
+    setConfigDrawerOpen(true);
+    setRightPanelMode('empty');
+    setSelectedVersion(null);
+    setSelectedVersionConfigJson(null);
+    if (selectedConfigId) {
+      const cfg = evalConfigs.find((c) => c.id === selectedConfigId);
+      if (cfg) setExpandedConfigName(cfg.name);
+    }
+  };
+
+  const select_version = async (config: EvalConfig) => {
+    setSelectedVersion(config);
+    setRightPanelMode('view');
+    setSelectedConfigId(config.id);
+    try {
+      const full = await evalApi.fetchEvalConfig(config.id);
+      setSelectedVersionConfigJson(full.config_json || null);
+    } catch {
+      message.error('加载配置详情失败');
+    }
+  };
+
+  const handle_clone = () => {
+    if (!selectedVersion || !selectedVersionConfigJson) return;
+    setRightPanelMode('edit');
+    const cj = selectedVersionConfigJson;
+    editForm.setFieldsValue({
+      name: selectedVersion.name,
+      description: selectedVersion.description,
+      retrieval_vector_top_k: cj?.retrieval?.vector_top_k ?? 20,
+      retrieval_keyword_top_k: cj?.retrieval?.keyword_top_k ?? 20,
+      retrieval_rrf_k: cj?.retrieval?.rrf_k ?? 60,
+      retrieval_max_chunks_per_article: cj?.retrieval?.max_chunks_per_article ?? 3,
+      retrieval_min_rrf_score: cj?.retrieval?.min_rrf_score ?? 0,
+      rerank_enable_rerank: cj?.rerank?.enable_rerank ?? true,
+      rerank_reranker_type: cj?.rerank?.reranker_type ?? 'gguf',
+      rerank_rerank_top_k: cj?.rerank?.rerank_top_k ?? 5,
+      rerank_rerank_min_score: cj?.rerank?.rerank_min_score ?? 0,
+      generation_max_context_chars: cj?.generation?.max_context_chars ?? 12000,
+    });
+  };
+
+  const handle_new_config = () => {
+    setSelectedVersion(null);
+    setRightPanelMode('edit');
+    editForm.setFieldsValue({
+      name: '',
+      description: '',
       retrieval_vector_top_k: 20,
       retrieval_keyword_top_k: 20,
       retrieval_rrf_k: 60,
@@ -402,12 +485,11 @@ export default function EvalPage() {
       rerank_rerank_min_score: 0,
       generation_max_context_chars: 12000,
     });
-    setConfigModalOpen(true);
   };
 
-  const create_config = async () => {
+  const handle_save_config = async () => {
     try {
-      const values = await configForm.validateFields();
+      const values = await editForm.validateFields();
       await evalApi.createEvalConfig({
         name: values.name,
         description: values.description || '',
@@ -429,20 +511,37 @@ export default function EvalPage() {
         },
       });
       message.success('配置创建成功');
-      setConfigModalOpen(false);
-      const configs = await evalApi.fetchEvalConfigs();
-      setEvalConfigs(configs);
+      const configs = await refresh_configs();
+      setRightPanelMode('empty');
+      setSelectedVersion(null);
+      if (values.name) setExpandedConfigName(values.name);
     } catch (err) {
-      message.error(`创建配置失败: ${err}`);
+      message.error(`保存配置失败: ${err}`);
     }
   };
 
-  const delete_config = async (configId: number) => {
+  const handle_activate = async () => {
+    if (!selectedVersion) return;
     try {
-      await evalApi.deleteEvalConfig(configId);
+      await evalApi.activateEvalConfig(selectedVersion.id);
+      message.success('已切换为当前版本');
+      const configs = await refresh_configs();
+      const updated = configs.find((c) => c.id === selectedVersion.id);
+      if (updated) select_version(updated);
+    } catch (err) {
+      message.error(`切换失败: ${err}`);
+    }
+  };
+
+  const handle_delete_config = async () => {
+    if (!selectedVersion) return;
+    try {
+      await evalApi.deleteEvalConfig(selectedVersion.id);
       message.success('配置已删除');
-      setEvalConfigs((prev) => prev.filter((c) => c.id !== configId));
-      if (selectedConfigId === configId) setSelectedConfigId(null);
+      if (selectedConfigId === selectedVersion.id) setSelectedConfigId(null);
+      const configs = await refresh_configs();
+      setSelectedVersion(null);
+      setRightPanelMode('empty');
     } catch (err) {
       message.error(`删除失败: ${err}`);
     }
@@ -586,20 +685,18 @@ export default function EvalPage() {
               <>
                 <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Space>
-                    <Select
-                      placeholder="选择配置"
-                      allowClear
-                      style={{ width: 180 }}
-                      value={selectedConfigId ?? undefined}
-                      onChange={(v) => setSelectedConfigId(v ?? null)}
-                      options={evalConfigs
-                        .filter((c) => c.is_active)
-                        .map((c) => ({
-                          value: c.id,
-                          label: `${c.name} (v${c.version})`,
-                        }))}
-                    />
-                    <Button icon={<SettingOutlined />} onClick={open_config_modal}>配置管理</Button>
+                    <Button
+                      icon={<SettingOutlined />}
+                      onClick={open_config_drawer}
+                      type={selectedConfigId ? 'default' : 'dashed'}
+                    >
+                      {selectedConfigId
+                        ? (() => {
+                            const cfg = evalConfigs.find((c) => c.id === selectedConfigId);
+                            return cfg ? `${cfg.name} (v${cfg.version})` : '选择配置';
+                          })()
+                        : '选择配置'}
+                    </Button>
                     <Button icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('retrieval')}>检索评测</Button>
                     <Button icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('generation')}>生成评测</Button>
                     <Button type="primary" icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('full')}>完整评测</Button>
@@ -626,40 +723,77 @@ export default function EvalPage() {
                 <Row gutter={16}>
                   <Col span={10}>
                     <Card title="评测记录" size="small" bodyStyle={{ padding: 0, overflow: 'hidden' }}>
-                      <Table
-                        dataSource={evaluations}
-                        columns={evaluationColumns}
-                        rowKey="id"
-                        loading={evaluationsLoading}
-                        size="small"
-                        scroll={{ x: 620, y: 400 }}
-                        pagination={{ pageSize: 15 }}
-                        rowSelection={{
-                          selectedRowKeys: selectedEvalIds,
-                          onChange: (keys) => setSelectedEvalIds(keys as string[]),
-                        }}
-                        onRow={(evaluation) => ({
-                          onClick: () => view_evaluation(evaluation),
-                          style: {
-                            cursor: 'pointer',
-                            background: selectedEvaluation?.id === evaluation.id ? '#e6f4ff' : undefined,
-                          },
-                        })}
-                      />
-                      {hasSelection && (
-                        <div style={{
-                          position: 'sticky', bottom: 0, background: '#fff', borderTop: '1px solid #f0f0f0',
-                          padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 1,
-                        }}>
-                          <Text type="secondary">{selectedEvalIds.length} 项</Text>
-                          <Popconfirm
-                            title={`确定删除 ${selectedEvalIds.length} 条评测？`}
-                            onConfirm={handle_batch_delete_evals}
+                      <div style={{ overflow: 'auto', maxHeight: 400 }}>
+                        {evaluationsLoading ? (
+                          <div style={{ padding: '40px 16px', textAlign: 'center', color: '#bfbfbf', fontSize: 12 }}>加载中...</div>
+                        ) : evalPaged.length === 0 ? (
+                          <div style={{ padding: '40px 16px', textAlign: 'center', color: '#bfbfbf', fontSize: 12 }}>暂无评测记录</div>
+                        ) : (
+                          <Table
+                            dataSource={evalPaged}
+                            columns={[
+                              {
+                                title: '',
+                                key: '_select',
+                                width: 40,
+                                render: (_: undefined, e: Evaluation) => (
+                                  <Checkbox
+                                    checked={selectedEvalIds.includes(e.id)}
+                                    onChange={(ev) => toggle_eval_selection(e.id, ev.target.checked)}
+                                    onClick={(ev) => ev.stopPropagation()}
+                                  />
+                                ),
+                              },
+                              ...evaluationColumns,
+                            ]}
+                            rowKey="id"
+                            size="small"
+                            scroll={{ x: 660 }}
+                            pagination={false}
+                            onRow={(evaluation) => ({
+                              onClick: () => view_evaluation(evaluation),
+                              style: {
+                                cursor: 'pointer',
+                                background: selectedEvaluation?.id === evaluation.id ? '#e6f4ff' : undefined,
+                              },
+                            })}
+                          />
+                        )}
+                      </div>
+                      <div style={{
+                        padding: '8px 16px', borderTop: '1px solid #f0f0f0',
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        fontSize: 12, color: '#8c8c8c', flexShrink: 0,
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Checkbox
+                            checked={evalAllSelected}
+                            indeterminate={hasSelection && !evalAllSelected}
+                            onChange={(e) => setSelectedEvalIds(e.target.checked ? evalPaged.map((ev) => ev.id) : [])}
                           >
-                            <Button type="primary" danger size="small" icon={<DeleteOutlined />}>删除</Button>
-                          </Popconfirm>
+                            全选
+                          </Checkbox>
+                          {hasSelection && (
+                            <>
+                              <span style={{ color: '#1677ff' }}>{selectedEvalIds.length} 项</span>
+                              <Popconfirm
+                                title={`确定删除 ${selectedEvalIds.length} 条评测？`}
+                                onConfirm={handle_batch_delete_evals}
+                              >
+                                <Button type="primary" danger size="small" icon={<DeleteOutlined />}>删除</Button>
+                              </Popconfirm>
+                            </>
+                          )}
+                          {!hasSelection && <span>共 {evaluations.length} 条</span>}
                         </div>
-                      )}
+                        {evaluations.length > EVAL_PAGE_SIZE && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <Button size="small" disabled={evalPage <= 1} onClick={() => setEvalPage(evalPage - 1)}>上一页</Button>
+                            <span>{evalPage}</span>
+                            <Button size="small" disabled={evalPage * EVAL_PAGE_SIZE >= evaluations.length} onClick={() => setEvalPage(evalPage + 1)}>下一页</Button>
+                          </div>
+                        )}
+                      </div>
                     </Card>
                   </Col>
 
@@ -877,141 +1011,248 @@ export default function EvalPage() {
         })()}
       </Modal>
 
-      <Modal
-        title="配置管理"
-        open={configModalOpen}
-        onCancel={() => setConfigModalOpen(false)}
-        width={700}
-        footer={null}
+      <Drawer
+        title="评测配置管理"
+        size="large"
+        open={configDrawerOpen}
+        onClose={() => {
+          setConfigDrawerOpen(false);
+          setRightPanelMode('empty');
+          setSelectedVersion(null);
+        }}
+        destroyOnClose
       >
-        <div style={{ marginBottom: 16 }}>
-          <Text strong>已有配置</Text>
-          {evalConfigs.length === 0 ? (
-            <Text type="secondary" style={{ marginLeft: 8 }}>暂无配置</Text>
-          ) : (
-            <Table
-              dataSource={evalConfigs}
-              rowKey="id"
+        <Row gutter={16} style={{ height: 'calc(100vh - 108px)' }}>
+          <Col span={10} style={{ borderRight: '1px solid #f0f0f0', paddingRight: 16, overflowY: 'auto' }}>
+            <Button
+              type="primary"
               size="small"
-              pagination={false}
-              style={{ marginTop: 8 }}
-              columns={[
-                { title: '名称', dataIndex: 'name', key: 'name' },
-                { title: '版本', dataIndex: 'version', key: 'version', width: 60 },
-                {
-                  title: '状态', key: 'is_active', width: 70,
-                  render: (_: unknown, r: EvalConfig) => (
-                    <Tag color={r.is_active ? 'green' : 'default'}>{r.is_active ? '激活' : '停用'}</Tag>
-                  ),
-                },
-                { title: '说明', dataIndex: 'description', key: 'description', ellipsis: true },
-                {
-                  title: '操作', key: 'action', width: 70,
-                  render: (_: unknown, r: EvalConfig) => r.is_active ? (
-                    <Text type="secondary" style={{ fontSize: 12 }}>当前激活</Text>
-                  ) : (
-                    <Popconfirm title="确定删除此配置？" onConfirm={() => delete_config(r.id)}>
-                      <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+              icon={<PlusOutlined />}
+              onClick={handle_new_config}
+              style={{ marginBottom: 12, width: '100%' }}
+            >
+              新建配置
+            </Button>
+            {configGroups.length === 0 ? (
+              <Text type="secondary">暂无配置</Text>
+            ) : (
+              <Collapse
+                accordion
+                activeKey={expandedConfigName ?? undefined}
+                onChange={(key) => setExpandedConfigName(key as string)}
+              >
+                {configGroups.map((group) => (
+                  <Collapse.Panel
+                    key={group.name}
+                    header={
+                      <span>
+                        <Text strong>{group.name}</Text>
+                        <Text type="secondary" style={{ marginLeft: 8 }}>
+                          ({group.versions.length}个版本)
+                        </Text>
+                      </span>
+                    }
+                  >
+                    {group.versions.map((v) => (
+                      <div
+                        key={v.id}
+                        onClick={() => select_version(v)}
+                        style={{
+                          padding: '6px 8px',
+                          cursor: 'pointer',
+                          borderRadius: 4,
+                          background: selectedVersion?.id === v.id ? '#e6f4ff' : undefined,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          marginBottom: 2,
+                        }}
+                      >
+                        <span>
+                          {v.is_active ? <Badge status="success" style={{ marginRight: 6 }} /> : null}
+                          <Text>v{v.version}</Text>
+                          <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                            {v.created_at?.slice(0, 10)}
+                          </Text>
+                        </span>
+                        {v.is_active ? <Tag color="green" style={{ marginRight: 0 }}>当前</Tag> : null}
+                      </div>
+                    ))}
+                  </Collapse.Panel>
+                ))}
+              </Collapse>
+            )}
+          </Col>
+
+          <Col span={14} style={{ paddingLeft: 16, overflowY: 'auto' }}>
+            {rightPanelMode === 'empty' && (
+              <div style={{ textAlign: 'center', paddingTop: 80 }}>
+                <Text type="secondary">选择左侧的配置版本查看详情</Text>
+              </div>
+            )}
+
+            {rightPanelMode === 'view' && selectedVersion && selectedVersionConfigJson && (
+              <>
+                <Descriptions bordered size="small" column={2}>
+                  <Descriptions.Item label="名称">{selectedVersion.name}</Descriptions.Item>
+                  <Descriptions.Item label="版本">v{selectedVersion.version}</Descriptions.Item>
+                  <Descriptions.Item label="说明" span={2}>
+                    {selectedVersion.description || '-'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="创建时间" span={2}>
+                    {selectedVersion.created_at}
+                  </Descriptions.Item>
+                </Descriptions>
+
+                <Card size="small" title="检索参数" style={{ marginTop: 16 }}>
+                  <Descriptions bordered size="small" column={2}>
+                    <Descriptions.Item label="向量 Top-K">{selectedVersionConfigJson.retrieval?.vector_top_k}</Descriptions.Item>
+                    <Descriptions.Item label="关键词 Top-K">{selectedVersionConfigJson.retrieval?.keyword_top_k}</Descriptions.Item>
+                    <Descriptions.Item label="RRF K">{selectedVersionConfigJson.retrieval?.rrf_k}</Descriptions.Item>
+                    <Descriptions.Item label="单篇最大 Chunk">{selectedVersionConfigJson.retrieval?.max_chunks_per_article}</Descriptions.Item>
+                    <Descriptions.Item label="最小 RRF 分数">{selectedVersionConfigJson.retrieval?.min_rrf_score}</Descriptions.Item>
+                  </Descriptions>
+                </Card>
+
+                <Card size="small" title="重排序参数" style={{ marginTop: 12 }}>
+                  <Descriptions bordered size="small" column={2}>
+                    <Descriptions.Item label="启用重排序">
+                      {selectedVersionConfigJson.rerank?.enable_rerank ? '是' : '否'}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="重排序器">{selectedVersionConfigJson.rerank?.reranker_type}</Descriptions.Item>
+                    <Descriptions.Item label="重排序 Top-K">{selectedVersionConfigJson.rerank?.rerank_top_k}</Descriptions.Item>
+                    <Descriptions.Item label="最小重排序分数">{selectedVersionConfigJson.rerank?.rerank_min_score}</Descriptions.Item>
+                  </Descriptions>
+                </Card>
+
+                <Card size="small" title="生成参数" style={{ marginTop: 12 }}>
+                  <Descriptions bordered size="small" column={2}>
+                    <Descriptions.Item label="最大上下文字符数">{selectedVersionConfigJson.generation?.max_context_chars}</Descriptions.Item>
+                  </Descriptions>
+                </Card>
+
+                <div style={{ marginTop: 16, display: 'flex', justifyContent: 'space-between' }}>
+                  <Space>
+                    <Button icon={<CopyOutlined />} onClick={handle_clone}>克隆并编辑</Button>
+                    {!selectedVersion.is_active && (
+                      <Popconfirm title="将此版本设为当前激活版本？" onConfirm={handle_activate}>
+                        <Button icon={<CheckCircleOutlined />}>设为当前</Button>
+                      </Popconfirm>
+                    )}
+                  </Space>
+                  {!selectedVersion.is_active && (
+                    <Popconfirm title="确定删除此配置版本？" onConfirm={handle_delete_config}>
+                      <Button danger icon={<DeleteOutlined />}>删除</Button>
                     </Popconfirm>
-                  ),
-                },
-              ]}
-            />
-          )}
-        </div>
+                  )}
+                </div>
+              </>
+            )}
 
-        <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 16 }}>
-          <Text strong>新建配置</Text>
-          <Form form={configForm} layout="vertical" style={{ marginTop: 8 }}>
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item name="name" label="配置名称" rules={[{ required: true, message: '请输入配置名称' }]}>
-                  <Input placeholder="如 默认" />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item name="description" label="说明">
-                  <Input placeholder="配置说明" />
-                </Form.Item>
-              </Col>
-            </Row>
+            {rightPanelMode === 'edit' && (
+              <>
+                <Text strong>
+                  {selectedVersion ? `克隆 ${selectedVersion.name} v${selectedVersion.version}` : '新建配置'}
+                </Text>
+                <Form form={editForm} layout="vertical" style={{ marginTop: 16 }}>
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Form.Item name="name" label="配置名称" rules={[{ required: true, message: '请输入配置名称' }]}>
+                        <Input placeholder="如 默认" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item name="description" label="说明">
+                        <Input placeholder="配置说明" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
 
-            <Text type="secondary" style={{ fontSize: 13 }}>检索参数</Text>
-            <Row gutter={16}>
-              <Col span={8}>
-                <Form.Item name="retrieval_vector_top_k" label="向量 Top-K">
-                  <InputNumber min={1} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-              <Col span={8}>
-                <Form.Item name="retrieval_keyword_top_k" label="关键词 Top-K">
-                  <InputNumber min={1} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-              <Col span={8}>
-                <Form.Item name="retrieval_rrf_k" label="RRF K">
-                  <InputNumber min={1} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-            </Row>
-            <Row gutter={16}>
-              <Col span={8}>
-                <Form.Item name="retrieval_max_chunks_per_article" label="单篇最大 Chunk">
-                  <InputNumber min={1} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-              <Col span={8}>
-                <Form.Item name="retrieval_min_rrf_score" label="最小 RRF 分数">
-                  <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-            </Row>
+                  <Divider orientation="left" plain>检索参数</Divider>
+                  <Row gutter={16}>
+                    <Col span={8}>
+                      <Form.Item name="retrieval_vector_top_k" label="向量 Top-K">
+                        <InputNumber min={1} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item name="retrieval_keyword_top_k" label="关键词 Top-K">
+                        <InputNumber min={1} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item name="retrieval_rrf_k" label="RRF K">
+                        <InputNumber min={1} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                  <Row gutter={16}>
+                    <Col span={8}>
+                      <Form.Item name="retrieval_max_chunks_per_article" label="单篇最大 Chunk">
+                        <InputNumber min={1} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item name="retrieval_min_rrf_score" label="最小 RRF 分数">
+                        <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
 
-            <Text type="secondary" style={{ fontSize: 13 }}>重排序参数</Text>
-            <Row gutter={16}>
-              <Col span={8}>
-                <Form.Item name="rerank_enable_rerank" label="启用重排序" valuePropName="checked">
-                  <Switch checkedChildren="开" unCheckedChildren="关" />
-                </Form.Item>
-              </Col>
-              <Col span={8}>
-                <Form.Item name="rerank_reranker_type" label="重排序器">
-                  <Select options={[
-                    { value: 'gguf', label: 'GGUF' },
-                    { value: 'llm', label: 'LLM' },
-                    { value: 'none', label: 'None' },
-                  ]} />
-                </Form.Item>
-              </Col>
-              <Col span={8}>
-                <Form.Item name="rerank_rerank_top_k" label="重排序 Top-K">
-                  <InputNumber min={1} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-            </Row>
-            <Row gutter={16}>
-              <Col span={8}>
-                <Form.Item name="rerank_rerank_min_score" label="最小重排序分数">
-                  <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-            </Row>
+                  <Divider orientation="left" plain>重排序参数</Divider>
+                  <Row gutter={16}>
+                    <Col span={8}>
+                      <Form.Item name="rerank_enable_rerank" label="启用重排序" valuePropName="checked">
+                        <Switch checkedChildren="开" unCheckedChildren="关" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item name="rerank_reranker_type" label="重排序器">
+                        <Select options={[
+                          { value: 'gguf', label: 'GGUF' },
+                          { value: 'llm', label: 'LLM' },
+                          { value: 'none', label: 'None' },
+                        ]} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item name="rerank_rerank_top_k" label="重排序 Top-K">
+                        <InputNumber min={1} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                  <Row gutter={16}>
+                    <Col span={8}>
+                      <Form.Item name="rerank_rerank_min_score" label="最小重排序分数">
+                        <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
 
-            <Text type="secondary" style={{ fontSize: 13 }}>生成参数</Text>
-            <Row gutter={16}>
-              <Col span={8}>
-                <Form.Item name="generation_max_context_chars" label="最大上下文字符数">
-                  <InputNumber min={500} max={50000} step={1000} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-            </Row>
+                  <Divider orientation="left" plain>生成参数</Divider>
+                  <Row gutter={16}>
+                    <Col span={8}>
+                      <Form.Item name="generation_max_context_chars" label="最大上下文字符数">
+                        <InputNumber min={500} max={50000} step={1000} style={{ width: '100%' }} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
 
-            <Form.Item style={{ marginBottom: 0, marginTop: 8 }}>
-              <Button type="primary" onClick={create_config}>创建配置</Button>
-            </Form.Item>
-          </Form>
-        </div>
-      </Modal>
+                  <Form.Item style={{ marginBottom: 0, marginTop: 8 }}>
+                    <Space>
+                      <Button type="primary" onClick={handle_save_config}>保存为新版本</Button>
+                      <Button onClick={() => {
+                        setRightPanelMode('empty');
+                        setSelectedVersion(null);
+                      }}>取消</Button>
+                    </Space>
+                  </Form.Item>
+                </Form>
+              </>
+            )}
+          </Col>
+        </Row>
+      </Drawer>
     </div>
   );
 }
