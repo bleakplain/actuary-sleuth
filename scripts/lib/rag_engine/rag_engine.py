@@ -412,6 +412,19 @@ class RAGEngine:
         if self._reranker:
             results = self._reranker.rerank(query_text, results, top_k=top_k)
 
+        if results and config.rerank_min_score > 0:
+            filtered = [
+                r for r in results
+                if not r.get('reranked', False)
+                or r.get('rerank_score', 0) >= config.rerank_min_score
+            ]
+            if len(filtered) < len(results):
+                logger.debug(
+                    f"Reranker 阈值过滤: {len(results)} → {len(filtered)} "
+                    f"(阈值={config.rerank_min_score})"
+                )
+            results = filtered
+
         return results
 
     def _apply_filters(self, results: List[Dict[str, Any]], filters: Dict[str, Any]) -> List[Dict[str, Any]]:

@@ -15,9 +15,10 @@ class HybridQueryConfig:
     keyword_weight: float = 1.0
     enable_rerank: bool = True
     rerank_top_k: int = 5
-    reranker_type: str = "llm"
+    reranker_type: str = "gguf"
     max_chunks_per_article: int = 3
     min_rrf_score: float = 0.0
+    rerank_min_score: float = 0.0
 
     _VALID_RERANKER_TYPES = {"llm", "gguf", "none"}
 
@@ -34,6 +35,11 @@ class HybridQueryConfig:
             raise ValueError(
                 f"reranker_type must be one of {self._VALID_RERANKER_TYPES}, "
                 f"got {self.reranker_type}"
+            )
+        if not 0.0 <= self.rerank_min_score <= 1.0:
+            raise ValueError(
+                f"rerank_min_score must be between 0.0 and 1.0, "
+                f"got {self.rerank_min_score}"
             )
 
 
