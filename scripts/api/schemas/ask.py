@@ -7,6 +7,7 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = Field(None, description="对话 ID，为空则新建对话")
     mode: str = Field("qa", pattern="^(qa|search)$", description="qa=智能问答, search=精确检索")
     debug: Optional[bool] = Field(None, description="是否记录 trace 调试信息，默认读取配置")
+    user_id: str = Field("default", description="用户 ID，用于记忆隔离")
 
 
 class CitationOut(BaseModel):

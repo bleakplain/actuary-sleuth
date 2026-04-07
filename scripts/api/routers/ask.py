@@ -23,10 +23,11 @@ from api.database import (
     search_conversations,
     update_feedback,
 )
-from api.dependencies import get_rag_engine
+from api.dependencies import get_rag_engine, get_memory_service, get_ask_graph
 from api.schemas.ask import ChatRequest, ConversationOut, MessageOut
 from lib.config import get_config
 from lib.llm.trace import cleanup_trace_counters, get_llm_call_count, reset_llm_call_count, trace_span
+from lib.rag_engine.graph import AskState, GraphContext
 from lib.rag_engine.quality_detector import detect_quality
 
 logger = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ def _build_trace_payload(root_span, trace_id: Optional[str] = None) -> dict:
 @router.post("/chat")
 async def chat(req: ChatRequest):
     conversation_id = req.conversation_id or f"conv_{uuid.uuid4().hex[:8]}"
-    create_conversation(conversation_id, title=req.question[:50])
+    create_conversation(conversation_id, title=req.question[:50], user_id=req.user_id)
     add_message(conversation_id, "user", req.question)
 
     engine = get_rag_engine()
@@ -104,25 +105,40 @@ async def chat(req: ChatRequest):
             raise HTTPException(status_code=500, detail=f"检索失败: {e}")
 
     async def event_stream():
+        root_span = None
+        exc_info = (None, None, None)
         try:
-            root_span = None
             if req.debug:
-                with trace_span("root", "root") as root_span:
-                    reset_llm_call_count(root_span.trace_id)
-                    root_span.input = {"question": req.question, "mode": req.mode}
-                    result = await asyncio.to_thread(engine.ask, req.question)
-                    root_span.output = {
-                        "answer_length": len(result.get("answer", "")),
-                        "answer": result.get("answer", ""),
-                        "source_count": len(result.get("sources", [])),
-                    }
-                    root_span.metadata = {
-                        "mode": req.mode,
-                        "retrieval": "hybrid",
-                        "reranker": engine.config.rerank.reranker_type,
-                    }
-            else:
-                result = await asyncio.to_thread(engine.ask, req.question)
+                root_span = trace_span("root", "root")
+                root_span.__enter__()
+                reset_llm_call_count(root_span.trace_id)
+                root_span.input = {"question": req.question, "mode": req.mode}
+
+            memory_svc = get_memory_service()
+            graph = get_ask_graph()
+            state = AskState(
+                question=req.question, mode=req.mode, user_id=req.user_id,
+                conversation_id=conversation_id, search_results=[], memory_context="",
+                answer="", sources=[], citations=[], unverified_claims=[],
+                content_mismatches=[], faithfulness_score=None, error=None,
+            )
+            context = GraphContext(
+                rag_engine=engine, llm_client=engine._llm_client,
+                memory_service=memory_svc,
+            )
+            result = await asyncio.to_thread(graph.invoke, state, context=context)
+
+            if root_span:
+                root_span.output = {
+                    "answer_length": len(result.get("answer", "")),
+                    "answer": result.get("answer", ""),
+                    "source_count": len(result.get("sources", [])),
+                }
+                root_span.metadata = {
+                    "mode": req.mode,
+                    "retrieval": "hybrid",
+                    "reranker": engine.config.rerank.reranker_type,
+                }
 
             answer = result.get("answer", "")
             chunk_size = 4
@@ -146,6 +162,10 @@ async def chat(req: ChatRequest):
                 unverified_claims=result.get("unverified_claims", []),
             )
 
+            if root_span:
+                root_span.__exit__(*exc_info)
+                exc_info = (None, None, None)
+
             trace_summary = None
             if root_span:
                 tid = root_span.trace_id
@@ -154,7 +174,7 @@ async def chat(req: ChatRequest):
                                name=req.question, summary=trace_summary["summary"])
                 cleanup_trace_counters(tid)
 
-            done_data: dict = {
+            response_meta: dict = {
                 "conversation_id": conversation_id,
                 "message_id": msg_id,
                 "citations": result.get("citations", []),
@@ -164,11 +184,11 @@ async def chat(req: ChatRequest):
                 "content_mismatches": result.get("content_mismatches", []),
             }
             if trace_summary:
-                done_data["trace"] = trace_summary
+                response_meta["trace"] = trace_summary
 
             yield {
                 "event": "message",
-                "data": json.dumps({"type": "done", "data": done_data}, ensure_ascii=False),
+                "data": json.dumps({"type": "done", "data": response_meta}, ensure_ascii=False),
             }
 
             # 自动质量检测 — 低于阈值自动创建 feedback
@@ -194,7 +214,11 @@ async def chat(req: ChatRequest):
             except Exception as e:
                 logger.warning(f"Auto quality detection failed: {e}")
         except Exception as e:
+            exc_info = (type(e), e, e.__traceback__)
             logger.error(f"Chat failed: {e}")
+            if root_span:
+                root_span.__exit__(*exc_info)
+                cleanup_trace_counters(root_span.trace_id)
             yield {
                 "event": "message",
                 "data": json.dumps({"type": "error", "data": str(e)}, ensure_ascii=False),

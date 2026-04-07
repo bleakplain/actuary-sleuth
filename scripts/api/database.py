@@ -218,12 +218,43 @@ def _migrate_db():
             if col not in trace_cols:
                 conn.execute(f"ALTER TABLE traces ADD COLUMN {col} {dtype} {default}")
 
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS memory_metadata (
+            mem0_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            conversation_id TEXT,
+            category TEXT DEFAULT 'fact',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            expires_at TEXT,
+            last_accessed_at TEXT NOT NULL DEFAULT (datetime('now')),
+            access_count INTEGER NOT NULL DEFAULT 0,
+            is_deleted INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_user ON memory_metadata(user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_expires ON memory_metadata(expires_at)")
 
-def create_conversation(conversation_id: str, title: str = "") -> None:
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_profiles (
+            user_id TEXT PRIMARY KEY,
+            focus_areas TEXT DEFAULT '[]',
+            preference_tags TEXT DEFAULT '[]',
+            audit_stats TEXT DEFAULT '{}',
+            summary TEXT DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """)
+
+        conv_cols = {row[1] for row in conn.execute("PRAGMA table_info(conversations)").fetchall()}
+        if 'user_id' not in conv_cols:
+            conn.execute("ALTER TABLE conversations ADD COLUMN user_id TEXT DEFAULT 'default'")
+
+
+def create_conversation(conversation_id: str, title: str = "", user_id: str = "default") -> None:
     with get_connection() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO conversations (id, title) VALUES (?, ?)",
-            (conversation_id, title),
+            "INSERT OR IGNORE INTO conversations (id, title, user_id) VALUES (?, ?, ?)",
+            (conversation_id, title, user_id),
         )
 
 
