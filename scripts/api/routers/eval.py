@@ -90,7 +90,7 @@ async def update_eval_sample(sample_id: str, sample: EvalSampleCreate):
 
 
 @router.delete("/dataset/samples/{sample_id}")
-async def delete_eval_sample(sample_id: str):
+async def remove_eval_sample(sample_id: str):
     if not delete_eval_sample(sample_id):
         raise HTTPException(status_code=404, detail="样本不存在")
     return {"deleted": True}
@@ -104,7 +104,7 @@ async def import_dataset(req: ImportSamplesRequest):
 
 
 @router.post("/dataset/snapshots")
-async def create_snapshot(req: SnapshotCreate):
+async def add_snapshot(req: SnapshotCreate):
     snap_id = create_snapshot(req.name, req.description)
     return {"snapshot_id": snap_id, "name": req.name}
 
@@ -115,7 +115,7 @@ async def list_snapshots():
 
 
 @router.post("/dataset/snapshots/{snapshot_id}/restore")
-async def restore_snapshot(snapshot_id: str):
+async def apply_snapshot(snapshot_id: str):
     snap_ids = [s["id"] for s in get_snapshots()]
     if snapshot_id not in snap_ids:
         raise HTTPException(status_code=404, detail="快照不存在")
@@ -285,7 +285,7 @@ async def list_evaluations():
 
 
 @router.delete("/evaluations")
-async def batch_delete_evaluations(ids: str = Query(..., description="逗号分隔的评测ID列表")):
+async def remove_evaluations(ids: str = Query(..., description="逗号分隔的评测ID列表")):
     evaluation_ids = [eid.strip() for eid in ids.split(",") if eid.strip()]
     if not evaluation_ids:
         raise HTTPException(status_code=400, detail="未提供有效的评测ID")
@@ -402,13 +402,13 @@ async def get_active_eval_config(name: str):
 
 
 @router.post("/configs")
-async def create_eval_config_route(req: EvalConfigCreate):
+async def add_eval_config(req: EvalConfigCreate):
     config_id = insert_eval_config(req.name, req.description, req.to_config_dict())
     return {"id": config_id, "name": req.name}
 
 
 @router.delete("/configs/{config_id}")
-async def delete_eval_config_route(config_id: int):
+async def deactivate_eval_config(config_id: int):
     if not remove_eval_config(config_id):
         raise HTTPException(status_code=400, detail="只能删除非激活版本的配置")
 

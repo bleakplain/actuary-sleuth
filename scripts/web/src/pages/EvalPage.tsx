@@ -475,27 +475,27 @@ export default function EvalPage() {
   const detailColumns = [
     { title: '样本ID', dataIndex: 'sample_id', key: 'sample_id', width: 80 },
     {
-      title: <Tooltip title={METRIC_LABELS.precision_at_k?.tooltip}>Precision@{evalK}</Tooltip>,
+      title: <Tooltip title={resolveMetricMeta('precision_at_k', evalK).tooltip}>Precision@{evalK}</Tooltip>,
       key: 'precision', width: 100,
       render: (_: undefined, r: SampleResult) => formatMetric(r.retrieval_metrics.precision),
     },
     {
-      title: <Tooltip title={METRIC_LABELS.recall_at_k?.tooltip}>Recall@{evalK}</Tooltip>,
+      title: <Tooltip title={resolveMetricMeta('recall_at_k', evalK).tooltip}>Recall@{evalK}</Tooltip>,
       key: 'recall', width: 100,
       render: (_: undefined, r: SampleResult) => formatMetric(r.retrieval_metrics.recall),
     },
     {
-      title: <Tooltip title={METRIC_LABELS.mrr?.tooltip}>MRR</Tooltip>,
+      title: <Tooltip title={resolveMetricMeta('mrr').tooltip}>MRR</Tooltip>,
       key: 'mrr', width: 90,
       render: (_: undefined, r: SampleResult) => formatMetric(r.retrieval_metrics.mrr),
     },
     {
-      title: <Tooltip title={METRIC_LABELS.ndcg?.tooltip}>NDCG</Tooltip>,
+      title: <Tooltip title={resolveMetricMeta('ndcg').tooltip}>NDCG</Tooltip>,
       key: 'ndcg', width: 90,
       render: (_: undefined, r: SampleResult) => formatMetric(r.retrieval_metrics.ndcg),
     },
     {
-      title: <Tooltip title={METRIC_LABELS.faithfulness?.tooltip}>忠实度</Tooltip>,
+      title: <Tooltip title={resolveMetricMeta('faithfulness').tooltip}>忠实度</Tooltip>,
       key: 'faithfulness', width: 100,
       render: (_: undefined, r: SampleResult) => formatMetric(r.generation_metrics.faithfulness),
     },

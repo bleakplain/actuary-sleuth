@@ -98,6 +98,7 @@ export interface Evaluation {
   finished_at?: string;
   config?: {
     retrieval?: Record<string, string | number | boolean>;
+    rerank?: Record<string, string | number | boolean>;
     generation?: Record<string, string | number | boolean>;
     evaluation?: Record<string, string>;
     dataset?: Record<string, string | number | null>;
