@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Input, Button, Checkbox, Popconfirm, message } from 'antd';
 import { SearchOutlined, DeleteOutlined, ClearOutlined } from '@ant-design/icons';
 import { useObservabilityStore } from '../../stores/observabilityStore';
@@ -6,6 +6,33 @@ import type { Dayjs } from 'dayjs';
 import { DatePicker } from 'antd';
 
 const PAGE_SIZE = 20;
+
+interface ColumnDef {
+  key: string;
+  label: string;
+  initialWidth: number;
+  minWidth?: number;
+  flex?: boolean;
+}
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'time', label: '时间', initialWidth: 130, minWidth: 90 },
+  { key: 'traceId', label: 'Trace ID', initialWidth: 110, minWidth: 80 },
+  { key: 'name', label: '名称', initialWidth: 200, minWidth: 60, flex: true },
+  { key: 'spans', label: 'Spans', initialWidth: 56, minWidth: 40 },
+  { key: 'llmCalls', label: 'LLM 调用', initialWidth: 68, minWidth: 50 },
+  { key: 'latency', label: '耗时', initialWidth: 100, minWidth: 70 },
+];
+
+function loadColumnWidths(): Record<string, number> {
+  try {
+    const saved = localStorage.getItem('trace-list-col-widths');
+    if (saved) return JSON.parse(saved);
+  } catch { /* ignore */ }
+  const defaults: Record<string, number> = {};
+  for (const col of COLUMNS) defaults[col.key] = col.initialWidth;
+  return defaults;
+}
 
 export default function TraceList() {
   const {
@@ -17,6 +44,7 @@ export default function TraceList() {
   const [traceIdFilter, setTraceIdFilter] = useState('');
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [colWidths, setColWidths] = useState<Record<string, number>>(loadColumnWidths);
 
   const handleSearch = () => {
     setSelectedIds([]);
@@ -67,6 +95,99 @@ export default function TraceList() {
     return `${pad(d.getMonth() + 1)}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   };
 
+  const handleResizeStart = useCallback((colKey: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startWidth = e.currentTarget.parentElement?.offsetWidth ?? 100;
+    let lastX = e.clientX;
+
+    const handleMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - lastX;
+      lastX = ev.clientX;
+      const col = COLUMNS.find((c) => c.key === colKey);
+      const minWidth = col?.minWidth ?? 40;
+      const cur = document.querySelector<HTMLElement>(`[data-col="${colKey}"]`);
+      if (!cur) return;
+      const newWidth = Math.max(minWidth, cur.offsetWidth + delta);
+      setColWidths((prev) => ({ ...prev, [colKey]: newWidth }));
+    };
+
+    const handleUp = () => {
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', handleMove);
+    document.addEventListener('mouseup', handleUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem('trace-list-col-widths', JSON.stringify(colWidths)); } catch { /* ignore */ }
+  }, [colWidths]);
+
+  const renderCell = (item: typeof traceList[number], key: string) => {
+    switch (key) {
+      case 'time':
+        return (
+          <span style={{ color: '#8c8c8c', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+            {fmtTime(item.created_at)}
+          </span>
+        );
+      case 'traceId':
+        return (
+          <span style={{
+            fontFamily: "'SF Mono','Menlo','Consolas',monospace",
+            fontSize: 12, color: '#262626',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }} title={item.trace_id}>
+            {item.trace_id}
+          </span>
+        );
+      case 'name':
+        return (
+          <span style={{
+            color: '#262626', fontSize: 13,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }} title={item.trace_name || undefined}>
+            {item.trace_name || '-'}
+          </span>
+        );
+      case 'spans':
+        return <span style={{ color: '#8c8c8c', fontSize: 12 }}>{item.span_count}</span>;
+      case 'llmCalls':
+        return <span style={{ color: '#8c8c8c', fontSize: 12 }}>{item.llm_call_count}</span>;
+      case 'latency':
+        return (
+          <span style={{
+            color: item.status === 'error' ? '#ff4d4f' : '#52c41a',
+            fontSize: 12, fontVariantNumeric: 'tabular-nums',
+            position: 'relative',
+          }}>
+            <span style={{
+              position: 'absolute', left: 0, top: 4, bottom: 4,
+              width: `${Math.max((item.total_duration_ms / maxDuration) * 100, 2)}%`,
+              background: item.status === 'error' ? 'rgba(255,77,79,0.1)' : 'rgba(82,196,26,0.1)',
+              borderRadius: 2,
+            }} />
+            <span style={{ position: 'relative' }}>{fmtDuration(item.total_duration_ms)}</span>
+          </span>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const colStyle = (col: ColumnDef) => {
+    if (col.flex) {
+      return { flex: '1 1 0', minWidth: col.minWidth ?? 60, paddingLeft: 12 };
+    }
+    return { width: colWidths[col.key], flexShrink: 0 };
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Filter bar */}
@@ -101,12 +222,18 @@ export default function TraceList() {
         flexShrink: 0,
       }}>
         <span style={{ width: 28, flexShrink: 0 }} />
-        <span style={{ width: 130, flexShrink: 0 }}>Time</span>
-        <span style={{ width: 110, flexShrink: 0 }}>Trace ID</span>
-        <span style={{ flex: 1, paddingLeft: 12 }}>Name</span>
-        <span style={{ width: 56, flexShrink: 0 }}>Spans</span>
-        <span style={{ width: 68, flexShrink: 0 }}>LLM Calls</span>
-        <span style={{ width: 100, flexShrink: 0 }}>Latency</span>
+        {COLUMNS.map((col) => (
+          <span key={col.key} data-col={col.key} style={{ ...colStyle(col), position: 'relative', overflow: 'visible' }}>
+            {col.label}
+            <span
+              onMouseDown={(e) => handleResizeStart(col.key, e)}
+              style={{
+                position: 'absolute', right: -3, top: -2, bottom: -2, width: 6,
+                cursor: 'col-resize', zIndex: 1,
+              }}
+            />
+          </span>
+        ))}
       </div>
 
       {/* List */}
@@ -116,81 +243,44 @@ export default function TraceList() {
             暂无 Trace 数据
           </div>
         )}
-        {traceList.map((item) => {
-          return (
-            <div
-              key={item.trace_id}
-              onClick={() => selectTrace(item.trace_id)}
-              style={{
-                padding: '6px 16px',
-                cursor: 'pointer',
-                background: selectedTraceId === item.trace_id ? '#e6f4ff' : '#fff',
-                borderBottom: '1px solid #f5f5f5',
-                display: 'flex',
-                alignItems: 'center',
-                fontSize: 13,
-                transition: 'background 0.15s',
-              }}
-              onMouseEnter={(e) => { if (selectedTraceId !== item.trace_id) e.currentTarget.style.background = '#fafafa'; }}
-              onMouseLeave={(e) => { if (selectedTraceId !== item.trace_id) e.currentTarget.style.background = '#fff'; }}
-            >
-              <span style={{ width: 28, flexShrink: 0 }}>
-                <Checkbox
-                  checked={selectedIds.includes(item.trace_id)}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => toggleSelect(item.trace_id, e.target.checked)}
-                  size="small"
-                />
-              </span>
-              <span style={{
-                width: 130, flexShrink: 0,
-                color: '#8c8c8c', fontSize: 12, fontVariantNumeric: 'tabular-nums',
-              }}>
-                {fmtTime(item.created_at)}
-              </span>
-              <span style={{
-                width: 110, flexShrink: 0,
-                fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
-                fontSize: 12, color: '#262626',
+        {traceList.map((item) => (
+          <div
+            key={item.trace_id}
+            onClick={() => selectTrace(item.trace_id)}
+            style={{
+              padding: '6px 16px',
+              cursor: 'pointer',
+              background: selectedTraceId === item.trace_id ? '#e6f4ff' : '#fff',
+              borderBottom: '1px solid #f5f5f5',
+              display: 'flex',
+              alignItems: 'center',
+              fontSize: 13,
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={(e) => { if (selectedTraceId !== item.trace_id) e.currentTarget.style.background = '#fafafa'; }}
+            onMouseLeave={(e) => { if (selectedTraceId !== item.trace_id) e.currentTarget.style.background = '#fff'; }}
+          >
+            <span style={{ width: 28, flexShrink: 0 }}>
+              <Checkbox
+                checked={selectedIds.includes(item.trace_id)}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => toggleSelect(item.trace_id, e.target.checked)}
+                size="small"
+              />
+            </span>
+            {COLUMNS.map((col) => (
+              <span key={col.key} data-col={col.key} style={{
+                ...colStyle(col),
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                title: item.trace_id,
               }}>
-                {item.trace_id}
+                {renderCell(item, col.key)}
               </span>
-              <span style={{
-                flex: 1, paddingLeft: 12,
-                color: '#262626', fontSize: 13,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                title: item.trace_name || undefined,
-              }}>
-                {item.trace_name || '-'}
-              </span>
-              <span style={{ width: 56, flexShrink: 0, color: '#8c8c8c', fontSize: 12 }}>
-                {item.span_count}
-              </span>
-              <span style={{ width: 68, flexShrink: 0, color: '#8c8c8c', fontSize: 12 }}>
-                {item.llm_call_count}
-              </span>
-              <span style={{
-                width: 100, flexShrink: 0,
-                color: item.status === 'error' ? '#ff4d4f' : '#52c41a',
-                fontSize: 12, fontVariantNumeric: 'tabular-nums',
-                position: 'relative',
-              }}>
-                <span style={{
-                  position: 'absolute', left: 0, top: 4, bottom: 4,
-                  width: `${Math.max((item.total_duration_ms / maxDuration) * 100, 2)}%`,
-                  background: item.status === 'error' ? 'rgba(255,77,79,0.1)' : 'rgba(82,196,26,0.1)',
-                  borderRadius: 2,
-                }} />
-                <span style={{ position: 'relative' }}>{fmtDuration(item.total_duration_ms)}</span>
-              </span>
-            </div>
-          );
-        })}
+            ))}
+          </div>
+        ))}
       </div>
 
-      {/* Bottom bar: selection + pagination */}
+      {/* Bottom bar */}
       <div style={{
         padding: '8px 16px', borderTop: '1px solid #f0f0f0',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',

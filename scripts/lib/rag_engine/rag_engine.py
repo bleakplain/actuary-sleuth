@@ -398,8 +398,6 @@ class RAGEngine:
             k=config.rrf_k,
             filters=filters,
             preprocessor=self._preprocessor,
-            vector_weight=config.vector_weight,
-            keyword_weight=config.keyword_weight,
             max_chunks_per_article=config.max_chunks_per_article,
         )
 

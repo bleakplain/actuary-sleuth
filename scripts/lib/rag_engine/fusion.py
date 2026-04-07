@@ -25,8 +25,6 @@ def reciprocal_rank_fusion(
     vector_results: List[NodeWithScore],
     keyword_results: List[NodeWithScore],
     k: int = 60,
-    vector_weight: float = 1.0,
-    keyword_weight: float = 1.0,
     max_chunks_per_article: int = 3,
 ) -> List[Dict[str, Any]]:
     """Reciprocal Rank Fusion 融合两路检索结果
@@ -35,8 +33,6 @@ def reciprocal_rank_fusion(
         vector_results: 向量检索结果
         keyword_results: 关键词检索结果
         k: RRF 常数，默认 60
-        vector_weight: 向量检索权重，默认 1.0
-        keyword_weight: 关键词检索权重，默认 1.0
         max_chunks_per_article: 每条款最大 chunk 数，默认 3
 
     Returns:
@@ -50,12 +46,12 @@ def reciprocal_rank_fusion(
 
     for rank, scored in enumerate(vector_results):
         key = _chunk_key(scored)
-        scores[key] += vector_weight / (k + rank + 1)
+        scores[key] += 1.0 / (k + rank + 1)
         chunks[key] = scored.node
 
     for rank, scored in enumerate(keyword_results):
         key = _chunk_key(scored)
-        scores[key] += keyword_weight / (k + rank + 1)
+        scores[key] += 1.0 / (k + rank + 1)
         chunks[key] = scored.node
 
     results = []

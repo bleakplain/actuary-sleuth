@@ -79,7 +79,6 @@ class ZhipuClient(BaseLLMClient):
             atexit.register(cleanup)
 
     def _do_generate(self, prompt: str, **kwargs) -> str:
-        self._validate_prompt(prompt)
         url = f"{self.base_url}/chat/completions"
         data = {
             "model": kwargs.get('model', self.model),
@@ -129,10 +128,9 @@ class ZhipuClient(BaseLLMClient):
         rate_limit_delay_mult=LLMConstants.RATE_LIMIT_DELAY_MULT
     )
     def generate(self, prompt: str, **kwargs) -> str:
-        return self._do_generate(prompt, **kwargs)
+        return super().generate(prompt, **kwargs)
 
     def _do_chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
-        self._validate_messages(messages)
         url = f"{self.base_url}/chat/completions"
         data = {
             "model": kwargs.get('model', self.model),
@@ -170,7 +168,7 @@ class ZhipuClient(BaseLLMClient):
         rate_limit_delay_mult=LLMConstants.RATE_LIMIT_DELAY_MULT
     )
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
-        return self._do_chat(messages, **kwargs)
+        return super().chat(messages, **kwargs)
 
     def health_check(self) -> bool:
         try:

@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from sse_starlette.sse import EventSourceResponse
@@ -16,7 +17,7 @@ from api.database import (
     delete_conversation,
     get_conversations,
     get_messages,
-    get_trace,
+    get_trace_by_message_id,
     save_spans,
     save_trace,
     search_conversations,
@@ -25,25 +26,42 @@ from api.database import (
 from api.dependencies import get_rag_engine
 from api.schemas.ask import ChatRequest, ConversationOut, MessageOut
 from lib.config import get_config
-from lib.llm.trace import get_llm_call_count, reset_llm_call_count, trace_span
+from lib.llm.trace import cleanup_trace_counters, get_llm_call_count, reset_llm_call_count, trace_span
 from lib.rag_engine.quality_detector import detect_quality
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ask", tags=["法规问答"])
 
 
-def _persist_trace(root_span, message_id: int, conversation_id: str = "", name: str = "") -> None:
+def _persist_trace(root_span, message_id: int, conversation_id: str = "",
+                   name: str = "", summary: Optional[dict] = None,
+                   trace_id: Optional[str] = None) -> None:
     """将 trace 树中所有 span 批量写入数据库。"""
-    save_trace(root_span.trace_id, message_id, conversation_id, name)
-    spans_data = [s.to_dict() for s in root_span.iter_spans()]
-    save_spans(spans_data)
+    spans = list(root_span.iter_spans())
+    if summary is None:
+        error_count = sum(1 for s in spans if s.status == "error")
+        llm_count = get_llm_call_count(trace_id)
+        summary = {
+            "status": "error" if error_count > 0 else "ok",
+            "total_duration_ms": root_span.duration_ms,
+            "span_count": len(spans),
+            "llm_call_count": llm_count,
+        }
+    save_trace(
+        root_span.trace_id, message_id, conversation_id, name,
+        status=summary["status"],
+        total_duration_ms=summary["total_duration_ms"],
+        span_count=summary["span_count"],
+        llm_call_count=summary["llm_call_count"],
+    )
+    save_spans([s.to_dict() for s in spans])
 
 
-def _build_trace_payload(root_span) -> dict:
+def _build_trace_payload(root_span, trace_id: Optional[str] = None) -> dict:
     """从 trace 树构建 SSE 推送的 trace 数据（与 TraceData 格式对齐）。"""
     spans = list(root_span.iter_spans())
     error_count = sum(1 for s in spans if s.status == "error")
-    llm_count = root_span.metadata.get("llm_call_count", 0) or 0
+    llm_count = get_llm_call_count(trace_id)
     return {
         "trace_id": root_span.trace_id,
         "root": root_span.to_dict(),
@@ -53,6 +71,7 @@ def _build_trace_payload(root_span) -> dict:
             "span_count": len(spans),
             "llm_call_count": llm_count,
             "error_count": error_count,
+            "status": "error" if error_count > 0 else "ok",
         },
     }
 
@@ -88,8 +107,8 @@ async def chat(req: ChatRequest):
         try:
             root_span = None
             if req.debug:
-                reset_llm_call_count()
                 with trace_span("root", "root") as root_span:
+                    reset_llm_call_count(root_span.trace_id)
                     root_span.input = {"question": req.question, "mode": req.mode}
                     result = await asyncio.to_thread(engine.ask, req.question)
                     root_span.output = {
@@ -103,8 +122,6 @@ async def chat(req: ChatRequest):
                         "mode": req.mode,
                         "retrieval": "hybrid",
                         "reranker": hc.reranker_type if hc else None,
-                        "source_count": len(result.get("sources", [])),
-                        "llm_call_count": get_llm_call_count(),
                     }
             else:
                 result = await asyncio.to_thread(engine.ask, req.question)
@@ -133,8 +150,11 @@ async def chat(req: ChatRequest):
 
             trace_summary = None
             if root_span:
-                trace_summary = _build_trace_payload(root_span)
-                _persist_trace(root_span, msg_id, conversation_id, name=req.question)
+                tid = root_span.trace_id
+                trace_summary = _build_trace_payload(root_span, tid)
+                _persist_trace(root_span, msg_id, conversation_id,
+                               name=req.question, summary=trace_summary["summary"])
+                cleanup_trace_counters(tid)
 
             done_data: dict = {
                 "conversation_id": conversation_id,
@@ -218,7 +238,7 @@ async def batch_remove_conversations(ids: str = Query(..., description="逗号�
 
 @router.get("/messages/{message_id}/trace")
 async def get_message_trace(message_id: int):
-    trace = get_trace(message_id)
+    trace = get_trace_by_message_id(message_id)
     if trace is None:
         raise HTTPException(status_code=404, detail="Trace not found")
     return trace

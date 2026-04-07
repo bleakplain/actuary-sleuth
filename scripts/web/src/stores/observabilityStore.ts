@@ -31,8 +31,12 @@ export const useObservabilityStore = create<ObservabilityState>((set, get) => ({
   loadTraces: async (params?: TraceSearchParams) => {
     const merged = { ...get().traceParams, ...params, page: params?.page ?? get().tracePage };
     set({ traceParams: merged });
-    const resp = await api.fetchTraces(merged);
-    set({ traceList: resp.items, traceTotal: resp.total });
+    try {
+      const resp = await api.fetchTraces(merged);
+      set({ traceList: resp.items, traceTotal: resp.total });
+    } catch {
+      // 网络错误时不清空已有数据，保留陈旧数据供用户查看
+    }
   },
 
   selectTrace: (traceId: string) => {

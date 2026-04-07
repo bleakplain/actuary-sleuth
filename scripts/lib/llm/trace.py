@@ -4,9 +4,9 @@
 用于记录 RAG 管线中各环节的输入、输出、耗时和错误信息。
 参考 OpenTelemetry 规范设计，支持 span 级别持久化。
 
-跨线程传播：ContextVar 只在 asyncio.to_thread 中自动复制，
+跨线程传播：ContextVar 通过 asyncio.to_thread 和 copy_context 自动复制，
 对 llama_index 内部线程池等场景不生效。因此 trace_span 使用
-_active_trace_id 全局变量作为跨线程 fallback。
+_active_trace_id ContextVar 作为跨线程 fallback。
 """
 import logging
 import threading
@@ -25,9 +25,8 @@ _trace_context: ContextVar[Optional["TraceSpan"]] = ContextVar("trace", default=
 _counters: dict[str, dict[str, int]] = {}
 _counters_lock = threading.Lock()
 
-# 当前活跃的 trace_id（线程安全，供 ContextVar 无法传播的线程访问）
-_active_trace_id: Optional[str] = None
-_active_trace_id_lock = threading.Lock()
+# 当前活跃的 trace_id（ContextVar，用于 span 树构建）
+_active_trace_id: ContextVar[Optional[str]] = ContextVar("active_trace_id", default=None)
 
 
 def _get_counter(trace_id: str, key: str) -> int:
@@ -48,34 +47,30 @@ def _increment_counter(trace_id: str, key: str) -> int:
 
 
 def _get_active_trace_id() -> Optional[str]:
-    global _active_trace_id
-    with _active_trace_id_lock:
-        return _active_trace_id
+    return _active_trace_id.get()
 
 
 def _set_active_trace_id(tid: Optional[str]) -> None:
-    global _active_trace_id
-    with _active_trace_id_lock:
-        _active_trace_id = tid
+    _active_trace_id.set(tid)
 
 
-def reset_llm_call_count() -> None:
-    """重置当前 trace 的 LLM 调用计数。"""
-    tid = _get_active_trace_id()
+def reset_llm_call_count(trace_id: Optional[str] = None) -> None:
+    """重置 LLM 调用计数。trace_id 优先使用显式传入值，否则从 ContextVar 获取。"""
+    tid = trace_id or _get_active_trace_id()
     if tid:
         _set_counter(tid, "llm_calls", 0)
 
 
-def incr_llm_call_count() -> None:
-    """在当前 trace 中累加 LLM 调用计数（线程安全）。"""
-    tid = _get_active_trace_id()
+def incr_llm_call_count(trace_id: Optional[str] = None) -> None:
+    """累加 LLM 调用计数。trace_id 优先使用显式传入值，否则从 ContextVar 获取。"""
+    tid = trace_id or _get_active_trace_id()
     if tid:
         _increment_counter(tid, "llm_calls")
 
 
-def get_llm_call_count() -> int:
-    """读取当前 trace 的 LLM 调用计数。"""
-    tid = _get_active_trace_id()
+def get_llm_call_count(trace_id: Optional[str] = None) -> int:
+    """读取 LLM 调用计数。trace_id 优先使用显式传入值，否则从 ContextVar 获取。"""
+    tid = trace_id or _get_active_trace_id()
     if tid:
         return _get_counter(tid, "llm_calls")
     return 0
@@ -178,11 +173,14 @@ class trace_span:
         if exc_val is not None:
             self.span.error = str(exc_val)
         _trace_context.set(self._parent)
-        if self._is_root:
-            _set_active_trace_id(None)
-            with _counters_lock:
-                _counters.pop(self.span.trace_id, None)
         return False
+
+
+def cleanup_trace_counters(trace_id: str) -> None:
+    """清理指定 trace 的计数器和活跃 ID（在 trace 持久化后调用）。"""
+    _set_active_trace_id(None)
+    with _counters_lock:
+        _counters.pop(trace_id, None)
 
 
 def get_current_trace() -> Optional[TraceSpan]:

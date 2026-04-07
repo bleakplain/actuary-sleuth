@@ -90,12 +90,14 @@ class LLMReranker(BaseReranker):
         )
 
         try:
-            with trace_span("llm_rerank", "rerank", model=getattr(self._llm, 'model', ''), candidate_count=len(candidates)) as span:
-                span.metadata.update({
+            with trace_span("llm_rerank", "rerank") as span:
+                span.metadata = {
                     "reranker_type": "llm",
+                    "model": getattr(self._llm, 'model', ''),
+                    "candidate_count": len(candidates),
                     "top_k": self._config.top_k,
                     "max_candidates": self._config.max_candidates,
-                })
+                }
                 span.input = {"query": query, "candidate_count": len(candidates), "prompt": prompt}
                 response = self._llm.generate(prompt)
                 response_str = str(response).strip()

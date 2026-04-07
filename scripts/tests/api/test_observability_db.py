@@ -51,14 +51,16 @@ class TestBatchDeleteConversations:
 class TestTraceSearch:
     def _create_trace(self, trace_id="t1", message_id=1, conversation_id="conv_a", status="ok"):
         import api.database as db
-        db.save_trace(trace_id, message_id, conversation_id)
-        db.save_spans([{
+        span = {
             "trace_id": trace_id, "span_id": f"{trace_id}-1",
             "parent_span_id": None, "name": "root", "category": "root",
             "input": {"question": "test"}, "output": {"answer": "ok"},
             "start_time": 1000.0, "end_time": 1001.5, "duration_ms": 1500.0,
             "status": status, "error": None,
-        }])
+        }
+        db.save_trace(trace_id, message_id, conversation_id,
+                       status=status, total_duration_ms=span["duration_ms"], span_count=1)
+        db.save_spans([span])
 
     def test_search_traces_no_filter(self, _patch_database):
         import api.database as db
@@ -122,14 +124,14 @@ class TestGetTraceByTraceId:
             "start_time": 1000.0, "end_time": 1001.5, "duration_ms": 1500.0,
             "status": "ok", "error": None,
         }])
-        trace = db.get_trace_by_trace_id("abc123")
+        trace = db.get_trace_by_id("abc123")
         assert trace is not None
         assert trace["trace_id"] == "abc123"
         assert trace["summary"]["span_count"] == 1
 
     def test_get_missing_trace(self, _patch_database):
         import api.database as db
-        trace = db.get_trace_by_trace_id("nonexistent")
+        trace = db.get_trace_by_id("nonexistent")
         assert trace is None
 
 
@@ -156,7 +158,7 @@ class TestCleanupTraces:
         db.save_spans([{"trace_id": "t1", "span_id": "t1-1", "parent_span_id": None, "name": "root", "category": "root", "input": None, "output": None, "start_time": 1.0, "end_time": 2.0, "duration_ms": 1000.0, "status": "ok", "error": None}])
         db.save_trace("t2", 2, "conv_b")
         db.save_spans([{"trace_id": "t2", "span_id": "t2-1", "parent_span_id": None, "name": "root", "category": "root", "input": None, "output": None, "start_time": 1.0, "end_time": 2.0, "duration_ms": 1000.0, "status": "ok", "error": None}])
-        db.save_trace("t3", 3, "conv_c")
+        db.save_trace("t3", 3, "conv_c", status="error")
         db.save_spans([{"trace_id": "t3", "span_id": "t3-1", "parent_span_id": None, "name": "root", "category": "root", "input": None, "output": None, "start_time": 1.0, "end_time": 2.0, "duration_ms": 1000.0, "status": "error", "error": "test error"}])
         count = db.count_traces_for_cleanup(start_date="2020-01-01", end_date="2099-12-31", status="ok")
         assert count == 2

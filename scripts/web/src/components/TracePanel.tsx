@@ -15,7 +15,7 @@ const CATEGORY_CONFIG: Record<string, { label: string; color: string; bg: string
   preprocessing: { label: '预处理', color: '#722ed1', bg: '#f9f0ff' },
   retrieval: { label: '检索', color: '#1677ff', bg: '#e6f4ff' },
   rerank: { label: '重排序', color: '#fa8c16', bg: '#fff7e6' },
-  llm: { label: 'LLM', color: '#52c41a', bg: '#f6ffed' },
+  llm: { label: '生成', color: '#52c41a', bg: '#f6ffed' },
 };
 
 function getCategoryStyle(category: string) {

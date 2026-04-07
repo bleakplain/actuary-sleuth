@@ -38,8 +38,6 @@ class OllamaClient(BaseLLMClient):
         self._session = requests.Session()
 
     def _do_generate(self, prompt: str, **kwargs) -> str:
-        """实际执行单次 API 调用"""
-        self._validate_prompt(prompt)
         url = f"{self.host}/api/generate"
         data = {
             "model": kwargs.get('model', self.model),
@@ -60,10 +58,9 @@ class OllamaClient(BaseLLMClient):
     @_with_circuit_breaker("ollama")
     @_retry_with_backoff(max_retries=3, base_delay=2, rate_limit_delay_mult=2)
     def generate(self, prompt: str, **kwargs) -> str:
-        return self._do_generate(prompt, **kwargs)
+        return super().generate(prompt, **kwargs)
 
     def _do_chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
-        self._validate_messages(messages)
         url = f"{self.host}/api/chat"
         data = {
             "model": kwargs.get('model', self.model),
@@ -84,7 +81,7 @@ class OllamaClient(BaseLLMClient):
     @_with_circuit_breaker("ollama")
     @_retry_with_backoff(max_retries=3, base_delay=2, rate_limit_delay_mult=2)
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
-        return self._do_chat(messages, **kwargs)
+        return super().chat(messages, **kwargs)
 
     def health_check(self) -> bool:
         """健康检查"""

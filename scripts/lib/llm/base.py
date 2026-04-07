@@ -6,6 +6,8 @@ LLM 客户端抽象基类
 from abc import ABC, abstractmethod
 from typing import List, Dict
 
+from lib.llm.trace import incr_llm_call_count
+
 
 class BaseLLMClient(ABC):
     """LLM客户端基类"""
@@ -51,12 +53,22 @@ class BaseLLMClient(ABC):
         except Exception:
             pass
 
-    @abstractmethod
     def generate(self, prompt: str, **kwargs) -> str:
-        pass
+        self._validate_prompt(prompt)
+        incr_llm_call_count()
+        return self._do_generate(prompt, **kwargs)
 
     @abstractmethod
+    def _do_generate(self, prompt: str, **kwargs) -> str:
+        pass
+
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
+        self._validate_messages(messages)
+        incr_llm_call_count()
+        return self._do_chat(messages, **kwargs)
+
+    @abstractmethod
+    def _do_chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         pass
 
     def ocr_table(self, image_base64: str) -> str:

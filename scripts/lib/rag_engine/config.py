@@ -11,8 +11,6 @@ class HybridQueryConfig:
     vector_top_k: int = 20
     keyword_top_k: int = 20
     rrf_k: int = 60
-    vector_weight: float = 1.0
-    keyword_weight: float = 1.0
     enable_rerank: bool = True
     rerank_top_k: int = 5
     reranker_type: str = "gguf"

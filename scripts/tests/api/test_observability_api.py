@@ -29,14 +29,16 @@ def _create_trace_data(api_db):
     api_db.create_conversation("conv_test", "测试会话")
     msg_id = api_db.add_message("conv_test", "user", "什么是等待期？")
     api_db.add_message("conv_test", "assistant", "等待期是指...")
-    api_db.save_trace("trace_abc123", msg_id, "conv_test")
-    api_db.save_spans([{
+    span = {
         "trace_id": "trace_abc123", "span_id": "trace_abc123-1",
         "parent_span_id": None, "name": "root", "category": "root",
         "input": {"question": "什么是等待期？"}, "output": {"answer": "等待期是指..."},
         "start_time": 1000.0, "end_time": 1002.0, "duration_ms": 2000.0,
         "status": "ok", "error": None,
-    }])
+    }
+    api_db.save_trace("trace_abc123", msg_id, "conv_test",
+                       total_duration_ms=span["duration_ms"], span_count=1)
+    api_db.save_spans([span])
 
 
 class TestTraceListAPI:

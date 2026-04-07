@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from api.database import (
     search_traces,
-    get_trace_by_trace_id,
+    get_trace_by_id,
     batch_delete_traces,
     count_traces_for_cleanup,
     cleanup_traces,
@@ -40,7 +40,7 @@ async def list_traces(
 
 @router.get("/traces/{trace_id}")
 async def get_trace_detail(trace_id: str):
-    trace = get_trace_by_trace_id(trace_id)
+    trace = get_trace_by_id(trace_id)
     if trace is None:
         raise HTTPException(status_code=404, detail="Trace not found")
     return trace

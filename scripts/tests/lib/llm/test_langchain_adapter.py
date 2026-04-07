@@ -18,11 +18,11 @@ class MockChatClient(BaseLLMClient):
     def __init__(self, model: str = "glm-4-flash"):
         super().__init__(model, timeout=30)
 
-    def chat(self, messages, **kwargs):
-        return f"response to: {messages[-1]['content']}"
-
-    def generate(self, prompt, **kwargs):
+    def _do_generate(self, prompt, **kwargs):
         return f"response to: {prompt}"
+
+    def _do_chat(self, messages, **kwargs):
+        return f"response to: {messages[-1]['content']}"
 
     def health_check(self):
         return True
