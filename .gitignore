@@ -79,5 +79,6 @@ scripts/test-results/
 # Reranker model files (large binaries, not tracked)
 scripts/lib/rag_engine/models/reranker/*.gguf
 scripts/lib/rag_engine/models/reranker/*.safetensors
+scripts/lib/rag_engine/models/
 scripts/lib/rag_engine/tools/
 

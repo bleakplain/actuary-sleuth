@@ -90,13 +90,32 @@ export interface EvalSnapshot {
 
 export interface Evaluation {
   id: string;
-  mode: 'retrieval' | 'generation' | 'full';
+  mode: 'retrieval' | 'generation' | 'full' | 'llm_judge';
   status: 'pending' | 'running' | 'completed' | 'failed';
   progress: number;
   total: number;
   started_at: string;
   finished_at?: string;
-  config?: Record<string, string | number>;
+  config?: {
+    retrieval?: Record<string, string | number | boolean>;
+    generation?: Record<string, string | number | boolean>;
+    evaluation?: Record<string, string>;
+    dataset?: Record<string, string | number | null>;
+  };
+}
+
+export interface EvalConfig {
+  id: number;
+  name: string;
+  version: number;
+  description: string;
+  is_active: number;
+  created_at: string;
+  config_json?: {
+    retrieval?: Record<string, string | number | boolean>;
+    rerank?: Record<string, string | number | boolean>;
+    generation?: Record<string, string | number | boolean>;
+  };
 }
 
 export interface SampleResult {

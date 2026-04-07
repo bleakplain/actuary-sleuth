@@ -116,12 +116,10 @@ async def chat(req: ChatRequest):
                         "answer": result.get("answer", ""),
                         "source_count": len(result.get("sources", [])),
                     }
-                    engine_config = engine.config
-                    hc = engine_config.hybrid_config
                     root_span.metadata = {
                         "mode": req.mode,
                         "retrieval": "hybrid",
-                        "reranker": hc.reranker_type if hc else None,
+                        "reranker": engine.config.rerank.reranker_type,
                     }
             else:
                 result = await asyncio.to_thread(engine.ask, req.question)

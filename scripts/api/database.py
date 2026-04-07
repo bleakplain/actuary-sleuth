@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional, List, Dict
 
 from lib.common.database import get_connection
+from lib.rag_engine.config import RAGConfig
 
 
 _SCHEMA_SQL = """
@@ -74,6 +75,16 @@ CREATE TABLE IF NOT EXISTS eval_sample_results (
     generation_metrics_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_eval_results_run ON eval_sample_results(run_id);
+
+CREATE TABLE IF NOT EXISTS eval_configs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    description TEXT NOT NULL DEFAULT '',
+    config_json TEXT NOT NULL DEFAULT '{}',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 CREATE TABLE IF NOT EXISTS human_reviews (
     id TEXT PRIMARY KEY,
@@ -472,7 +483,92 @@ def restore_snapshot(snapshot_id: str) -> int:
         return count
 
 
-def create_evaluation(run_id: str, mode: str, config: Dict) -> None:
+# ── 评测配置版本管理 ──────────────────────────────────
+
+
+def insert_eval_config(name: str, description: str, config: Dict) -> int:
+    """创建评测配置新版本，自动 version+1，deactivate 旧版本。"""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(version), 0) FROM eval_configs WHERE name = ?",
+            (name,),
+        ).fetchone()
+        next_version = row[0] + 1
+        conn.execute(
+            "UPDATE eval_configs SET is_active = 0 WHERE name = ? AND is_active = 1",
+            (name,),
+        )
+        conn.execute(
+            "INSERT INTO eval_configs (name, version, description, config_json, is_active) "
+            "VALUES (?, ?, ?, ?, 1)",
+            (name, next_version, description, json.dumps(config, ensure_ascii=False)),
+        )
+        return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+def get_eval_configs(name: Optional[str] = None) -> List[Dict]:
+    with get_connection() as conn:
+        if name:
+            rows = conn.execute(
+                "SELECT id, name, version, description, is_active, created_at FROM eval_configs "
+                "WHERE name = ? ORDER BY version DESC",
+                (name,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, name, version, description, is_active, created_at FROM eval_configs "
+                "ORDER BY name, version DESC",
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_eval_config(config_id: int) -> Optional[Dict]:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id, name, version, description, config_json, created_at "
+            "FROM eval_configs WHERE id = ?",
+            (config_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return _deserialize_json_fields(dict(row), {"config_json": "config_json"})
+
+
+def get_active_config(name: str) -> Optional[Dict]:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id, name, version, description, config_json, created_at "
+            "FROM eval_configs WHERE name = ? AND is_active = 1",
+            (name,),
+        ).fetchone()
+        if row is None:
+            return None
+        return _deserialize_json_fields(dict(row), {"config_json": "config_json"})
+
+
+def remove_eval_config(config_id: int) -> bool:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT is_active FROM eval_configs WHERE id = ?", (config_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        if row["is_active"]:
+            return False
+        conn.execute("DELETE FROM eval_configs WHERE id = ?", (config_id,))
+        return True
+
+
+def _ensure_default_config():
+    """启动时检查，如果 eval_configs 为空则插入默认配置。"""
+    with get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM eval_configs").fetchone()[0]
+        if count > 0:
+            return
+    insert_eval_config("默认", "默认检索配置", RAGConfig().to_dict())
+
+
+def insert_evaluation(run_id: str, mode: str, config: Dict) -> None:
     with get_connection() as conn:
         conn.execute(
             "INSERT INTO eval_runs (id, mode, status, config_json) VALUES (?, ?, 'pending', ?)",
@@ -504,6 +600,14 @@ def save_evaluation_report(run_id: str, report: Dict) -> None:
         conn.execute(
             "UPDATE eval_runs SET report_json = ? WHERE id = ?",
             (json.dumps(report, ensure_ascii=False), run_id),
+        )
+
+
+def update_evaluation_config(run_id: str, config: Dict, total: int = 0) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE eval_runs SET config_json = ?, total = ? WHERE id = ?",
+            (json.dumps(config, ensure_ascii=False), total, run_id),
         )
 
 
@@ -550,6 +654,35 @@ def get_evaluations() -> List[Dict]:
             "FROM eval_runs ORDER BY started_at DESC"
         ).fetchall()
         return [_deserialize_json_fields(dict(r), {"config": "config_json"}) for r in rows]
+
+
+def get_evaluation_trends(metric: str, limit: int = 20) -> List[Dict]:
+    """获取指定指标在历次已完成评测中的值。"""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, started_at, report_json FROM eval_runs "
+            "WHERE status = 'completed' AND report_json IS NOT NULL "
+            "ORDER BY started_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    section, _, key = metric.partition(".")
+    points = []
+    for row in rows:
+        d = _deserialize_json_fields(dict(row), {"report": "report_json"})
+        report = d.get("report", {})
+        section_data = report.get(section, report if not section else {})
+        if not isinstance(section_data, dict):
+            continue
+        val = section_data.get(key) if section else report.get(metric)
+        if val is None or not isinstance(val, (int, float)):
+            continue
+        points.append({
+            "run_id": d["id"],
+            "label": d["id"][:12],
+            "value": val,
+            "timestamp": d.get("started_at", ""),
+        })
+    return points
 
 
 def get_sample_results(run_id: str) -> List[Dict]:
@@ -947,7 +1080,7 @@ def cleanup_traces(
     return batch_delete_traces(trace_ids)
 
 
-def create_human_review(
+def insert_human_review(
     evaluation_id: str,
     sample_id: str,
     reviewer: str = "",

@@ -2,17 +2,37 @@
 
 import uuid
 import asyncio
-import json
 import logging
 from typing import Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import JSONResponse, Response
 
 from api.schemas.eval import (
     EvalSampleCreate, EvalSampleOut, ImportSamplesRequest,
-    EvaluationRequest, CompareRequest, SnapshotCreate,
+    EvaluationRequest, EvalConfigCreate, CompareRequest, SnapshotCreate,
     HumanReviewCreate,
 )
+from api.database import (
+    eval_sample_count, import_eval_samples, get_eval_samples,
+    upsert_eval_sample, get_eval_sample, delete_eval_sample,
+    create_snapshot, get_snapshots, restore_snapshot,
+    insert_evaluation, get_evaluation, get_evaluations,
+    update_evaluation_status, update_evaluation_config,
+    save_evaluation_report, save_sample_result, get_sample_results,
+    get_evaluation_trends, get_eval_config, get_active_config, get_eval_configs,
+    insert_eval_config, remove_eval_config,
+    insert_human_review,
+    get_human_reviews, get_human_review_stats,
+)
+from lib.rag_engine.config import RAGConfig
+from lib.rag_engine.rag_engine import RAGEngine
+from lib.rag_engine import RetrievalEvaluator, GenerationEvaluator, load_eval_dataset
+from lib.rag_engine.llm_judge import LLMPJudge
+from lib.rag_engine.eval_dataset import EvalSample
+from lib.rag_engine.eval_guide import generate_eval_summary
+from lib.rag_engine.dataset_validator import validate_dataset
+from lib.llm import LLMClientFactory
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/eval", tags=["评估管理"])
@@ -24,13 +44,10 @@ _eval_tasks: dict = {}
 
 
 def _ensure_default_dataset():
-    from api.database import eval_sample_count
     if eval_sample_count() > 0:
         return
     try:
-        from lib.rag_engine import load_eval_dataset
         samples = load_eval_dataset()
-        from api.database import import_eval_samples
         count = import_eval_samples([s.to_dict() for s in samples])
         if count > 0:
             logger.info(f"已导入 {count} 条默认评测数据")
@@ -44,7 +61,6 @@ async def list_eval_samples(
     difficulty: Optional[str] = Query(None),
     topic: Optional[str] = Query(None),
 ):
-    from api.database import get_eval_samples
     return get_eval_samples(
         question_type=question_type,
         difficulty=difficulty,
@@ -54,7 +70,6 @@ async def list_eval_samples(
 
 @router.post("/dataset/samples", response_model=EvalSampleOut)
 async def create_eval_sample(sample: EvalSampleCreate):
-    from api.database import upsert_eval_sample, get_eval_sample
     upsert_eval_sample(sample.model_dump())
     result = get_eval_sample(sample.id)
     if result is None:
@@ -64,7 +79,6 @@ async def create_eval_sample(sample: EvalSampleCreate):
 
 @router.put("/dataset/samples/{sample_id}", response_model=EvalSampleOut)
 async def update_eval_sample(sample_id: str, sample: EvalSampleCreate):
-    from api.database import get_eval_sample, upsert_eval_sample
     existing = get_eval_sample(sample_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="样本不存在")
@@ -76,7 +90,6 @@ async def update_eval_sample(sample_id: str, sample: EvalSampleCreate):
 
 @router.delete("/dataset/samples/{sample_id}")
 async def delete_eval_sample(sample_id: str):
-    from api.database import delete_eval_sample
     if not delete_eval_sample(sample_id):
         raise HTTPException(status_code=404, detail="样本不存在")
     return {"deleted": True}
@@ -84,7 +97,6 @@ async def delete_eval_sample(sample_id: str):
 
 @router.post("/dataset/import")
 async def import_dataset(req: ImportSamplesRequest):
-    from api.database import import_eval_samples
     samples = [s.model_dump() for s in req.samples]
     count = import_eval_samples(samples)
     return {"imported": count, "total": len(samples), "skipped": len(samples) - count}
@@ -92,20 +104,17 @@ async def import_dataset(req: ImportSamplesRequest):
 
 @router.post("/dataset/snapshots")
 async def create_snapshot(req: SnapshotCreate):
-    from api.database import create_snapshot
     snap_id = create_snapshot(req.name, req.description)
     return {"snapshot_id": snap_id, "name": req.name}
 
 
 @router.get("/dataset/snapshots")
 async def list_snapshots():
-    from api.database import get_snapshots
     return get_snapshots()
 
 
 @router.post("/dataset/snapshots/{snapshot_id}/restore")
 async def restore_snapshot(snapshot_id: str):
-    from api.database import restore_snapshot, get_snapshots
     snap_ids = [s["id"] for s in get_snapshots()]
     if snapshot_id not in snap_ids:
         raise HTTPException(status_code=404, detail="快照不存在")
@@ -116,15 +125,35 @@ async def restore_snapshot(snapshot_id: str):
 # ── 评估运行 ─────────────────────────────────────────
 
 
+def _build_eval_record(config: RAGConfig, mode: str, total_samples: int,
+                       judge_model="", config_id=None, config_name=None,
+                       config_version=None) -> Dict:
+    result = config.to_dict()
+    result["evaluation"] = {"mode": mode, "judge_model": judge_model}
+    result["dataset"] = {"total_samples": total_samples}
+    if config_id is not None:
+        result["dataset"]["config_id"] = config_id
+    if config_name is not None:
+        result["dataset"]["config_name"] = config_name
+    if config_version is not None:
+        result["dataset"]["config_version"] = config_version
+    return result
+
+
+def _load_config(config_id: int):
+    """从 eval_configs 表加载 RAGConfig。"""
+    cfg = get_eval_config(config_id)
+    if cfg is None:
+        raise ValueError(f"配置不存在: {config_id}")
+    config = RAGConfig.from_dict(cfg["config_json"])
+    return config, cfg["name"], cfg["version"]
+
+
 @router.post("/evaluations")
 async def create_evaluation(req: EvaluationRequest):
     evaluation_id = f"eval_{uuid.uuid4().hex[:8]}"
 
-    from api.database import create_evaluation
-    create_evaluation(evaluation_id, req.mode, {
-        "top_k": req.top_k,
-        "chunking": req.chunking,
-    })
+    insert_evaluation(evaluation_id, req.mode, {"mode": req.mode})
 
     _eval_tasks[evaluation_id] = {"status": "pending"}
 
@@ -132,32 +161,46 @@ async def create_evaluation(req: EvaluationRequest):
         try:
             _eval_tasks[evaluation_id]["status"] = "running"
 
-            from api.app import rag_engine
-            if rag_engine is None:
-                raise RuntimeError("RAG 引擎未就绪")
-
-            from api.database import (
-                get_eval_samples, update_evaluation_status,
-                save_evaluation_report, save_sample_result,
-            )
-            from lib.rag_engine import RetrievalEvaluator, GenerationEvaluator
-            from lib.rag_engine.llm_judge import LLMPJudge
-            from lib.llm import LLMClientFactory
+            config, config_name, config_version = _load_config(req.config_id)
 
             samples_data = get_eval_samples()
+            if req.filters:
+                for key, val in req.filters.items():
+                    samples_data = [s for s in samples_data if s.get(key) == val]
             samples = [EvalSample.from_dict(s) for s in samples_data]
             total = len(samples)
+
+            judge_model = ""
+            eval_llm = None
+            if req.mode == "llm_judge":
+                eval_llm = LLMClientFactory.create_eval_llm()
+                judge_model = getattr(eval_llm, 'model', '')
+
+            update_evaluation_config(
+                evaluation_id,
+                _build_eval_record(config, req.mode, total,
+                                   judge_model, req.config_id, config_name, config_version),
+                total=total,
+            )
             update_evaluation_status(evaluation_id, "running", progress=0, total=total)
 
+            from lib.rag_engine.kb_manager import KBManager
+            kb_config = KBManager().load_kb()
+            config.regulations_dir = kb_config.regulations_dir
+            config.vector_db_path = kb_config.vector_db_path
+
+            eval_engine = RAGEngine(config)
+            if not eval_engine.initialize():
+                raise RuntimeError("评测引擎初始化失败")
+
             if req.mode in ("retrieval", "full"):
-                ret_eval = RetrievalEvaluator(rag_engine)
-                ret_report, ret_details = ret_eval.evaluate_batch(samples, top_k=req.top_k)
+                ret_eval = RetrievalEvaluator(eval_engine)
+                ret_report, ret_details = ret_eval.evaluate_batch(
+                    samples, top_k=config.rerank.rerank_top_k,
+                )
                 for detail in ret_details:
                     sample_id = detail.get("sample_id", "")
-                    save_sample_result(
-                        evaluation_id, sample_id,
-                        retrieval_metrics=detail,
-                    )
+                    save_sample_result(evaluation_id, sample_id, retrieval_metrics=detail)
                     current = _eval_tasks[evaluation_id].get("progress", 0) + 1
                     _eval_tasks[evaluation_id]["progress"] = current
                     update_evaluation_status(evaluation_id, "running", progress=current, total=total)
@@ -166,10 +209,9 @@ async def create_evaluation(req: EvaluationRequest):
             if req.mode in ("generation", "full", "llm_judge"):
                 llm_judge = None
                 if req.mode == "llm_judge":
-                    eval_llm = LLMClientFactory.create_eval_llm()
                     llm_judge = LLMPJudge(eval_llm)
-                gen_eval = GenerationEvaluator(rag_engine=rag_engine, llm_judge=llm_judge)
-                gen_report = gen_eval.evaluate_batch(samples, rag_engine=rag_engine)
+                gen_eval = GenerationEvaluator(rag_engine=eval_engine, llm_judge=llm_judge)
+                gen_report = gen_eval.evaluate_batch(samples, rag_engine=eval_engine)
 
             report: Dict = {}
             if req.mode in ("retrieval", "full"):
@@ -182,10 +224,10 @@ async def create_evaluation(req: EvaluationRequest):
             save_evaluation_report(evaluation_id, report)
             update_evaluation_status(evaluation_id, "completed")
             _eval_tasks[evaluation_id]["status"] = "completed"
+            eval_engine.cleanup()
 
         except Exception as e:
             logger.error(f"Eval run {evaluation_id} failed: {e}")
-            from api.database import update_evaluation_status
             update_evaluation_status(evaluation_id, "failed")
             _eval_tasks[evaluation_id]["status"] = "failed"
             _eval_tasks[evaluation_id]["error"] = str(e)
@@ -196,7 +238,6 @@ async def create_evaluation(req: EvaluationRequest):
 
 @router.get("/evaluations/{evaluation_id}/status")
 async def get_evaluation_status(evaluation_id: str):
-    from api.database import get_evaluation
     run = get_evaluation(evaluation_id)
     if run is None:
         raise HTTPException(status_code=404, detail="评估运行不存在")
@@ -208,12 +249,12 @@ async def get_evaluation_status(evaluation_id: str):
         "total": run["total"],
         "started_at": run["started_at"],
         "finished_at": run["finished_at"],
+        "config": run.get("config"),
     }
 
 
 @router.get("/evaluations/{evaluation_id}/report")
 async def get_evaluation_report(evaluation_id: str):
-    from api.database import get_evaluation
     run = get_evaluation(evaluation_id)
     if run is None:
         raise HTTPException(status_code=404, detail="评估运行不存在")
@@ -224,7 +265,6 @@ async def get_evaluation_report(evaluation_id: str):
 
 @router.get("/evaluations/{evaluation_id}/details")
 async def get_evaluation_details(evaluation_id: str):
-    from api.database import get_evaluation, get_sample_results
     run = get_evaluation(evaluation_id)
     if run is None:
         raise HTTPException(status_code=404, detail="评估运行不存在")
@@ -240,14 +280,19 @@ async def get_evaluation_details(evaluation_id: str):
 
 @router.get("/evaluations")
 async def list_evaluations():
-    from api.database import get_evaluations
     return get_evaluations()
+
+
+@router.get("/evaluations/trends")
+async def get_evaluation_trends(
+    metric: str = Query(..., description="指标名，如 retrieval.precision_at_k"),
+    limit: int = Query(20, ge=1, le=50),
+):
+    return get_evaluation_trends(metric, limit)
 
 
 @router.post("/evaluations/compare")
 async def compare_evaluations(req: CompareRequest):
-    from api.database import get_evaluation
-
     baseline = get_evaluation(req.baseline_id)
     compare = get_evaluation(req.compare_id)
     if baseline is None or compare is None:
@@ -295,9 +340,6 @@ async def compare_evaluations(req: CompareRequest):
 
 @router.get("/evaluations/{evaluation_id}/export")
 async def export_evaluation_report(evaluation_id: str, format: str = "json"):
-    from api.database import get_evaluation
-    from fastapi.responses import JSONResponse, Response
-
     run = get_evaluation(evaluation_id)
     if run is None:
         raise HTTPException(status_code=404, detail="评估运行不存在")
@@ -311,8 +353,6 @@ async def export_evaluation_report(evaluation_id: str, format: str = "json"):
             "report": report,
         })
     elif format == "md":
-        from lib.rag_engine.eval_guide import generate_eval_summary
-
         lines = [f"# 评估报告 {evaluation_id}", f"模式: {run['mode']}", f"时间: {run['started_at']}", ""]
         for section, metrics in report.items():
             if isinstance(metrics, dict):
@@ -335,14 +375,39 @@ async def export_evaluation_report(evaluation_id: str, format: str = "json"):
         raise HTTPException(status_code=400, detail="不支持的格式，可选: json, md")
 
 
+# ── 评测配置管理 ─────────────────────────────────────
+
+
+@router.get("/configs")
+async def list_eval_configs(name: Optional[str] = Query(None)):
+    return get_eval_configs(name=name)
+
+
+@router.get("/configs/{name}/active")
+async def get_active_eval_config(name: str):
+    cfg = get_active_config(name)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail=f"配置 '{name}' 不存在")
+    return cfg
+
+
+@router.post("/configs")
+async def create_eval_config_route(req: EvalConfigCreate):
+    config_id = insert_eval_config(req.name, req.description, req.to_config_dict())
+    return {"id": config_id, "name": req.name}
+
+
+@router.delete("/configs/{config_id}")
+async def delete_eval_config_route(config_id: int):
+    if not remove_eval_config(config_id):
+        raise HTTPException(status_code=400, detail="只能删除非激活版本的配置")
+
+
 # ── 数据集质量审查 ─────────────────────────────────────
 
 
 @router.get("/dataset/audit")
 async def audit_dataset():
-    from api.database import get_eval_samples
-    from lib.rag_engine.dataset_validator import validate_dataset
-
     samples_data = get_eval_samples()
     samples = [EvalSample.from_dict(s) for s in samples_data]
     report = validate_dataset(samples)
@@ -354,8 +419,7 @@ async def audit_dataset():
 
 @router.post("/human-reviews")
 async def create_human_review(req: HumanReviewCreate):
-    from api.database import create_human_review as db_create
-    review_id = db_create(
+    review_id = insert_human_review(
         evaluation_id=req.evaluation_id,
         sample_id=req.sample_id,
         reviewer=req.reviewer,
@@ -369,7 +433,6 @@ async def create_human_review(req: HumanReviewCreate):
 
 @router.get("/human-reviews/{evaluation_id}")
 async def list_human_reviews(evaluation_id: str):
-    from api.database import get_human_reviews, get_human_review_stats
     reviews = get_human_reviews(evaluation_id)
     stats = get_human_review_stats(evaluation_id)
     return {"reviews": reviews, "stats": stats}

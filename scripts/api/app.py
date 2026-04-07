@@ -58,8 +58,10 @@ async def lifespan(app: FastAPI):
     try:
         from api.routers.eval import _ensure_default_dataset
         _ensure_default_dataset()
+        from api.database import _ensure_default_config
+        _ensure_default_config()
     except Exception as e:
-        logger.warning(f"默认数据集初始化失败: {e}")
+        logger.warning(f"默认数据初始化失败: {e}")
 
     auto_classify_task = asyncio.create_task(_auto_classify_loop())
 
