@@ -127,15 +127,12 @@ async def apply_snapshot(snapshot_id: str):
 
 
 def _build_eval_record(config: RAGConfig, mode: str, total_samples: int,
-                       judge_model="", config_id=None, config_name=None,
-                       config_version=None) -> Dict:
+                       judge_model="", config_id=None, config_version=None) -> Dict:
     result = config.to_dict()
     result["evaluation"] = {"mode": mode, "judge_model": judge_model}
     result["dataset"] = {"total_samples": total_samples}
     if config_id is not None:
         result["dataset"]["config_id"] = config_id
-    if config_name is not None:
-        result["dataset"]["config_name"] = config_name
     if config_version is not None:
         result["dataset"]["config_version"] = config_version
     return result
@@ -147,7 +144,7 @@ def _load_config(config_id: int):
     if cfg is None:
         raise ValueError(f"配置不存在: {config_id}")
     config = RAGConfig.from_dict(cfg["config_json"])
-    return config, cfg["name"], cfg["version"]
+    return config, cfg["version"]
 
 
 @router.post("/evaluations")
@@ -162,7 +159,7 @@ async def create_evaluation(req: EvaluationRequest):
         try:
             _eval_tasks[evaluation_id]["status"] = "running"
 
-            config, config_name, config_version = _load_config(req.config_id)
+            config, config_version = _load_config(req.config_id)
 
             samples_data = get_eval_samples()
             if req.filters:
@@ -180,7 +177,7 @@ async def create_evaluation(req: EvaluationRequest):
             update_evaluation_config(
                 evaluation_id,
                 _build_eval_record(config, req.mode, total,
-                                   judge_model, req.config_id, config_name, config_version),
+                                   judge_model, req.config_id, config_version),
                 total=total,
             )
             update_evaluation_status(evaluation_id, "running", progress=0, total=total)
@@ -389,26 +386,26 @@ async def export_evaluation_report(evaluation_id: str, format: str = "json"):
 
 
 @router.get("/configs")
-async def list_eval_configs(name: Optional[str] = Query(None)):
-    return get_eval_configs(name=name)
+async def list_eval_configs():
+    return get_eval_configs()
 
 
-@router.get("/configs/{name}/active")
-async def get_active_eval_config(name: str):
-    cfg = get_active_config(name)
+@router.get("/configs/active")
+async def get_active_eval_config():
+    cfg = get_active_config()
     if cfg is None:
-        raise HTTPException(status_code=404, detail=f"配置 '{name}' 不存在")
+        raise HTTPException(status_code=404, detail="无激活的评测配置")
     return cfg
 
 
 @router.post("/configs")
 async def add_eval_config(req: EvalConfigCreate):
-    config_id = insert_eval_config(req.name, req.description, req.to_config_dict())
-    return {"id": config_id, "name": req.name}
+    config_id = insert_eval_config(req.description, req.to_config_dict())
+    return {"id": config_id, "version": get_eval_config(config_id)["version"]}
 
 
 @router.delete("/configs/{config_id}")
-async def deactivate_eval_config(config_id: int):
+async def delete_eval_config(config_id: int):
     if not remove_eval_config(config_id):
         raise HTTPException(status_code=400, detail="只能删除非激活版本的配置")
 
@@ -428,7 +425,7 @@ async def activate_config(config_id: int):
         raise HTTPException(status_code=404, detail="配置不存在")
     if not activate_eval_config(config_id):
         raise HTTPException(status_code=500, detail="激活失败")
-    return {"id": config_id, "name": cfg["name"]}
+    return {"id": config_id, "version": cfg["version"]}
 
 
 # ── 数据集质量审查 ─────────────────────────────────────

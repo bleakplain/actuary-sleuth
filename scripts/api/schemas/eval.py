@@ -40,7 +40,6 @@ class EvaluationRequest(BaseModel):
 
 
 class EvalConfigCreate(BaseModel):
-    name: str = Field(..., min_length=1)
     description: str = ""
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     rerank: RerankConfig = Field(default_factory=RerankConfig)
