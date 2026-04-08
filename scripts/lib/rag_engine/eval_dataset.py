@@ -81,9 +81,9 @@ class EvalSample:
         else:
             d['review_status'] = ReviewStatus.PENDING
         if 'regulation_refs' in d and d['regulation_refs']:
-            d['regulation_refs'] = [RegulationRef.from_dict(r) for r in d['regulation_refs']]
+            d['regulation_refs'] = tuple(RegulationRef.from_dict(r) for r in d['regulation_refs'])
         else:
-            d['regulation_refs'] = []
+            d['regulation_refs'] = ()
         return cls(**d)
 
 

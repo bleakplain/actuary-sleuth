@@ -412,7 +412,6 @@ def get_eval_sample(sample_id: str) -> Optional[Dict]:
 
 
 def _sample_insert_values(s: Dict, use_now: bool = True) -> tuple:
-    ts = "datetime('now')" if use_now else "?"
     now = datetime.now(timezone.utc).isoformat()
     return (
         s["id"], s["question"], s.get("ground_truth", ""),
@@ -423,14 +422,23 @@ def _sample_insert_values(s: Dict, use_now: bool = True) -> tuple:
         s.get("topic", ""),
         now if use_now else s.get("created_at", now),
         now if use_now else s.get("updated_at", now),
+        json.dumps(s.get("regulation_refs", []), ensure_ascii=False),
+        s.get("review_status", "pending"),
+        s.get("reviewer", ""),
+        s.get("reviewed_at", ""),
+        s.get("review_comment", ""),
+        s.get("created_by", "human"),
+        s.get("kb_version", ""),
     )
 
 
 _SAMPLE_INSERT_SQL = (
     "INSERT OR IGNORE INTO eval_samples "
     "(id, question, ground_truth, evidence_docs_json, evidence_keywords_json, "
-    "question_type, difficulty, topic, created_at, updated_at) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "question_type, difficulty, topic, created_at, updated_at, "
+    "regulation_refs_json, review_status, reviewer, reviewed_at, review_comment, "
+    "created_by, kb_version) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 
@@ -490,6 +498,17 @@ def eval_sample_count() -> int:
     with get_connection() as conn:
         row = conn.execute("SELECT COUNT(*) AS cnt FROM eval_samples").fetchone()
         return row["cnt"]
+
+
+def get_review_stats() -> Dict:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS total, "
+            "SUM(CASE WHEN review_status = 'approved' THEN 1 ELSE 0 END) AS approved, "
+            "SUM(CASE WHEN review_status != 'approved' THEN 1 ELSE 0 END) AS pending "
+            "FROM eval_samples"
+        ).fetchone()
+        return {"total": row["total"], "pending": row["pending"], "approved": row["approved"]}
 
 
 def import_eval_samples(samples: List[Dict]) -> int:

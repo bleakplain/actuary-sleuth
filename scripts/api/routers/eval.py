@@ -25,7 +25,9 @@ from api.database import (
     insert_human_review,
     get_human_reviews, get_human_review_stats,
     batch_delete_evaluations,
+    get_review_stats,
 )
+from lib.rag_engine.eval_dataset import EvalSample, ReviewStatus
 from lib.rag_engine.config import RAGConfig
 from lib.rag_engine.rag_engine import RAGEngine
 from lib.rag_engine import RetrievalEvaluator, GenerationEvaluator, load_eval_dataset
@@ -87,7 +89,7 @@ async def update_eval_sample(sample_id: str, sample: EvalSampleCreate):
         raise HTTPException(status_code=404, detail="样本不存在")
     update_data = sample.model_dump()
     update_data["id"] = sample_id
-    update_data["review_status"] = "pending"
+    update_data["review_status"] = ReviewStatus.PENDING.value
     update_data["reviewer"] = ""
     update_data["reviewed_at"] = ""
     upsert_eval_sample(update_data)
@@ -478,7 +480,7 @@ async def approve_sample(sample_id: str, req: ReviewSampleRequest):
         raise HTTPException(status_code=404, detail="样本不存在")
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
-    existing["review_status"] = "approved"
+    existing["review_status"] = ReviewStatus.APPROVED.value
     existing["reviewer"] = req.reviewer
     existing["reviewed_at"] = now
     existing["review_comment"] = req.comment
@@ -487,12 +489,8 @@ async def approve_sample(sample_id: str, req: ReviewSampleRequest):
 
 
 @router.get("/dataset/review-stats")
-async def get_review_stats():
-    samples = get_eval_samples()
-    total = len(samples)
-    pending = sum(1 for s in samples if s.get("review_status") != "approved")
-    approved = total - pending
-    return {"total": total, "pending": pending, "approved": approved}
+async def review_stats():
+    return get_review_stats()
 
 
 @router.post("/dataset/kb-search", response_model=list[KbSearchResult])
@@ -513,6 +511,8 @@ async def search_knowledge_base(req: KbSearchRequest):
             for r in results
             if r.get("text")
         ]
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"KB 搜索失败: {e}")
         raise HTTPException(status_code=500, detail=f"知识库搜索失败: {str(e)}")

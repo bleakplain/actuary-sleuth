@@ -72,7 +72,7 @@ def test_eval_sample_backward_compatible():
     }
     sample = EvalSample.from_dict(old_data)
     assert sample.review_status == ReviewStatus.PENDING
-    assert sample.regulation_refs == []
+    assert sample.regulation_refs == ()
     assert sample.reviewer == ""
     assert sample.created_by == "human"
     assert sample.kb_version == ""

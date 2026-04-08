@@ -11,7 +11,7 @@ import {
 } from '@ant-design/icons';
 import * as evalApi from '../api/eval';
 import MetricsChart, { formatMetric, ComparisonChart, TrendChart } from '../components/MetricsChart';
-import type { EvalSample, EvalSnapshot, Evaluation, EvalConfig, SampleResult, MetricsDiff } from '../types';
+import type { EvalSample, EvalSnapshot, Evaluation, EvalConfig, SampleResult, MetricsDiff, RegulationRef } from '../types';
 import { resolveMetricMeta } from '../utils/evalMetrics';
 
 const { Text } = Typography;
@@ -40,10 +40,8 @@ const STATUS_MAP: Record<string, { color: string; label: string }> = {
   failed: { color: 'error', label: '失败' },
 };
 
-import type { EvalSample as EvalSampleType, RegulationRef } from '../types';
-
 function ReviewTab() {
-  const [samples, setSamples] = useState<EvalSampleType[]>([]);
+  const [samples, setSamples] = useState<EvalSample[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('');
