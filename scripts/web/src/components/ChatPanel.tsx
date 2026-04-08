@@ -20,20 +20,20 @@ export default function ChatPanel() {
   const {
     messages,
     streaming,
-    currentConversationId,
-    conversations,
+    currentSessionId,
+    sessions,
     sendMessage,
-    selectConversation,
-    deleteConversation,
-    loadConversations,
+    selectSession,
+    deleteSession,
+    loadSessions,
     activeTraceMessageId,
     traceLoading,
     closeTrace,
     debugMode,
     toggleDebugMode,
-    conversationSearch,
-    setConversationSearch,
-    batchDeleteConversations,
+    sessionSearch,
+    setSessionSearch,
+    batchDeleteSessions,
   } = useAskStore();
 
   const [sourcePanelOpen, setSourcePanelOpen] = React.useState(false);
@@ -41,13 +41,13 @@ export default function ChatPanel() {
   const [panelSources, setPanelSources] = React.useState<Source[]>([]);
   const [traceWidth, setTraceWidth] = useState(DEFAULT_TRACE_WIDTH);
   const [dragging, setDragging] = useState(false);
-  const [selectedConvIds, setSelectedConvIds] = React.useState<string[]>([]);
+  const [selectedSessionIds, setSelectedSessionIds] = React.useState<string[]>([]);
   const dragStartX = useRef(0);
   const dragStartWidth = useRef(0);
 
   useEffect(() => {
-    loadConversations();
-  }, [loadConversations]);
+    loadSessions();
+  }, [loadSessions]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -94,7 +94,7 @@ export default function ChatPanel() {
 
   const handleBatchDelete = async () => {
     try {
-      await batchDeleteConversations(selectedConvIds);
+      await batchDeleteSessions(selectedSessionIds);
       setSelectedConvIds([]);
       message.success('已删除');
     } catch {
@@ -126,31 +126,31 @@ export default function ChatPanel() {
             prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
             size="small"
             allowClear
-            value={conversationSearch}
-            onChange={(e) => setConversationSearch(e.target.value)}
+            value={sessionSearch}
+            onChange={(e) => setSessionSearch(e.target.value)}
           />
         </div>
-        {selectedConvIds.length > 0 && (
+        {selectedSessionIds.length > 0 && (
           <div style={{ padding: '0 8px 8px' }}>
             <Popconfirm
-              title={`确定删除选中的 ${selectedConvIds.length} 个会话？`}
+              title={`确定删除选中的 ${selectedSessionIds.length} 个会话？`}
               onConfirm={handleBatchDelete}
             >
               <Button type="primary" danger size="small" icon={<DeleteOutlined />} block>
-                删除 ({selectedConvIds.length})
+                删除 ({selectedSessionIds.length})
               </Button>
             </Popconfirm>
           </div>
         )}
         <div style={{ flex: 1, overflow: 'auto' }}>
-          {conversations.map((conv) => (
+          {sessions.map((session) => (
             <div
-              key={conv.id}
-              onClick={() => selectConversation(conv.id)}
+              key={session.id}
+              onClick={() => selectSession(session.id)}
               style={{
                 padding: '8px 12px',
                 cursor: 'pointer',
-                background: currentConversationId === conv.id ? '#e6f4ff' : '#fff',
+                background: currentSessionId === session.id ? '#e6f4ff' : '#fff',
                 borderBottom: '1px solid #f5f5f5',
                 display: 'flex',
                 justifyContent: 'space-between',
@@ -158,13 +158,13 @@ export default function ChatPanel() {
               }}
             >
               <Checkbox
-                checked={selectedConvIds.includes(conv.id)}
+                checked={selectedSessionIds.includes(session.id)}
                 onClick={(e) => e.stopPropagation()}
                 onChange={(e) => {
                   if (e.target.checked) {
-                    setSelectedConvIds([...selectedConvIds, conv.id]);
+                    setSelectedConvIds([...selectedSessionIds, session.id]);
                   } else {
-                    setSelectedConvIds(selectedConvIds.filter((id) => id !== conv.id));
+                    setSelectedConvIds(selectedSessionIds.filter((id) => id !== session.id));
                   }
                 }}
                 style={{ marginRight: 4 }}
@@ -178,13 +178,13 @@ export default function ChatPanel() {
                   fontSize: 13,
                 }}
               >
-                {conv.title || conv.id}
+                {session.title || session.id}
               </span>
               <Popconfirm
                 title="确定删除？"
                 onConfirm={(e) => {
                   e?.stopPropagation();
-                  deleteConversation(conv.id);
+                  deleteSession(session.id);
                 }}
                 onCancel={(e) => e?.stopPropagation()}
               >

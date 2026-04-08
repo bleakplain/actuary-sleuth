@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  fetchConversations,
+  fetchSessions,
   fetchMessages,
-  deleteConversation,
+  deleteSession,
   chatSearch,
   chatSSE,
 } from './ask';
@@ -27,21 +27,21 @@ describe('ask API', () => {
     vi.clearAllMocks();
   });
 
-  describe('fetchConversations', () => {
-    it('returns conversation list', async () => {
-      const conversations = [
+  describe('fetchSessions', () => {
+    it('returns session list', async () => {
+      const sessions = [
         { id: 'c1', title: 'test', created_at: '2026-01-01', message_count: 2 },
       ];
-      mockedClient.get.mockResolvedValueOnce({ data: conversations });
+      mockedClient.get.mockResolvedValueOnce({ data: sessions });
 
-      const result = await fetchConversations();
-      expect(result).toEqual(conversations);
-      expect(mockedClient.get).toHaveBeenCalledWith('/api/ask/conversations');
+      const result = await fetchSessions();
+      expect(result).toEqual(sessions);
+      expect(mockedClient.get).toHaveBeenCalledWith('/api/ask/sessions');
     });
   });
 
   describe('fetchMessages', () => {
-    it('returns messages for a conversation', async () => {
+    it('returns messages for a session', async () => {
       const messages = [
         { id: 1, role: 'user', content: 'hello' },
         { id: 2, role: 'assistant', content: 'hi' },
@@ -50,23 +50,23 @@ describe('ask API', () => {
 
       const result = await fetchMessages('c1');
       expect(result).toEqual(messages);
-      expect(mockedClient.get).toHaveBeenCalledWith('/api/ask/conversations/c1/messages');
+      expect(mockedClient.get).toHaveBeenCalledWith('/api/ask/sessions/c1/messages');
     });
   });
 
-  describe('deleteConversation', () => {
+  describe('deleteSession', () => {
     it('calls delete endpoint', async () => {
       mockedClient.delete.mockResolvedValueOnce({});
 
-      await deleteConversation('c1');
-      expect(mockedClient.delete).toHaveBeenCalledWith('/api/ask/conversations/c1');
+      await deleteSession('c1');
+      expect(mockedClient.delete).toHaveBeenCalledWith('/api/ask/sessions/c1');
     });
   });
 
   describe('chatSearch', () => {
     it('posts search request and returns result', async () => {
       const searchResult = {
-        conversation_id: 'c1',
+        session_id: 'c1',
         mode: 'search',
         content: '[{"law_name":"保险法"}]',
         sources: [{ law_name: '保险法', article_number: '第一条' }],
@@ -77,18 +77,18 @@ describe('ask API', () => {
       expect(result).toEqual(searchResult);
       expect(mockedClient.post).toHaveBeenCalledWith('/api/ask/chat', {
         question: '等待期多久',
-        conversation_id: undefined,
+        session_id: undefined,
         mode: 'search',
       });
     });
 
-    it('passes conversation_id when provided', async () => {
-      mockedClient.post.mockResolvedValueOnce({ data: { conversation_id: 'c1', mode: 'search', content: '', sources: [] } });
+    it('passes session_id when provided', async () => {
+      mockedClient.post.mockResolvedValueOnce({ data: { session_id: 'c1', mode: 'search', content: '', sources: [] } });
 
       await chatSearch('问题', 'c1');
       expect(mockedClient.post).toHaveBeenCalledWith('/api/ask/chat', {
         question: '问题',
-        conversation_id: 'c1',
+        session_id: 'c1',
         mode: 'search',
       });
     });
@@ -99,7 +99,7 @@ describe('ask API', () => {
       // Mock fetch to return a ReadableStream
       const mockStream = new ReadableStream({
         start(controller) {
-          controller.enqueue(new TextEncoder().encode('data: {"type":"done","data":{"conversation_id":"c1","message_id":42,"citations":[],"sources":[]}}\n\n'));
+          controller.enqueue(new TextEncoder().encode('data: {"type":"done","data":{"session_id":"c1","message_id":42,"citations":[],"sources":[]}}\n\n'));
           controller.close();
         },
       });
@@ -121,7 +121,7 @@ describe('ask API', () => {
       const sseData = [
         'data: {"type":"token","data":"你好"}\n',
         'data: {"type":"token","data":"世界"}\n',
-        'data: {"type":"done","data":{"conversation_id":"c1","message_id":42,"citations":[],"sources":[]}}\n\n',
+        'data: {"type":"done","data":{"session_id":"c1","message_id":42,"citations":[],"sources":[]}}\n\n',
       ].join('');
 
       const mockStream = new ReadableStream({
@@ -140,7 +140,7 @@ describe('ask API', () => {
       expect(onToken).toHaveBeenCalledWith('你好');
       expect(onToken).toHaveBeenCalledWith('世界');
       expect(onDone).toHaveBeenCalledWith(expect.objectContaining({
-        conversation_id: 'c1',
+        session_id: 'c1',
         message_id: 42,
       }));
       vi.unstubAllGlobals();

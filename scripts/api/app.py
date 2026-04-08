@@ -55,6 +55,9 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("数据库初始化完成")
 
+    from api.dependencies import init_memory_service
+    init_memory_service()
+
     try:
         from api.routers.eval import _ensure_default_dataset
         _ensure_default_dataset()
@@ -75,13 +78,19 @@ async def lifespan(app: FastAPI):
         _rag_initialized = rag_engine.initialize()
         if _rag_initialized:
             logger.info("RAG 引擎初始化完成")
+            from api.dependencies import init_ask_graph
+            init_ask_graph()
         else:
             logger.warning("RAG 引擎初始化失败（问答功能不可用）")
     except Exception as e:
         logger.warning(f"RAG 引擎初始化失败（问答功能不可用）: {e}")
 
+    memory_cleanup_task = asyncio.create_task(_memory_cleanup_loop())
+
     auto_classify_task.cancel()
     yield
+
+    memory_cleanup_task.cancel()
 
     if rag_engine is not None:
         rag_engine.cleanup()
@@ -105,6 +114,24 @@ async def _auto_classify_loop():
         await asyncio.sleep(3600)
 
 
+async def _memory_cleanup_loop():
+    """每日清理过期记忆。"""
+    from api.dependencies import get_memory_service
+    try:
+        while True:
+            await asyncio.sleep(86400)
+            svc = get_memory_service()
+            if svc and svc.available:
+                try:
+                    count = svc.cleanup_expired()
+                    if count:
+                        logger.info(f"清理过期记忆 {count} 条")
+                except Exception as e:
+                    logger.warning(f"记忆清理失败: {e}")
+    except asyncio.CancelledError:
+        pass
+
+
 app = FastAPI(
     title="Actuary Sleuth - 法规知识平台",
     version="1.0.0",
@@ -120,6 +147,7 @@ app.add_middleware(
 )
 
 from api.routers import ask, knowledge, eval as eval_router, compliance, kb_version, feedback, observability
+from api.routers.memory import router as memory_router
 app.include_router(ask.router)
 app.include_router(knowledge.router)
 app.include_router(eval_router.router)
@@ -127,6 +155,7 @@ app.include_router(compliance.router)
 app.include_router(kb_version.router)
 app.include_router(feedback.router)
 app.include_router(observability.router)
+app.include_router(memory_router)
 
 
 @app.get("/api/health")

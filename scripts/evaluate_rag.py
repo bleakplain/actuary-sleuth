@@ -63,13 +63,8 @@ def _ensure_env():
             pass
 
     if 'ZHIPU_API_KEY' not in os.environ:
-        try:
-            from lib.common.config_validator import ConfigValidator
-            api_key = ConfigValidator.require_api_key('ZHIPU_API_KEY', '智谱')
-            os.environ['ZHIPU_API_KEY'] = api_key
-        except Exception as e:
-            logger.error(f"无法获取 API 密钥: {e}")
-            sys.exit(1)
+        logger.error("环境变量 'ZHIPU_API_KEY' 未设置")
+        sys.exit(1)
 
 
 def setup_rag_engine(config: RAGConfig) -> 'RAGEngine':

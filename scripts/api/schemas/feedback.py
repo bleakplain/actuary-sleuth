@@ -12,7 +12,7 @@ class FeedbackCreate(BaseModel):
 class FeedbackOut(BaseModel):
     id: str
     message_id: int
-    conversation_id: str
+    session_id: str
     rating: str
     reason: str
     correction: str

@@ -16,6 +16,7 @@ const CATEGORY_CONFIG: Record<string, { label: string; color: string; bg: string
   retrieval: { label: '检索', color: '#1677ff', bg: '#e6f4ff' },
   rerank: { label: '重排序', color: '#fa8c16', bg: '#fff7e6' },
   llm: { label: '生成', color: '#52c41a', bg: '#f6ffed' },
+  memory: { label: '记忆', color: '#13c2c2', bg: '#e6fffb' },
 };
 
 function getCategoryStyle(category: string) {
@@ -319,8 +320,16 @@ function SpanDetails({ span, depth }: { span: TraceSpan; depth: number }) {
         </>
       )}
 
+      {/* memory */}
+      {cat === 'memory' && out && out.memory_count !== undefined && (
+        <div style={{ fontSize: 11, color: '#595959', lineHeight: 1.6 }}>
+          检索到 <span style={{ fontWeight: 600, color: '#13c2c2' }}>{String(out.memory_count)}</span> 条记忆
+          {out.has_profile ? '，含用户画像' : ''}
+        </div>
+      )}
+
       {/* fallback */}
-      {cat !== 'retrieval' && cat !== 'rerank' && cat !== 'llm' && cat !== 'root' && (
+      {cat !== 'retrieval' && cat !== 'rerank' && cat !== 'llm' && cat !== 'root' && cat !== 'memory' && (
         <>
           <CollapsibleText label="Input" text={JSON.stringify(span.input ?? {}, null, 2)} bg="#fafafa" />
           <CollapsibleText label="Output" text={JSON.stringify(span.output ?? {}, null, 2)} bg="#f6ffed" />

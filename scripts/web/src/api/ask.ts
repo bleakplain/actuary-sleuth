@@ -1,8 +1,8 @@
 import client from './client';
-import type { Conversation, Message, Source, Citation, TraceData } from '../types';
+import type { Session, Message, Source, Citation, TraceData } from '../types';
 
 interface ChatDoneData {
-  conversation_id: string;
+  session_id: string;
   message_id?: number;
   citations: Citation[];
   sources: Source[];
@@ -10,31 +10,31 @@ interface ChatDoneData {
   trace?: TraceData;
 }
 
-export async function fetchConversations(search?: string): Promise<Conversation[]> {
-  const { data } = await client.get('/api/ask/conversations', {
+export async function fetchSessions(search?: string): Promise<Session[]> {
+  const { data } = await client.get('/api/ask/sessions', {
     params: search ? { search } : undefined,
   });
   return data;
 }
 
-export async function fetchMessages(conversationId: string): Promise<Message[]> {
-  const { data } = await client.get(`/api/ask/conversations/${conversationId}/messages`);
+export async function fetchMessages(sessionId: string): Promise<Message[]> {
+  const { data } = await client.get(`/api/ask/sessions/${sessionId}/messages`);
   return data;
 }
 
-export async function deleteConversation(conversationId: string): Promise<void> {
-  await client.delete(`/api/ask/conversations/${conversationId}`);
+export async function deleteSession(sessionId: string): Promise<void> {
+  await client.delete(`/api/ask/sessions/${sessionId}`);
 }
 
-export async function batchDeleteConversations(ids: string[]): Promise<{ deleted: number }> {
-  const { data } = await client.delete('/api/ask/conversations', {
+export async function batchDeleteSessions(ids: string[]): Promise<{ deleted: number }> {
+  const { data } = await client.delete('/api/ask/sessions', {
     params: { ids: ids.join(',') },
   });
   return data;
 }
 
 export function chatSSE(
-  req: { question: string; conversation_id?: string; mode: 'qa' | 'search'; debug?: boolean },
+  req: { question: string; session_id?: string; mode: 'qa' | 'search'; debug?: boolean },
   callbacks: {
     onToken: (token: string) => void;
     onDone: (data: ChatDoneData) => void;
@@ -87,11 +87,11 @@ export function chatSSE(
 
 export async function chatSearch(
   question: string,
-  conversationId?: string,
-): Promise<{ conversation_id: string; mode: string; content: string; sources: Source[] }> {
+  sessionId?: string,
+): Promise<{ session_id: string; mode: string; content: string; sources: Source[] }> {
   const { data } = await client.post('/api/ask/chat', {
     question,
-    conversation_id: conversationId,
+    session_id: sessionId,
     mode: 'search',
   });
   return data;

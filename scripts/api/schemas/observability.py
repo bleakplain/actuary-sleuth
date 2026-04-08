@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 class TraceListItem(BaseModel):
     trace_id: str
     message_id: Optional[int] = None
-    conversation_id: Optional[str] = None
+    session_id: Optional[str] = None
     created_at: str
     status: str = "ok"
     total_duration_ms: float = 0

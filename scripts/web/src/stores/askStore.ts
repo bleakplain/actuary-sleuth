@@ -1,59 +1,59 @@
 import { create } from 'zustand';
-import type { Conversation, Message, Source } from '../types';
+import type { Session, Message, Source } from '../types';
 import * as askApi from '../api/ask';
 
 let _searchTimer: ReturnType<typeof setTimeout> | null = null;
 
 interface AskState {
-  conversations: Conversation[];
-  currentConversationId: string | null;
+  sessions: Session[];
+  currentSessionId: string | null;
   messages: Message[];
   streaming: boolean;
   currentSources: Source[];
   activeTraceMessageId: number | null;
   traceLoading: boolean;
   debugMode: boolean;
-  conversationSearch: string;
+  sessionSearch: string;
 
-  loadConversations: (search?: string) => Promise<void>;
-  selectConversation: (id: string) => Promise<void>;
+  loadSessions: (search?: string) => Promise<void>;
+  selectSession: (id: string) => Promise<void>;
   sendMessage: (question: string, mode: 'qa' | 'search') => void;
-  deleteConversation: (id: string) => Promise<void>;
+  deleteSession: (id: string) => Promise<void>;
   openTrace: (messageId: number) => void;
   closeTrace: () => void;
   toggleDebugMode: () => void;
-  setConversationSearch: (search: string) => void;
-  batchDeleteConversations: (ids: string[]) => Promise<void>;
+  setSessionSearch: (search: string) => void;
+  batchDeleteSessions: (ids: string[]) => Promise<void>;
 }
 
 export const useAskStore = create<AskState>((set, get) => ({
-  conversations: [],
-  currentConversationId: null,
+  sessions: [],
+  currentSessionId: null,
   messages: [],
   streaming: false,
   currentSources: [],
   activeTraceMessageId: null,
   traceLoading: false,
   debugMode: false,
-  conversationSearch: "",
+  sessionSearch: "",
 
-  loadConversations: async (search?: string) => {
-    const conversations = await askApi.fetchConversations(search);
-    set({ conversations });
+  loadSessions: async (search?: string) => {
+    const sessions = await askApi.fetchSessions(search);
+    set({ sessions });
   },
 
-  selectConversation: async (id: string) => {
-    set({ currentConversationId: id, currentSources: [], activeTraceMessageId: null, traceLoading: false });
+  selectSession: async (id: string) => {
+    set({ currentSessionId: id, currentSources: [], activeTraceMessageId: null, traceLoading: false });
     const messages = await askApi.fetchMessages(id);
     set({ messages });
   },
 
   sendMessage: (question: string, mode: 'qa' | 'search') => {
-    const { currentConversationId, messages } = get();
+    const { currentSessionId, messages } = get();
 
     const userMsg: Message = {
       id: Date.now(),
-      conversation_id: currentConversationId || '',
+      session_id: currentSessionId || '',
       role: 'user',
       content: question,
       citations: [],
@@ -62,7 +62,7 @@ export const useAskStore = create<AskState>((set, get) => ({
     };
     const assistantMsg: Message = {
       id: Date.now() + 1,
-      conversation_id: currentConversationId || '',
+      session_id: currentSessionId || '',
       role: 'assistant',
       content: '',
       citations: [],
@@ -73,7 +73,7 @@ export const useAskStore = create<AskState>((set, get) => ({
 
     if (mode === 'search') {
       askApi
-        .chatSearch(question, currentConversationId || undefined)
+        .chatSearch(question, currentSessionId || undefined)
         .then((data) => {
           set((s) => ({
             messages: s.messages.map((m) =>
@@ -84,7 +84,7 @@ export const useAskStore = create<AskState>((set, get) => ({
             currentSources: data.sources || [],
             streaming: false,
           }));
-          get().loadConversations();
+          get().loadSessions();
         })
         .catch((err: Error) => {
           set((s) => ({
@@ -99,7 +99,7 @@ export const useAskStore = create<AskState>((set, get) => ({
 
     let fullAnswer = '';
     askApi.chatSSE(
-      { question, conversation_id: currentConversationId || undefined, mode: 'qa', debug: get().debugMode },
+      { question, session_id: currentSessionId || undefined, mode: 'qa', debug: get().debugMode },
       {
         onToken: (token) => {
           fullAnswer += token;
@@ -122,11 +122,11 @@ export const useAskStore = create<AskState>((set, get) => ({
                   }
                 : m,
             ),
-            currentConversationId: doneData.conversation_id || currentConversationId,
+            currentSessionId: doneData.session_id || currentSessionId,
             currentSources: doneData.sources || [],
             streaming: false,
           }));
-          get().loadConversations();
+          get().loadSessions();
         },
         onError: (err) => {
           set((s) => ({
@@ -140,13 +140,13 @@ export const useAskStore = create<AskState>((set, get) => ({
     );
   },
 
-  deleteConversation: async (id: string) => {
-    await askApi.deleteConversation(id);
-    const { currentConversationId } = get();
-    if (currentConversationId === id) {
-      set({ currentConversationId: null, messages: [], activeTraceMessageId: null, traceLoading: false });
+  deleteSession: async (id: string) => {
+    await askApi.deleteSession(id);
+    const { currentSessionId } = get();
+    if (currentSessionId === id) {
+      set({ currentSessionId: null, messages: [], activeTraceMessageId: null, traceLoading: false });
     }
-    get().loadConversations();
+    get().loadSessions();
   },
 
   openTrace: (messageId: number) => {
@@ -183,22 +183,22 @@ export const useAskStore = create<AskState>((set, get) => ({
     set({ activeTraceMessageId: null });
   },
 
-  setConversationSearch: (search: string) => {
-    set({ conversationSearch: search });
+  setSessionSearch: (search: string) => {
+    set({ sessionSearch: search });
     if (_searchTimer) clearTimeout(_searchTimer);
     _searchTimer = setTimeout(() => {
-      get().loadConversations(search);
+      get().loadSessions(search);
       _searchTimer = null;
     }, 300);
   },
 
-  batchDeleteConversations: async (ids: string[]) => {
-    await askApi.batchDeleteConversations(ids);
-    const { currentConversationId } = get();
-    if (ids.includes(currentConversationId || "")) {
-      set({ currentConversationId: null, messages: [], activeTraceMessageId: null, traceLoading: false });
+  batchDeleteSessions: async (ids: string[]) => {
+    await askApi.batchDeleteSessions(ids);
+    const { currentSessionId } = get();
+    if (ids.includes(currentSessionId || "")) {
+      set({ currentSessionId: null, messages: [], activeTraceMessageId: null, traceLoading: false });
     }
-    get().loadConversations(get().conversationSearch || undefined);
+    get().loadSessions(get().sessionSearch || undefined);
   },
 
   toggleDebugMode: () => {
