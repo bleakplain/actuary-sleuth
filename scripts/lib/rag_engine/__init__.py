@@ -26,7 +26,7 @@ from .config import RAGConfig, get_config, config_to_dict, RetrievalConfig, Rera
 from .exceptions import RAGEngineError, EngineInitializationError, RetrievalError
 from .query_preprocessor import QueryPreprocessor, PreprocessedQuery
 from .reranker_base import BaseReranker
-from .llm_reranker import LLMReranker, RerankConfig
+from .llm_reranker import LLMReranker
 from .gguf_reranker_adapter import GGUFReranker
 from .attribution import parse_citations, AttributionResult, Citation
 
@@ -39,7 +39,6 @@ from .bm25_index import BM25Index
 from .chunker import ChecklistChunker
 from .evaluator import RetrievalEvaluator, GenerationEvaluator, RAGEvalReport
 from .eval_dataset import EvalSample, QuestionType, load_eval_dataset, create_default_eval_dataset, save_eval_dataset, DEFAULT_DATASET_PATH
-from .llm_judge import LLMPJudge, LLMPJudgeResult, LLMPJudgeBatchReport
 from .dataset_validator import validate_dataset, QualityAuditReport
 from .eval_guide import interpret_metric, generate_eval_summary
 from .quality_detector import detect_quality, compute_retrieval_relevance, compute_info_completeness
@@ -59,7 +58,6 @@ __all__ = [
     'PreprocessedQuery',
     'BaseReranker',
     'LLMReranker',
-    'RerankConfig',
     'GGUFReranker',
     'parse_citations',
     'AttributionResult',
@@ -87,9 +85,6 @@ __all__ = [
     'compute_info_completeness',
     'classify_badcase',
     'assess_compliance_risk',
-    'LLMPJudge',
-    'LLMPJudgeResult',
-    'LLMPJudgeBatchReport',
     'validate_dataset',
     'QualityAuditReport',
     'interpret_metric',

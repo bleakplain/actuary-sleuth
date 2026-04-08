@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Card, Table, Button, Space, Select, Tag, Modal, Form, Input, InputNumber, Switch,
   Typography, message, Row, Col, Popconfirm, Progress, Descriptions, Tabs, Tooltip,
-  Divider, Checkbox,
+  Divider, Checkbox, Drawer,
 } from 'antd';
 import {
   PlusOutlined, ImportOutlined, SaveOutlined, RollbackOutlined,
@@ -10,6 +10,7 @@ import {
   DeleteOutlined, CopyOutlined, CheckCircleOutlined, SearchOutlined, CloseCircleOutlined, LinkOutlined,
 } from '@ant-design/icons';
 import * as evalApi from '../api/eval';
+import * as kbApi from '../api/knowledge';
 import MetricsChart, { formatMetric, ComparisonChart, TrendChart } from '../components/MetricsChart';
 import type { EvalSample, EvalSnapshot, Evaluation, EvalConfig, SampleResult, MetricsDiff, RegulationRef } from '../types';
 import { resolveMetricMeta } from '../utils/evalMetrics';
@@ -40,49 +41,57 @@ const STATUS_MAP: Record<string, { color: string; label: string }> = {
   failed: { color: 'error', label: '失败' },
 };
 
-function ReviewTab() {
-  const [samples, setSamples] = useState<EvalSample[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string>('');
-  const [stats, setStats] = useState<{ total: number; pending: number; approved: number }>({ total: 0, pending: 0, approved: 0 });
-  const [kbQuery, setKbQuery] = useState('');
-  const [kbResults, setKbResults] = useState<{
-    doc_name: string; article: string; excerpt: string; relevance: number; hierarchy_path: string; chunk_id: string;
-  }[]>([]);
-  const [kbSearching, setKbSearching] = useState(false);
+const REVIEW_STATUS_TAG: Record<string, { color: string; label: string }> = {
+  approved: { color: 'green', label: '已通过' },
+  pending: { color: 'default', label: '待审核' },
+};
+
+interface KbSearchResult {
+  doc_name: string; article: string; excerpt: string; hierarchy_path: string; chunk_id: string;
+}
+
+interface KbChunkItem {
+  law_name: string; article_number: string; category: string; hierarchy_path: string;
+  source_file: string; doc_number: string; issuing_authority: string; text: string;
+}
+
+function SampleDrawer({
+  sample,
+  open,
+  onClose,
+  onSaved,
+}: {
+  sample: EvalSample;
+  open: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const [editGroundTruth, setEditGroundTruth] = useState('');
   const [editReviewer, setEditReviewer] = useState('');
   const [editComment, setEditComment] = useState('');
+  const [kbQuery, setKbQuery] = useState('');
+  const [kbResults, setKbResults] = useState<KbSearchResult[]>([]);
+  const [kbSearching, setKbSearching] = useState(false);
   const [kbSearchDone, setKbSearchDone] = useState(false);
 
-  const selected = samples.find((s) => s.id === selectedId) ?? null;
-
-  const loadSamples = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [sampleList, statsData] = await Promise.all([
-        evalApi.fetchEvalSamples(statusFilter ? { review_status: statusFilter } : undefined),
-        evalApi.fetchReviewStats(),
-      ]);
-      setSamples(sampleList);
-      setStats(statsData);
-    } catch (err) {
-      message.error(`加载失败: ${err}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [statusFilter]);
-
-  useEffect(() => { loadSamples(); }, [loadSamples]);
+  const [kbDocs, setKbDocs] = useState<{ name: string; file_path: string; clause_count: number }[]>([]);
+  const [kbDocsLoading, setKbDocsLoading] = useState(false);
+  const [selectedDocPath, setSelectedDocPath] = useState<string | undefined>(undefined);
+  const [docChunks, setDocChunks] = useState<KbChunkItem[]>([]);
+  const [docChunksLoading, setDocChunksLoading] = useState(false);
+  const [currentRefs, setCurrentRefs] = useState<RegulationRef[]>([]);
 
   useEffect(() => {
-    if (selected) {
-      setEditGroundTruth(selected.ground_truth);
-      setEditReviewer(selected.reviewer);
-      setEditComment(selected.review_comment);
+    if (sample) {
+      setEditGroundTruth(sample.ground_truth);
+      setEditReviewer(sample.reviewer);
+      setEditComment(sample.review_comment);
+      setCurrentRefs([...(sample.regulation_refs || [])]);
+      setKbQuery('');
+      setKbResults([]);
+      setKbSearchDone(false);
     }
-  }, [selected]);
+  }, [sample]);
 
   const handleSearchKb = async () => {
     if (!kbQuery.trim()) return;
@@ -98,233 +107,255 @@ function ReviewTab() {
     }
   };
 
-  const handleSave = async () => {
-    if (!selected) return;
+  const loadKbDocs = async () => {
+    if (kbDocs.length > 0) return;
+    setKbDocsLoading(true);
     try {
-      await evalApi.updateEvalSample(selected.id, { ...selected, ground_truth: editGroundTruth });
+      const docs = await kbApi.fetchDocuments();
+      setKbDocs(docs.map(d => ({ name: d.name, file_path: d.file_path, clause_count: d.clause_count })));
+    } catch {
+      // KB docs optional
+    } finally {
+      setKbDocsLoading(false);
+    }
+  };
+
+  const handleSelectDoc = async (filePath: string) => {
+    setSelectedDocPath(filePath || undefined);
+    if (!filePath) {
+      setDocChunks([]);
+      return;
+    }
+    setDocChunksLoading(true);
+    try {
+      const result = await kbApi.fetchDocumentChunks(filePath);
+      setDocChunks(result.chunks);
+    } catch {
+      setDocChunks([]);
+    } finally {
+      setDocChunksLoading(false);
+    }
+  };
+
+  const addRef = (ref: RegulationRef) => {
+    if (currentRefs.some(r => r.doc_name === ref.doc_name && r.article === ref.article)) {
+      message.info('该条款已引用');
+      return;
+    }
+    setCurrentRefs(prev => [...prev, ref]);
+  };
+
+  const removeRef = (index: number) => {
+    setCurrentRefs(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSave = async () => {
+    try {
+      await evalApi.updateEvalSample(sample.id, {
+        ...sample,
+        ground_truth: editGroundTruth,
+        regulation_refs: currentRefs,
+      });
       message.success('已保存，审核状态重置为待审核');
-      loadSamples();
+      onSaved();
     } catch (err) {
       message.error(`保存失败: ${err}`);
     }
   };
 
   const handleApprove = async () => {
-    if (!selected) return;
     try {
-      await evalApi.approveSample(selected.id, editReviewer, editComment);
+      await evalApi.updateEvalSample(sample.id, {
+        ...sample,
+        ground_truth: editGroundTruth,
+        regulation_refs: currentRefs,
+      });
+      await evalApi.approveSample(sample.id, editReviewer, editComment);
       message.success('审核通过');
-      loadSamples();
+      onClose();
+      onSaved();
     } catch (err) {
       message.error(`审核失败: ${err}`);
     }
   };
 
-  const handleAddRef = async (result: {
-    doc_name: string; article: string; excerpt: string; relevance: number; hierarchy_path: string; chunk_id: string;
-  }) => {
-    if (!selected) return;
-    const newRef: RegulationRef = {
-      doc_name: result.doc_name,
-      article: result.article,
-      excerpt: result.excerpt,
-      relevance: result.relevance,
-      chunk_id: result.chunk_id,
-    };
-    const updatedRefs = [...(selected.regulation_refs || []), newRef];
-    try {
-      await evalApi.updateEvalSample(selected.id, { ...selected, regulation_refs: updatedRefs });
-      message.success('已添加引用');
-      loadSamples();
-    } catch (err) {
-      message.error(`添加引用失败: ${err}`);
-    }
-  };
-
-  const handleRemoveRef = async (index: number) => {
-    if (!selected) return;
-    const updatedRefs = [...(selected.regulation_refs || [])];
-    updatedRefs.splice(index, 1);
-    try {
-      await evalApi.updateEvalSample(selected.id, { ...selected, regulation_refs: updatedRefs });
-      loadSamples();
-    } catch (err) {
-      message.error(`移除引用失败: ${err}`);
-    }
-  };
+  const drawerTitle = (
+    <Space>
+      <span>{sample.id}</span>
+      <Tag color={TYPE_COLORS[sample.question_type] || 'default'}>{sample.question_type}</Tag>
+      <Tag color={REVIEW_STATUS_TAG[sample.review_status]?.color}>
+        {REVIEW_STATUS_TAG[sample.review_status]?.label}
+      </Tag>
+    </Space>
+  );
 
   return (
-    <Row gutter={16}>
-      <Col span={8}>
-        <Card size="small" title={
+    <Drawer
+      title={drawerTitle}
+      open={open}
+      onClose={onClose}
+      width={640}
+      styles={{ body: { overflowY: 'auto', paddingBottom: 60 } }}
+      footer={
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Space>
-            <span>样本列表</span>
-            <Tag color="blue">{stats.pending} 待审核</Tag>
-            <Tag color="green">{stats.approved} 已通过</Tag>
+            <span style={{ fontSize: 13 }}>审核人：</span>
+            <Input size="small" style={{ width: 100 }} value={editReviewer}
+              onChange={(e) => setEditReviewer(e.target.value)} placeholder="姓名" />
+            <span style={{ fontSize: 13, marginLeft: 8 }}>备注：</span>
+            <Input size="small" style={{ width: 200 }} value={editComment}
+              onChange={(e) => setEditComment(e.target.value)} placeholder="可选" />
           </Space>
-        }>
-          <div style={{ marginBottom: 8 }}>
+          <Space>
+            <Button onClick={handleSave}>保存</Button>
+            <Button type="primary" onClick={handleApprove}>审核通过</Button>
+          </Space>
+        </div>
+      }
+    >
+      <div style={{ marginBottom: 16 }}>
+        <Text type="secondary">问题</Text>
+        <div style={{ marginTop: 4, fontSize: 14 }}>{sample.question}</div>
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <Text type="secondary">标准答案</Text>
+        <Input.TextArea
+          rows={3}
+          value={editGroundTruth}
+          onChange={(e) => setEditGroundTruth(e.target.value)}
+          style={{ marginTop: 4 }}
+        />
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <Text type="secondary">已引用法规 ({currentRefs.length})</Text>
+        {currentRefs.length === 0 && (
+          <div style={{ color: '#bfbfbf', fontSize: 13, marginTop: 4 }}>暂无引用，请在下方搜索或浏览法规库添加</div>
+        )}
+        {currentRefs.map((ref, idx) => (
+          <div key={idx} style={{
+            marginTop: 4, padding: '6px 8px', background: '#fafafa',
+            border: '1px solid #f0f0f0', borderRadius: 4, fontSize: 13,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Space>
+                <Tag>{ref.article}</Tag>
+                <Text>{ref.doc_name}</Text>
+              </Space>
+              <Button type="text" size="small" danger icon={<CloseCircleOutlined />}
+                onClick={() => removeRef(idx)} />
+            </div>
+            <div style={{ marginTop: 2, color: '#666', fontSize: 12 }}>
+              {ref.excerpt && ref.excerpt.length > 150 ? ref.excerpt.slice(0, 150) + '...' : ref.excerpt}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Divider style={{ margin: '12px 0' }} />
+
+      <div style={{ marginBottom: 16 }}>
+        <Text type="secondary">搜索法规库</Text>
+        <div style={{ marginTop: 4, display: 'flex', gap: 8 }}>
+          <Input
+            placeholder="输入问题关键词..."
+            value={kbQuery}
+            onChange={(e) => setKbQuery(e.target.value)}
+            onPressEnter={handleSearchKb}
+          />
+          <Button icon={<SearchOutlined />} loading={kbSearching} onClick={handleSearchKb}>搜索</Button>
+        </div>
+        {kbSearchDone && kbResults.length === 0 && !kbSearching && (
+          <div style={{ color: '#bfbfbf', fontSize: 13, marginTop: 8 }}>无搜索结果</div>
+        )}
+        {kbResults.length > 0 && (
+          <div style={{ marginTop: 8, maxHeight: 240, overflow: 'auto' }}>
+            {kbResults.map((r, idx) => (
+              <div key={idx} style={{
+                padding: '6px 8px', marginBottom: 4, background: '#fafafa',
+                border: '1px solid #f0f0f0', borderRadius: 4, fontSize: 13,
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Space>
+                    <Tag>{r.article || '-'}</Tag>
+                    <Text ellipsis style={{ maxWidth: 200 }}>{r.doc_name}</Text>
+                  </Space>
+                  <Button type="link" size="small" icon={<LinkOutlined />}
+                    onClick={() => addRef({ doc_name: r.doc_name, article: r.article, excerpt: r.excerpt, chunk_id: r.chunk_id })} />
+                </div>
+                {r.hierarchy_path && (
+                  <div style={{ marginTop: 2, color: '#999', fontSize: 11 }}>{r.hierarchy_path}</div>
+                )}
+                <div style={{ marginTop: 2, color: '#666', fontSize: 12 }}>
+                  {r.excerpt.length > 120 ? r.excerpt.slice(0, 120) + '...' : r.excerpt}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <Divider style={{ margin: '12px 0' }} />
+
+      <div style={{ marginBottom: 16 }}>
+        <Text type="secondary">浏览法规文档</Text>
+        {kbDocs.length === 0 && !kbDocsLoading && (
+          <Button type="link" size="small" onClick={loadKbDocs} style={{ marginLeft: 8 }}>
+            加载文档列表
+          </Button>
+        )}
+        {kbDocsLoading && <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>加载中...</Text>}
+        {kbDocs.length > 0 && (
+          <div style={{ marginTop: 8 }}>
             <Select
               size="small"
-              value={statusFilter || undefined}
-              onChange={setStatusFilter}
+              value={selectedDocPath}
+              onChange={handleSelectDoc}
               allowClear
-              placeholder="筛选状态"
+              placeholder="选择法规文档"
               style={{ width: '100%' }}
-              options={[
-                { value: 'pending', label: '待审核' },
-                { value: 'approved', label: '已通过' },
-              ]}
+              options={kbDocs.map(d => ({
+                value: d.file_path,
+                label: `${d.name} (${d.clause_count} 条)`,
+              }))}
             />
-          </div>
-          <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 220px)' }}>
-            <Table
-              dataSource={samples}
-              loading={loading}
-              rowKey="id"
-              size="small"
-              pagination={false}
-              scroll={{ y: 'calc(100vh - 280px)' }}
-              onRow={(s) => ({
-                onClick: () => setSelectedId(s.id),
-                style: {
-                  cursor: 'pointer',
-                  background: selectedId === s.id ? '#e6f4ff' : undefined,
-                },
-              })}
-              columns={[
-                {
-                  title: '状态', dataIndex: 'review_status', key: 'review_status', width: 60,
-                  render: (v: string) => v === 'approved'
-                    ? <Tag color="green" style={{ margin: 0 }}>通过</Tag>
-                    : <Tag style={{ margin: 0 }}>待审</Tag>,
-                },
-                { title: '问题', dataIndex: 'question', key: 'question', ellipsis: true },
-              ]}
-            />
-          </div>
-        </Card>
-      </Col>
-
-      <Col span={16}>
-        {selected ? (
-          <Card size="small" title={
-            <Space>
-              <span>{selected.id}</span>
-              <Tag color={TYPE_COLORS[selected.question_type] || 'default'}>{selected.question_type}</Tag>
-              {selected.review_status === 'approved'
-                ? <Tag color="green">已通过</Tag>
-                : <Tag>待审核</Tag>}
-            </Space>
-          }>
-            <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">问题：</Text>
-              <div style={{ marginTop: 4 }}>{selected.question}</div>
-            </div>
-
-            <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">标准答案：</Text>
-              <Input.TextArea
-                rows={3}
-                value={editGroundTruth}
-                onChange={(e) => setEditGroundTruth(e.target.value)}
-                style={{ marginTop: 4 }}
-              />
-            </div>
-
-            <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">已引用法规：</Text>
-              {(!selected.regulation_refs || selected.regulation_refs.length === 0) && (
-                <div style={{ color: '#bfbfbf', fontSize: 13, marginTop: 4 }}>暂无引用</div>
-              )}
-              {selected.regulation_refs?.map((ref, idx) => (
-                <div key={idx} style={{
-                  marginTop: 4, padding: '6px 8px', background: '#fafafa',
-                  border: '1px solid #f0f0f0', borderRadius: 4, fontSize: 13,
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Space>
-                      <Tag>{ref.article}</Tag>
-                      <Text>{ref.doc_name}</Text>
-                    </Space>
-                    <Button type="text" size="small" danger icon={<CloseCircleOutlined />}
-                      onClick={() => handleRemoveRef(idx)} />
-                  </div>
-                  <div style={{ marginTop: 2, color: '#666', fontSize: 12 }}>{ref.excerpt.slice(0, 150)}...</div>
-                </div>
-              ))}
-            </div>
-
-            <Divider style={{ margin: '12px 0' }} />
-
-            <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">搜索法规库</Text>
-              <div style={{ marginTop: 4, display: 'flex', gap: 8 }}>
-                <Input
-                  placeholder="输入关键词搜索..."
-                  value={kbQuery}
-                  onChange={(e) => setKbQuery(e.target.value)}
-                  onPressEnter={handleSearchKb}
-                />
-                <Button icon={<SearchOutlined />} loading={kbSearching} onClick={handleSearchKb}>搜索</Button>
-              </div>
-            </div>
-
-            {kbSearchDone && kbResults.length === 0 && !kbSearching && (
-              <div style={{ color: '#bfbfbf', fontSize: 13, marginBottom: 12 }}>无搜索结果</div>
+            {docChunksLoading && (
+              <div style={{ color: '#bfbfbf', fontSize: 12, marginTop: 4 }}>加载条款中...</div>
             )}
-
-            {kbResults.length > 0 && (
-              <div style={{ marginBottom: 12, maxHeight: 300, overflow: 'auto' }}>
-                {kbResults.map((r, idx) => (
+            {selectedDocPath && !docChunksLoading && docChunks.length > 0 && (
+              <div style={{ marginTop: 4, maxHeight: 240, overflow: 'auto' }}>
+                {docChunks.map((chunk, idx) => (
                   <div key={idx} style={{
                     padding: '6px 8px', marginBottom: 4, background: '#fafafa',
                     border: '1px solid #f0f0f0', borderRadius: 4, fontSize: 13,
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <Space>
-                        <Tag>{r.article || '-'}</Tag>
-                        <Text ellipsis style={{ maxWidth: 200 }}>{r.doc_name}</Text>
-                        <Text type="secondary" style={{ fontSize: 12 }}>{r.relevance.toFixed(2)}</Text>
+                        <Tag>{chunk.article_number || '-'}</Tag>
+                        {chunk.hierarchy_path && (
+                          <Text type="secondary" style={{ fontSize: 11 }}>{chunk.hierarchy_path.split(' > ').pop()}</Text>
+                        )}
                       </Space>
                       <Button type="link" size="small" icon={<LinkOutlined />}
-                        onClick={() => handleAddRef(r)}>引用</Button>
+                        onClick={() => addRef({
+                          doc_name: chunk.source_file,
+                          article: chunk.article_number,
+                          excerpt: chunk.text,
+                          chunk_id: '',
+                        })} />
                     </div>
-                    <div style={{ marginTop: 2, color: '#666', fontSize: 12 }}>{r.excerpt.slice(0, 120)}...</div>
+                    <div style={{ marginTop: 2, color: '#666', fontSize: 12 }}>
+                      {chunk.text.length > 120 ? chunk.text.slice(0, 120) + '...' : chunk.text}
+                    </div>
                   </div>
                 ))}
               </div>
             )}
-
-            <Divider style={{ margin: '12px 0' }} />
-
-            <div style={{ marginBottom: 12 }}>
-              <Space>
-                <span style={{ fontSize: 13 }}>审核人：</span>
-                <Input size="small" style={{ width: 120 }} value={editReviewer}
-                  onChange={(e) => setEditReviewer(e.target.value)} placeholder="姓名" />
-              </Space>
-            </div>
-            <div style={{ marginBottom: 16 }}>
-              <Space>
-                <span style={{ fontSize: 13 }}>备注：</span>
-                <Input size="small" style={{ width: 300 }} value={editComment}
-                  onChange={(e) => setEditComment(e.target.value)} placeholder="审核备注（可选）" />
-              </Space>
-            </div>
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Button onClick={handleSave}>保存</Button>
-              <Button type="primary" onClick={handleApprove}>审核通过</Button>
-            </div>
-          </Card>
-        ) : (
-          <Card style={{ textAlign: 'center', paddingTop: 80 }}>
-            <Text type="secondary">选择左侧的样本进行审核</Text>
-          </Card>
+          </div>
         )}
-      </Col>
-    </Row>
+      </div>
+    </Drawer>
   );
 }
 
@@ -334,9 +365,11 @@ export default function EvalPage() {
   const [samples, setSamples] = useState<EvalSample[]>([]);
   const [snapshots, setSnapshots] = useState<EvalSnapshot[]>([]);
   const [samplesLoading, setSamplesLoading] = useState(false);
-  const [filters, setFilters] = useState<{ question_type?: string; difficulty?: string; topic?: string }>({});
+  const [filters, setFilters] = useState<{ question_type?: string; difficulty?: string; topic?: string; review_status?: string }>({});
+  const [reviewStats, setReviewStats] = useState<{ total: number; pending: number; approved: number }>({ total: 0, pending: 0, approved: 0 });
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingSample, setEditingSample] = useState<Partial<EvalSample> | null>(null);
+  const [drawerSample, setDrawerSample] = useState<EvalSample | null>(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importText, setImportText] = useState('');
   const [snapshotModalOpen, setSnapshotModalOpen] = useState(false);
@@ -432,7 +465,7 @@ export default function EvalPage() {
   );
   const evalAllSelected = evalPaged.length > 0 && evalPaged.every((e) => selectedEvalIds.includes(e.id));
 
-  const toggle_eval_selection = (id: string, checked: boolean) => {
+  const toggleEvalSelection = (id: string, checked: boolean) => {
     setSelectedEvalIds((prev) => checked ? [...prev, id] : prev.filter((x) => x !== id));
   };
 
@@ -452,19 +485,25 @@ export default function EvalPage() {
     }
   }, [filters]);
 
+  const load_review_stats = useCallback(async () => {
+    try {
+      const statsData = await evalApi.fetchReviewStats();
+      setReviewStats(statsData);
+    } catch {
+      // non-critical
+    }
+  }, []);
+
   useEffect(() => {
-    if (activeTab === 'dataset') load_samples();
-  }, [activeTab, load_samples]);
+    if (activeTab === 'dataset') {
+      load_samples();
+      load_review_stats();
+    }
+  }, [activeTab, load_samples, load_review_stats]);
 
   const create_sample = () => {
     setEditingSample(null);
     form.resetFields();
-    setEditModalOpen(true);
-  };
-
-  const edit_sample = (sample: EvalSample) => {
-    setEditingSample(sample);
-    form.setFieldsValue(sample);
     setEditModalOpen(true);
   };
 
@@ -536,6 +575,13 @@ export default function EvalPage() {
   };
 
   const datasetColumns = [
+    {
+      title: '审核', dataIndex: 'review_status', key: 'review_status', width: 70,
+      render: (v: string) => {
+        const info = REVIEW_STATUS_TAG[v] || { color: 'default', label: v };
+        return <Tag color={info.color} style={{ margin: 0 }}>{info.label}</Tag>;
+      },
+    },
     { title: 'ID', dataIndex: 'id', key: 'id', width: 80 },
     { title: '问题', dataIndex: 'question', key: 'question', ellipsis: true },
     {
@@ -545,10 +591,16 @@ export default function EvalPage() {
     { title: '难度', dataIndex: 'difficulty', key: 'difficulty', width: 80 },
     { title: '主题', dataIndex: 'topic', key: 'topic', width: 100 },
     {
-      title: '操作', key: 'action', width: 150,
+      title: '引用', dataIndex: 'regulation_refs', key: 'regulation_refs', width: 60,
+      render: (refs: RegulationRef[]) => (
+        <Text type="secondary">{refs?.length || 0}</Text>
+      ),
+    },
+    {
+      title: '操作', key: 'action', width: 120,
       render: (_: undefined, sample: EvalSample) => (
         <Space>
-          <Button type="link" size="small" onClick={() => edit_sample(sample)}>编辑</Button>
+          <Button type="link" size="small" onClick={() => setDrawerSample(sample)}>审核</Button>
           <Popconfirm title="确定删除？" onConfirm={() => delete_sample(sample.id)}>
             <Button type="link" size="small" danger>删除</Button>
           </Popconfirm>
@@ -799,7 +851,7 @@ export default function EvalPage() {
           enable_rerank: values.rerank_enable_rerank,
           reranker_type: values.rerank_reranker_type,
           rerank_top_k: values.rerank_rerank_top_k,
-          rerank_min_score: values.rerank_min_score,
+          min_score: values.rerank_min_score,
         },
         generation: {
           max_context_chars: values.generation_max_context_chars,
@@ -901,9 +953,9 @@ export default function EvalPage() {
       render: (m: string) => <Tag>{m}</Tag>,
     },
     {
-      title: '配置', dataIndex: 'config', key: 'config', width: 100,
+      title: '配置', dataIndex: 'config', key: 'config', width: 80,
       render: (_: unknown, e: Evaluation) => {
-        const cv = e.config?.dataset?.config_version;
+        const cv = e.config_version;
         return cv ? <Tag>v{cv}</Tag> : <Text type="secondary">-</Text>;
       },
     },
@@ -968,6 +1020,15 @@ export default function EvalPage() {
                 <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Space>
                     <Select
+                      placeholder="审核状态" allowClear style={{ width: 110 }}
+                      value={filters.review_status}
+                      onChange={(v) => setFilters({ ...filters, review_status: v })}
+                      options={[
+                        { value: 'pending', label: `待审核 (${reviewStats.pending})` },
+                        { value: 'approved', label: `已通过 (${reviewStats.approved})` },
+                      ]}
+                    />
+                    <Select
                       placeholder="问题类型" allowClear style={{ width: 160 }}
                       value={filters.question_type}
                       onChange={(v) => setFilters({ ...filters, question_type: v })}
@@ -1003,7 +1064,11 @@ export default function EvalPage() {
                         loading={samplesLoading}
                         pagination={{ pageSize: 20 }}
                         size="middle"
-                        scroll={{ x: 650 }}
+                        scroll={{ x: 750 }}
+                        onRow={(sample) => ({
+                          onClick: () => setDrawerSample(sample),
+                          style: { cursor: 'pointer' },
+                        })}
                       />
                     </Card>
                   </Col>
@@ -1020,9 +1085,22 @@ export default function EvalPage() {
                               <br />
                               <Text type="secondary" style={{ fontSize: 12 }}>{snapshot.created_at}</Text>
                             </div>
-                            <Popconfirm title={`确定恢复到 ${snapshot.name}？当前数据将被覆盖。`} onConfirm={() => restore_snapshot(snapshot.id)}>
-                              <Button type="link" size="small" icon={<RollbackOutlined />}>恢复</Button>
-                            </Popconfirm>
+                            <Space>
+                              <Popconfirm title={`确定恢复到 ${snapshot.name}？当前数据将被覆盖。`} onConfirm={() => restore_snapshot(snapshot.id)}>
+                                <Button type="link" size="small" icon={<RollbackOutlined />}>恢复</Button>
+                              </Popconfirm>
+                              <Popconfirm title={`确定删除快照 ${snapshot.name}？`} onConfirm={async () => {
+                                try {
+                                  await evalApi.deleteSnapshot(snapshot.id);
+                                  message.success('快照已删除');
+                                  load_samples();
+                                } catch (err) {
+                                  message.error(String(err));
+                                }
+                              }}>
+                                <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+                              </Popconfirm>
+                            </Space>
                           </div>
                         ))
                       )}
@@ -1031,11 +1109,6 @@ export default function EvalPage() {
                 </Row>
               </>
             ),
-          },
-          {
-            key: 'review',
-            label: '审核',
-            children: <ReviewTab />,
           },
           {
             key: 'configs',
@@ -1248,7 +1321,7 @@ export default function EvalPage() {
                           <Form.Item name="rerank_rerank_top_k" label="重排序 Top-K" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }} style={{ display: 'inline-block', width: '50%', verticalAlign: 'top' }}>
                             <InputNumber min={1} disabled={!rerankEnabled} style={{ width: '100%' }} />
                           </Form.Item>
-                          <Form.Item name="rerank_rerank_min_score" label="最小重排序分数" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }} style={{ display: 'inline-block', width: '50%', verticalAlign: 'top' }}>
+                          <Form.Item name="rerank_min_score" label="最小重排序分数" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }} style={{ display: 'inline-block', width: '50%', verticalAlign: 'top' }}>
                             <InputNumber min={0} max={1} step={0.1} disabled={!rerankEnabled} style={{ width: '100%' }} />
                           </Form.Item>
                         </Card>
@@ -1330,7 +1403,7 @@ export default function EvalPage() {
                                 render: (_: undefined, e: Evaluation) => (
                                   <Checkbox
                                     checked={selectedEvalIds.includes(e.id)}
-                                    onChange={(ev) => toggle_eval_selection(e.id, ev.target.checked)}
+                                    onChange={(ev) => toggleEvalSelection(e.id, ev.target.checked)}
                                     onClick={(ev) => ev.stopPropagation()}
                                   />
                                 ),
@@ -1402,7 +1475,9 @@ export default function EvalPage() {
                           <Descriptions.Item label="状态">
                             <Tag color={STATUS_MAP[selectedEvaluation.status]?.color}>{STATUS_MAP[selectedEvaluation.status]?.label}</Tag>
                           </Descriptions.Item>
+                          <Descriptions.Item label="配置版本">{selectedEvaluation.config_version ? `v${selectedEvaluation.config_version}` : '-'}</Descriptions.Item>
                           <Descriptions.Item label="启动时间">{selectedEvaluation.started_at}</Descriptions.Item>
+                          <Descriptions.Item label="数据集版本" span={2}>{selectedEvaluation.dataset_version || '-'}</Descriptions.Item>
                           {selectedEvaluation.status === 'completed' && (
                             <Descriptions.Item label="操作" span={3}>
                               <Space>
@@ -1477,6 +1552,13 @@ export default function EvalPage() {
             ),
           },
         ]}
+      />
+
+      <SampleDrawer
+        sample={drawerSample!}
+        open={!!drawerSample}
+        onClose={() => setDrawerSample(null)}
+        onSaved={() => { load_samples(); load_review_stats(); }}
       />
 
       <Modal
@@ -1596,7 +1678,7 @@ export default function EvalPage() {
               ]}
               size="small"
               pagination={false}
-            />
+              />
             </>
           );
         })()}

@@ -8,7 +8,6 @@ class RegulationRefSchema(BaseModel):
     doc_name: str
     article: str
     excerpt: str
-    relevance: float = 1.0
     chunk_id: str = ""
 
 
@@ -54,7 +53,7 @@ class ImportSamplesRequest(BaseModel):
 
 
 class EvaluationRequest(BaseModel):
-    mode: str = Field("full", pattern="^(retrieval|generation|full|llm_judge)$")
+    mode: str = Field("full", pattern="^(retrieval|generation|full)$")
     config_id: int
     snapshot_id: Optional[str] = None
     filters: Optional[Dict[str, str]] = None
@@ -104,6 +103,5 @@ class KbSearchResult(BaseModel):
     doc_name: str
     article: str
     excerpt: str
-    relevance: float
     hierarchy_path: str = ""
     chunk_id: str = ""

@@ -34,7 +34,6 @@ class RegulationRef:
     doc_name: str
     article: str
     excerpt: str
-    relevance: float = 1.0
     chunk_id: str = ""
 
     def to_dict(self) -> dict:
@@ -128,7 +127,7 @@ def save_eval_dataset(samples: List[EvalSample], path: Optional[str] = None) -> 
 
 
 def create_default_eval_dataset() -> List[EvalSample]:
-    """创建默认评估数据集（150+ 条，覆盖四种题型）。"""
+    """创建默认评估数据集（150 条，覆盖四种题型）。"""
     samples = _create_base_eval_dataset()
     samples.extend(_create_extended_eval_dataset())
     samples.extend(_create_phase2_eval_dataset())

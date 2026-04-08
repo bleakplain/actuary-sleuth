@@ -47,6 +47,18 @@ class LLMClientFactory:
         return _create_embedding_model(get_embed_llm_config())
 
     @staticmethod
+    def create_ragas_llm():
+        """创建 RAGAS 评估用 Langchain LLM。"""
+        from lib.llm.langchain_adapter import ChatAdapter
+        return ChatAdapter(client=LLMClientFactory.create_eval_llm())
+
+    @staticmethod
+    def create_ragas_embed_model():
+        """创建 RAGAS 评估用 Langchain Embedding 模型。"""
+        from lib.llm.langchain_adapter import EmbeddingAdapter
+        return EmbeddingAdapter(LLMClientFactory.create_embed_llm())
+
+    @staticmethod
     def create_client(config: Dict[str, Any]) -> BaseLLMClient:
         provider = config.get('provider', 'zhipu').lower()
 

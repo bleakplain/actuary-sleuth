@@ -24,7 +24,6 @@ from lib.rag_engine.evaluator import (
     GenerationEvalReport,
     RAGEvalReport,
     _is_relevant,
-    _compute_token_jaccard,
     _compute_redundancy_rate,
     evaluate_retrieval,
 )
@@ -309,27 +308,6 @@ class TestRetrievalMetrics:
         assert _is_relevant(result, ["05_健康保险产品开发.md"], ["等待期", "既往症"]) is True
         assert call_count == 0
 
-    def test_token_jaccard_identical(self):
-        assert _compute_token_jaccard(
-            "保险合同是投保人与保险人约定保险权利义务关系的协议",
-            "保险合同是投保人与保险人约定保险权利义务关系的协议",
-        ) == 1.0
-
-    def test_token_jaccard_disjoint(self):
-        jaccard = _compute_token_jaccard("保险公司应当按照规定提取保证金", "意外伤害保险属于定额给付型")
-        assert jaccard < 0.3
-
-    def test_token_jaccard_partial(self):
-        jaccard = _compute_token_jaccard(
-            "保险公司应当按照国务院保险监督管理机构的规定提取保证金",
-            "保险公司应当提取保证金用于保障被保险人利益",
-        )
-        assert 0.2 < jaccard < 0.8
-
-    def test_token_jaccard_empty(self):
-        assert _compute_token_jaccard("", "保险合同") == 0.0
-        assert _compute_token_jaccard("保险合同", "") == 0.0
-
     def test_redundancy_rate_no_redundancy(self):
         results = [
             {'content': '保险合同是投保人与保险人约定保险权利义务关系的协议'},
@@ -520,39 +498,13 @@ class TestRetrievalEvaluator:
 
 class TestGenerationEvaluator:
 
-    def test_evaluate_without_ragas(self, mock_rag_engine, sample_eval):
-        """RAGAS 不可用时使用轻量级指标"""
+    def test_evaluate_without_ragas_raises(self):
+        """RAGAS 未安装时 GenerationEvaluator 应抛出 ImportError"""
         with patch.dict('sys.modules', {'ragas': None, 'datasets': None}):
-            evaluator = GenerationEvaluator()
-            assert evaluator.ragas_available is False
+            with pytest.raises(ImportError, match="RAGAS"):
+                GenerationEvaluator()
 
-            contexts = ['等待期规定：既往症人群的等待期不应与健康人群有过大差距']
-            answer = '健康保险等待期不应与健康人群有过大差距'
-            result = evaluator.evaluate(sample_eval, contexts, answer)
-
-            assert 'faithfulness' in result
-            assert 'answer_relevancy' in result
-            assert 'answer_correctness' in result
-            assert 0.0 <= result['faithfulness'] <= 1.0
-
-    def test_evaluate_batch_without_ragas(self, mock_rag_engine):
-        """RAGAS 不可用时批量评估返回轻量级指标"""
-        mock_rag_engine.ask.return_value = {
-            'answer': '等待期不应与健康人群有过大差距',
-            'sources': [{'content': '等待期规定：既往症人群的等待期不应与健康人群有过大差距'}],
-        }
-        samples = create_default_eval_dataset()[:3]
-
-        with patch.dict('sys.modules', {'ragas': None, 'datasets': None}):
-            evaluator = GenerationEvaluator()
-            report = evaluator.evaluate_batch(samples, mock_rag_engine)
-
-            assert isinstance(report, GenerationEvalReport)
-            assert report.faithfulness is not None
-            assert report.answer_relevancy is not None
-            assert report.answer_correctness is not None
-            assert 0.0 <= report.faithfulness <= 1.0
-
+    @pytest.mark.ragas
     def test_evaluate_batch_no_engine(self):
         """未提供 RAG 引擎时返回空报告"""
         evaluator = GenerationEvaluator()
@@ -560,41 +512,6 @@ class TestGenerationEvaluator:
 
         assert isinstance(report, GenerationEvalReport)
         assert report.faithfulness is None
-
-    def test_lightweight_faithfulness_high(self):
-        """答案 token 全部出现在上下文中时 faithfulness 接近 1.0"""
-        contexts = ['保险合同是投保人与保险人约定保险权利义务关系的协议']
-        answer = '保险合同是投保人与保险人约定权利义务关系的协议'
-        score = GenerationEvaluator._compute_faithfulness(contexts, answer)
-        assert score > 0.8
-
-    def test_lightweight_faithfulness_low(self):
-        """答案包含上下文中没有的 token 时 faithfulness 较低"""
-        contexts = ['保险合同是投保人与保险人约定的协议']
-        answer = '万能保险的结算利率根据账户价值确定'
-        score = GenerationEvaluator._compute_faithfulness(contexts, answer)
-        assert score < 0.5
-
-    def test_lightweight_faithfulness_empty(self):
-        assert GenerationEvaluator._compute_faithfulness([], '保险合同') == 0.0
-        assert GenerationEvaluator._compute_faithfulness(['上下文'], '') == 0.0
-
-    def test_lightweight_correctness_high(self):
-        """答案与标准答案 token 重叠度高时 correctness 接近 1.0"""
-        truth = '保险公司应当提取保证金用于保障被保险人利益'
-        answer = '保险公司应当提取保证金保障被保险人利益'
-        score = GenerationEvaluator._compute_correctness(answer, truth)
-        assert score > 0.6
-
-    def test_lightweight_correctness_low(self):
-        truth = '保险公司应当按照规定提取保证金'
-        answer = '万能保险结算利率根据账户价值确定'
-        score = GenerationEvaluator._compute_correctness(answer, truth)
-        assert score < 0.3
-
-    def test_lightweight_correctness_empty(self):
-        assert GenerationEvaluator._compute_correctness('', '保险合同') == 0.0
-        assert GenerationEvaluator._compute_correctness('保险合同', '') == 0.0
 
     @pytest.mark.ragas
     def test_evaluate_with_ragas(self, mock_rag_engine, sample_eval):
@@ -618,9 +535,6 @@ class TestGenerationEvaluator:
         }
 
         evaluator = GenerationEvaluator(mock_rag_engine, llm=ragas_llm, embeddings=ragas_embeddings)
-        if not evaluator.ragas_available:
-            pytest.skip("RAGAS not installed")
-
         report = evaluator.evaluate_batch([sample_eval], mock_rag_engine)
 
         assert report.faithfulness is not None
@@ -713,9 +627,6 @@ class TestGenerationEvalReport:
 
 class TestEvaluateRetrieval:
     def test_run_with_all_failures(self, mock_rag_engine):
-        from lib.rag_engine.eval_dataset import create_default_eval_dataset
-        from lib.rag_engine.evaluator import evaluate_retrieval
-
         mock_rag_engine.search.return_value = [
             {'content': '不相关内容', 'law_name': '其他', 'source_file': 'other.md', 'score': 0.5},
         ]

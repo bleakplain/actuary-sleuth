@@ -4,6 +4,7 @@
 不创建独立连接。
 """
 
+import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
@@ -54,7 +55,7 @@ CREATE TABLE IF NOT EXISTS eval_snapshots (
 
 CREATE TABLE IF NOT EXISTS eval_runs (
     id TEXT PRIMARY KEY,
-    mode TEXT NOT NULL CHECK(mode IN ('retrieval', 'generation', 'full', 'llm_judge')),
+    mode TEXT NOT NULL CHECK(mode IN ('retrieval', 'generation', 'full')),
     status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'running', 'completed', 'failed')),
     progress INTEGER NOT NULL DEFAULT 0,
     total INTEGER NOT NULL DEFAULT 0,
@@ -254,6 +255,14 @@ def _migrate_db():
             conn.execute("ALTER TABLE eval_samples ADD COLUMN created_by TEXT NOT NULL DEFAULT 'human'")
         if 'kb_version' not in sample_cols:
             conn.execute("ALTER TABLE eval_samples ADD COLUMN kb_version TEXT NOT NULL DEFAULT ''")
+
+        run_cols = {row[1] for row in conn.execute("PRAGMA table_info(eval_runs)").fetchall()}
+        if 'config_version' not in run_cols:
+            conn.execute("ALTER TABLE eval_runs ADD COLUMN config_version INTEGER")
+        if 'dataset_version' not in run_cols:
+            conn.execute("ALTER TABLE eval_runs ADD COLUMN dataset_version TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_runs_config_version ON eval_runs(config_version)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_runs_dataset_version ON eval_runs(dataset_version)")
 
 
 def create_conversation(conversation_id: str, title: str = "") -> None:
@@ -544,19 +553,35 @@ def get_snapshots() -> List[Dict]:
 
 
 def restore_snapshot(snapshot_id: str) -> int:
+    samples = get_snapshot_samples(snapshot_id)
+    if samples is None:
+        return 0
     with get_connection() as conn:
         conn.execute("DELETE FROM eval_samples")
-        snap = conn.execute(
-            "SELECT samples_json FROM eval_snapshots WHERE id = ?",
-            (snapshot_id,),
-        ).fetchone()
-        if not snap or not snap["samples_json"]:
-            return 0
-        count = 0
-        for s in json.loads(snap["samples_json"]):
+        for s in samples:
             conn.execute(_SAMPLE_INSERT_SQL, _sample_insert_values(s))
-            count += 1
-        return count
+        return len(samples)
+
+
+def get_snapshot_samples(snapshot_id: str) -> Optional[List[Dict]]:
+    """读取快照的样本数据（不修改当前 eval_samples 表）。"""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT samples_json FROM eval_snapshots WHERE id = ?", (snapshot_id,)
+        ).fetchone()
+        if not row or not row["samples_json"]:
+            return None
+        return json.loads(row["samples_json"])
+
+
+def compute_dataset_fingerprint() -> str:
+    """计算当前 eval_samples 的指纹（排序 ID 的 SHA-256 前 12 位）。"""
+    with get_connection() as conn:
+        rows = conn.execute("SELECT id FROM eval_samples ORDER BY id").fetchall()
+        ids = [r["id"] for r in rows]
+        if not ids:
+            return "empty"
+        return hashlib.sha256(",".join(ids).encode()).hexdigest()[:12]
 
 
 # ── 评测配置版本管理 ──────────────────────────────────
@@ -607,16 +632,33 @@ def get_active_config() -> Optional[Dict]:
         return _deserialize_json_fields(dict(row), {"config_json": "config_json"})
 
 
+def _has_eval_run_refs(conn, column: str, value) -> bool:
+    return conn.execute(
+        f"SELECT COUNT(*) AS cnt FROM eval_runs WHERE {column} = ?", (value,)
+    ).fetchone()["cnt"] > 0
+
+
 def remove_eval_config(config_id: int) -> bool:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT is_active FROM eval_configs WHERE id = ?", (config_id,),
+            "SELECT is_active, version FROM eval_configs WHERE id = ?", (config_id,),
         ).fetchone()
         if row is None:
             return False
         if row["is_active"]:
             return False
+        if _has_eval_run_refs(conn, "config_version", row["version"]):
+            return False
         conn.execute("DELETE FROM eval_configs WHERE id = ?", (config_id,))
+        return True
+
+
+def remove_snapshot(snapshot_id: str) -> bool:
+    """删除快照，但有关联评测记录时拒绝。"""
+    with get_connection() as conn:
+        if _has_eval_run_refs(conn, "dataset_version", f"snapshot:{snapshot_id}"):
+            return False
+        conn.execute("DELETE FROM eval_snapshots WHERE id = ?", (snapshot_id,))
         return True
 
 
@@ -643,11 +685,17 @@ def _ensure_default_config():
         conn.execute("UPDATE eval_configs SET is_active = 1 WHERE id = ?", (config_id,))
 
 
-def insert_evaluation(run_id: str, mode: str, config: Dict) -> None:
+def insert_evaluation(
+    run_id: str, mode: str, config: Dict,
+    config_version: Optional[int] = None,
+    dataset_version: Optional[str] = None,
+) -> None:
     with get_connection() as conn:
         conn.execute(
-            "INSERT INTO eval_runs (id, mode, status, config_json) VALUES (?, ?, 'pending', ?)",
-            (run_id, mode, json.dumps(config, ensure_ascii=False)),
+            "INSERT INTO eval_runs (id, mode, status, config_json, config_version, dataset_version) "
+            "VALUES (?, ?, 'pending', ?, ?, ?)",
+            (run_id, mode, json.dumps(config, ensure_ascii=False),
+             config_version, dataset_version),
         )
 
 
@@ -725,7 +773,8 @@ def get_evaluation(run_id: str) -> Optional[Dict]:
 def get_evaluations() -> List[Dict]:
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT id, mode, status, progress, total, started_at, finished_at, config_json "
+            "SELECT id, mode, status, progress, total, started_at, finished_at, "
+            "config_json, config_version, dataset_version "
             "FROM eval_runs ORDER BY started_at DESC"
         ).fetchall()
         return [_deserialize_json_fields(dict(r), {"config": "config_json"}) for r in rows]

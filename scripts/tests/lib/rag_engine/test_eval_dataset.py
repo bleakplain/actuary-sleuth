@@ -6,7 +6,6 @@ def test_regulation_ref_roundtrip():
         doc_name="健康保险管理办法.txt",
         article="第27条",
         excerpt="健康保险的产品设计应当...",
-        relevance=0.92,
     )
     d = ref.to_dict()
     restored = RegulationRef.from_dict(d)
@@ -18,18 +17,15 @@ def test_regulation_ref_with_chunk_id():
         doc_name="保险法.txt",
         article="第18条",
         excerpt="保险合同中规定的等待期...",
-        relevance=0.85,
         chunk_id="chunk_abc123",
     )
     d = ref.to_dict()
     restored = RegulationRef.from_dict(d)
     assert restored.chunk_id == "chunk_abc123"
-    assert restored.relevance == 0.85
 
 
 def test_regulation_ref_defaults():
     ref = RegulationRef(doc_name="a.txt", article="第1条", excerpt="...")
-    assert ref.relevance == 1.0
     assert ref.chunk_id == ""
 
 
@@ -45,7 +41,7 @@ def test_eval_sample_with_review_fields():
         topic="测试",
         regulation_refs=[RegulationRef(
             doc_name="保险法.txt", article="第18条",
-            excerpt="保险合同中...", relevance=0.9,
+            excerpt="保险合同中...",
         )],
         review_status=ReviewStatus.APPROVED,
         reviewer="张精算师",

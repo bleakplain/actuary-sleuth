@@ -31,7 +31,6 @@ from lib.rag_engine.evaluator import (
     RAGEvalReport,
     evaluate_retrieval,
 )
-from lib.rag_engine.llm_judge import LLMPJudge
 from lib.rag_engine.eval_dataset import (
     EvalSample,
     QuestionType,
@@ -41,7 +40,6 @@ from lib.rag_engine.eval_dataset import (
 )
 from lib.rag_engine.llamaindex_adapter import ClientLLMAdapter
 from lib.llm import LLMClientFactory
-from lib.llm.langchain_adapter import ChatAdapter, EmbeddingAdapter
 from llama_index.core import Settings
 
 logging.basicConfig(
@@ -82,18 +80,6 @@ def setup_rag_engine(config: RAGConfig) -> 'RAGEngine':
 
     logger.info("LLM 和 Embedding 模型设置完成")
     return RAGEngine(config)
-
-
-def create_ragas_llm():
-    """创建 RAGAS 评估用的 Langchain LLM"""
-    _ensure_env()
-    return ChatAdapter(client=LLMClientFactory.create_eval_llm())
-
-
-def create_ragas_embeddings():
-    """创建 RAGAS 评估用的 Langchain Embedding"""
-    _ensure_env()
-    return EmbeddingAdapter(LLMClientFactory.create_embed_llm())
 
 
 def export_report(report: RAGEvalReport, output_path: str):
@@ -210,60 +196,6 @@ def compare_reports(report1: RAGEvalReport, report2: RAGEvalReport, label1: str 
     print("=" * 70 + "\n")
 
 
-def detect_regressions(current_report: Dict, baseline_report: Dict) -> Dict[str, Any]:
-    """检测指标退化
-
-    Args:
-        current_report: 当前评估报告（字典格式）
-        baseline_report: 基线评估报告（字典格式）
-
-    Returns:
-        包含 passed, degradations, improvements 的字典
-    """
-    TOLERANCE = 0.02
-
-    metrics_to_check = [
-        ("recall_at_k", ["retrieval", "recall_at_k"]),
-        ("faithfulness", ["generation", "faithfulness"]),
-        ("answer_correctness", ["generation", "answer_correctness"]),
-    ]
-
-    degradations: List[Dict[str, Any]] = []
-    improvements: List[Dict[str, Any]] = []
-
-    for display_name, key_path in metrics_to_check:
-        current_val: float = current_report
-        baseline_val: float = baseline_report
-        try:
-            for key in key_path:
-                current_val = current_val[key]
-                baseline_val = baseline_val[key]
-        except (KeyError, TypeError):
-            continue
-
-        delta = current_val - baseline_val
-        if delta < -TOLERANCE:
-            degradations.append({
-                "metric": display_name,
-                "baseline": baseline_val,
-                "current": current_val,
-                "delta": round(delta, 4),
-            })
-        elif delta > TOLERANCE:
-            improvements.append({
-                "metric": display_name,
-                "baseline": baseline_val,
-                "current": current_val,
-                "delta": round(delta, 4),
-            })
-
-    return {
-        "passed": len(degradations) == 0,
-        "degradations": degradations,
-        "improvements": improvements,
-    }
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="RAG 知识库质量评估工具",
@@ -282,9 +214,9 @@ def main():
     parser.add_argument(
         '--mode',
         type=str,
-        choices=['retrieval', 'generation', 'full', 'llm_judge'],
+        choices=['retrieval', 'generation', 'full'],
         default='full',
-        help='评估模式: retrieval(仅检索)/generation(仅生成)/full(完整，默认)/llm_judge(LLM Judge)'
+        help='评估模式: retrieval(仅检索)/generation(仅生成)/full(完整，默认)'
     )
 
     parser.add_argument(
@@ -326,26 +258,11 @@ def main():
         help='分块策略（默认: semantic）'
     )
 
-    parser.add_argument(
-        '--llm-judge',
-        action='store_true',
-        help='使用 LLM Judge 进行生成评估（等价于 --mode llm_judge）'
-    )
-
-    parser.add_argument(
-        '--num-samples',
-        type=int,
-        default=1,
-        help='LLM Judge 多次采样取均值（默认: 1）'
-    )
-
     args = parser.parse_args()
 
     # 确定评估模式
     if args.retrieval_only:
         mode = 'retrieval'
-    elif args.llm_judge:
-        mode = 'llm_judge'
     else:
         mode = args.mode
 
@@ -370,23 +287,17 @@ def main():
             rag_engine, samples, top_k=args.top_k
         )
 
-    if mode in ('generation', 'full', 'llm_judge'):
+    if mode in ('generation', 'full'):
         if mode == 'generation':
             rag_engine = setup_rag_engine(config)
             logger.info(f"RAG 引擎初始化完成（分块策略: {args.chunking}）")
 
-        if mode == 'llm_judge':
-            logger.info("开始 LLM Judge 评估...")
-            eval_llm = LLMClientFactory.create_eval_llm()
-            llm_judge = LLMPJudge(eval_llm)
-            gen_evaluator = GenerationEvaluator(
-                rag_engine=rag_engine, llm_judge=llm_judge,
-            )
-        else:
-            logger.info("开始生成评估...")
-            ragas_llm = create_ragas_llm()
-            ragas_embeddings = create_ragas_embeddings()
-            gen_evaluator = GenerationEvaluator(rag_engine, llm=ragas_llm, embeddings=ragas_embeddings)
+        logger.info("开始生成评估...")
+        gen_evaluator = GenerationEvaluator(
+            rag_engine,
+            llm=LLMClientFactory.create_ragas_llm(),
+            embeddings=LLMClientFactory.create_ragas_embed_model(),
+        )
 
         generation_report = gen_evaluator.evaluate_batch(samples, rag_engine=rag_engine)
     else:

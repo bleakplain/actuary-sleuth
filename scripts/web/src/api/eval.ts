@@ -45,6 +45,10 @@ export async function restoreSnapshot(snapshotId: string): Promise<{ restored: n
   return data;
 }
 
+export async function deleteSnapshot(snapshotId: string): Promise<void> {
+  await client.delete(`/api/eval/dataset/snapshots/${snapshotId}`);
+}
+
 // ── 评测配置 ──────────────────────────────────────────
 
 export async function fetchEvalConfigs(): Promise<EvalConfig[]> {
@@ -84,7 +88,7 @@ export async function createEvalConfig(config: {
 // ── 评估运行 ──────────────────────────────────────────
 
 export async function createEvaluation(config: {
-  mode: 'retrieval' | 'generation' | 'full' | 'llm_judge';
+  mode: 'retrieval' | 'generation' | 'full';
   config_id: number;
   snapshot_id?: string;
   filters?: Record<string, string>;
@@ -166,7 +170,7 @@ export async function fetchReviewStats(): Promise<{ total: number; pending: numb
 }
 
 export async function searchKnowledgeBase(query: string, topK = 10): Promise<{
-  doc_name: string; article: string; excerpt: string; relevance: number; hierarchy_path: string; chunk_id: string;
+  doc_name: string; article: string; excerpt: string; hierarchy_path: string; chunk_id: string;
 }[]> {
   const { data } = await client.post('/api/eval/dataset/kb-search', { query, top_k: topK });
   return data;

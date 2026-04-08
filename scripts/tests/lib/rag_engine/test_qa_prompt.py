@@ -172,20 +172,20 @@ class TestUnverifiedClaimsDetection:
 class TestFaithfulness:
 
     def test_high_faithfulness(self):
-        from lib.rag_engine.evaluator import GenerationEvaluator
+        from lib.rag_engine.evaluator import compute_faithfulness
         contexts = ["健康保险产品的等待期不得超过90天"]
         answer = "健康保险产品的等待期不得超过90天"
-        score = GenerationEvaluator._compute_faithfulness(contexts, answer)
+        score = compute_faithfulness(contexts, answer)
         assert score > 0.8
 
     def test_low_faithfulness(self):
-        from lib.rag_engine.evaluator import GenerationEvaluator
+        from lib.rag_engine.evaluator import compute_faithfulness
         contexts = ["健康保险产品的等待期不得超过90天"]
         answer = "根据宇宙大爆炸理论，宇宙已有138亿年历史"
-        score = GenerationEvaluator._compute_faithfulness(contexts, answer)
+        score = compute_faithfulness(contexts, answer)
         assert score < 0.3
 
     def test_empty_inputs(self):
-        from lib.rag_engine.evaluator import GenerationEvaluator
-        assert GenerationEvaluator._compute_faithfulness([], "答案") == 0.0
-        assert GenerationEvaluator._compute_faithfulness(["上下文"], "") == 0.0
+        from lib.rag_engine.evaluator import compute_faithfulness
+        assert compute_faithfulness([], "答案") == 0.0
+        assert compute_faithfulness(["上下文"], "") == 0.0

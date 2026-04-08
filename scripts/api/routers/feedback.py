@@ -166,10 +166,10 @@ async def verify_badcase(feedback_id: str):
 
         result = rag_engine.ask(query, include_sources=True)
 
-        from lib.rag_engine.evaluator import GenerationEvaluator
+        from lib.rag_engine.evaluator import compute_faithfulness
         contexts = [s.get('content', '') for s in result.get('sources', [])]
         answer = result.get('answer', '')
-        faithfulness = GenerationEvaluator._compute_faithfulness(contexts, answer) if contexts and answer else None
+        faithfulness = compute_faithfulness(contexts, answer) if contexts and answer else None
 
         return {
             "feedback_id": feedback_id,

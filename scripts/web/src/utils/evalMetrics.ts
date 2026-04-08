@@ -8,7 +8,6 @@ const METRIC_LABELS: Record<string, { label: string; tooltip: string }> = {
   faithfulness: { label: '忠实度', tooltip: '生成答案是否有检索依据支撑 (Faithfulness)' },
   answer_relevancy: { label: '答案相关性', tooltip: '生成答案与用户问题的相关程度' },
   answer_correctness: { label: '答案正确性', tooltip: '生成答案与标准答案的一致性' },
-  avg_score: { label: '平均分', tooltip: '综合评分的均值' },
   total_samples: { label: '样本数', tooltip: '评测样本总数' },
   failed_samples: { label: '失败样本', tooltip: '评测过程中失败的样本数' },
 };

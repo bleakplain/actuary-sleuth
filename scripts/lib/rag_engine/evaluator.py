@@ -5,7 +5,7 @@ RAG 量化评估器
 
 分层评估体系：
 - RetrievalEvaluator: 独立检索评估（Precision@K, Recall@K, MRR, NDCG, 冗余率）
-- GenerationEvaluator: 独立生成评估（RAGAS 可用时使用 RAGAS，否则使用轻量级 token 覆盖率指标）
+- GenerationEvaluator: 独立生成评估（依赖 RAGAS，需安装 ragas 包）
 """
 import math
 import re
@@ -243,13 +243,6 @@ def _jaccard_similarity(set_a: Set[str], set_b: Set[str]) -> float:
     return len(intersection) / len(union)
 
 
-def _compute_token_jaccard(text_a: str, text_b: str) -> float:
-    return _jaccard_similarity(
-        _tokenize_to_set(text_a) or set(),
-        _tokenize_to_set(text_b) or set(),
-    )
-
-
 def _compute_redundancy_rate(results: List[Dict[str, Any]]) -> float:
     if len(results) <= 1:
         return 0.0
@@ -282,6 +275,34 @@ def _bigram_overlap(bigrams_a: Set[str], bigrams_b: Set[str]) -> float:
         return 0.0
     covered = bigrams_a & bigrams_b
     return len(covered) / len(bigrams_a)
+
+
+def compute_faithfulness(contexts: List[str], answer: str) -> float:
+    """基于 bigram 重叠度评估答案对检索上下文的忠实度（供 feedback 等模块独立使用）。"""
+    if not contexts or not answer:
+        return 0.0
+
+    context_text = ' '.join(contexts)
+    context_bigrams = _token_bigrams(context_text)
+    answer_bigrams = _token_bigrams(answer)
+
+    sentences = _ANSWER_SENTENCE_PATTERN.findall(answer)
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 3]
+    if not sentences:
+        return _bigram_overlap(answer_bigrams, context_bigrams)
+
+    supported_count = 0
+    for sentence in sentences:
+        sentence_bigrams = _token_bigrams(sentence)
+        if not sentence_bigrams:
+            continue
+        covered = sentence_bigrams & context_bigrams
+        if len(covered) / len(sentence_bigrams) >= _SENTENCE_COVERAGE_THRESHOLD:
+            supported_count += 1
+
+    sentence_coverage = supported_count / len(sentences)
+    bigram_overlap = _bigram_overlap(answer_bigrams, context_bigrams)
+    return 0.7 * sentence_coverage + 0.3 * bigram_overlap
 
 
 def _compute_context_relevance(query: str, results: List[Dict[str, Any]]) -> float:
@@ -427,21 +448,16 @@ class RetrievalEvaluator:
 
 
 class GenerationEvaluator:
-    """生成质量评估器
-
-    优先级: llm_judge > ragas > lightweight
+    """生成质量评估器（依赖 RAGAS，需安装 ragas 包）
 
     Args:
         rag_engine: 用于生成答案的 RAG 引擎
         llm: RAGAS 评估用 LLM，由调用方注入
         embeddings: RAGAS 评估用 Embedding，由调用方注入
-        llm_judge: LLMPJudge 实例，由调用方注入
     """
 
-    def __init__(self, rag_engine=None, llm=None, embeddings=None, llm_judge=None):
+    def __init__(self, rag_engine=None, llm=None, embeddings=None):
         self.rag_engine = rag_engine
-        self._llm_judge = llm_judge
-        self._ragas_available = False
         self._eval_llm = llm
         self._eval_embeddings = embeddings
 
@@ -452,18 +468,12 @@ class GenerationEvaluator:
                 answer_relevancy,
                 answer_correctness,
             )
-            self._ragas_available = True
             self._ragas_evaluate = ragas_evaluate
             self._ragas_metrics = [faithfulness, answer_relevancy, answer_correctness]
-        except ImportError:
-            logger.info(
-                "RAGAS 未安装，将使用轻量级指标进行生成评估。"
-                "安装: pip install ragas"
-            )
-
-    @property
-    def ragas_available(self) -> bool:
-        return self._ragas_available
+        except ImportError as e:
+            raise ImportError(
+                "RAGAS 是生成评估的必需依赖。请安装: pip install ragas"
+            ) from e
 
     def evaluate(
         self,
@@ -471,13 +481,7 @@ class GenerationEvaluator:
         contexts: List[str],
         answer: str,
     ) -> Dict[str, float]:
-        """评估单条样本的生成质量
-
-        RAGAS 可用时使用 RAGAS 评估，否则使用轻量级指标。
-        """
-        if not self._ragas_available:
-            return self._lightweight_evaluate(sample, contexts, answer)
-
+        """评估单条样本的生成质量"""
         from datasets import Dataset
 
         dataset = Dataset.from_dict({
@@ -515,12 +519,7 @@ class GenerationEvaluator:
             logger.warning("未提供 RAG 引擎，跳过生成评估")
             return GenerationEvalReport()
 
-        if self._llm_judge is not None:
-            return self._llm_judge_evaluate_batch(engine, samples)
-        elif self._ragas_available:
-            return self._ragas_evaluate_batch(engine, samples)
-        else:
-            return self._lightweight_evaluate_batch(engine, samples)
+        return self._ragas_evaluate_batch(engine, samples)
 
     def _ragas_evaluate_batch(
         self,
@@ -533,7 +532,7 @@ class GenerationEvaluator:
         contexts_list = []
         answers = []
         ground_truths = []
-        by_type_data: Dict[str, Dict[str, list]] = {}
+        question_types = []
 
         for sample in samples:
             result = engine.ask(sample.question, include_sources=True)
@@ -544,15 +543,7 @@ class GenerationEvaluator:
             contexts_list.append(contexts)
             answers.append(answer)
             ground_truths.append(sample.ground_truth)
-
-            qtype = sample.question_type.value
-            by_type_data.setdefault(qtype, {
-                'user_input': [], 'retrieved_contexts': [], 'response': [], 'reference': []
-            })
-            by_type_data[qtype]['user_input'].append(sample.question)
-            by_type_data[qtype]['retrieved_contexts'].append(contexts)
-            by_type_data[qtype]['response'].append(answer)
-            by_type_data[qtype]['reference'].append(sample.ground_truth)
+            question_types.append(sample.question_type.value)
 
         dataset = Dataset.from_dict({
             "user_input": questions,
@@ -578,142 +569,26 @@ class GenerationEvaluator:
                 if len(values) > 0:
                     setattr(report, column, float(values.mean()))
 
-        for qtype, type_data in by_type_data.items():
-            type_dataset = Dataset.from_dict(type_data)
-            type_result = self._ragas_evaluate(
-                type_dataset,
-                metrics=self._ragas_metrics,
-                llm=self._eval_llm,
-                embeddings=self._eval_embeddings,
-            )
-            type_df = type_result.to_pandas()
-
+        for qtype in set(question_types):
+            type_mask = [qt == qtype for qt in question_types]
             type_metrics = {}
             for column in _RAGAS_METRICS:
-                if column in type_df.columns:
-                    values = type_df[column].dropna()
-                    if len(values) > 0:
-                        type_metrics[column] = float(values.mean())
-
+                if column in df.columns:
+                    type_values = df[column][type_mask].dropna()
+                    if len(type_values) > 0:
+                        type_metrics[column] = float(type_values.mean())
             if type_metrics:
                 report.by_type[qtype] = type_metrics
 
         return report
 
-    def _llm_judge_evaluate_batch(
-        self,
-        engine,
-        samples: List[EvalSample],
-    ) -> GenerationEvalReport:
-        batch_report = self._llm_judge.judge_batch(samples, engine)
-        return GenerationEvalReport(
-            faithfulness=batch_report.faithfulness,
-            answer_relevancy=batch_report.relevancy,
-            answer_correctness=batch_report.correctness,
-            by_type=batch_report.by_type,
-        )
-
-    def _lightweight_evaluate(
-        self,
-        sample: EvalSample,
-        contexts: List[str],
-        answer: str,
-    ) -> Dict[str, float]:
-        """轻量级单条生成质量评估（无需 LLM）
-
-        - faithfulness: 答案 token 对检索上下文 token 的覆盖率
-        - answer_relevancy: 答案与标准答案的 token Jaccard 相似度
-        - answer_correctness: 答案关键 token 与标准答案的覆盖率
-        """
-        faithfulness = self._compute_faithfulness(contexts, answer)
-        relevancy = _compute_token_jaccard(answer, sample.ground_truth)
-        correctness = self._compute_correctness(answer, sample.ground_truth)
-
-        return {
-            'faithfulness': faithfulness,
-            'answer_relevancy': relevancy,
-            'answer_correctness': correctness,
-        }
-
-    def _lightweight_evaluate_batch(
-        self,
-        engine,
-        samples: List[EvalSample],
-    ) -> GenerationEvalReport:
-        """轻量级批量生成质量评估"""
-        all_metrics: List[Dict[str, float]] = []
-        by_type_metrics: Dict[str, List[Dict[str, float]]] = {}
-
-        for sample in samples:
-            result = engine.ask(sample.question, include_sources=True)
-            answer = result.get('answer', '')
-            contexts = [s.get('content', '') for s in result.get('sources', [])]
-
-            metrics = self._lightweight_evaluate(sample, contexts, answer)
-            all_metrics.append(metrics)
-
-            qtype = sample.question_type.value
-            by_type_metrics.setdefault(qtype, []).append(metrics)
-
-        if not all_metrics:
-            return GenerationEvalReport()
-
-        n = len(all_metrics)
-        report = GenerationEvalReport(
-            faithfulness=sum(m['faithfulness'] for m in all_metrics) / n,
-            answer_relevancy=sum(m['answer_relevancy'] for m in all_metrics) / n,
-            answer_correctness=sum(m['answer_correctness'] for m in all_metrics) / n,
-        )
-
-        for qtype, type_metrics_list in by_type_metrics.items():
-            tn = len(type_metrics_list)
-            report.by_type[qtype] = {
-                'faithfulness': sum(m['faithfulness'] for m in type_metrics_list) / tn,
-                'answer_relevancy': sum(m['answer_relevancy'] for m in type_metrics_list) / tn,
-                'answer_correctness': sum(m['answer_correctness'] for m in type_metrics_list) / tn,
-            }
-
-        return report
-
-    @staticmethod
-    def _compute_faithfulness(contexts: List[str], answer: str) -> float:
-        if not contexts or not answer:
-            return 0.0
-
-        context_text = ' '.join(contexts)
-        context_bigrams = _token_bigrams(context_text)
-        answer_bigrams = _token_bigrams(answer)
-
-        sentences = _ANSWER_SENTENCE_PATTERN.findall(answer)
-        sentences = [s.strip() for s in sentences if len(s.strip()) > 3]
-        if not sentences:
-            return _bigram_overlap(answer_bigrams, context_bigrams)
-
-        supported_count = 0
-        for sentence in sentences:
-            sentence_bigrams = _token_bigrams(sentence)
-            if not sentence_bigrams:
-                continue
-            covered = sentence_bigrams & context_bigrams
-            if len(covered) / len(sentence_bigrams) >= _SENTENCE_COVERAGE_THRESHOLD:
-                supported_count += 1
-
-        sentence_coverage = supported_count / len(sentences)
-        bigram_overlap = _bigram_overlap(answer_bigrams, context_bigrams)
-        return 0.7 * sentence_coverage + 0.3 * bigram_overlap
-
-    @staticmethod
-    def _compute_correctness(answer: str, ground_truth: str) -> float:
-        if not answer or not ground_truth:
-            return 0.0
-        return _bigram_overlap(_token_bigrams(ground_truth), _token_bigrams(answer))
 
 
 def evaluate_retrieval(
     rag_engine,
     samples: List[EvalSample],
     top_k: int = 5,
-) -> tuple:
+) -> Tuple[RetrievalEvalReport, List[Dict[str, Any]]]:
     """运行检索评估
 
     Returns:

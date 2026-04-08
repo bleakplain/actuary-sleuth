@@ -71,7 +71,6 @@ export interface RegulationRef {
   doc_name: string;
   article: string;
   excerpt: string;
-  relevance: number;
   chunk_id: string;
 }
 
@@ -105,12 +104,14 @@ export interface EvalSnapshot {
 
 export interface Evaluation {
   id: string;
-  mode: 'retrieval' | 'generation' | 'full' | 'llm_judge';
+  mode: 'retrieval' | 'generation' | 'full';
   status: 'pending' | 'running' | 'completed' | 'failed';
   progress: number;
   total: number;
   started_at: string;
   finished_at?: string;
+  config_version?: number;
+  dataset_version?: string;
   config?: {
     retrieval?: Record<string, string | number | boolean>;
     rerank?: Record<string, string | number | boolean>;

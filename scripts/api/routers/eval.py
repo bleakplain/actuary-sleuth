@@ -17,11 +17,13 @@ from api.database import (
     eval_sample_count, import_eval_samples, get_eval_samples,
     upsert_eval_sample, get_eval_sample, delete_eval_sample,
     create_snapshot, get_snapshots, restore_snapshot,
+    get_snapshot_samples, compute_dataset_fingerprint,
     insert_evaluation, get_evaluation, get_evaluations,
     update_evaluation_status, update_evaluation_config,
     save_evaluation_report, save_sample_result, get_sample_results,
     fetch_evaluation_trends, get_eval_config, get_active_config, get_eval_configs,
     insert_eval_config, remove_eval_config, activate_eval_config,
+    remove_snapshot,
     insert_human_review,
     get_human_reviews, get_human_review_stats,
     batch_delete_evaluations,
@@ -31,8 +33,6 @@ from lib.rag_engine.eval_dataset import EvalSample, ReviewStatus
 from lib.rag_engine.config import RAGConfig
 from lib.rag_engine.rag_engine import RAGEngine
 from lib.rag_engine import RetrievalEvaluator, GenerationEvaluator, load_eval_dataset
-from lib.rag_engine.llm_judge import LLMPJudge
-from lib.rag_engine.eval_dataset import EvalSample
 from lib.rag_engine.eval_guide import generate_eval_summary
 from lib.rag_engine.dataset_validator import validate_dataset
 from lib.llm import LLMClientFactory
@@ -130,13 +130,22 @@ async def apply_snapshot(snapshot_id: str):
     return {"restored": count}
 
 
+@router.delete("/dataset/snapshots/{snapshot_id}")
+async def delete_snapshot(snapshot_id: str):
+    if not remove_snapshot(snapshot_id):
+        raise HTTPException(
+            status_code=400,
+            detail="该快照有关联评测记录，请先删除关联的评测记录",
+        )
+
+
 # ── 评估运行 ─────────────────────────────────────────
 
 
 def _build_eval_record(config: RAGConfig, mode: str, total_samples: int,
-                       judge_model="", config_id=None, config_version=None) -> Dict:
+                       config_id=None, config_version=None) -> Dict:
     result = config.to_dict()
-    result["evaluation"] = {"mode": mode, "judge_model": judge_model}
+    result["evaluation"] = {"mode": mode}
     result["dataset"] = {"total_samples": total_samples}
     if config_id is not None:
         result["dataset"]["config_id"] = config_id
@@ -158,7 +167,22 @@ def _load_config(config_id: int):
 async def create_evaluation(req: EvaluationRequest):
     evaluation_id = f"eval_{uuid.uuid4().hex[:8]}"
 
-    insert_evaluation(evaluation_id, req.mode, {"mode": req.mode})
+    config, config_version = _load_config(req.config_id)
+
+    if req.snapshot_id:
+        samples_data = get_snapshot_samples(req.snapshot_id)
+        if samples_data is None:
+            raise HTTPException(status_code=404, detail=f"快照不存在: {req.snapshot_id}")
+        dataset_version = f"snapshot:{req.snapshot_id}"
+    else:
+        samples_data = get_eval_samples()
+        dataset_version = compute_dataset_fingerprint()
+
+    insert_evaluation(
+        evaluation_id, req.mode, {"mode": req.mode},
+        config_version=config_version,
+        dataset_version=dataset_version,
+    )
 
     _eval_tasks[evaluation_id] = {"status": "pending"}
 
@@ -166,25 +190,16 @@ async def create_evaluation(req: EvaluationRequest):
         try:
             _eval_tasks[evaluation_id]["status"] = "running"
 
-            config, config_version = _load_config(req.config_id)
-
-            samples_data = get_eval_samples()
             if req.filters:
                 for key, val in req.filters.items():
                     samples_data = [s for s in samples_data if s.get(key) == val]
             samples = [EvalSample.from_dict(s) for s in samples_data]
             total = len(samples)
 
-            judge_model = ""
-            eval_llm = None
-            if req.mode == "llm_judge":
-                eval_llm = LLMClientFactory.create_eval_llm()
-                judge_model = getattr(eval_llm, 'model', '')
-
             update_evaluation_config(
                 evaluation_id,
                 _build_eval_record(config, req.mode, total,
-                                   judge_model, req.config_id, config_version),
+                                   req.config_id, config_version),
                 total=total,
             )
             update_evaluation_status(evaluation_id, "running", progress=0, total=total)
@@ -211,11 +226,12 @@ async def create_evaluation(req: EvaluationRequest):
                     update_evaluation_status(evaluation_id, "running", progress=current, total=total)
 
             gen_report = None
-            if req.mode in ("generation", "full", "llm_judge"):
-                llm_judge = None
-                if req.mode == "llm_judge":
-                    llm_judge = LLMPJudge(eval_llm)
-                gen_eval = GenerationEvaluator(rag_engine=eval_engine, llm_judge=llm_judge)
+            if req.mode in ("generation", "full"):
+                gen_eval = GenerationEvaluator(
+                    rag_engine=eval_engine,
+                    llm=LLMClientFactory.create_ragas_llm(),
+                    embeddings=LLMClientFactory.create_ragas_embed_model(),
+                )
                 gen_report = gen_eval.evaluate_batch(samples, rag_engine=eval_engine)
 
             report: Dict = {}
@@ -414,7 +430,10 @@ async def add_eval_config(req: EvalConfigCreate):
 @router.delete("/configs/{config_id}")
 async def delete_eval_config(config_id: int):
     if not remove_eval_config(config_id):
-        raise HTTPException(status_code=400, detail="只能删除非激活版本的配置")
+        raise HTTPException(
+            status_code=400,
+            detail="不能删除：配置不存在、正在生效、或有关联评测记录",
+        )
 
 
 @router.get("/configs/{config_id}")
@@ -504,7 +523,6 @@ async def search_knowledge_base(req: KbSearchRequest):
                 doc_name=r.get("metadata", {}).get("source_file", ""),
                 article=r.get("metadata", {}).get("article_number", ""),
                 excerpt=r.get("text", "")[:500],
-                relevance=r.get("score", 0.0),
                 hierarchy_path=r.get("metadata", {}).get("hierarchy_path", ""),
                 chunk_id=r.get("metadata", {}).get("chunk_id", ""),
             )
