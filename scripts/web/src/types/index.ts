@@ -67,6 +67,14 @@ export interface TaskStatus {
   result?: Record<string, string | number>;
 }
 
+export interface RegulationRef {
+  doc_name: string;
+  article: string;
+  excerpt: string;
+  relevance: number;
+  chunk_id: string;
+}
+
 export interface EvalSample {
   id: string;
   question: string;
@@ -76,6 +84,13 @@ export interface EvalSample {
   question_type: 'factual' | 'multi_hop' | 'negative' | 'colloquial';
   difficulty: 'easy' | 'medium' | 'hard';
   topic: string;
+  regulation_refs: RegulationRef[];
+  review_status: 'pending' | 'approved';
+  reviewer: string;
+  reviewed_at: string;
+  review_comment: string;
+  created_by: 'human' | 'llm';
+  kb_version: string;
   created_at: string;
   updated_at: string;
 }
@@ -98,6 +113,7 @@ export interface Evaluation {
   finished_at?: string;
   config?: {
     retrieval?: Record<string, string | number | boolean>;
+    rerank?: Record<string, string | number | boolean>;
     generation?: Record<string, string | number | boolean>;
     evaluation?: Record<string, string>;
     dataset?: Record<string, string | number | null>;
@@ -106,7 +122,6 @@ export interface Evaluation {
 
 export interface EvalConfig {
   id: number;
-  name: string;
   version: number;
   description: string;
   is_active: number;

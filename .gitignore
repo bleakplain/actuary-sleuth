@@ -1,36 +1,14 @@
 # Temporary test scripts (root-level only, scripts/tests/ is tracked)
 /test_*.py
 /*_test.py
-/e2e_test*.py
-/complete_test*.py
-/run_tests.py
-/scoring_comparison.py
-
-# Temporary fix/backup scripts
-/fix_*.py
-/*_fixed.py
-/*_old.py
-/rebuild_*.py
-/*_final*.py
-/import_*.py
 
 # Python
 __pycache__/
-*.py[cod]
 *$py.class
 *.so
 .Python
 venv/
-env/
-ENV/
 .venv/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
 
 # OS
 .DS_Store
@@ -45,9 +23,6 @@ Thumbs.db
 # Test outputs
 .coverage
 scripts/.coverage
-*.db-shm
-*.db-wal
-scripts/lib/rag_engine/data/kb/
 .pytest_cache/
 .mypy_cache/
 
@@ -56,8 +31,8 @@ node_modules/
 package-lock.json
 
 # Database (runtime data, not source)
-data/actuary.db
-data/lancedb/
+data/
+scripts/lib/rag_engine/data/kb/
 
 # Environment variables (contains sensitive data)
 .env
@@ -70,15 +45,12 @@ data/lancedb/
 # Vite / web build cache
 .vite/
 scripts/.vite/
-plan.md
 
 # Playwright / test results
 scripts/web/test-results/
 scripts/test-results/
 
 # Reranker model files (large binaries, not tracked)
-scripts/lib/rag_engine/models/reranker/*.gguf
-scripts/lib/rag_engine/models/reranker/*.safetensors
 scripts/lib/rag_engine/models/
 scripts/lib/rag_engine/tools/
 

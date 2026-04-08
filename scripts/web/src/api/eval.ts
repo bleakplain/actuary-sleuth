@@ -5,6 +5,7 @@ export async function fetchEvalSamples(params?: {
   question_type?: string;
   difficulty?: string;
   topic?: string;
+  review_status?: string;
 }): Promise<EvalSample[]> {
   const { data } = await client.get('/api/eval/dataset', { params });
   return data;
@@ -46,13 +47,13 @@ export async function restoreSnapshot(snapshotId: string): Promise<{ restored: n
 
 // ── 评测配置 ──────────────────────────────────────────
 
-export async function fetchEvalConfigs(name?: string): Promise<EvalConfig[]> {
-  const { data } = await client.get('/api/eval/configs', { params: name ? { name } : undefined });
+export async function fetchEvalConfigs(): Promise<EvalConfig[]> {
+  const { data } = await client.get('/api/eval/configs');
   return data;
 }
 
-export async function fetchActiveConfig(name: string): Promise<EvalConfig> {
-  const { data } = await client.get(`/api/eval/configs/${name}/active`);
+export async function fetchActiveConfig(): Promise<EvalConfig> {
+  const { data } = await client.get('/api/eval/configs/active');
   return data;
 }
 
@@ -60,13 +61,22 @@ export async function deleteEvalConfig(configId: number): Promise<void> {
   await client.delete(`/api/eval/configs/${configId}`);
 }
 
+export async function fetchEvalConfig(configId: number): Promise<EvalConfig> {
+  const { data } = await client.get(`/api/eval/configs/${configId}`);
+  return data;
+}
+
+export async function activateEvalConfig(configId: number): Promise<{ id: number; version: number }> {
+  const { data } = await client.post(`/api/eval/configs/${configId}/activate`);
+  return data;
+}
+
 export async function createEvalConfig(config: {
-  name: string;
   description?: string;
   retrieval?: Record<string, unknown>;
   rerank?: Record<string, unknown>;
   generation?: Record<string, unknown>;
-}): Promise<{ id: number; name: string }> {
+}): Promise<{ id: number; version: number }> {
   const { data } = await client.post('/api/eval/configs', config);
   return data;
 }
@@ -109,6 +119,13 @@ export async function fetchEvaluations(): Promise<Evaluation[]> {
   return data;
 }
 
+export async function deleteEvaluations(ids: string[]): Promise<{ deleted: number }> {
+  const { data } = await client.delete('/api/eval/evaluations', {
+    params: { ids: ids.join(',') },
+  });
+  return data;
+}
+
 export async function fetchEvaluationTrends(metric: string, limit = 20): Promise<{
   run_id: string;
   label: string;
@@ -133,5 +150,24 @@ export async function exportEvaluationReport(evaluationId: string, format: 'json
     params: { format },
     responseType: 'blob',
   });
+  return data;
+}
+
+// ── 人工审核 ──────────────────────────────────────────
+
+export async function approveSample(id: string, reviewer: string, comment: string): Promise<EvalSample> {
+  const { data } = await client.patch(`/api/eval/dataset/samples/${id}/review`, { reviewer, comment });
+  return data;
+}
+
+export async function fetchReviewStats(): Promise<{ total: number; pending: number; approved: number }> {
+  const { data } = await client.get('/api/eval/dataset/review-stats');
+  return data;
+}
+
+export async function searchKnowledgeBase(query: string, topK = 10): Promise<{
+  doc_name: string; article: string; excerpt: string; relevance: number; hierarchy_path: string; chunk_id: string;
+}[]> {
+  const { data } = await client.post('/api/eval/dataset/kb-search', { query, top_k: topK });
   return data;
 }

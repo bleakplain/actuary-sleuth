@@ -54,6 +54,8 @@ def generate_eval_summary(report_dict: Dict) -> Dict[str, List]:
             if not isinstance(value, (int, float)):
                 continue
             interp = interpret_metric(key, value)
+            if interp['level'] == 'unknown':
+                continue
             summary[interp['level']].append({
                 'metric': key,
                 'value': round(value, 3),

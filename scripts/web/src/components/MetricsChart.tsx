@@ -1,9 +1,10 @@
-import { Card, Row, Col, Statistic } from 'antd';
+import { Card, Row, Col, Statistic, Tooltip } from 'antd';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
   ResponsiveContainer, RadarChart, Radar, PolarGrid,
   PolarAngleAxis, PolarRadiusAxis, LineChart, Line, Legend,
 } from 'recharts';
+import { resolveMetricMeta, stripCategoryPrefix } from '../utils/evalMetrics';
 
 interface MetricItem {
   name: string;
@@ -13,6 +14,7 @@ interface MetricItem {
 interface Props {
   metrics: Record<string, number>;
   title?: string;
+  k?: number;
 }
 
 export function formatMetric(value: number | undefined): string {
@@ -41,12 +43,11 @@ function groupByCategory(items: MetricItem[]): Record<string, MetricItem[]> {
   return groups;
 }
 
-function stripCategoryPrefix(name: string): string {
-  const dotIndex = name.indexOf('.');
-  return dotIndex > 0 ? name.slice(dotIndex + 1) : name;
+function metricDisplayName(name: string, k?: number): string {
+  return resolveMetricMeta(stripCategoryPrefix(name), k).label;
 }
 
-export default function MetricsChart({ metrics, title = '评估指标' }: Props) {
+export default function MetricsChart({ metrics, title = '评测指标', k }: Props) {
   const items: MetricItem[] = Object.entries(metrics)
     .filter(([, val]) => typeof val === 'number')
     .map(([key, val]) => ({ name: key, value: val }));
@@ -56,27 +57,32 @@ export default function MetricsChart({ metrics, title = '评估指标' }: Props)
   return (
     <Card title={title} size="small">
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        {items.slice(0, 6).map((item) => (
-          <Col span={4} key={item.name}>
-            <Statistic
-              title={stripCategoryPrefix(item.name)}
-              value={(item.value * 100).toFixed(1)}
-              suffix="%"
-              valueStyle={{ fontSize: 16 }}
-            />
-          </Col>
-        ))}
+        {items.slice(0, 6).map((item) => {
+          const meta = resolveMetricMeta(stripCategoryPrefix(item.name), k);
+          return (
+            <Col span={4} key={item.name}>
+              <Tooltip title={meta.tooltip}>
+                <Statistic
+                  title={meta.label}
+                  value={(item.value * 100).toFixed(1)}
+                  suffix="%"
+                  valueStyle={{ fontSize: 16 }}
+                />
+              </Tooltip>
+            </Col>
+          );
+        })}
       </Row>
 
       {Object.entries(grouped).map(([category, categoryItems]) => (
         <div key={category} style={Object.keys(grouped).indexOf(category) < Object.keys(grouped).length - 1 ? { marginBottom: 24 } : undefined}>
           <h4 style={{ marginBottom: 8 }}>{CATEGORY_LABELS[category] || category}</h4>
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={categoryItems.map((i) => ({ name: stripCategoryPrefix(i.name), value: Number((i.value * 100).toFixed(1)) }))}>
+            <BarChart data={categoryItems.map((i) => ({ name: metricDisplayName(i.name, k), value: Number((i.value * 100).toFixed(1)) }))}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="name" />
+              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
               <YAxis domain={[0, 100]} />
-              <Tooltip formatter={(v) => `${Number(v)}%`} />
+              <RechartsTooltip formatter={(v) => `${Number(v)}%`} />
               <Bar dataKey="value" fill={CATEGORY_COLORS[category] || '#1677ff'} />
             </BarChart>
           </ResponsiveContainer>
@@ -99,21 +105,22 @@ interface ComparisonData {
 interface ComparisonChartProps {
   data: ComparisonData[];
   title?: string;
+  k?: number;
 }
 
-export function ComparisonChart({ data, title = '指标对比' }: ComparisonChartProps) {
+export function ComparisonChart({ data, title = '指标对比', k }: ComparisonChartProps) {
   const grouped = groupByCategory(
     data.map((d) => ({ name: d.metric, value: d.compare }))
   );
 
   const radarData = data.slice(0, 10).map((d) => ({
-    metric: stripCategoryPrefix(d.metric),
+    metric: metricDisplayName(d.metric, k),
     baseline: Number((d.baseline * 100).toFixed(1)),
     compare: Number((d.compare * 100).toFixed(1)),
   }));
 
   const barData = data.map((d) => ({
-    metric: stripCategoryPrefix(d.metric),
+    metric: metricDisplayName(d.metric, k),
     baseline: Number((d.baseline * 100).toFixed(1)),
     compare: Number((d.compare * 100).toFixed(1)),
   }));
@@ -131,7 +138,7 @@ export function ComparisonChart({ data, title = '指标对比' }: ComparisonChar
               <Radar name="基准" dataKey="baseline" stroke="#1677ff" fill="#1677ff" fillOpacity={0.2} />
               <Radar name="对比" dataKey="compare" stroke="#52c41a" fill="#52c41a" fillOpacity={0.2} />
               <Legend />
-              <Tooltip />
+              <RechartsTooltip />
             </RadarChart>
           </ResponsiveContainer>
         </div>
@@ -152,7 +159,7 @@ export function ComparisonChart({ data, title = '指标对比' }: ComparisonChar
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="metric" tick={{ fontSize: 11 }} />
                 <YAxis domain={[0, 100]} />
-                <Tooltip formatter={(v) => `${Number(v)}%`} />
+                <RechartsTooltip formatter={(v) => `${Number(v)}%`} />
                 <Legend />
                 <Bar dataKey="baseline" fill="#1677ff" name="基准" />
                 <Bar dataKey="compare" fill="#52c41a" name="对比" />
@@ -189,13 +196,13 @@ export function TrendChart({ data, metricName, title = '指标趋势' }: TrendCh
   if (chartData.length === 0) return null;
 
   return (
-    <Card title={title} size="small">
-      <ResponsiveContainer width="100%" height={250}>
+    <Card title={title} size="small" bodyStyle={{ paddingTop: 0 }}>
+      <ResponsiveContainer width="100%" height={200}>
         <LineChart data={chartData}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="label" tick={{ fontSize: 11 }} />
           <YAxis domain={[0, 100]} />
-          <Tooltip formatter={(v) => `${metricName || '指标'}: ${Number(v)}%`} />
+          <RechartsTooltip formatter={(v) => `${metricName || '指标'}: ${Number(v)}%`} />
           <Line type="monotone" dataKey="value" stroke="#1677ff" strokeWidth={2} dot={{ r: 4 }} />
         </LineChart>
       </ResponsiveContainer>

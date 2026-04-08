@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, Response
 from api.schemas.eval import (
     EvalSampleCreate, EvalSampleOut, ImportSamplesRequest,
     EvaluationRequest, EvalConfigCreate, CompareRequest, SnapshotCreate,
-    HumanReviewCreate,
+    HumanReviewCreate, ReviewSampleRequest, KbSearchRequest, KbSearchResult,
 )
 from api.database import (
     eval_sample_count, import_eval_samples, get_eval_samples,
@@ -20,10 +20,11 @@ from api.database import (
     insert_evaluation, get_evaluation, get_evaluations,
     update_evaluation_status, update_evaluation_config,
     save_evaluation_report, save_sample_result, get_sample_results,
-    get_evaluation_trends, get_eval_config, get_active_config, get_eval_configs,
-    insert_eval_config, remove_eval_config,
+    fetch_evaluation_trends, get_eval_config, get_active_config, get_eval_configs,
+    insert_eval_config, remove_eval_config, activate_eval_config,
     insert_human_review,
     get_human_reviews, get_human_review_stats,
+    batch_delete_evaluations,
 )
 from lib.rag_engine.config import RAGConfig
 from lib.rag_engine.rag_engine import RAGEngine
@@ -60,11 +61,13 @@ async def list_eval_samples(
     question_type: Optional[str] = Query(None),
     difficulty: Optional[str] = Query(None),
     topic: Optional[str] = Query(None),
+    review_status: Optional[str] = Query(None, pattern="^(pending|approved)$"),
 ):
     return get_eval_samples(
         question_type=question_type,
         difficulty=difficulty,
         topic=topic,
+        review_status=review_status,
     )
 
 
@@ -84,12 +87,15 @@ async def update_eval_sample(sample_id: str, sample: EvalSampleCreate):
         raise HTTPException(status_code=404, detail="样本不存在")
     update_data = sample.model_dump()
     update_data["id"] = sample_id
+    update_data["review_status"] = "pending"
+    update_data["reviewer"] = ""
+    update_data["reviewed_at"] = ""
     upsert_eval_sample(update_data)
     return get_eval_sample(sample_id)
 
 
 @router.delete("/dataset/samples/{sample_id}")
-async def delete_eval_sample(sample_id: str):
+async def remove_eval_sample(sample_id: str):
     if not delete_eval_sample(sample_id):
         raise HTTPException(status_code=404, detail="样本不存在")
     return {"deleted": True}
@@ -103,7 +109,7 @@ async def import_dataset(req: ImportSamplesRequest):
 
 
 @router.post("/dataset/snapshots")
-async def create_snapshot(req: SnapshotCreate):
+async def add_snapshot(req: SnapshotCreate):
     snap_id = create_snapshot(req.name, req.description)
     return {"snapshot_id": snap_id, "name": req.name}
 
@@ -114,7 +120,7 @@ async def list_snapshots():
 
 
 @router.post("/dataset/snapshots/{snapshot_id}/restore")
-async def restore_snapshot(snapshot_id: str):
+async def apply_snapshot(snapshot_id: str):
     snap_ids = [s["id"] for s in get_snapshots()]
     if snapshot_id not in snap_ids:
         raise HTTPException(status_code=404, detail="快照不存在")
@@ -126,15 +132,12 @@ async def restore_snapshot(snapshot_id: str):
 
 
 def _build_eval_record(config: RAGConfig, mode: str, total_samples: int,
-                       judge_model="", config_id=None, config_name=None,
-                       config_version=None) -> Dict:
+                       judge_model="", config_id=None, config_version=None) -> Dict:
     result = config.to_dict()
     result["evaluation"] = {"mode": mode, "judge_model": judge_model}
     result["dataset"] = {"total_samples": total_samples}
     if config_id is not None:
         result["dataset"]["config_id"] = config_id
-    if config_name is not None:
-        result["dataset"]["config_name"] = config_name
     if config_version is not None:
         result["dataset"]["config_version"] = config_version
     return result
@@ -146,7 +149,7 @@ def _load_config(config_id: int):
     if cfg is None:
         raise ValueError(f"配置不存在: {config_id}")
     config = RAGConfig.from_dict(cfg["config_json"])
-    return config, cfg["name"], cfg["version"]
+    return config, cfg["version"]
 
 
 @router.post("/evaluations")
@@ -161,7 +164,7 @@ async def create_evaluation(req: EvaluationRequest):
         try:
             _eval_tasks[evaluation_id]["status"] = "running"
 
-            config, config_name, config_version = _load_config(req.config_id)
+            config, config_version = _load_config(req.config_id)
 
             samples_data = get_eval_samples()
             if req.filters:
@@ -179,7 +182,7 @@ async def create_evaluation(req: EvaluationRequest):
             update_evaluation_config(
                 evaluation_id,
                 _build_eval_record(config, req.mode, total,
-                                   judge_model, req.config_id, config_name, config_version),
+                                   judge_model, req.config_id, config_version),
                 total=total,
             )
             update_evaluation_status(evaluation_id, "running", progress=0, total=total)
@@ -283,12 +286,21 @@ async def list_evaluations():
     return get_evaluations()
 
 
+@router.delete("/evaluations")
+async def remove_evaluations(ids: str = Query(..., description="逗号分隔的评测ID列表")):
+    evaluation_ids = [eid.strip() for eid in ids.split(",") if eid.strip()]
+    if not evaluation_ids:
+        raise HTTPException(status_code=400, detail="未提供有效的评测ID")
+    deleted = batch_delete_evaluations(evaluation_ids)
+    return {"deleted": deleted}
+
+
 @router.get("/evaluations/trends")
 async def get_evaluation_trends(
     metric: str = Query(..., description="指标名，如 retrieval.precision_at_k"),
     limit: int = Query(20, ge=1, le=50),
 ):
-    return get_evaluation_trends(metric, limit)
+    return fetch_evaluation_trends(metric, limit)
 
 
 @router.post("/evaluations/compare")
@@ -379,28 +391,46 @@ async def export_evaluation_report(evaluation_id: str, format: str = "json"):
 
 
 @router.get("/configs")
-async def list_eval_configs(name: Optional[str] = Query(None)):
-    return get_eval_configs(name=name)
+async def list_eval_configs():
+    return get_eval_configs()
 
 
-@router.get("/configs/{name}/active")
-async def get_active_eval_config(name: str):
-    cfg = get_active_config(name)
+@router.get("/configs/active")
+async def get_active_eval_config():
+    cfg = get_active_config()
     if cfg is None:
-        raise HTTPException(status_code=404, detail=f"配置 '{name}' 不存在")
+        raise HTTPException(status_code=404, detail="无激活的评测配置")
     return cfg
 
 
 @router.post("/configs")
-async def create_eval_config_route(req: EvalConfigCreate):
-    config_id = insert_eval_config(req.name, req.description, req.to_config_dict())
-    return {"id": config_id, "name": req.name}
+async def add_eval_config(req: EvalConfigCreate):
+    config_id, version = insert_eval_config(req.description, req.to_config_dict())
+    return {"id": config_id, "version": version}
 
 
 @router.delete("/configs/{config_id}")
-async def delete_eval_config_route(config_id: int):
+async def delete_eval_config(config_id: int):
     if not remove_eval_config(config_id):
         raise HTTPException(status_code=400, detail="只能删除非激活版本的配置")
+
+
+@router.get("/configs/{config_id}")
+async def get_single_eval_config(config_id: int):
+    cfg = get_eval_config(config_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="配置不存在")
+    return cfg
+
+
+@router.post("/configs/{config_id}/activate")
+async def activate_config(config_id: int):
+    cfg = get_eval_config(config_id)
+    if cfg is None:
+        raise HTTPException(status_code=404, detail="配置不存在")
+    if not activate_eval_config(config_id):
+        raise HTTPException(status_code=500, detail="激活失败")
+    return {"id": config_id, "version": cfg["version"]}
 
 
 # ── 数据集质量审查 ─────────────────────────────────────
@@ -436,3 +466,53 @@ async def list_human_reviews(evaluation_id: str):
     reviews = get_human_reviews(evaluation_id)
     stats = get_human_review_stats(evaluation_id)
     return {"reviews": reviews, "stats": stats}
+
+
+# ── 人工审核工作台 ─────────────────────────────────────
+
+
+@router.patch("/dataset/samples/{sample_id}/review", response_model=EvalSampleOut)
+async def approve_sample(sample_id: str, req: ReviewSampleRequest):
+    existing = get_eval_sample(sample_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="样本不存在")
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    existing["review_status"] = "approved"
+    existing["reviewer"] = req.reviewer
+    existing["reviewed_at"] = now
+    existing["review_comment"] = req.comment
+    upsert_eval_sample(existing)
+    return get_eval_sample(sample_id)
+
+
+@router.get("/dataset/review-stats")
+async def get_review_stats():
+    samples = get_eval_samples()
+    total = len(samples)
+    pending = sum(1 for s in samples if s.get("review_status") != "approved")
+    approved = total - pending
+    return {"total": total, "pending": pending, "approved": approved}
+
+
+@router.post("/dataset/kb-search", response_model=list[KbSearchResult])
+async def search_knowledge_base(req: KbSearchRequest):
+    try:
+        from api.dependencies import get_rag_engine
+        engine = get_rag_engine()
+        results = engine.search(req.query, top_k=req.top_k)
+        return [
+            KbSearchResult(
+                doc_name=r.get("metadata", {}).get("source_file", ""),
+                article=r.get("metadata", {}).get("article_number", ""),
+                excerpt=r.get("text", "")[:500],
+                relevance=r.get("score", 0.0),
+                hierarchy_path=r.get("metadata", {}).get("hierarchy_path", ""),
+                chunk_id=r.get("metadata", {}).get("chunk_id", ""),
+            )
+            for r in results
+            if r.get("text")
+        ]
+    except Exception as e:
+        logger.error(f"KB 搜索失败: {e}")
+        raise HTTPException(status_code=500, detail=f"知识库搜索失败: {str(e)}")

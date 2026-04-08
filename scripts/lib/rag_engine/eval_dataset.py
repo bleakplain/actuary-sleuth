@@ -24,6 +24,28 @@ class QuestionType(Enum):
     COLLOQUIAL = "colloquial"
 
 
+class ReviewStatus(Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+
+
+@dataclass(frozen=True)
+class RegulationRef:
+    doc_name: str
+    article: str
+    excerpt: str
+    relevance: float = 1.0
+    chunk_id: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> 'RegulationRef':
+        valid = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in d.items() if k in valid})
+
+
 @dataclass(frozen=True)
 class EvalSample:
     id: str
@@ -34,10 +56,19 @@ class EvalSample:
     question_type: QuestionType
     difficulty: str
     topic: str
+    regulation_refs: List[RegulationRef] = ()
+    review_status: ReviewStatus = ReviewStatus.PENDING
+    reviewer: str = ""
+    reviewed_at: str = ""
+    review_comment: str = ""
+    created_by: str = "human"
+    kb_version: str = ""
 
     def to_dict(self) -> dict:
         d = asdict(self)
         d['question_type'] = self.question_type.value
+        d['review_status'] = self.review_status.value
+        d['regulation_refs'] = [r.to_dict() for r in self.regulation_refs]
         return d
 
     @classmethod
@@ -45,6 +76,14 @@ class EvalSample:
         valid = {f.name for f in fields(cls)}
         d = {k: v for k, v in d.items() if k in valid}
         d['question_type'] = QuestionType(d['question_type'])
+        if 'review_status' in d and d['review_status']:
+            d['review_status'] = ReviewStatus(d['review_status'])
+        else:
+            d['review_status'] = ReviewStatus.PENDING
+        if 'regulation_refs' in d and d['regulation_refs']:
+            d['regulation_refs'] = [RegulationRef.from_dict(r) for r in d['regulation_refs']]
+        else:
+            d['regulation_refs'] = []
         return cls(**d)
 
 
