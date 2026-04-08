@@ -7,10 +7,8 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from lib.common.database import get_connection
-from lib.llm.factory import LLMClientFactory
 from lib.memory.base import MemoryBase, Mem0Memory
 from lib.memory.config import MemoryConfig
-from lib.memory.prompts import PROFILE_EXTRACTION_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +85,7 @@ class MemoryService:
         cleaned = 0
 
         try:
-            with self._get_conn() as conn:
+            with get_connection() as conn:
                 now = datetime.now().isoformat()
                 expired = conn.execute(
                     "SELECT mem0_id FROM memory_metadata "
@@ -112,7 +110,7 @@ class MemoryService:
     def get_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
         """获取用户画像。"""
         try:
-            with self._get_conn() as conn:
+            with get_connection() as conn:
                 row = conn.execute(
                     "SELECT focus_areas, preference_tags, audit_stats, summary FROM user_profiles WHERE user_id = ?",
                     (user_id,),
@@ -129,56 +127,33 @@ class MemoryService:
         except Exception:
             return None
 
-    def update_profile(self, question: str, answer: str, user_id: str) -> None:
+    def update_profile(self, req, user_id: str) -> Dict[str, Any]:
         """增量更新用户画像。"""
-        try:
-            extracted = self._extract_profile_tags(question, answer)
-            new_areas = extracted.get("focus_areas", [])
-            new_tags = extracted.get("preference_tags", [])
+        with get_connection() as conn:
+            existing = conn.execute(
+                "SELECT focus_areas, preference_tags, summary FROM user_profiles WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
 
-            with self._get_conn() as conn:
-                existing = conn.execute(
-                    "SELECT focus_areas, preference_tags, audit_stats FROM user_profiles WHERE user_id = ?",
-                    (user_id,),
-                ).fetchone()
+            if not existing:
+                raise ValueError(f"用户画像不存在: {user_id}")
 
-                if existing:
-                    focus_areas = json.loads(existing[0])
-                    preference_tags = json.loads(existing[1])
-                    audit_stats = json.loads(existing[2])
-                else:
-                    focus_areas, preference_tags, audit_stats = [], [], {}
+            focus_areas = json.loads(existing[0]) if req.focus_areas is None else req.focus_areas
+            preference_tags = json.loads(existing[1]) if req.preference_tags is None else req.preference_tags
+            summary = existing[2] if req.summary is None else req.summary
 
-                focus_areas = list(set(focus_areas) | set(new_areas))
-                preference_tags = list(set(preference_tags) | set(new_tags))
-                audit_stats["total_audits"] = audit_stats.get("total_audits", 0) + 1
+            conn.execute(
+                "UPDATE user_profiles SET focus_areas = ?, preference_tags = ?, summary = ?, updated_at = datetime('now') "
+                "WHERE user_id = ?",
+                (json.dumps(focus_areas), json.dumps(preference_tags), summary, user_id),
+            )
 
-                conn.execute(
-                    "INSERT INTO user_profiles (user_id, focus_areas, preference_tags, audit_stats, updated_at) "
-                    "VALUES (?, ?, ?, ?, datetime('now')) "
-                    "ON CONFLICT(user_id) DO UPDATE SET "
-                    "focus_areas = excluded.focus_areas, "
-                    "preference_tags = excluded.preference_tags, "
-                    "audit_stats = excluded.audit_stats, "
-                    "updated_at = excluded.updated_at",
-                    (user_id, json.dumps(focus_areas), json.dumps(preference_tags), json.dumps(audit_stats)),
-                )
-        except Exception:
-            logger.debug("用户画像更新失败", exc_info=True)
-
-    def _extract_profile_tags(self, question: str, answer: str) -> Dict:
-        """用 LLM 从对话中提取关注领域和偏好标签。"""
-        try:
-            llm = LLMClientFactory.create_qa_llm()
-            prompt = f"{PROFILE_EXTRACTION_PROMPT}\n\nInput:\n用户: {question}\n助手: {answer}\nOutput: "
-            result = llm.generate(prompt)
-            text = str(result).strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-            return json.loads(text)
-        except Exception:
-            logger.debug("画像标签提取失败", exc_info=True)
-            return {"focus_areas": [], "preference_tags": []}
+        return {
+            "user_id": user_id,
+            "focus_areas": focus_areas,
+            "preference_tags": preference_tags,
+            "summary": summary,
+        }
 
     def _purge_memories(self, rows) -> int:
         count = 0
@@ -191,14 +166,11 @@ class MemoryService:
                 pass
         return count
 
-    def _get_conn(self):
-        return get_connection()
-
     def _update_access_stats(self, memory_ids: List[str]) -> None:
         if not memory_ids:
             return
         try:
-            with self._get_conn() as conn:
+            with get_connection() as conn:
                 conn.execute(
                     "UPDATE memory_metadata SET last_accessed_at = datetime('now'), "
                     "access_count = access_count + 1 WHERE mem0_id IN ({})".format(
@@ -226,7 +198,7 @@ class MemoryService:
             expires_at = (datetime.now() + timedelta(days=ttl_days)).isoformat()
 
         try:
-            with self._get_conn() as conn:
+            with get_connection() as conn:
                 conn.execute(
                     "INSERT OR IGNORE INTO memory_metadata (mem0_id, user_id, session_id, category, expires_at) "
                     "VALUES (?, ?, ?, ?, ?)",
@@ -237,7 +209,7 @@ class MemoryService:
 
     def _soft_delete_metadata(self, mem0_id: str) -> None:
         try:
-            with self._get_conn() as conn:
+            with get_connection() as conn:
                 conn.execute(
                     "UPDATE memory_metadata SET is_deleted = 1 WHERE mem0_id = ?", (mem0_id,)
                 )

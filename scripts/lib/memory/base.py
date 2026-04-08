@@ -8,8 +8,15 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def _precheck() -> None:
+    for pkg in ("mem0", "lancedb"):
+        try:
+            __import__(pkg)
+        except ImportError:
+            raise ImportError(f"缺少依赖包: {pkg}")
+
+
 class MemoryBase(ABC):
-    """记忆后端抽象接口 — 定义记忆的增删查能力。"""
 
     @abstractmethod
     def search(self, query: str, user_id: str, limit: int = 3) -> List[Dict]:
@@ -46,51 +53,45 @@ class Mem0Memory(MemoryBase):
 
     @classmethod
     def create(cls) -> Optional[Mem0Memory]:
-        """创建 Mem0 后端，初始化失败返回 None。"""
+        """创建 Mem0 后端，预检失败返回 None（降级模式）。"""
         try:
+            _precheck()
+
             from mem0 import Memory
-            from langchain_community.vectorstores import LanceDB as LCLanceDB
-
-            from lib.config import get_config
-            from lib.memory.embeddings import EmbeddingBridge
-
             from pathlib import Path
+
+            from lib.config import get_qa_llm_config, get_embed_llm_config
             from lib.memory.prompts import AUDIT_FACT_EXTRACTION_PROMPT
 
-            cfg = get_config()
-            qa_cfg = cfg.llm.qa
-
-            embedding_lc = EmbeddingBridge()
+            qa_cfg = get_qa_llm_config()
+            embed_cfg = get_embed_llm_config()
             lancedb_path = str(Path("./data/lancedb").resolve())
-            lancedb_store = LCLanceDB(
-                uri=lancedb_path,
-                table_name="memories",
-                embedding=embedding_lc,
-            )
 
-            base_url = qa_cfg.get("base_url", "").rstrip("/")
             config = {
                 "llm": {
                     "provider": "openai",
                     "config": {
-                        "model": qa_cfg.get("model", "glm-4-flash"),
-                        "api_key": qa_cfg.get("api_key"),
-                        "openai_base_url": base_url,
-                        "temperature": 0.1,
+                        "model": qa_cfg.model,
+                        "api_key": qa_cfg.api_key,
+                        "openai_base_url": qa_cfg.base_url,
+                        "temperature": qa_cfg.temperature,
                     }
                 },
                 "embedder": {
-                    "provider": "langchain",
-                    "config": {"model": embedding_lc}
-                },
-                "vector_store": {
-                    "provider": "langchain",
-                    "config": {"client": lancedb_store}
+                    "provider": "ollama",
+                    "config": {
+                        "model": embed_cfg.model,
+                        "ollama_base_url": embed_cfg.base_url,
+                    }
                 },
                 "custom_fact_extraction_prompt": AUDIT_FACT_EXTRACTION_PROMPT,
                 "version": "v1.1",
             }
             memory = Memory.from_config(config)
+
+            from lib.memory.vector_store import LanceDBMemoryStore
+            memory.vector_store = LanceDBMemoryStore(lancedb_path, "memories")
+
             logger.info("Mem0 初始化成功")
             return cls(memory)
         except Exception as e:
@@ -111,7 +112,10 @@ class Mem0Memory(MemoryBase):
         result = self._memory.add(
             messages, user_id=user_id, metadata=metadata or {}, run_id=run_id,
         )
-        return result.get("results", {}).get("ids", [])
+        items = result.get("results", [])
+        if isinstance(items, list):
+            return [item["id"] for item in items if "id" in item]
+        return []
 
     def delete(self, memory_id: str) -> None:
         self._memory.delete(memory_id)

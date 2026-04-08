@@ -242,31 +242,32 @@ class JinaEmbeddingAdapter(BaseEmbedding):
         return await asyncio.to_thread(self._get_text_embeddings, texts)
 
 
-def _create_embedding_model(config: dict):
-    """创建嵌入模型适配器（内部工厂函数，通过 LLMClientFactory.create_embed_model() 调用）"""
-    from llama_index.embeddings.ollama import OllamaEmbedding
+def _create_embedding_model(cfg):
+    provider = cfg.provider
+    model = cfg.model
+    base_url = cfg.base_url
+    api_key = cfg.api_key
 
-    provider = config.get('provider', 'ollama')
+    from llama_index.embeddings.ollama import OllamaEmbedding
 
     if provider == 'zhipu':
         return ZhipuEmbeddingAdapter(
-            api_key=config['api_key'],
-            model=config.get('model', 'embedding-3'),
-            base_url=config.get('base_url', 'https://open.bigmodel.cn/api/paas/v4'),
-            embed_batch_size=config.get('embed_batch_size', 50),
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            embed_batch_size=50,
         )
     elif provider == 'ollama':
-        model = config.get('model', 'nomic-embed-text')
         if 'jina' in model:
             return JinaEmbeddingAdapter(
                 model_name=model,
-                base_url=config.get('host', 'http://localhost:11434'),
-                embed_batch_size=config.get('embed_batch_size', 50),
+                base_url=base_url,
+                embed_batch_size=50,
             )
         return OllamaEmbedding(
             model_name=model,
-            base_url=config.get('host', 'http://localhost:11434'),
-            embed_batch_size=config.get('embed_batch_size', 50),
+            base_url=base_url,
+            embed_batch_size=50,
         )
     else:
         raise ValueError(f"Unsupported embedding provider: {provider}")

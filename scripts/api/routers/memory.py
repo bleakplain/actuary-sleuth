@@ -1,6 +1,5 @@
 """记忆管理 API。"""
 import json
-import logging
 
 from fastapi import APIRouter, HTTPException
 
@@ -14,9 +13,7 @@ from api.schemas.memory import (
     ProfileUpdateRequest,
     UserProfile,
 )
-from lib.common.database import get_connection
 
-logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
 
@@ -100,25 +97,8 @@ def update_profile(req: ProfileUpdateRequest, user_id: str = "default"):
     svc = get_memory_service()
     if not svc:
         raise HTTPException(status_code=503, detail="记忆服务不可用")
-    with get_connection() as conn:
-        existing = conn.execute(
-            "SELECT focus_areas, preference_tags, summary FROM user_profiles WHERE user_id = ?",
-            (user_id,),
-        ).fetchone()
-        if not existing:
-            raise HTTPException(status_code=404, detail="用户画像不存在")
-        updates = {}
-        if req.focus_areas is not None:
-            updates["focus_areas"] = json.dumps(req.focus_areas)
-        if req.preference_tags is not None:
-            updates["preference_tags"] = json.dumps(req.preference_tags)
-        if req.summary is not None:
-            updates["summary"] = req.summary
-        if updates:
-            set_clause = ", ".join(f"{k} = ?" for k in updates)
-            conn.execute(
-                f"UPDATE user_profiles SET {set_clause}, updated_at = datetime('now') WHERE user_id = ?",
-                (*updates.values(), user_id),
-            )
-    profile = svc.get_profile(user_id)
-    return UserProfile(**profile)
+    existing = svc.get_profile(user_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="用户画像不存在")
+    profile = svc.update_profile(req, user_id)
+    return profile

@@ -4,13 +4,9 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class MemoryConfig:
-    """记忆服务配置"""
-
     ttl_fact: int = 30
     ttl_preference: int = 90
     ttl_audit_conclusion: int = -1
 
     inactive_threshold_days: int = 60
-
-    memory_search_limit: int = 3
     memory_context_max_chars: int = 2000

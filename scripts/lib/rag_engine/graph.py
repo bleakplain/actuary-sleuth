@@ -17,14 +17,7 @@ from lib.rag_engine.rag_engine import _SYSTEM_PROMPT, RAGEngine
 
 logger = logging.getLogger(__name__)
 
-_memory_config: MemoryConfig | None = None
-
-
-def _get_memory_config() -> MemoryConfig:
-    global _memory_config
-    if _memory_config is None:
-        _memory_config = MemoryConfig()
-    return _memory_config
+_memory_config = MemoryConfig()
 
 
 class AskState(TypedDict):
@@ -55,9 +48,8 @@ class GraphContext:
 
 
 def retrieve_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
-    """情节记忆检索 + 用户画像注入。"""
     memory_svc = runtime.context.memory_service
-    max_chars = _get_memory_config().memory_context_max_chars
+    max_chars = _memory_config.memory_context_max_chars
     with trace_span("memory_retrieve", "memory") as span:
         parts = []
 
@@ -85,7 +77,6 @@ def retrieve_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
 
 
 def rag_search(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
-    """语义记忆检索。"""
     engine = runtime.context.rag_engine
     with trace_span("graph_retrieve", "rag") as span:
         results = engine.search(state["question"])
@@ -93,7 +84,6 @@ def rag_search(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
 
 
 def generate(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
-    """LLM 生成 — 融合语义记忆 + 情节记忆 + 程序性记忆。"""
     engine = runtime.context.rag_engine
     llm = runtime.context.llm_client
     with trace_span("graph_generate", "llm", model=getattr(llm, 'model', '')) as span:
@@ -133,7 +123,6 @@ def generate(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
 
 
 def extract_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
-    """情节记忆写入。失败不阻塞。"""
     memory_svc = runtime.context.memory_service
     conversation = [
         {"role": "user", "content": state["question"]},
@@ -149,8 +138,7 @@ def extract_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
     return {}
 
 
-def update_profile_node(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
-    """用户画像更新。失败不阻塞。"""
+def update_user_profile(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
     memory_svc = runtime.context.memory_service
     try:
         memory_svc.update_profile(state["question"], state["answer"], state["user_id"])
@@ -166,7 +154,7 @@ def create_ask_graph():
     graph.add_node("rag_search", rag_search)
     graph.add_node("generate", generate)
     graph.add_node("extract_memory", extract_memory)
-    graph.add_node("update_profile", update_profile_node)
+    graph.add_node("update_profile", update_user_profile)
 
     graph.add_edge(START, "retrieve_memory")
     graph.add_edge(START, "rag_search")

@@ -33,7 +33,6 @@ def test_retrieve_memory_returns_context(mock_context):
 
 
 def test_graph_end_to_end(mock_context):
-    from unittest.mock import MagicMock as MC
     graph = create_ask_graph()
     state = AskState(
         question="等待期", mode="qa", user_id="test",
@@ -42,7 +41,7 @@ def test_graph_end_to_end(mock_context):
         faithfulness_score=None, error=None,
     )
     with patch("lib.rag_engine.graph.trace_span") as mock_span:
-        mock_span.return_value.__enter__ = MC()
-        mock_span.return_value.__exit__ = MC(return_value=False)
+        mock_span.return_value.__enter__ = MagicMock()
+        mock_span.return_value.__exit__ = MagicMock(return_value=False)
         result = graph.invoke(state, context=mock_context)
     assert result["answer"] != ""
