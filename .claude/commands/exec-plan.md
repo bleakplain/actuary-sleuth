@@ -40,6 +40,42 @@ arguments:
 
 ---
 
+## 第零步：Worktree 检查与创建
+
+**执行任何代码变更前，必须确保在 worktree 中工作。**
+
+### 检测是否已在 worktree 中
+
+1. 运行 `git worktree list` 检查当前工作目录
+2. 如果当前目录已指向一个 worktree 分支（非 master）→ 跳过创建，直接执行
+3. 如果当前在 master 上 → 必须创建 worktree
+
+### 创建 Worktree
+
+1. **提取 feature-name** — 从 `specs/` 目录或 `plan.md` 路径中提取（如 `004-eval-dataset-curation`）
+2. **扫描编号** — 检查本地+远程分支中已有的 `NNN-*` 分支，取 max+1
+3. **检查分支是否已存在** — 如果 `<feature-name>` 分支已存在，直接切换到对应 worktree
+4. **创建 worktree** — 基于 `origin/master` 创建：
+   ```bash
+   git worktree add .claude/worktrees/<feature-name> -b <feature-name> origin/master
+   ```
+5. **将 plan.md 和相关产物复制到 worktree**：
+   ```bash
+   cp -r specs/<feature-name>/ .claude/worktrees/<feature-name>/specs/<feature-name>/
+   ```
+6. **切换工作目录到 worktree**：
+   ```
+   后续所有操作在 .claude/worktrees/<feature-name>/ 下执行
+   ```
+
+### 如果 plan.md 在 master 上且无 specs 目录
+
+说明是兼容模式且方案文件在项目根目录或其他位置，此时：
+1. 仍需创建 worktree 隔离开发环境
+2. 将方案文件复制到 worktree 对应位置
+
+---
+
 ## SDD 模式执行步骤
 
 ### 第一步：读取并解析 plan.md
