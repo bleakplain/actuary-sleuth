@@ -27,7 +27,7 @@ from .query_preprocessor import QueryPreprocessor
 from .exceptions import EngineInitializationError, RetrievalError
 from .attribution import parse_citations, AttributionResult
 from ._gguf_cli import GGUFReranker as GGUFCliReranker
-from .gguf_reranker_adapter import GGUFReranker
+from .gguf_reranker_adapter import GGUFReranker, RerankerError
 from lib.llm import BaseLLMClient, LLMClientFactory
 from lib.llm.trace import trace_span
 
@@ -164,7 +164,7 @@ class RAGEngine:
             try:
                 gguf = GGUFCliReranker()
                 return GGUFReranker(gguf)
-            except FileNotFoundError as e:
+            except (FileNotFoundError, OSError, ValueError) as e:
                 logger.warning(f"GGUF reranker 不可用，回退到 LLM reranker: {e}")
                 return LLMReranker(self._llm_client, rerank_config)
 
@@ -396,7 +396,16 @@ class RAGEngine:
                 return []
 
         if self._reranker:
-            results = self._reranker.rerank(query_text, results, top_k=top_k)
+            try:
+                results = self._reranker.rerank(query_text, results, top_k=top_k)
+            except RerankerError as e:
+                logger.warning(f"GGUF reranker 运行时失败，回退到 LLM reranker: {e}")
+                fallback_config = RerankConfig(
+                    enabled=True,
+                    top_k=self.config.rerank.rerank_top_k,
+                )
+                fallback = LLMReranker(self._llm_client, fallback_config)
+                results = fallback.rerank(query_text, results, top_k=top_k)
 
         if results and rk.rerank_min_score > 0:
             filtered = [
