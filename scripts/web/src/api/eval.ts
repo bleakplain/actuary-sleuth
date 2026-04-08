@@ -5,6 +5,7 @@ export async function fetchEvalSamples(params?: {
   question_type?: string;
   difficulty?: string;
   topic?: string;
+  review_status?: string;
 }): Promise<EvalSample[]> {
   const { data } = await client.get('/api/eval/dataset', { params });
   return data;
@@ -149,5 +150,24 @@ export async function exportEvaluationReport(evaluationId: string, format: 'json
     params: { format },
     responseType: 'blob',
   });
+  return data;
+}
+
+// ── 人工审核 ──────────────────────────────────────────
+
+export async function approveSample(id: string, reviewer: string, comment: string): Promise<EvalSample> {
+  const { data } = await client.patch(`/api/eval/dataset/samples/${id}/review`, { reviewer, comment });
+  return data;
+}
+
+export async function fetchReviewStats(): Promise<{ total: number; pending: number; approved: number }> {
+  const { data } = await client.get('/api/eval/dataset/review-stats');
+  return data;
+}
+
+export async function searchKnowledgeBase(query: string, topK = 10): Promise<{
+  doc_name: string; article: string; excerpt: string; relevance: number; hierarchy_path: string; chunk_id: string;
+}[]> {
+  const { data } = await client.post('/api/eval/dataset/kb-search', { query, top_k: topK });
   return data;
 }

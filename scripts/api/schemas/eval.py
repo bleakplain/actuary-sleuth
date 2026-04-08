@@ -4,6 +4,14 @@ from pydantic import BaseModel, Field
 from lib.rag_engine.config import config_to_dict, RetrievalConfig, RerankConfig, GenerationConfig
 
 
+class RegulationRefSchema(BaseModel):
+    doc_name: str
+    article: str
+    excerpt: str
+    relevance: float = 1.0
+    chunk_id: str = ""
+
+
 class EvalSampleCreate(BaseModel):
     id: str = Field(..., min_length=1)
     question: str = Field(..., min_length=1)
@@ -13,6 +21,12 @@ class EvalSampleCreate(BaseModel):
     question_type: str = Field("factual", pattern="^(factual|multi_hop|negative|colloquial)$")
     difficulty: str = Field("medium", pattern="^(easy|medium|hard)$")
     topic: str = ""
+    regulation_refs: List[RegulationRefSchema] = []
+    review_status: str = Field("pending", pattern="^(pending|approved)$")
+    reviewer: str = ""
+    review_comment: str = ""
+    created_by: str = Field("human", pattern="^(human|llm)$")
+    kb_version: str = ""
 
 
 class EvalSampleOut(BaseModel):
@@ -24,6 +38,13 @@ class EvalSampleOut(BaseModel):
     question_type: str
     difficulty: str
     topic: str
+    regulation_refs: List[RegulationRefSchema]
+    review_status: str
+    reviewer: str
+    reviewed_at: str
+    review_comment: str
+    created_by: str
+    kb_version: str
     created_at: str
     updated_at: str
 
@@ -67,3 +88,22 @@ class HumanReviewCreate(BaseModel):
     correctness_score: Optional[float] = Field(None, ge=0.0, le=1.0)
     relevancy_score: Optional[float] = Field(None, ge=0.0, le=1.0)
     comment: str = ""
+
+
+class ReviewSampleRequest(BaseModel):
+    reviewer: str = ""
+    comment: str = ""
+
+
+class KbSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    top_k: int = Field(10, ge=1, le=50)
+
+
+class KbSearchResult(BaseModel):
+    doc_name: str
+    article: str
+    excerpt: str
+    relevance: float
+    hierarchy_path: str = ""
+    chunk_id: str = ""

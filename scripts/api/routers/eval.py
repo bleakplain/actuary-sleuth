@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, Response
 from api.schemas.eval import (
     EvalSampleCreate, EvalSampleOut, ImportSamplesRequest,
     EvaluationRequest, EvalConfigCreate, CompareRequest, SnapshotCreate,
-    HumanReviewCreate,
+    HumanReviewCreate, ReviewSampleRequest, KbSearchRequest, KbSearchResult,
 )
 from api.database import (
     eval_sample_count, import_eval_samples, get_eval_samples,
@@ -61,11 +61,13 @@ async def list_eval_samples(
     question_type: Optional[str] = Query(None),
     difficulty: Optional[str] = Query(None),
     topic: Optional[str] = Query(None),
+    review_status: Optional[str] = Query(None, pattern="^(pending|approved)$"),
 ):
     return get_eval_samples(
         question_type=question_type,
         difficulty=difficulty,
         topic=topic,
+        review_status=review_status,
     )
 
 
@@ -85,6 +87,9 @@ async def update_eval_sample(sample_id: str, sample: EvalSampleCreate):
         raise HTTPException(status_code=404, detail="样本不存在")
     update_data = sample.model_dump()
     update_data["id"] = sample_id
+    update_data["review_status"] = "pending"
+    update_data["reviewer"] = ""
+    update_data["reviewed_at"] = ""
     upsert_eval_sample(update_data)
     return get_eval_sample(sample_id)
 
@@ -400,8 +405,8 @@ async def get_active_eval_config():
 
 @router.post("/configs")
 async def add_eval_config(req: EvalConfigCreate):
-    config_id = insert_eval_config(req.description, req.to_config_dict())
-    return {"id": config_id, "version": get_eval_config(config_id)["version"]}
+    config_id, version = insert_eval_config(req.description, req.to_config_dict())
+    return {"id": config_id, "version": version}
 
 
 @router.delete("/configs/{config_id}")
@@ -461,3 +466,53 @@ async def list_human_reviews(evaluation_id: str):
     reviews = get_human_reviews(evaluation_id)
     stats = get_human_review_stats(evaluation_id)
     return {"reviews": reviews, "stats": stats}
+
+
+# ── 人工审核工作台 ─────────────────────────────────────
+
+
+@router.patch("/dataset/samples/{sample_id}/review", response_model=EvalSampleOut)
+async def approve_sample(sample_id: str, req: ReviewSampleRequest):
+    existing = get_eval_sample(sample_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="样本不存在")
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    existing["review_status"] = "approved"
+    existing["reviewer"] = req.reviewer
+    existing["reviewed_at"] = now
+    existing["review_comment"] = req.comment
+    upsert_eval_sample(existing)
+    return get_eval_sample(sample_id)
+
+
+@router.get("/dataset/review-stats")
+async def get_review_stats():
+    samples = get_eval_samples()
+    total = len(samples)
+    pending = sum(1 for s in samples if s.get("review_status") != "approved")
+    approved = total - pending
+    return {"total": total, "pending": pending, "approved": approved}
+
+
+@router.post("/dataset/kb-search", response_model=list[KbSearchResult])
+async def search_knowledge_base(req: KbSearchRequest):
+    try:
+        from api.dependencies import get_rag_engine
+        engine = get_rag_engine()
+        results = engine.search(req.query, top_k=req.top_k)
+        return [
+            KbSearchResult(
+                doc_name=r.get("metadata", {}).get("source_file", ""),
+                article=r.get("metadata", {}).get("article_number", ""),
+                excerpt=r.get("text", "")[:500],
+                relevance=r.get("score", 0.0),
+                hierarchy_path=r.get("metadata", {}).get("hierarchy_path", ""),
+                chunk_id=r.get("metadata", {}).get("chunk_id", ""),
+            )
+            for r in results
+            if r.get("text")
+        ]
+    except Exception as e:
+        logger.error(f"KB 搜索失败: {e}")
+        raise HTTPException(status_code=500, detail=f"知识库搜索失败: {str(e)}")

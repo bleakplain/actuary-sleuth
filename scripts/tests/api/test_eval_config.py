@@ -16,27 +16,27 @@ def db(_patch_database):
 
 class TestInsertEvalConfig:
     def test_auto_increment_version(self, db):
-        c1 = insert_eval_config("第一个配置", {"retrieval": {"vector_top_k": 10}})
-        c2 = insert_eval_config("第二个配置", {"retrieval": {"vector_top_k": 20}})
+        _, v1 = insert_eval_config("第一个配置", {"retrieval": {"vector_top_k": 10}})
+        _, v2 = insert_eval_config("第二个配置", {"retrieval": {"vector_top_k": 20}})
         configs = get_eval_configs()
         versions = [c["version"] for c in configs]
-        assert c1 == 2
-        assert c2 == 3
+        assert v1 == 2
+        assert v2 == 3
         assert versions == [3, 2, 1]  # default=1, c1=2, c2=3, DESC order
 
-    def test_first_insert_version_is_1(self, db):
-        c = insert_eval_config("初始配置", {})
-        assert c == 2  # returns id, default config is id=1 so new one is id=2
+    def test_first_insert_returns_id(self, db):
+        cid, _ = insert_eval_config("初始配置", {})
+        assert cid == 2  # default config is id=1 so new one is id=2
 
     def test_stores_config_json(self, db):
         config = {"retrieval": {"vector_top_k": 15}, "rerank": {"enable_rerank": False}}
-        cid = insert_eval_config("测试", config)
+        cid, _ = insert_eval_config("测试", config)
         result = get_eval_config(cid)
         assert result["config_json"]["retrieval"]["vector_top_k"] == 15
         assert result["config_json"]["rerank"]["enable_rerank"] is False
 
     def test_description_defaults_empty(self, db):
-        cid = insert_eval_config("", {})
+        cid, _ = insert_eval_config("", {})
         result = get_eval_config(cid)
         assert result["description"] == ""
 
@@ -52,8 +52,8 @@ class TestGetEvalConfigs:
 
 class TestActivateEvalConfig:
     def test_only_one_active(self, db):
-        c1 = insert_eval_config("配置1", {})
-        c2 = insert_eval_config("配置2", {})
+        c1, _ = insert_eval_config("配置1", {})
+        c2, _ = insert_eval_config("配置2", {})
         activate_eval_config(c2)
         cfg1 = get_eval_config(c1)
         cfg2 = get_eval_config(c2)
@@ -61,7 +61,7 @@ class TestActivateEvalConfig:
         assert cfg2["is_active"] == 1
 
     def test_get_active_config(self, db):
-        c = insert_eval_config("新配置", {})
+        c, _ = insert_eval_config("新配置", {})
         activate_eval_config(c)
         active = get_active_config()
         assert active is not None
@@ -80,7 +80,7 @@ class TestRemoveEvalConfig:
         assert result is False
 
     def test_delete_inactive(self, db):
-        c = insert_eval_config("可删除", {})
+        c, _ = insert_eval_config("可删除", {})
         result = remove_eval_config(c)
         assert result is True
         assert get_eval_config(c) is None

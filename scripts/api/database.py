@@ -179,7 +179,7 @@ def _deserialize_json_fields(row: dict, mappings: Dict[str, str]) -> dict:
 
 
 _MSG_JSON_FIELDS = {"citations": "citations_json", "sources": "sources_json", "unverified_claims": "unverified_claims_json"}
-_SAMPLE_JSON_FIELDS = {"evidence_docs": "evidence_docs_json", "evidence_keywords": "evidence_keywords_json"}
+_SAMPLE_JSON_FIELDS = {"evidence_docs": "evidence_docs_json", "evidence_keywords": "evidence_keywords_json", "regulation_refs": "regulation_refs_json"}
 _RESULT_JSON_FIELDS = {
     "retrieved_docs": "retrieved_docs_json",
     "retrieval_metrics": "retrieval_metrics_json",
@@ -238,6 +238,22 @@ def _migrate_db():
             """)
             conn.execute("DROP TABLE eval_configs")
             conn.execute("ALTER TABLE eval_configs_new RENAME TO eval_configs")
+
+        sample_cols = {row[1] for row in conn.execute("PRAGMA table_info(eval_samples)").fetchall()}
+        if 'regulation_refs_json' not in sample_cols:
+            conn.execute("ALTER TABLE eval_samples ADD COLUMN regulation_refs_json TEXT NOT NULL DEFAULT '[]'")
+        if 'review_status' not in sample_cols:
+            conn.execute("ALTER TABLE eval_samples ADD COLUMN review_status TEXT NOT NULL DEFAULT 'pending'")
+        if 'reviewer' not in sample_cols:
+            conn.execute("ALTER TABLE eval_samples ADD COLUMN reviewer TEXT NOT NULL DEFAULT ''")
+        if 'reviewed_at' not in sample_cols:
+            conn.execute("ALTER TABLE eval_samples ADD COLUMN reviewed_at TEXT NOT NULL DEFAULT ''")
+        if 'review_comment' not in sample_cols:
+            conn.execute("ALTER TABLE eval_samples ADD COLUMN review_comment TEXT NOT NULL DEFAULT ''")
+        if 'created_by' not in sample_cols:
+            conn.execute("ALTER TABLE eval_samples ADD COLUMN created_by TEXT NOT NULL DEFAULT 'human'")
+        if 'kb_version' not in sample_cols:
+            conn.execute("ALTER TABLE eval_samples ADD COLUMN kb_version TEXT NOT NULL DEFAULT ''")
 
 
 def create_conversation(conversation_id: str, title: str = "") -> None:
@@ -360,6 +376,7 @@ def get_eval_samples(
     question_type: Optional[str] = None,
     difficulty: Optional[str] = None,
     topic: Optional[str] = None,
+    review_status: Optional[str] = None,
 ) -> List[Dict]:
     clauses: list[str] = []
     params: list = []
@@ -372,6 +389,9 @@ def get_eval_samples(
     if topic:
         clauses.append("topic = ?")
         params.append(topic)
+    if review_status:
+        clauses.append("review_status = ?")
+        params.append(review_status)
 
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     with get_connection() as conn:
@@ -420,8 +440,10 @@ def upsert_eval_sample(sample: Dict) -> None:
         conn.execute("""
             INSERT INTO eval_samples
                 (id, question, ground_truth, evidence_docs_json, evidence_keywords_json,
-                 question_type, difficulty, topic, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 question_type, difficulty, topic, created_at, updated_at,
+                 regulation_refs_json, review_status, reviewer, reviewed_at, review_comment,
+                 created_by, kb_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 question = excluded.question,
                 ground_truth = excluded.ground_truth,
@@ -430,7 +452,14 @@ def upsert_eval_sample(sample: Dict) -> None:
                 question_type = excluded.question_type,
                 difficulty = excluded.difficulty,
                 topic = excluded.topic,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                regulation_refs_json = excluded.regulation_refs_json,
+                review_status = excluded.review_status,
+                reviewer = excluded.reviewer,
+                reviewed_at = excluded.reviewed_at,
+                review_comment = excluded.review_comment,
+                created_by = excluded.created_by,
+                kb_version = excluded.kb_version
         """, (
             sample["id"], sample["question"], sample.get("ground_truth", ""),
             json.dumps(sample.get("evidence_docs", []), ensure_ascii=False),
@@ -439,6 +468,13 @@ def upsert_eval_sample(sample: Dict) -> None:
             sample.get("difficulty", "medium"),
             sample.get("topic", ""),
             now, now,
+            json.dumps(sample.get("regulation_refs", []), ensure_ascii=False),
+            sample.get("review_status", "pending"),
+            sample.get("reviewer", ""),
+            sample.get("reviewed_at", ""),
+            sample.get("review_comment", ""),
+            sample.get("created_by", "human"),
+            sample.get("kb_version", ""),
         ))
 
 
@@ -507,8 +543,8 @@ def restore_snapshot(snapshot_id: str) -> int:
 # ── 评测配置版本管理 ──────────────────────────────────
 
 
-def insert_eval_config(description: str, config: Dict) -> int:
-    """创建评测配置新版本，自动 version+1。"""
+def insert_eval_config(description: str, config: Dict) -> tuple:
+    """创建评测配置新版本，自动 version+1。返回 (id, version)。"""
     with get_connection() as conn:
         row = conn.execute("SELECT COALESCE(MAX(version), 0) FROM eval_configs").fetchone()
         next_version = row[0] + 1
@@ -516,7 +552,8 @@ def insert_eval_config(description: str, config: Dict) -> int:
             "INSERT INTO eval_configs (version, description, config_json) VALUES (?, ?, ?)",
             (next_version, description, json.dumps(config, ensure_ascii=False)),
         )
-        return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        config_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        return config_id, next_version
 
 
 def get_eval_configs() -> List[Dict]:
@@ -582,10 +619,9 @@ def _ensure_default_config():
         if count > 0:
             return
     from lib.rag_engine.config import RAGConfig
-    insert_eval_config("默认配置", RAGConfig().to_dict())
-    # 激活第一个配置
+    config_id, _ = insert_eval_config("默认配置", RAGConfig().to_dict())
     with get_connection() as conn:
-        conn.execute("UPDATE eval_configs SET is_active = 1 WHERE id = (SELECT id FROM eval_configs LIMIT 1)")
+        conn.execute("UPDATE eval_configs SET is_active = 1 WHERE id = ?", (config_id,))
 
 
 def insert_evaluation(run_id: str, mode: str, config: Dict) -> None:
