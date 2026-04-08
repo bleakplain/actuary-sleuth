@@ -63,10 +63,11 @@ def _build_trace_payload(root_span, trace_id: Optional[str] = None) -> dict:
     spans = list(root_span.iter_spans())
     error_count = sum(1 for s in spans if s.status == "error")
     llm_count = get_llm_call_count(trace_id)
+    flat_spans = [{k: v for k, v in s.to_dict().items() if k != "children"} for s in spans]
     return {
         "trace_id": root_span.trace_id,
         "root": root_span.to_dict(),
-        "spans": [s.to_dict() for s in spans],
+        "spans": flat_spans,
         "summary": {
             "total_duration_ms": root_span.duration_ms,
             "span_count": len(spans),
