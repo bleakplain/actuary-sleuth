@@ -46,13 +46,13 @@ export async function restoreSnapshot(snapshotId: string): Promise<{ restored: n
 
 // ── 评测配置 ──────────────────────────────────────────
 
-export async function fetchEvalConfigs(name?: string): Promise<EvalConfig[]> {
-  const { data } = await client.get('/api/eval/configs', { params: name ? { name } : undefined });
+export async function fetchEvalConfigs(): Promise<EvalConfig[]> {
+  const { data } = await client.get('/api/eval/configs');
   return data;
 }
 
-export async function fetchActiveConfig(name: string): Promise<EvalConfig> {
-  const { data } = await client.get(`/api/eval/configs/${name}/active`);
+export async function fetchActiveConfig(): Promise<EvalConfig> {
+  const { data } = await client.get('/api/eval/configs/active');
   return data;
 }
 
@@ -65,18 +65,17 @@ export async function fetchEvalConfig(configId: number): Promise<EvalConfig> {
   return data;
 }
 
-export async function activateEvalConfig(configId: number): Promise<{ id: number; name: string }> {
+export async function activateEvalConfig(configId: number): Promise<{ id: number; version: number }> {
   const { data } = await client.post(`/api/eval/configs/${configId}/activate`);
   return data;
 }
 
 export async function createEvalConfig(config: {
-  name: string;
   description?: string;
   retrieval?: Record<string, unknown>;
   rerank?: Record<string, unknown>;
   generation?: Record<string, unknown>;
-}): Promise<{ id: number; name: string }> {
+}): Promise<{ id: number; version: number }> {
   const { data } = await client.post('/api/eval/configs', config);
   return data;
 }

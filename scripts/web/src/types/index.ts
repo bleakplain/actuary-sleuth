@@ -107,7 +107,6 @@ export interface Evaluation {
 
 export interface EvalConfig {
   id: number;
-  name: string;
   version: number;
   description: string;
   is_active: number;
