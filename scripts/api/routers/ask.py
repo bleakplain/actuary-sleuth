@@ -109,8 +109,8 @@ async def chat(req: ChatRequest):
         exc_info = (None, None, None)
         try:
             if req.debug:
-                root_span = trace_span("root", "root")
-                root_span.__enter__()
+                _span_ctx = trace_span("root", "root")
+                root_span = _span_ctx.__enter__()
                 reset_llm_call_count(root_span.trace_id)
                 root_span.input = {"question": req.question, "mode": req.mode}
 
@@ -163,7 +163,7 @@ async def chat(req: ChatRequest):
             )
 
             if root_span:
-                root_span.__exit__(*exc_info)
+                _span_ctx.__exit__(*exc_info)
                 exc_info = (None, None, None)
 
             trace_summary = None
@@ -217,7 +217,7 @@ async def chat(req: ChatRequest):
             exc_info = (type(e), e, e.__traceback__)
             logger.error(f"Chat failed: {e}")
             if root_span:
-                root_span.__exit__(*exc_info)
+                _span_ctx.__exit__(*exc_info)
                 cleanup_trace_counters(root_span.trace_id)
             yield {
                 "event": "message",

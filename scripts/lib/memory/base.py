@@ -53,14 +53,17 @@ class Mem0Memory(MemoryBase):
 
             from lib.config import get_config
             from lib.memory.embeddings import EmbeddingBridge
+
+            from pathlib import Path
             from lib.memory.prompts import AUDIT_FACT_EXTRACTION_PROMPT
 
             cfg = get_config()
-            qa_cfg = cfg.qa
+            qa_cfg = cfg.llm.qa
 
             embedding_lc = EmbeddingBridge()
+            lancedb_path = str(Path("./data/lancedb").resolve())
             lancedb_store = LCLanceDB(
-                uri="./data/lancedb",
+                uri=lancedb_path,
                 table_name="memories",
                 embedding=embedding_lc,
             )
