@@ -19,14 +19,14 @@ async def submit_feedback(req: FeedbackCreate):
     from api.database import create_feedback, get_feedback, get_connection
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT conversation_id FROM messages WHERE id = ?", (req.message_id,)
+            "SELECT session_id FROM messages WHERE id = ?", (req.message_id,)
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="消息不存在")
-    conversation_id = row[0]
+    session_id = row[0]
     fb_id = create_feedback(
         message_id=req.message_id,
-        conversation_id=conversation_id,
+        session_id=session_id,
         rating=req.rating,
         reason=req.reason,
         correction=req.correction,
@@ -109,8 +109,8 @@ async def classify_pending_badcases() -> Dict[str, int]:
             if msgs is None:
                 continue
             user_msg = conn.execute(
-                "SELECT content FROM messages WHERE conversation_id = ? AND role = 'user' AND id < ? ORDER BY id DESC LIMIT 1",
-                (fb["conversation_id"], fb["message_id"]),
+                "SELECT content FROM messages WHERE session_id = ? AND role = 'user' AND id < ? ORDER BY id DESC LIMIT 1",
+                (fb["session_id"], fb["message_id"]),
             ).fetchone()
 
         query = user_msg[0] if user_msg else ""
@@ -150,8 +150,8 @@ async def verify_badcase(feedback_id: str):
 
     with get_connection() as conn:
         user_msg = conn.execute(
-            "SELECT content FROM messages WHERE conversation_id = ? AND role = 'user' AND id < ? ORDER BY id DESC LIMIT 1",
-            (fb["conversation_id"], fb["message_id"]),
+            "SELECT content FROM messages WHERE session_id = ? AND role = 'user' AND id < ? ORDER BY id DESC LIMIT 1",
+            (fb["session_id"], fb["message_id"]),
         ).fetchone()
 
     if user_msg is None:
@@ -195,8 +195,8 @@ async def convert_to_eval_sample(feedback_id: str, ground_truth: str = ""):
 
     with get_connection() as conn:
         user_msg = conn.execute(
-            "SELECT content FROM messages WHERE conversation_id = ? AND role = 'user' AND id < ? ORDER BY id DESC LIMIT 1",
-            (fb["conversation_id"], fb["message_id"]),
+            "SELECT content FROM messages WHERE session_id = ? AND role = 'user' AND id < ? ORDER BY id DESC LIMIT 1",
+            (fb["session_id"], fb["message_id"]),
         ).fetchone()
         assistant_msg = conn.execute(
             "SELECT sources_json FROM messages WHERE id = ?",

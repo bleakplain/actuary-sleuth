@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/observability", tags=["可测性"])
 @router.get("/traces", response_model=TraceListResponse)
 async def list_traces(
     trace_id: str = Query("", description="精确匹配 trace ID"),
-    conversation_id: str = Query("", description="精确匹配 conversation ID"),
+    session_id: str = Query("", description="精确匹配 session ID"),
     message_id: int = Query(0, description="精确匹配 message ID"),
     status: str = Query("", description="状态过滤: ok / error"),
     start_date: str = Query("", description="起始日期 YYYY-MM-DD"),
@@ -27,7 +27,7 @@ async def list_traces(
 ):
     items, total = search_traces(
         trace_id=trace_id,
-        conversation_id=conversation_id,
+        session_id=session_id,
         message_id=message_id,
         status=status,
         start_date=start_date,

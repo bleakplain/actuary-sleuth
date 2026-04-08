@@ -20,7 +20,7 @@ export interface Source {
 
 export interface Message {
   id: number;
-  conversation_id: string;
+  session_id: string;
   role: 'user' | 'assistant';
   content: string;
   citations: Citation[];
@@ -31,7 +31,7 @@ export interface Message {
   trace?: TraceData | null;
 }
 
-export interface Conversation {
+export interface Session {
   id: string;
   title: string;
   created_at: string;
@@ -40,7 +40,7 @@ export interface Conversation {
 
 export interface ChatRequest {
   question: string;
-  conversation_id?: string;
+  session_id?: string;
   mode: 'qa' | 'search';
   debug?: boolean;
 }
@@ -185,7 +185,7 @@ export interface ComplianceReport {
 export interface Feedback {
   id: string;
   message_id: number;
-  conversation_id: string;
+  session_id: string;
   rating: 'up' | 'down';
   reason: string;
   correction: string;
@@ -249,7 +249,7 @@ export interface TraceData {
 export interface TraceListItem {
   trace_id: string;
   message_id: number | null;
-  conversation_id: string | null;
+  session_id: string | null;
   created_at: string;
   status: 'ok' | 'error';
   total_duration_ms: number;

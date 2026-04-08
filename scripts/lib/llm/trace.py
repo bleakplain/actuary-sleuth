@@ -89,6 +89,7 @@ class TraceSpan:
     start_time: float = 0.0
     end_time: float = 0.0
     error: Optional[str] = None
+    _children_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
     children: list["TraceSpan"] = field(default_factory=list)
 
     @property
@@ -104,10 +105,14 @@ class TraceSpan:
     def iter_spans(self):
         """Yield self and all descendant spans (flat iteration)."""
         yield self
-        for child in self.children:
+        with self._children_lock:
+            snapshot = list(self.children)
+        for child in snapshot:
             yield from child.iter_spans()
 
     def to_dict(self) -> dict:
+        with self._children_lock:
+            snapshot = list(self.children)
         return {
             "span_id": self.span_id,
             "trace_id": self.trace_id,
@@ -122,7 +127,7 @@ class TraceSpan:
             "duration_ms": self.duration_ms,
             "status": self.status,
             "error": self.error,
-            "children": [c.to_dict() for c in self.children],
+            "children": [c.to_dict() for c in snapshot],
         }
 
 
@@ -149,7 +154,8 @@ class trace_span:
             # ContextVar 正常传播，挂载到父 span
             self.span.trace_id = parent.trace_id
             self.span.parent_span_id = parent.span_id
-            parent.children.append(self.span)
+            with parent._children_lock:
+                parent.children.append(self.span)
             self.span.span_id = _id_generator.new_id()
         elif active_tid:
             # ContextVar 未传播（跨线程），但全局 trace_id 存在

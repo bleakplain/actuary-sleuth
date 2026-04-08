@@ -3,16 +3,16 @@ import { useAskStore } from './askStore';
 
 // Mock the ask API module
 vi.mock('../api/ask', () => ({
-  fetchConversations: vi.fn(),
+  fetchSessions: vi.fn(),
   fetchMessages: vi.fn(),
-  deleteConversation: vi.fn(),
+  deleteSession: vi.fn(),
   chatSearch: vi.fn(),
   chatSSE: vi.fn((_req, callbacks) => {
     // Immediately call onDone with message_id for testability
     const ctrl = new AbortController();
     setTimeout(() => {
       callbacks.onDone({
-        conversation_id: 'conv_test',
+        session_id: 'sess_test',
         message_id: 42,
         citations: [],
         sources: [],
@@ -24,9 +24,9 @@ vi.mock('../api/ask', () => ({
 
 import * as askApi from '../api/ask';
 
-const mockedFetchConversations = vi.mocked(askApi.fetchConversations);
+const mockedFetchSessions = vi.mocked(askApi.fetchSessions);
 const mockedFetchMessages = vi.mocked(askApi.fetchMessages);
-const mockedDeleteConversation = vi.mocked(askApi.deleteConversation);
+const mockedDeleteSession = vi.mocked(askApi.deleteSession);
 const mockedChatSearch = vi.mocked(askApi.chatSearch);
 const mockedChatSSE = vi.mocked(askApi.chatSSE);
 
@@ -35,46 +35,46 @@ describe('askStore', () => {
     vi.clearAllMocks();
     // Reset store state between tests
     useAskStore.setState({
-      conversations: [],
-      currentConversationId: null,
+      sessions: [],
+      currentSessionId: null,
       messages: [],
       streaming: false,
       currentSources: [],
     });
   });
 
-  describe('loadConversations', () => {
-    it('loads and sets conversations', async () => {
-      const conversations = [
+  describe('loadSessions', () => {
+    it('loads and sets sessions', async () => {
+      const sessions = [
         { id: 'c1', title: 'test', created_at: '2026-01-01', message_count: 2 },
       ];
-      mockedFetchConversations.mockResolvedValueOnce(conversations);
+      mockedFetchSessions.mockResolvedValueOnce(sessions);
 
-      await useAskStore.getState().loadConversations();
+      await useAskStore.getState().loadSessions();
 
-      expect(useAskStore.getState().conversations).toEqual(conversations);
+      expect(useAskStore.getState().sessions).toEqual(sessions);
     });
 
-    it('handles empty conversation list', async () => {
-      mockedFetchConversations.mockResolvedValueOnce([]);
+    it('handles empty session list', async () => {
+      mockedFetchSessions.mockResolvedValueOnce([]);
 
-      await useAskStore.getState().loadConversations();
+      await useAskStore.getState().loadSessions();
 
-      expect(useAskStore.getState().conversations).toEqual([]);
+      expect(useAskStore.getState().sessions).toEqual([]);
     });
   });
 
-  describe('selectConversation', () => {
-    it('sets current conversation and loads messages', async () => {
+  describe('selectSession', () => {
+    it('sets current session and loads messages', async () => {
       const messages = [
         { id: 1, role: 'user', content: 'hello', citations: [], sources: [], timestamp: '' },
       ];
       mockedFetchMessages.mockResolvedValueOnce(messages);
 
-      await useAskStore.getState().selectConversation('c1');
+      await useAskStore.getState().selectSession('c1');
 
       const state = useAskStore.getState();
-      expect(state.currentConversationId).toBe('c1');
+      expect(state.currentSessionId).toBe('c1');
       expect(state.messages).toEqual(messages);
       expect(state.currentSources).toEqual([]);
     });
@@ -83,7 +83,7 @@ describe('askStore', () => {
   describe('sendMessage (search mode)', () => {
     it('adds user and assistant messages, then updates assistant', async () => {
       mockedChatSearch.mockResolvedValueOnce({
-        conversation_id: 'c1',
+        session_id: 'c1',
         mode: 'search',
         content: '搜索结果',
         sources: [{ law_name: '保险法' }],
@@ -121,7 +121,7 @@ describe('askStore', () => {
 
   describe('sendMessage (qa mode — SSE message_id)', () => {
     it('updates assistant message id from temp to real DB id after SSE done', async () => {
-      mockedFetchConversations.mockResolvedValueOnce([]);
+      mockedFetchSessions.mockResolvedValueOnce([]);
 
       useAskStore.getState().sendMessage('测试问题', 'qa');
 
@@ -139,33 +139,33 @@ describe('askStore', () => {
       expect(stateAfter.streaming).toBe(false);
       // Assistant message id should now be the real DB id (42)
       expect(stateAfter.messages[1].id).toBe(42);
-      // conversation_id should be updated
-      expect(stateAfter.currentConversationId).toBe('conv_test');
+      // session_id should be updated
+      expect(stateAfter.currentSessionId).toBe('sess_test');
     });
   });
 
-  describe('deleteConversation', () => {
+  describe('deleteSession', () => {
     it('deletes and clears if current', async () => {
-      mockedDeleteConversation.mockResolvedValueOnce(undefined);
-      mockedFetchConversations.mockResolvedValueOnce([]);
+      mockedDeleteSession.mockResolvedValueOnce(undefined);
+      mockedFetchSessions.mockResolvedValueOnce([]);
 
-      useAskStore.setState({ currentConversationId: 'c1', messages: [{ id: 1 } as any] });
-      await useAskStore.getState().deleteConversation('c1');
+      useAskStore.setState({ currentSessionId: 'c1', messages: [{ id: 1 } as any] });
+      await useAskStore.getState().deleteSession('c1');
 
       const state = useAskStore.getState();
-      expect(state.currentConversationId).toBeNull();
+      expect(state.currentSessionId).toBeNull();
       expect(state.messages).toEqual([]);
-      expect(mockedDeleteConversation).toHaveBeenCalledWith('c1');
+      expect(mockedDeleteSession).toHaveBeenCalledWith('c1');
     });
 
-    it('keeps current conversation if deleting another', async () => {
-      mockedDeleteConversation.mockResolvedValueOnce(undefined);
-      mockedFetchConversations.mockResolvedValueOnce([]);
+    it('keeps current session if deleting another', async () => {
+      mockedDeleteSession.mockResolvedValueOnce(undefined);
+      mockedFetchSessions.mockResolvedValueOnce([]);
 
-      useAskStore.setState({ currentConversationId: 'c2', messages: [{ id: 1 } as any] });
-      await useAskStore.getState().deleteConversation('c1');
+      useAskStore.setState({ currentSessionId: 'c2', messages: [{ id: 1 } as any] });
+      await useAskStore.getState().deleteSession('c1');
 
-      expect(useAskStore.getState().currentConversationId).toBe('c2');
+      expect(useAskStore.getState().currentSessionId).toBe('c2');
     });
   });
 });

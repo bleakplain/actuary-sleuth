@@ -2,8 +2,8 @@
 
 
 class TestSubmitFeedback:
-    def test_submit_feedback_success(self, app_client, make_conversation, make_message):
-        make_conversation()
+    def test_submit_feedback_success(self, app_client, make_session, make_message):
+        make_session()
         msg_id = make_message(role="assistant", content="测试回答")
 
         resp = app_client.post("/api/feedback/submit", json={
@@ -19,8 +19,8 @@ class TestSubmitFeedback:
         assert data["user_question"] == ""
         assert data["assistant_answer"] == "测试回答"
 
-    def test_submit_feedback_upvote(self, app_client, make_conversation, make_message):
-        make_conversation()
+    def test_submit_feedback_upvote(self, app_client, make_session, make_message):
+        make_session()
         msg_id = make_message()
 
         resp = app_client.post("/api/feedback/submit", json={
@@ -30,8 +30,8 @@ class TestSubmitFeedback:
         assert resp.status_code == 200
         assert resp.json()["rating"] == "up"
 
-    def test_submit_feedback_with_correction(self, app_client, make_conversation, make_message):
-        make_conversation()
+    def test_submit_feedback_with_correction(self, app_client, make_session, make_message):
+        make_session()
         msg_id = make_message()
 
         resp = app_client.post("/api/feedback/submit", json={
@@ -69,15 +69,15 @@ class TestSubmitFeedback:
         resp = app_client.post("/api/feedback/submit", json={"rating": "up"})
         assert resp.status_code == 422
 
-    def test_submit_feedback_with_user_question_enriched(self, app_client, make_conversation, make_message):
+    def test_submit_feedback_with_user_question_enriched(self, app_client, make_session, make_message):
         import api.database as api_db
 
-        conv_id = "conv_feedback_test"
-        make_conversation(conversation_id=conv_id)
+        sess_id = "sess_feedback_test"
+        make_session(session_id=sess_id)
 
         # 创建 user + assistant 消息对
-        api_db.add_message(conv_id, "user", "等待期多长？")
-        msg_id = api_db.add_message(conv_id, "assistant", "不超过90天")
+        api_db.add_message(sess_id, "user", "等待期多长？")
+        msg_id = api_db.add_message(sess_id, "assistant", "不超过90天")
 
         resp = app_client.post("/api/feedback/submit", json={
             "message_id": msg_id,
@@ -91,8 +91,8 @@ class TestSubmitFeedback:
 
 
 class TestListBadcases:
-    def test_list_all_badcases(self, app_client, make_conversation, make_message):
-        make_conversation()
+    def test_list_all_badcases(self, app_client, make_session, make_message):
+        make_session()
         msg_id = make_message()
 
         app_client.post("/api/feedback/submit", json={
@@ -103,8 +103,8 @@ class TestListBadcases:
         assert resp.status_code == 200
         assert len(resp.json()) >= 1
 
-    def test_list_badcases_filter_by_status(self, app_client, make_conversation, make_message):
-        make_conversation()
+    def test_list_badcases_filter_by_status(self, app_client, make_session, make_message):
+        make_session()
         msg_id = make_message()
 
         app_client.post("/api/feedback/submit", json={
@@ -123,8 +123,8 @@ class TestListBadcases:
 
 
 class TestGetBadcase:
-    def test_get_badcase_success(self, app_client, make_conversation, make_message):
-        make_conversation()
+    def test_get_badcase_success(self, app_client, make_session, make_message):
+        make_session()
         msg_id = make_message()
 
         submit_resp = app_client.post("/api/feedback/submit", json={
@@ -142,8 +142,8 @@ class TestGetBadcase:
 
 
 class TestUpdateBadcase:
-    def test_update_badcase_status(self, app_client, make_conversation, make_message):
-        make_conversation()
+    def test_update_badcase_status(self, app_client, make_session, make_message):
+        make_session()
         msg_id = make_message()
 
         submit_resp = app_client.post("/api/feedback/submit", json={
@@ -183,7 +183,7 @@ class TestFeedbackStats:
         assert data["up_count"] == 0
         assert data["down_count"] == 0
 
-    def test_stats_after_submissions(self, app_client, make_conversation, make_message):
+    def test_stats_after_submissions(self, app_client, make_session, make_message):
         msg_id1 = make_message(role="assistant", content="回答1")
         msg_id2 = make_message(role="assistant", content="回答2")
 

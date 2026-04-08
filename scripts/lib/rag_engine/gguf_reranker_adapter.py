@@ -3,6 +3,7 @@
 """GGUF Reranker
 
 基于 Jina Reranker v3 GGUF 模型的精排器，实现 BaseReranker 接口。
+运行时失败时抛出 RerankerError，由调用方决定是否回退到其他精排策略。
 """
 import logging
 from typing import List, Dict, Any, Optional
@@ -10,6 +11,11 @@ from typing import List, Dict, Any, Optional
 from .reranker_base import BaseReranker
 
 logger = logging.getLogger(__name__)
+
+
+class RerankerError(Exception):
+    """精排器运行时错误，用于触发回退逻辑。"""
+    pass
 
 
 class GGUFReranker(BaseReranker):
@@ -35,12 +41,8 @@ class GGUFReranker(BaseReranker):
                 documents=documents,
                 top_n=top_k,
             )
-        except FileNotFoundError as e:
-            logger.warning(f"GGUF reranker 文件缺失: {e}")
-            return candidates[:top_k] if top_k else candidates
         except Exception as e:
-            logger.warning(f"GGUF reranker 精排失败: {e}")
-            return candidates[:top_k] if top_k else candidates
+            raise RerankerError(f"GGUF reranker 精排失败: {e}") from e
 
         results: List[Dict[str, Any]] = []
         for item in rerank_results:

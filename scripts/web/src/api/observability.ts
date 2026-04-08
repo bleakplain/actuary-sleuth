@@ -3,7 +3,7 @@ import type { TraceListResponse, TraceData, CleanupRequest, CleanupResponse } fr
 
 export interface TraceSearchParams {
   trace_id?: string;
-  conversation_id?: string;
+  session_id?: string;
   message_id?: string;
   status?: string;
   start_date?: string;
