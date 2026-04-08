@@ -99,6 +99,8 @@ export interface EvalSnapshot {
   name: string;
   description: string;
   sample_count: number;
+  version: number;
+  hash_code: string;
   created_at: string;
 }
 
