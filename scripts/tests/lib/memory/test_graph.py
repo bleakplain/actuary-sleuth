@@ -23,7 +23,7 @@ def mock_context():
 def test_retrieve_memory_returns_context(mock_context):
     state = AskState(
         question="等待期是多少", mode="qa", user_id="test",
-        conversation_id="conv_1", search_results=[], memory_context="",
+        session_id="sess_1", search_results=[], memory_context="",
         answer="", sources=[], citations=[], unverified_claims=[], content_mismatches=[],
         faithfulness_score=None, error=None,
     )
@@ -37,7 +37,7 @@ def test_graph_end_to_end(mock_context):
     graph = create_ask_graph()
     state = AskState(
         question="等待期", mode="qa", user_id="test",
-        conversation_id="conv_1", search_results=[], memory_context="",
+        session_id="sess_1", search_results=[], memory_context="",
         answer="", sources=[], citations=[], unverified_claims=[], content_mismatches=[],
         faithfulness_score=None, error=None,
     )

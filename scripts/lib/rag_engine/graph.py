@@ -33,7 +33,7 @@ class AskState(TypedDict):
     question: str
     mode: str
     user_id: str
-    conversation_id: str
+    session_id: str
     search_results: List[Dict[str, Any]]
     memory_context: str
     answer: str
@@ -142,7 +142,7 @@ def extract_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
     try:
         memory_svc.add(
             conversation, state["user_id"],
-            metadata={"conversation_id": state["conversation_id"]},
+            metadata={"session_id": state["session_id"]},
         )
     except Exception:
         logger.debug("记忆提取失败，跳过", exc_info=True)

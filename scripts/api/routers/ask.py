@@ -11,20 +11,20 @@ from sse_starlette.sse import EventSourceResponse
 
 from api.database import (
     add_message,
-    batch_delete_conversations,
-    create_conversation,
+    batch_delete_sessions,
+    create_session,
     create_feedback,
-    delete_conversation,
-    get_conversations,
+    delete_session,
+    get_sessions,
     get_messages,
     get_trace_by_message_id,
     save_spans,
     save_trace,
-    search_conversations,
+    search_sessions,
     update_feedback,
 )
 from api.dependencies import get_rag_engine, get_memory_service, get_ask_graph
-from api.schemas.ask import ChatRequest, ConversationOut, MessageOut
+from api.schemas.ask import ChatRequest, SessionOut, MessageOut
 from lib.config import get_config
 from lib.llm.trace import cleanup_trace_counters, get_llm_call_count, reset_llm_call_count, trace_span
 from lib.rag_engine.graph import AskState, GraphContext
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ask", tags=["法规问答"])
 
 
-def _persist_trace(root_span, message_id: int, conversation_id: str = "",
+def _persist_trace(root_span, message_id: int, session_id: str = "",
                    name: str = "", summary: Optional[dict] = None,
                    trace_id: Optional[str] = None) -> None:
     """将 trace 树中所有 span 批量写入数据库。"""
@@ -49,7 +49,7 @@ def _persist_trace(root_span, message_id: int, conversation_id: str = "",
             "llm_call_count": llm_count,
         }
     save_trace(
-        root_span.trace_id, message_id, conversation_id, name,
+        root_span.trace_id, message_id, session_id, name,
         status=summary["status"],
         total_duration_ms=summary["total_duration_ms"],
         span_count=summary["span_count"],
@@ -79,9 +79,9 @@ def _build_trace_payload(root_span, trace_id: Optional[str] = None) -> dict:
 
 @router.post("/chat")
 async def chat(req: ChatRequest):
-    conversation_id = req.conversation_id or f"conv_{uuid.uuid4().hex[:8]}"
-    create_conversation(conversation_id, title=req.question[:50], user_id=req.user_id)
-    add_message(conversation_id, "user", req.question)
+    session_id = req.session_id or f"sess_{uuid.uuid4().hex[:8]}"
+    create_session(session_id, title=req.question[:50], user_id=req.user_id)
+    add_message(session_id, "user", req.question)
 
     engine = get_rag_engine()
 
@@ -93,9 +93,9 @@ async def chat(req: ChatRequest):
         try:
             results = engine.search(req.question)
             content = json.dumps(results, ensure_ascii=False)
-            add_message(conversation_id, "assistant", content, sources=results)
+            add_message(session_id, "assistant", content, sources=results)
             return {
-                "conversation_id": conversation_id,
+                "session_id": session_id,
                 "mode": "search",
                 "content": content,
                 "sources": results,
@@ -118,7 +118,7 @@ async def chat(req: ChatRequest):
             graph = get_ask_graph()
             state = AskState(
                 question=req.question, mode=req.mode, user_id=req.user_id,
-                conversation_id=conversation_id, search_results=[], memory_context="",
+                session_id=session_id, search_results=[], memory_context="",
                 answer="", sources=[], citations=[], unverified_claims=[],
                 content_mismatches=[], faithfulness_score=None, error=None,
             )
@@ -153,7 +153,7 @@ async def chat(req: ChatRequest):
                 await asyncio.sleep(0.01)
 
             msg_id = add_message(
-                conversation_id,
+                session_id,
                 "assistant",
                 answer,
                 citations=result.get("citations", []),
@@ -170,12 +170,12 @@ async def chat(req: ChatRequest):
             if root_span:
                 tid = root_span.trace_id
                 trace_summary = _build_trace_payload(root_span, tid)
-                _persist_trace(root_span, msg_id, conversation_id,
+                _persist_trace(root_span, msg_id, session_id,
                                name=req.question, summary=trace_summary["summary"])
                 cleanup_trace_counters(tid)
 
             response_meta: dict = {
-                "conversation_id": conversation_id,
+                "session_id": session_id,
                 "message_id": msg_id,
                 "citations": result.get("citations", []),
                 "sources": result.get("sources", []),
@@ -202,7 +202,7 @@ async def chat(req: ChatRequest):
                 if quality["overall"] < 0.4:
                     fb_id = create_feedback(
                         message_id=msg_id,
-                        conversation_id=conversation_id,
+                        session_id=session_id,
                         rating="down",
                         reason="auto_detected",
                         source_channel="auto_detect",
@@ -227,34 +227,34 @@ async def chat(req: ChatRequest):
     return EventSourceResponse(event_stream())
 
 
-@router.get("/conversations", response_model=list[ConversationOut])
-async def list_conversations(search: str = Query("", description="按标题模糊搜索")):
+@router.get("/sessions", response_model=list[SessionOut])
+async def list_sessions(search: str = Query("", description="按标题模糊搜索")):
     if search:
-        rows, _ = search_conversations(search=search, page=1, size=100)
+        rows, _ = search_sessions(search=search, page=1, size=100)
         return rows
-    return get_conversations()
+    return get_sessions()
 
 
-@router.get("/conversations/{conversation_id}/messages", response_model=list[MessageOut])
-async def list_messages(conversation_id: str):
-    msgs = get_messages(conversation_id)
+@router.get("/sessions/{session_id}/messages", response_model=list[MessageOut])
+async def list_messages(session_id: str):
+    msgs = get_messages(session_id)
     if not msgs:
         raise HTTPException(status_code=404, detail="对话不存在")
     return msgs
 
 
-@router.delete("/conversations/{conversation_id}")
-async def remove_conversation(conversation_id: str):
-    count = delete_conversation(conversation_id)
+@router.delete("/sessions/{session_id}")
+async def remove_session(session_id: str):
+    count = delete_session(session_id)
     if count == 0:
         raise HTTPException(status_code=404, detail="对话不存在")
     return {"deleted_messages": count}
 
 
-@router.delete("/conversations")
-async def batch_remove_conversations(ids: str = Query(..., description="逗号分隔的会话 ID")):
-    conversation_ids = [cid.strip() for cid in ids.split(",") if cid.strip()]
-    deleted = batch_delete_conversations(conversation_ids)
+@router.delete("/sessions")
+async def batch_remove_sessions(ids: str = Query(..., description="逗号分隔的会话 ID")):
+    session_ids = [sid.strip() for sid in ids.split(",") if sid.strip()]
+    deleted = batch_delete_sessions(session_ids)
     return {"deleted": deleted}
 
 

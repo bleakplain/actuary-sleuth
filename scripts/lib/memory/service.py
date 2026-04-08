@@ -1,4 +1,4 @@
-"""记忆服务 — Mem0 包装 + 降级 + 活跃度管理 + 用户画像。"""
+"""记忆服务 — 后端抽象 + 降级 + 活跃度管理 + 用户画像。"""
 from __future__ import annotations
 
 import json
@@ -7,68 +7,27 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from lib.common.database import get_connection
-from lib.config import get_config
 from lib.llm.factory import LLMClientFactory
+from lib.memory.base import MemoryBase, Mem0Memory
 from lib.memory.config import MemoryConfig
-from lib.memory.embeddings import EmbeddingBridge
-from lib.memory.prompts import AUDIT_FACT_EXTRACTION_PROMPT, PROFILE_EXTRACTION_PROMPT
+from lib.memory.prompts import PROFILE_EXTRACTION_PROMPT
 
 logger = logging.getLogger(__name__)
 
 
 class MemoryService:
-    """Mem0 包装层，提供降级、活跃度管理和用户画像。"""
+    """记忆服务层 — 面向抽象能力（记忆），不绑定具体实现。"""
 
-    def __init__(self, memory: Optional[Any] = None, db_path: str = "./data/actuary_sleuth.db"):
-        self._memory = memory
-        self._available = memory is not None
+    def __init__(self, backend: Optional[MemoryBase] = None):
+        self._backend = backend
+        self._available = backend is not None
         self._config = MemoryConfig() if self._available else None
 
     @classmethod
-    def create(cls, db_path: str = "./data/actuary_sleuth.db") -> "MemoryService":
-        """创建记忆服务，Mem0 初始化失败时降级为无记忆模式。"""
-        try:
-            from mem0 import Memory
-            from langchain_community.vectorstores import LanceDB as LCLanceDB
-
-            cfg = get_config()
-            qa_cfg = cfg.qa
-
-            embedding_lc = EmbeddingBridge()
-            lancedb_store = LCLanceDB(
-                uri="./data/lancedb",
-                table_name="memories",
-                embedding=embedding_lc,
-            )
-
-            base_url = qa_cfg.get("base_url", "").rstrip("/")
-            config = {
-                "llm": {
-                    "provider": "openai",
-                    "config": {
-                        "model": qa_cfg.get("model", "glm-4-flash"),
-                        "api_key": qa_cfg.get("api_key"),
-                        "openai_base_url": base_url,
-                        "temperature": 0.1,
-                    }
-                },
-                "embedder": {
-                    "provider": "langchain",
-                    "config": {"model": embedding_lc}
-                },
-                "vector_store": {
-                    "provider": "langchain",
-                    "config": {"client": lancedb_store}
-                },
-                "custom_fact_extraction_prompt": AUDIT_FACT_EXTRACTION_PROMPT,
-                "version": "v1.1",
-            }
-            memory = Memory.from_config(config)
-            logger.info("Mem0 初始化成功")
-            return cls(memory, db_path)
-        except Exception as e:
-            logger.warning(f"Mem0 初始化失败，运行无记忆模式: {e}")
-            return cls(None, db_path)
+    def create(cls) -> "MemoryService":
+        """创建记忆服务，后端初始化失败时降级为无记忆模式。"""
+        backend = Mem0Memory.create()
+        return cls(backend)
 
     @property
     def available(self) -> bool:
@@ -79,8 +38,7 @@ class MemoryService:
         if not self._available:
             return []
         try:
-            result = self._memory.search(query, user_id=user_id, limit=limit)
-            memories = result.get("results", [])
+            memories = self._backend.search(query, user_id, limit)
             self._update_access_stats([m["id"] for m in memories if "id" in m])
             return memories
         except Exception:
@@ -92,8 +50,8 @@ class MemoryService:
         if not self._available:
             return []
         try:
-            result = self._memory.add(messages, user_id=user_id, metadata=metadata or {})
-            ids = result.get("results", {}).get("ids", [])
+            session_id = (metadata or {}).get("session_id")
+            ids = self._backend.add(messages, user_id, metadata=metadata or {}, run_id=session_id)
             for mid in ids:
                 self._insert_metadata(mid, user_id, metadata)
             return ids
@@ -106,7 +64,7 @@ class MemoryService:
         if not self._available:
             return False
         try:
-            self._memory.delete(memory_id)
+            self._backend.delete(memory_id)
             self._soft_delete_metadata(memory_id)
             return True
         except Exception:
@@ -117,8 +75,7 @@ class MemoryService:
         if not self._available:
             return []
         try:
-            result = self._memory.get_all(user_id=user_id)
-            return result.get("results", [])
+            return self._backend.get_all(user_id)
         except Exception:
             return []
 
@@ -227,7 +184,7 @@ class MemoryService:
         count = 0
         for (mem_id,) in rows:
             try:
-                self._memory.delete(mem_id)
+                self._backend.delete(mem_id)
                 self._soft_delete_metadata(mem_id)
                 count += 1
             except Exception:
@@ -238,6 +195,8 @@ class MemoryService:
         return get_connection()
 
     def _update_access_stats(self, memory_ids: List[str]) -> None:
+        if not memory_ids:
+            return
         try:
             with self._get_conn() as conn:
                 conn.execute(
@@ -269,9 +228,9 @@ class MemoryService:
         try:
             with self._get_conn() as conn:
                 conn.execute(
-                    "INSERT OR IGNORE INTO memory_metadata (mem0_id, user_id, conversation_id, category, expires_at) "
+                    "INSERT OR IGNORE INTO memory_metadata (mem0_id, user_id, session_id, category, expires_at) "
                     "VALUES (?, ?, ?, ?, ?)",
-                    (mem0_id, user_id, (metadata or {}).get("conversation_id"), category, expires_at),
+                    (mem0_id, user_id, (metadata or {}).get("session_id"), category, expires_at),
                 )
         except Exception:
             pass

@@ -31,7 +31,7 @@ describe('feedback API', () => {
       const feedback = {
         id: 'fb_test1',
         message_id: 1,
-        conversation_id: 'conv_1',
+        session_id: 'sess_1',
         rating: 'down',
         reason: '答案错误',
         correction: '',

@@ -124,16 +124,16 @@ def app_client(
 # ===== 测试数据工厂 fixtures =====
 
 @pytest.fixture()
-def make_conversation():
+def make_session():
     """创建对话的工厂 fixture。"""
     import api.database as api_db
 
     def _create(
-        conversation_id: str = "conv_test1",
+        session_id: str = "sess_test1",
         title: str = "测试对话",
     ) -> Dict[str, Any]:
-        api_db.create_conversation(conversation_id, title)
-        return {"id": conversation_id, "title": title}
+        api_db.create_session(session_id, title)
+        return {"id": session_id, "title": title}
 
     return _create
 
@@ -144,10 +144,10 @@ def make_message():
     import api.database as api_db
 
     def _create(
-        conversation_id: str = "conv_test1",
+        session_id: str = "sess_test1",
         role: str = "assistant",
         content: str = "测试回答",
     ) -> int:
-        return api_db.add_message(conversation_id, role, content)
+        return api_db.add_message(session_id, role, content)
 
     return _create

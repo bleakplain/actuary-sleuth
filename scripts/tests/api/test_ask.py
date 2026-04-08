@@ -31,7 +31,7 @@ class TestChatSSE:
         events = _parse_sse_events(resp.text)
         done_data = _find_event_by_type(events, "done")["data"]
         message_id = done_data["message_id"]
-        conversation_id = done_data["conversation_id"]
+        session_id = done_data["session_id"]
 
         # 用 feedback API 验证 message_id 有效
         feedback_resp = app_client.post("/api/feedback/submit", json={
@@ -44,7 +44,7 @@ class TestChatSSE:
         )
         fb = feedback_resp.json()
         assert fb["message_id"] == message_id
-        assert fb["conversation_id"] == conversation_id
+        assert fb["session_id"] == session_id
 
     def test_chat_sse_feedback_roundtrip(self, app_client):
         """端到端：发消息 → 获取 message_id → 提交反馈 → 查询 badcase。"""
@@ -90,7 +90,7 @@ class TestChatSSE:
         token_events = [e for e in events if e.get("type") == "token"]
         assert len(token_events) > 0, "SSE 流中没有 token 事件"
 
-    def test_chat_sse_includes_conversation_id(self, app_client):
+    def test_chat_sse_includes_session_id(self, app_client):
         resp = app_client.post("/api/ask/chat", json={
             "question": "测试",
             "mode": "qa",
@@ -99,7 +99,7 @@ class TestChatSSE:
 
         events = _parse_sse_events(resp.text)
         done_data = _find_event_by_type(events, "done")["data"]
-        assert done_data["conversation_id"].startswith("conv_")
+        assert done_data["session_id"].startswith("sess_")
 
 
 class TestSearchMode:
@@ -114,25 +114,25 @@ class TestSearchMode:
         assert "sources" in data
 
 
-class TestConversations:
-    def test_list_conversations(self, app_client, make_conversation):
-        make_conversation("conv_list1", "对话1")
-        make_conversation("conv_list2", "对话2")
+class TestSessions:
+    def test_list_sessions(self, app_client, make_session):
+        make_session("sess_list1", "对话1")
+        make_session("sess_list2", "对话2")
 
-        resp = app_client.get("/api/ask/conversations")
+        resp = app_client.get("/api/ask/sessions")
         assert resp.status_code == 200
         convs = resp.json()
         assert len(convs) >= 2
 
-    def test_get_messages(self, app_client, make_conversation, make_message):
-        conv_id = "conv_msg_test"
-        make_conversation(conv_id)
+    def test_get_messages(self, app_client, make_session, make_message):
+        sess_id = "sess_msg_test"
+        make_session(sess_id)
 
         import api.database as api_db
-        api_db.add_message(conv_id, "user", "问题")
-        api_db.add_message(conv_id, "assistant", "回答")
+        api_db.add_message(sess_id, "user", "问题")
+        api_db.add_message(sess_id, "assistant", "回答")
 
-        resp = app_client.get(f"/api/ask/conversations/{conv_id}/messages")
+        resp = app_client.get(f"/api/ask/sessions/{sess_id}/messages")
         assert resp.status_code == 200
         msgs = resp.json()
         assert len(msgs) == 2
@@ -140,24 +140,24 @@ class TestConversations:
         assert msgs[1]["role"] == "assistant"
 
     def test_get_messages_not_found(self, app_client):
-        resp = app_client.get("/api/ask/conversations/nonexistent/messages")
+        resp = app_client.get("/api/ask/sessions/nonexistent/messages")
         assert resp.status_code == 404
 
-    def test_delete_conversation(self, app_client, make_conversation):
-        conv_id = "conv_delete_test"
-        make_conversation(conv_id)
+    def test_delete_session(self, app_client, make_session):
+        sess_id = "sess_delete_test"
+        make_session(sess_id)
         import api.database as api_db
-        api_db.add_message(conv_id, "user", "要删除的消息")
+        api_db.add_message(sess_id, "user", "要删除的消息")
 
-        resp = app_client.delete(f"/api/ask/conversations/{conv_id}")
+        resp = app_client.delete(f"/api/ask/sessions/{sess_id}")
         assert resp.status_code == 200
 
         # 验证对话已删除
-        msg_resp = app_client.get(f"/api/ask/conversations/{conv_id}/messages")
+        msg_resp = app_client.get(f"/api/ask/sessions/{sess_id}/messages")
         assert msg_resp.status_code == 404
 
-    def test_delete_conversation_not_found(self, app_client):
-        resp = app_client.delete("/api/ask/conversations/nonexistent")
+    def test_delete_session_not_found(self, app_client):
+        resp = app_client.delete("/api/ask/sessions/nonexistent")
         assert resp.status_code == 404
 
 
@@ -185,31 +185,31 @@ def _find_event_by_type(events: list, event_type: str):
     return None
 
 
-class TestConversationSearch:
-    def test_search_conversations(self, app_client, make_conversation):
-        make_conversation("conv_a", "健康保险等待期")
-        make_conversation("conv_b", "免责条款")
-        resp = app_client.get("/api/ask/conversations?search=等待期")
+class TestSessionSearch:
+    def test_search_sessions(self, app_client, make_session):
+        make_session("sess_a", "健康保险等待期")
+        make_session("sess_b", "免责条款")
+        resp = app_client.get("/api/ask/sessions?search=等待期")
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
         assert data[0]["title"] == "健康保险等待期"
 
-    def test_search_conversations_empty(self, app_client, make_conversation):
-        make_conversation("conv_a", "测试")
-        resp = app_client.get("/api/ask/conversations?search=不存在")
+    def test_search_sessions_empty(self, app_client, make_session):
+        make_session("sess_a", "测试")
+        resp = app_client.get("/api/ask/sessions?search=不存在")
         assert resp.status_code == 200
         assert resp.json() == []
 
 
-class TestBatchDeleteConversations:
-    def test_batch_delete(self, app_client, make_conversation, make_message):
-        make_conversation("conv_del1", "删除1")
-        make_message("conv_del1", "user", "问题1")
-        make_conversation("conv_del2", "删除2")
-        make_conversation("conv_keep", "保留")
-        resp = app_client.delete("/api/ask/conversations?ids=conv_del1,conv_del2")
+class TestBatchDeleteSessions:
+    def test_batch_delete(self, app_client, make_session, make_message):
+        make_session("sess_del1", "删除1")
+        make_message("sess_del1", "user", "问题1")
+        make_session("sess_del2", "删除2")
+        make_session("sess_keep", "保留")
+        resp = app_client.delete("/api/ask/sessions?ids=sess_del1,sess_del2")
         assert resp.status_code == 200
         assert resp.json()["deleted"] == 2
-        resp2 = app_client.get("/api/ask/conversations")
+        resp2 = app_client.get("/api/ask/sessions")
         assert len(resp2.json()) == 1

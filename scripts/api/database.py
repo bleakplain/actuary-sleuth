@@ -14,7 +14,7 @@ from lib.rag_engine.config import RAGConfig
 
 
 _SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS conversations (
+CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -22,14 +22,14 @@ CREATE TABLE IF NOT EXISTS conversations (
 
 CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
     content TEXT NOT NULL DEFAULT '',
     citations_json TEXT NOT NULL DEFAULT '[]',
     sources_json TEXT NOT NULL DEFAULT '[]',
     timestamp TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 
 CREATE TABLE IF NOT EXISTS eval_samples (
     id TEXT PRIMARY KEY,
@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS compliance_reports (
 CREATE TABLE IF NOT EXISTS feedback (
     id TEXT PRIMARY KEY,
     message_id INTEGER NOT NULL REFERENCES messages(id),
-    conversation_id TEXT NOT NULL REFERENCES conversations(id),
+    session_id TEXT NOT NULL REFERENCES sessions(id),
     rating TEXT NOT NULL CHECK(rating IN ('up', 'down')),
     reason TEXT NOT NULL DEFAULT '',
     correction TEXT DEFAULT '',
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS traces (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     trace_id TEXT NOT NULL,
     message_id INTEGER,
-    conversation_id TEXT,
+    session_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_traces_trace_id ON traces(trace_id);
@@ -198,15 +198,15 @@ def init_db():
 def _migrate_db():
     """增量迁移：添加新列（如已存在则跳过）"""
     with get_connection() as conn:
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
-        if 'faithfulness_score' not in cols:
+        msg_cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
+        if 'faithfulness_score' not in msg_cols:
             conn.execute("ALTER TABLE messages ADD COLUMN faithfulness_score REAL")
-        if 'unverified_claims_json' not in cols:
+        if 'unverified_claims_json' not in msg_cols:
             conn.execute("ALTER TABLE messages ADD COLUMN unverified_claims_json TEXT DEFAULT '[]'")
 
         trace_cols = {row[1] for row in conn.execute("PRAGMA table_info(traces)").fetchall()}
-        if 'conversation_id' not in trace_cols:
-            conn.execute("ALTER TABLE traces ADD COLUMN conversation_id TEXT")
+        if 'session_id' not in trace_cols:
+            conn.execute("ALTER TABLE traces ADD COLUMN session_id TEXT")
         if 'name' not in trace_cols:
             conn.execute("ALTER TABLE traces ADD COLUMN name TEXT")
         for col, dtype, default in [
@@ -222,7 +222,7 @@ def _migrate_db():
         CREATE TABLE IF NOT EXISTS memory_metadata (
             mem0_id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
-            conversation_id TEXT,
+            session_id TEXT,
             category TEXT DEFAULT 'fact',
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             expires_at TEXT,
@@ -245,44 +245,44 @@ def _migrate_db():
         )
         """)
 
-        conv_cols = {row[1] for row in conn.execute("PRAGMA table_info(conversations)").fetchall()}
-        if 'user_id' not in conv_cols:
-            conn.execute("ALTER TABLE conversations ADD COLUMN user_id TEXT DEFAULT 'default'")
+        session_cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        if 'user_id' not in session_cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT DEFAULT 'default'")
 
 
-def create_conversation(conversation_id: str, title: str = "", user_id: str = "default") -> None:
+def create_session(session_id: str, title: str = "", user_id: str = "default") -> None:
     with get_connection() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO conversations (id, title, user_id) VALUES (?, ?, ?)",
-            (conversation_id, title, user_id),
+            "INSERT OR IGNORE INTO sessions (id, title, user_id) VALUES (?, ?, ?)",
+            (session_id, title, user_id),
         )
 
 
-def get_conversations() -> List[Dict]:
+def get_sessions() -> List[Dict]:
     with get_connection() as conn:
         rows = conn.execute("""
             SELECT c.id, c.title, c.created_at,
                    COUNT(m.id) AS message_count
-            FROM conversations c
-            LEFT JOIN messages m ON m.conversation_id = c.id
+            FROM sessions c
+            LEFT JOIN messages m ON m.session_id = c.id
             GROUP BY c.id
             ORDER BY c.created_at DESC
         """).fetchall()
         return [dict(r) for r in rows]
 
 
-def get_messages(conversation_id: str) -> List[Dict]:
+def get_messages(session_id: str) -> List[Dict]:
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT id, conversation_id, role, content, citations_json, sources_json, faithfulness_score, unverified_claims_json, timestamp "
-            "FROM messages WHERE conversation_id = ? ORDER BY id",
-            (conversation_id,),
+            "SELECT id, session_id, role, content, citations_json, sources_json, faithfulness_score, unverified_claims_json, timestamp "
+            "FROM messages WHERE session_id = ? ORDER BY id",
+            (session_id,),
         ).fetchall()
         return [_deserialize_json_fields(dict(r), _MSG_JSON_FIELDS) for r in rows]
 
 
 def add_message(
-    conversation_id: str,
+    session_id: str,
     role: str,
     content: str,
     citations: Optional[List[Dict]] = None,
@@ -292,10 +292,10 @@ def add_message(
 ) -> int:
     with get_connection() as conn:
         cur = conn.execute(
-            "INSERT INTO messages (conversation_id, role, content, citations_json, sources_json, faithfulness_score, unverified_claims_json) "
+            "INSERT INTO messages (session_id, role, content, citations_json, sources_json, faithfulness_score, unverified_claims_json) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
-                conversation_id,
+                session_id,
                 role,
                 content,
                 json.dumps(citations or [], ensure_ascii=False),
@@ -307,19 +307,19 @@ def add_message(
         return cur.lastrowid
 
 
-def delete_conversation(conversation_id: str) -> int:
+def delete_session(session_id: str) -> int:
     with get_connection() as conn:
         cur = conn.execute(
-            "DELETE FROM messages WHERE conversation_id = ?", (conversation_id,)
+            "DELETE FROM messages WHERE session_id = ?", (session_id,)
         )
         msg_count = cur.rowcount
         conn.execute(
-            "DELETE FROM conversations WHERE id = ?", (conversation_id,)
+            "DELETE FROM sessions WHERE id = ?", (session_id,)
         )
         return msg_count
 
 
-def search_conversations(search: str = "", page: int = 1, size: int = 20) -> tuple:
+def search_sessions(search: str = "", page: int = 1, size: int = 20) -> tuple:
     """分页搜索对话，按标题 LIKE 匹配。
 
     Returns:
@@ -334,15 +334,15 @@ def search_conversations(search: str = "", page: int = 1, size: int = 20) -> tup
 
     with get_connection() as conn:
         count_row = conn.execute(
-            f"SELECT COUNT(*) AS cnt FROM conversations c {where_clause}", params
+            f"SELECT COUNT(*) AS cnt FROM sessions c {where_clause}", params
         ).fetchone()
         total = count_row["cnt"]
 
         rows = conn.execute(f"""
             SELECT c.id, c.title, c.created_at,
                    COUNT(m.id) AS message_count
-            FROM conversations c
-            LEFT JOIN messages m ON m.conversation_id = c.id
+            FROM sessions c
+            LEFT JOIN messages m ON m.session_id = c.id
             {where_clause}
             GROUP BY c.id
             ORDER BY c.created_at DESC
@@ -351,17 +351,17 @@ def search_conversations(search: str = "", page: int = 1, size: int = 20) -> tup
         return [dict(r) for r in rows], total
 
 
-def batch_delete_conversations(ids: list) -> int:
+def batch_delete_sessions(ids: list) -> int:
     """批量删除对话及其关联消息。返回实际删除的对话数。"""
     if not ids:
         return 0
     placeholders = ",".join("?" for _ in ids)
     with get_connection() as conn:
         conn.execute(
-            f"DELETE FROM messages WHERE conversation_id IN ({placeholders})", ids
+            f"DELETE FROM messages WHERE session_id IN ({placeholders})", ids
         )
         cur = conn.execute(
-            f"DELETE FROM conversations WHERE id IN ({placeholders})", ids
+            f"DELETE FROM sessions WHERE id IN ({placeholders})", ids
         )
         return cur.rowcount
 
@@ -766,7 +766,7 @@ _FEEDBACK_JSON_FIELDS = {
 
 def create_feedback(
     message_id: int,
-    conversation_id: str,
+    session_id: str,
     rating: str,
     reason: str = "",
     correction: str = "",
@@ -775,9 +775,9 @@ def create_feedback(
     feedback_id = f"fb_{uuid.uuid4().hex[:8]}"
     with get_connection() as conn:
         conn.execute(
-            "INSERT INTO feedback (id, message_id, conversation_id, rating, reason, correction, source_channel) "
+            "INSERT INTO feedback (id, message_id, session_id, rating, reason, correction, source_channel) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (feedback_id, message_id, conversation_id, rating, reason, correction, source_channel),
+            (feedback_id, message_id, session_id, rating, reason, correction, source_channel),
         )
     return feedback_id
 
@@ -786,16 +786,16 @@ def _enrich_feedback(row: Dict) -> Dict:
     """为反馈记录补充用户问题和助手回答"""
     row = _deserialize_json_fields(row, _FEEDBACK_JSON_FIELDS)
     mid = row.get("message_id")
-    cid = row.get("conversation_id")
-    if not mid or not cid:
+    sid = row.get("session_id")
+    if not mid or not sid:
         return row
     with get_connection() as conn:
         assistant = conn.execute(
             "SELECT content FROM messages WHERE id = ?", (mid,)
         ).fetchone()
         user_msg = conn.execute(
-            "SELECT content FROM messages WHERE conversation_id = ? AND role = 'user' AND id < ? ORDER BY id DESC LIMIT 1",
-            (cid, mid),
+            "SELECT content FROM messages WHERE session_id = ? AND role = 'user' AND id < ? ORDER BY id DESC LIMIT 1",
+            (sid, mid),
         ).fetchone()
     row["assistant_answer"] = assistant[0] if assistant else ""
     row["user_question"] = user_msg[0] if user_msg else ""
@@ -886,7 +886,7 @@ def get_feedback_stats() -> Dict:
 def save_trace(
     trace_id: str,
     message_id: int,
-    conversation_id: str = "",
+    session_id: str = "",
     name: str = "",
     status: str = "ok",
     total_duration_ms: float = 0,
@@ -896,9 +896,9 @@ def save_trace(
     with get_connection() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO traces "
-            "(trace_id, message_id, conversation_id, name, status, total_duration_ms, span_count, llm_call_count) "
+            "(trace_id, message_id, session_id, name, status, total_duration_ms, span_count, llm_call_count) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (trace_id, message_id, conversation_id, name, status, total_duration_ms, span_count, llm_call_count),
+            (trace_id, message_id, session_id, name, status, total_duration_ms, span_count, llm_call_count),
         )
 
 
@@ -987,7 +987,7 @@ def get_trace_by_id(trace_id: str) -> Optional[Dict]:
 
 def search_traces(
     trace_id: str = "",
-    conversation_id: str = "",
+    session_id: str = "",
     message_id: int = 0,
     status: str = "",
     start_date: str = "",
@@ -995,11 +995,11 @@ def search_traces(
     page: int = 1,
     size: int = 20,
 ) -> tuple:
-    """分页搜索 trace，支持按 trace_id / conversation_id / message_id / status / 日期范围过滤。
+    """分页搜索 trace，支持按 trace_id / session_id / message_id / status / 日期范围过滤。
 
     Returns:
         (rows, total_count)，rows 中每条记录包含 trace_id, message_id,
-        conversation_id, created_at, status, total_duration_ms, span_count。
+        session_id, created_at, status, total_duration_ms, span_count。
     """
     clauses: list[str] = []
     params: list = []
@@ -1007,9 +1007,9 @@ def search_traces(
     if trace_id:
         clauses.append("trace_id = ?")
         params.append(trace_id)
-    if conversation_id:
-        clauses.append("conversation_id = ?")
-        params.append(conversation_id)
+    if session_id:
+        clauses.append("session_id = ?")
+        params.append(session_id)
     if message_id:
         clauses.append("message_id = ?")
         params.append(message_id)
@@ -1037,7 +1037,7 @@ def search_traces(
         total = count_row["cnt"]
 
         rows = conn.execute(
-            f"SELECT trace_id, message_id, conversation_id, created_at, "
+            f"SELECT trace_id, message_id, session_id, created_at, "
             f"status, total_duration_ms, span_count, llm_call_count, "
             f"name AS trace_name "
             f"FROM traces {where} "
