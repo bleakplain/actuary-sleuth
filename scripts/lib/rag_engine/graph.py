@@ -51,6 +51,7 @@ def retrieve_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
     memory_svc = runtime.context.memory_service
     max_chars = _memory_config.memory_context_max_chars
     with trace_span("memory_retrieve", "memory") as span:
+        span.input = {"question": state["question"], "user_id": state["user_id"]}
         parts = []
 
         memories = memory_svc.search(state["question"], state["user_id"])
@@ -73,13 +74,17 @@ def retrieve_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
         context = "\n\n".join(parts)
         if len(context) > max_chars:
             context = context[:max_chars] + "..."
+
+        span.output = {"memory_count": len(memories), "has_profile": bool(profile)}
         return {"memory_context": context}
 
 
 def rag_search(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
     engine = runtime.context.rag_engine
     with trace_span("graph_retrieve", "rag") as span:
+        span.input = {"question": state["question"]}
         results = engine.search(state["question"])
+        span.output = {"result_count": len(results)}
         return {"search_results": results}
 
 
@@ -87,6 +92,12 @@ def generate(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
     engine = runtime.context.rag_engine
     llm = runtime.context.llm_client
     with trace_span("graph_generate", "llm", model=getattr(llm, 'model', '')) as span:
+        span.input = {
+            "question": state["question"],
+            "context_chunk_count": len(state["search_results"]),
+            "has_memory_context": bool(state.get("memory_context")),
+        }
+
         user_prompt, included_count = RAGEngine._build_qa_prompt(
             engine.config.generation, state["question"], state["search_results"]
         )
@@ -95,15 +106,19 @@ def generate(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
         ]
         if state.get("memory_context"):
             messages.append({"role": "system", "content": f"【用户历史信息】\n{state['memory_context']}"})
-        messages.append({"role": "user", "content": user_prompt})
 
-        span.input = {
-            "question": state["question"],
-            "context_chunk_count": len(state["search_results"]),
-            "has_memory_context": bool(state.get("memory_context")),
-        }
-        answer = llm.chat(messages)
-        answer_str = str(answer)
+        with trace_span("llm_generate", "llm", model=getattr(llm, 'model', '')) as inner:
+            inner.input = {
+                "question": state["question"],
+                "context_chunk_count": len(state["search_results"]),
+                "system_prompt": _SYSTEM_PROMPT,
+                "user_prompt": user_prompt,
+                "has_memory_context": bool(state.get("memory_context")),
+            }
+            messages.append({"role": "user", "content": user_prompt})
+            answer = llm.chat(messages)
+            answer_str = str(answer)
+            inner.output = {"answer_length": len(answer_str), "answer": answer_str}
 
         included_sources = state["search_results"][:included_count] if state["search_results"] else []
         attribution = parse_citations(answer_str, included_sources)
