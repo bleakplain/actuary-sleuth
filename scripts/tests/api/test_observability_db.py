@@ -1,6 +1,5 @@
 """Observability 数据库函数测试。"""
 import pytest
-from scripts.tests.api.conftest import *
 
 
 class TestConversationSearch:

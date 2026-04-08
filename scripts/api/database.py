@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 from typing import Any, Optional, List, Dict
 
 from lib.common.database import get_connection
-from lib.rag_engine.config import RAGConfig
 
 
 _SCHEMA_SQL = """
@@ -78,11 +77,10 @@ CREATE INDEX IF NOT EXISTS idx_eval_results_run ON eval_sample_results(run_id);
 
 CREATE TABLE IF NOT EXISTS eval_configs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
     version INTEGER NOT NULL DEFAULT 1,
     description TEXT NOT NULL DEFAULT '',
     config_json TEXT NOT NULL DEFAULT '{}',
-    is_active INTEGER NOT NULL DEFAULT 1,
+    is_active INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -217,6 +215,29 @@ def _migrate_db():
         ]:
             if col not in trace_cols:
                 conn.execute(f"ALTER TABLE traces ADD COLUMN {col} {dtype} {default}")
+
+        # Migrate eval_configs: remove name column, make is_active global
+        config_cols = {row[1] for row in conn.execute("PRAGMA table_info(eval_configs)").fetchall()}
+        if 'name' in config_cols:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS eval_configs_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    description TEXT NOT NULL DEFAULT '',
+                    config_json TEXT NOT NULL DEFAULT '{}',
+                    is_active INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+            """)
+            conn.execute("""
+                INSERT INTO eval_configs_new (id, version, description, config_json, is_active, created_at)
+                SELECT id, version, description, config_json,
+                       CASE WHEN rowid = (SELECT rowid FROM eval_configs WHERE is_active = 1 LIMIT 1) THEN 1 ELSE 0 END,
+                       created_at
+                FROM eval_configs
+            """)
+            conn.execute("DROP TABLE eval_configs")
+            conn.execute("ALTER TABLE eval_configs_new RENAME TO eval_configs")
 
 
 def create_conversation(conversation_id: str, title: str = "") -> None:
@@ -486,46 +507,31 @@ def restore_snapshot(snapshot_id: str) -> int:
 # ── 评测配置版本管理 ──────────────────────────────────
 
 
-def insert_eval_config(name: str, description: str, config: Dict) -> int:
-    """创建评测配置新版本，自动 version+1，deactivate 旧版本。"""
+def insert_eval_config(description: str, config: Dict) -> int:
+    """创建评测配置新版本，自动 version+1。"""
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT COALESCE(MAX(version), 0) FROM eval_configs WHERE name = ?",
-            (name,),
-        ).fetchone()
+        row = conn.execute("SELECT COALESCE(MAX(version), 0) FROM eval_configs").fetchone()
         next_version = row[0] + 1
         conn.execute(
-            "UPDATE eval_configs SET is_active = 0 WHERE name = ? AND is_active = 1",
-            (name,),
-        )
-        conn.execute(
-            "INSERT INTO eval_configs (name, version, description, config_json, is_active) "
-            "VALUES (?, ?, ?, ?, 1)",
-            (name, next_version, description, json.dumps(config, ensure_ascii=False)),
+            "INSERT INTO eval_configs (version, description, config_json) VALUES (?, ?, ?)",
+            (next_version, description, json.dumps(config, ensure_ascii=False)),
         )
         return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
 
-def get_eval_configs(name: Optional[str] = None) -> List[Dict]:
+def get_eval_configs() -> List[Dict]:
     with get_connection() as conn:
-        if name:
-            rows = conn.execute(
-                "SELECT id, name, version, description, is_active, created_at FROM eval_configs "
-                "WHERE name = ? ORDER BY version DESC",
-                (name,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT id, name, version, description, is_active, created_at FROM eval_configs "
-                "ORDER BY name, version DESC",
-            ).fetchall()
+        rows = conn.execute(
+            "SELECT id, version, description, is_active, created_at FROM eval_configs "
+            "ORDER BY version DESC",
+        ).fetchall()
         return [dict(r) for r in rows]
 
 
 def get_eval_config(config_id: int) -> Optional[Dict]:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT id, name, version, description, config_json, created_at "
+            "SELECT id, version, description, config_json, is_active, created_at "
             "FROM eval_configs WHERE id = ?",
             (config_id,),
         ).fetchone()
@@ -534,12 +540,11 @@ def get_eval_config(config_id: int) -> Optional[Dict]:
         return _deserialize_json_fields(dict(row), {"config_json": "config_json"})
 
 
-def get_active_config(name: str) -> Optional[Dict]:
+def get_active_config() -> Optional[Dict]:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT id, name, version, description, config_json, created_at "
-            "FROM eval_configs WHERE name = ? AND is_active = 1",
-            (name,),
+            "SELECT id, version, description, config_json, is_active, created_at "
+            "FROM eval_configs WHERE is_active = 1",
         ).fetchone()
         if row is None:
             return None
@@ -560,12 +565,12 @@ def remove_eval_config(config_id: int) -> bool:
 
 
 def activate_eval_config(config_id: int) -> bool:
-    """将指定配置设为激活版本，同名的其他版本自动停用。"""
+    """将指定配置设为激活版本，其他版本自动停用。"""
     with get_connection() as conn:
-        row = conn.execute("SELECT name FROM eval_configs WHERE id = ?", (config_id,)).fetchone()
+        row = conn.execute("SELECT id FROM eval_configs WHERE id = ?", (config_id,)).fetchone()
         if row is None:
             return False
-        conn.execute("UPDATE eval_configs SET is_active = 0 WHERE name = ?", (row["name"],))
+        conn.execute("UPDATE eval_configs SET is_active = 0 WHERE is_active = 1")
         conn.execute("UPDATE eval_configs SET is_active = 1 WHERE id = ?", (config_id,))
         return True
 
@@ -576,7 +581,11 @@ def _ensure_default_config():
         count = conn.execute("SELECT COUNT(*) FROM eval_configs").fetchone()[0]
         if count > 0:
             return
-    insert_eval_config("默认", "默认检索配置", RAGConfig().to_dict())
+    from lib.rag_engine.config import RAGConfig
+    insert_eval_config("默认配置", RAGConfig().to_dict())
+    # 激活第一个配置
+    with get_connection() as conn:
+        conn.execute("UPDATE eval_configs SET is_active = 1 WHERE id = (SELECT id FROM eval_configs LIMIT 1)")
 
 
 def insert_evaluation(run_id: str, mode: str, config: Dict) -> None:
