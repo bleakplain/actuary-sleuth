@@ -584,6 +584,13 @@ export default function EvalPage() {
       render: (m: string) => <Tag>{m}</Tag>,
     },
     {
+      title: '配置', dataIndex: 'config', key: 'config', width: 100,
+      render: (_: unknown, e: Evaluation) => {
+        const cv = e.config?.dataset?.config_version;
+        return cv ? <Tag>v{cv}</Tag> : <Text type="secondary">-</Text>;
+      },
+    },
+    {
       title: '状态', dataIndex: 'status', key: 'status', width: 100,
       render: (s: string) => {
         const info = STATUS_MAP[s] || { color: 'default', label: s };
