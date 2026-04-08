@@ -2,11 +2,11 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Card, Table, Button, Space, Select, Tag, Modal, Form, Input, InputNumber, Switch,
   Typography, message, Row, Col, Popconfirm, Progress, Descriptions, Tabs, Tooltip,
-  Drawer, Badge, Collapse, Divider, Checkbox,
+  Divider, Checkbox,
 } from 'antd';
 import {
   PlusOutlined, ImportOutlined, SaveOutlined, RollbackOutlined,
-  PlayCircleOutlined, DownloadOutlined, SwapOutlined, SettingOutlined,
+  PlayCircleOutlined, DownloadOutlined, SwapOutlined,
   DeleteOutlined, CopyOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
 import * as evalApi from '../api/eval';
@@ -14,7 +14,7 @@ import MetricsChart, { formatMetric, ComparisonChart, TrendChart } from '../comp
 import type { EvalSample, EvalSnapshot, Evaluation, EvalConfig, SampleResult, MetricsDiff } from '../types';
 import { resolveMetricMeta } from '../utils/evalMetrics';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 const QUESTION_TYPE_OPTIONS = [
   { value: 'factual', label: 'FACTUAL（事实类）' },
@@ -73,12 +73,15 @@ export default function EvalPage() {
   const [dimensionFilter, setDimensionFilter] = useState<string>('overall');
   const [trendMetric, setTrendMetric] = useState<string>('retrieval.precision_at_k');
   const [trendData, setTrendData] = useState<{ run_id: string; label: string; value: number; timestamp: string }[]>([]);
-  const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
-  const [rightPanelMode, setRightPanelMode] = useState<'empty' | 'view' | 'edit'>('empty');
-  const [selectedVersion, setSelectedVersion] = useState<EvalConfig | null>(null);
-  const [selectedVersionConfigJson, setSelectedVersionConfigJson] = useState<EvalConfig['config_json'] | null>(null);
-  const [expandedConfigName, setExpandedConfigName] = useState<string | null>(null);
   const [editForm] = Form.useForm();
+
+  // Config Tab state
+  const [configList, setConfigList] = useState<EvalConfig[]>([]);
+  const [viewingConfig, setViewingConfig] = useState<EvalConfig | null>(null);
+  const [viewingConfigJson, setViewingConfigJson] = useState<EvalConfig['config_json'] | null>(null);
+  const [editingConfig, setEditingConfig] = useState<boolean>(false);
+  const [configCompareIds, setConfigCompareIds] = useState<number[]>([]);
+  const [configCompareResult, setConfigCompareResult] = useState<{ param: string; values: (string | number | boolean)[] }[] | null>(null);
 
   const evalK = useMemo((): number => {
     if (!selectedEvaluation?.config?.rerank) return 5;
@@ -279,12 +282,26 @@ export default function EvalPage() {
     }
   }, []);
 
+  // Load configs for runs tab and configs tab
   useEffect(() => {
-    if (activeTab === 'runs') {
-      refresh_evaluation_history();
+    if (activeTab === 'runs' || activeTab === 'configs') {
       if (evalConfigs.length === 0) {
         evalApi.fetchEvalConfigs().then(setEvalConfigs).catch(() => {});
       }
+    }
+  }, [activeTab]);
+
+  // Auto-select active config
+  useEffect(() => {
+    if (evalConfigs.length > 0 && selectedConfigId === null) {
+      const active = evalConfigs.find((c) => c.is_active);
+      if (active) setSelectedConfigId(active.id);
+    }
+  }, [evalConfigs, selectedConfigId]);
+
+  useEffect(() => {
+    if (activeTab === 'runs') {
+      refresh_evaluation_history();
     }
   }, [activeTab, refresh_evaluation_history]);
 
@@ -407,72 +424,34 @@ export default function EvalPage() {
     }
   };
 
-  const configGroups = useMemo(() => {
-    const map = new Map<string, EvalConfig[]>();
-    for (const c of evalConfigs) {
-      if (!map.has(c.name)) map.set(c.name, []);
-      map.get(c.name)!.push(c);
-    }
-    return Array.from(map.entries()).map(([name, versions]) => ({
-      name,
-      versions: versions.sort((a, b) => b.version - a.version),
-    }));
-  }, [evalConfigs]);
-
+  // Config Tab handlers
   const refresh_configs = useCallback(async () => {
     const configs = await evalApi.fetchEvalConfigs();
+    setConfigList(configs);
     setEvalConfigs(configs);
     return configs;
   }, []);
 
-  const open_config_drawer = () => {
-    setConfigDrawerOpen(true);
-    setRightPanelMode('empty');
-    setSelectedVersion(null);
-    setSelectedVersionConfigJson(null);
-    if (selectedConfigId) {
-      const cfg = evalConfigs.find((c) => c.id === selectedConfigId);
-      if (cfg) setExpandedConfigName(cfg.name);
-    }
-  };
+  useEffect(() => {
+    if (activeTab === 'configs') refresh_configs();
+  }, [activeTab, refresh_configs]);
 
-  const select_version = async (config: EvalConfig) => {
-    setSelectedVersion(config);
-    setRightPanelMode('view');
-    setSelectedConfigId(config.id);
+  const view_config = async (config: EvalConfig) => {
+    setViewingConfig(config);
+    setEditingConfig(false);
     try {
       const full = await evalApi.fetchEvalConfig(config.id);
-      setSelectedVersionConfigJson(full.config_json || null);
+      setViewingConfigJson(full.config_json || null);
     } catch {
       message.error('加载配置详情失败');
     }
   };
 
-  const handle_clone = () => {
-    if (!selectedVersion || !selectedVersionConfigJson) return;
-    setRightPanelMode('edit');
-    const cj = selectedVersionConfigJson;
+  const start_new_config = () => {
+    setViewingConfig(null);
+    setViewingConfigJson(null);
+    setEditingConfig(true);
     editForm.setFieldsValue({
-      name: selectedVersion.name,
-      description: selectedVersion.description,
-      retrieval_vector_top_k: cj?.retrieval?.vector_top_k ?? 20,
-      retrieval_keyword_top_k: cj?.retrieval?.keyword_top_k ?? 20,
-      retrieval_rrf_k: cj?.retrieval?.rrf_k ?? 60,
-      retrieval_max_chunks_per_article: cj?.retrieval?.max_chunks_per_article ?? 3,
-      retrieval_min_rrf_score: cj?.retrieval?.min_rrf_score ?? 0,
-      rerank_enable_rerank: cj?.rerank?.enable_rerank ?? true,
-      rerank_reranker_type: cj?.rerank?.reranker_type ?? 'gguf',
-      rerank_rerank_top_k: cj?.rerank?.rerank_top_k ?? 5,
-      rerank_rerank_min_score: cj?.rerank?.rerank_min_score ?? 0,
-      generation_max_context_chars: cj?.generation?.max_context_chars ?? 12000,
-    });
-  };
-
-  const handle_new_config = () => {
-    setSelectedVersion(null);
-    setRightPanelMode('edit');
-    editForm.setFieldsValue({
-      name: '',
       description: '',
       retrieval_vector_top_k: 20,
       retrieval_keyword_top_k: 20,
@@ -482,16 +461,34 @@ export default function EvalPage() {
       rerank_enable_rerank: true,
       rerank_reranker_type: 'gguf',
       rerank_rerank_top_k: 5,
-      rerank_rerank_min_score: 0,
+      rerank_min_score: 0,
       generation_max_context_chars: 12000,
     });
   };
 
-  const handle_save_config = async () => {
+  const clone_config = () => {
+    if (!viewingConfig || !viewingConfigJson) return;
+    setEditingConfig(true);
+    const cj = viewingConfigJson as Record<string, Record<string, unknown>> | undefined;
+    editForm.setFieldsValue({
+      description: viewingConfig.description,
+      retrieval_vector_top_k: (cj?.retrieval?.vector_top_k as number) ?? 20,
+      retrieval_keyword_top_k: (cj?.retrieval?.keyword_top_k as number) ?? 20,
+      retrieval_rrf_k: (cj?.retrieval?.rrf_k as number) ?? 60,
+      retrieval_max_chunks_per_article: (cj?.retrieval?.max_chunks_per_article as number) ?? 3,
+      retrieval_min_rrf_score: (cj?.retrieval?.min_rrf_score as number) ?? 0,
+      rerank_enable_rerank: (cj?.rerank?.enable_rerank as boolean) ?? true,
+      rerank_reranker_type: (cj?.rerank?.reranker_type as string) ?? 'gguf',
+      rerank_rerank_top_k: (cj?.rerank?.rerank_top_k as number) ?? 5,
+      rerank_min_score: (cj?.rerank?.rerank_min_score as number) ?? 0,
+      generation_max_context_chars: (cj?.generation?.max_context_chars as number) ?? 12000,
+    });
+  };
+
+  const save_config = async () => {
     try {
       const values = await editForm.validateFields();
       await evalApi.createEvalConfig({
-        name: values.name,
         description: values.description || '',
         retrieval: {
           vector_top_k: values.retrieval_vector_top_k,
@@ -504,47 +501,80 @@ export default function EvalPage() {
           enable_rerank: values.rerank_enable_rerank,
           reranker_type: values.rerank_reranker_type,
           rerank_top_k: values.rerank_rerank_top_k,
-          rerank_min_score: values.rerank_rerank_min_score,
+          rerank_min_score: values.rerank_min_score,
         },
         generation: {
           max_context_chars: values.generation_max_context_chars,
         },
       });
       message.success('配置创建成功');
-      const configs = await refresh_configs();
-      setRightPanelMode('empty');
-      setSelectedVersion(null);
-      if (values.name) setExpandedConfigName(values.name);
+      await refresh_configs();
+      setEditingConfig(false);
+      setViewingConfig(null);
     } catch (err) {
       message.error(`保存配置失败: ${err}`);
     }
   };
 
-  const handle_activate = async () => {
-    if (!selectedVersion) return;
+  const activate_config = async (configId: number) => {
     try {
-      await evalApi.activateEvalConfig(selectedVersion.id);
-      message.success('已切换为当前版本');
-      const configs = await refresh_configs();
-      const updated = configs.find((c) => c.id === selectedVersion.id);
-      if (updated) select_version(updated);
+      await evalApi.activateEvalConfig(configId);
+      message.success('已切换为当前生效配置');
+      await refresh_configs();
+      if (viewingConfig?.id === configId) {
+        const updated = await evalApi.fetchEvalConfig(configId);
+        setViewingConfig(updated);
+      }
     } catch (err) {
       message.error(`切换失败: ${err}`);
     }
   };
 
-  const handle_delete_config = async () => {
-    if (!selectedVersion) return;
+  const delete_config = async (configId: number) => {
     try {
-      await evalApi.deleteEvalConfig(selectedVersion.id);
+      await evalApi.deleteEvalConfig(configId);
       message.success('配置已删除');
-      if (selectedConfigId === selectedVersion.id) setSelectedConfigId(null);
-      const configs = await refresh_configs();
-      setSelectedVersion(null);
-      setRightPanelMode('empty');
+      if (selectedConfigId === configId) setSelectedConfigId(null);
+      if (viewingConfig?.id === configId) {
+        setViewingConfig(null);
+        setViewingConfigJson(null);
+      }
+      await refresh_configs();
     } catch (err) {
       message.error(`删除失败: ${err}`);
     }
+  };
+
+  const toggle_config_compare = (configId: number) => {
+    setConfigCompareIds((prev) =>
+      prev.includes(configId)
+        ? prev.filter((id) => id !== configId)
+        : prev.length < 2
+          ? [...prev, configId]
+          : prev,
+    );
+    setConfigCompareResult(null);
+  };
+
+  const run_config_compare = async () => {
+    if (configCompareIds.length !== 2) return;
+    const [c1, c2] = await Promise.all(
+      configCompareIds.map((id) => evalApi.fetchEvalConfig(id)),
+    );
+    const j1 = (c1.config_json || {}) as Record<string, Record<string, unknown>>;
+    const j2 = (c2.config_json || {}) as Record<string, Record<string, unknown>>;
+    const rows: { param: string; values: (string | number | boolean)[] }[] = [];
+    for (const section of ['retrieval', 'rerank', 'generation']) {
+      const s1 = j1[section] || {};
+      const s2 = j2[section] || {};
+      for (const key of Object.keys({ ...s1, ...s2 })) {
+        rows.push({
+          param: `${section}.${key}`,
+          values: [(s1[key] as string | number | boolean) ?? '-', (s2[key] as string | number | boolean) ?? '-'],
+        });
+      }
+    }
+    setConfigCompareResult(rows);
   };
 
   const evaluationColumns = [
@@ -679,24 +709,271 @@ export default function EvalPage() {
             ),
           },
           {
+            key: 'configs',
+            label: '配置管理',
+            children: (
+              <Row gutter={16}>
+                <Col span={10}>
+                  <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Button type="primary" size="small" icon={<PlusOutlined />} onClick={start_new_config}>
+                      新建配置
+                    </Button>
+                    <Space>
+                      <Checkbox
+                        checked={configCompareIds.length > 0}
+                        indeterminate={configCompareIds.length === 1}
+                        onChange={(e) => { if (!e.target.checked) setConfigCompareIds([]); setConfigCompareResult(null); }}
+                      >
+                        对比模式
+                      </Checkbox>
+                      {configCompareIds.length === 2 && (
+                        <Button size="small" icon={<SwapOutlined />} onClick={run_config_compare}>对比</Button>
+                      )}
+                    </Space>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', maxHeight: 'calc(100vh - 220px)' }}>
+                    {configList.length === 0 ? (
+                      <Text type="secondary">暂无配置</Text>
+                    ) : (
+                      configList.map((cfg) => (
+                        <Card
+                          key={cfg.id}
+                          size="small"
+                          hoverable
+                          style={{
+                            cursor: 'pointer',
+                            borderLeft: !!cfg.is_active ? '3px solid #52c41a' : '3px solid transparent',
+                            background: viewingConfig?.id === cfg.id ? '#e6f4ff' : undefined,
+                          }}
+                          onClick={() => configCompareIds.length > 0 ? toggle_config_compare(cfg.id) : view_config(cfg)}
+                          styles={{ body: { padding: '8px 12px' } }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span>
+                              {configCompareIds.length > 0 && (
+                                <Checkbox
+                                  checked={configCompareIds.includes(cfg.id)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={() => toggle_config_compare(cfg.id)}
+                                  style={{ marginRight: 8 }}
+                                />
+                              )}
+                              <Text strong>v{cfg.version}</Text>
+                              {cfg.description && (
+                                <Text type="secondary" style={{ marginLeft: 8 }}>{cfg.description}</Text>
+                              )}
+                            </span>
+                            <Space size={4}>
+                              {!!cfg.is_active ? <Tag color="green">生效中</Tag> : null}
+                              <Text type="secondary" style={{ fontSize: 12 }}>{cfg.created_at?.slice(0, 10)}</Text>
+                            </Space>
+                          </div>
+                        </Card>
+                      ))
+                    )}
+                  </div>
+                </Col>
+
+                <Col span={14}>
+                  {configCompareResult && (
+                    <Card title="配置对比" size="small">
+                      <Table
+                        dataSource={configCompareResult.map((r, i) => ({ key: i, ...r }))}
+                        columns={[
+                          { title: '参数', dataIndex: 'param', key: 'param', width: 200 },
+                          {
+                            title: `v${configList.find((c) => c.id === configCompareIds[0])?.version}`,
+                            dataIndex: 'values', key: 'v1', width: 120,
+                            render: (_: unknown, r: { values: (string | number | boolean)[] }) => (
+                              <span style={{ color: r.values[0] !== r.values[1] ? '#1677ff' : undefined }}>
+                                {String(r.values[0])}
+                              </span>
+                            ),
+                          },
+                          {
+                            title: `v${configList.find((c) => c.id === configCompareIds[1])?.version}`,
+                            dataIndex: 'values', key: 'v2', width: 120,
+                            render: (_: unknown, r: { values: (string | number | boolean)[] }) => (
+                              <span style={{ color: r.values[0] !== r.values[1] ? '#1677ff' : undefined }}>
+                                {String(r.values[1])}
+                              </span>
+                            ),
+                          },
+                        ]}
+                        pagination={false}
+                        size="small"
+                      />
+                    </Card>
+                  )}
+
+                  {!configCompareResult && !editingConfig && viewingConfig && viewingConfigJson && (
+                    <>
+                      <Descriptions bordered size="small" column={2}>
+                        <Descriptions.Item label="版本">v{viewingConfig.version}</Descriptions.Item>
+                        <Descriptions.Item label="状态">
+                          {!!viewingConfig.is_active ? <Tag color="green">生效中</Tag> : <Tag>未激活</Tag>}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="说明" span={2}>{viewingConfig.description || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="创建时间" span={2}>{viewingConfig.created_at}</Descriptions.Item>
+                      </Descriptions>
+
+                      <Card size="small" title="检索参数" style={{ marginTop: 16 }}>
+                        <Descriptions bordered size="small" column={2}>
+                          <Descriptions.Item label="向量 Top-K">{viewingConfigJson.retrieval?.vector_top_k}</Descriptions.Item>
+                          <Descriptions.Item label="关键词 Top-K">{viewingConfigJson.retrieval?.keyword_top_k}</Descriptions.Item>
+                          <Descriptions.Item label="RRF K">{viewingConfigJson.retrieval?.rrf_k}</Descriptions.Item>
+                          <Descriptions.Item label="单篇最大 Chunk">{viewingConfigJson.retrieval?.max_chunks_per_article}</Descriptions.Item>
+                          <Descriptions.Item label="最小 RRF 分数">{viewingConfigJson.retrieval?.min_rrf_score}</Descriptions.Item>
+                        </Descriptions>
+                      </Card>
+
+                      <Card size="small" title="重排序参数" style={{ marginTop: 12 }}>
+                        <Descriptions bordered size="small" column={2}>
+                          <Descriptions.Item label="启用重排序">{viewingConfigJson.rerank?.enable_rerank ? '是' : '否'}</Descriptions.Item>
+                          <Descriptions.Item label="重排序器">{viewingConfigJson.rerank?.reranker_type}</Descriptions.Item>
+                          <Descriptions.Item label="重排序 Top-K">{viewingConfigJson.rerank?.rerank_top_k}</Descriptions.Item>
+                          <Descriptions.Item label="最小重排序分数">{viewingConfigJson.rerank?.rerank_min_score}</Descriptions.Item>
+                        </Descriptions>
+                      </Card>
+
+                      <Card size="small" title="生成参数" style={{ marginTop: 12 }}>
+                        <Descriptions bordered size="small" column={2}>
+                          <Descriptions.Item label="最大上下文字符数">{viewingConfigJson.generation?.max_context_chars}</Descriptions.Item>
+                        </Descriptions>
+                      </Card>
+
+                      <div style={{ marginTop: 16, display: 'flex', justifyContent: 'space-between' }}>
+                        <Space>
+                          <Button icon={<CopyOutlined />} onClick={clone_config}>克隆并编辑</Button>
+                          {!viewingConfig.is_active && (
+                            <Popconfirm title="将此配置设为当前生效？" onConfirm={() => activate_config(viewingConfig!.id)}>
+                              <Button icon={<CheckCircleOutlined />}>设为生效</Button>
+                            </Popconfirm>
+                          )}
+                        </Space>
+                        {!viewingConfig.is_active && (
+                          <Popconfirm title="确定删除此配置？" onConfirm={() => delete_config(viewingConfig!.id)}>
+                            <Button danger icon={<DeleteOutlined />}>删除</Button>
+                          </Popconfirm>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {!configCompareResult && editingConfig && (
+                    <>
+                      <Text strong>{viewingConfig ? `克隆 v${viewingConfig.version}` : '新建配置'}</Text>
+                      <Form form={editForm} layout="vertical" style={{ marginTop: 16 }}>
+                        <Form.Item name="description" label="配置说明">
+                          <Input placeholder="如：关闭 reranker 的配置" />
+                        </Form.Item>
+
+                        <Divider orientation="left" plain>检索参数</Divider>
+                        <Row gutter={16}>
+                          <Col span={8}>
+                            <Form.Item name="retrieval_vector_top_k" label="向量 Top-K">
+                              <InputNumber min={1} style={{ width: '100%' }} />
+                            </Form.Item>
+                          </Col>
+                          <Col span={8}>
+                            <Form.Item name="retrieval_keyword_top_k" label="关键词 Top-K">
+                              <InputNumber min={1} style={{ width: '100%' }} />
+                            </Form.Item>
+                          </Col>
+                          <Col span={8}>
+                            <Form.Item name="retrieval_rrf_k" label="RRF K">
+                              <InputNumber min={1} style={{ width: '100%' }} />
+                            </Form.Item>
+                          </Col>
+                        </Row>
+                        <Row gutter={16}>
+                          <Col span={8}>
+                            <Form.Item name="retrieval_max_chunks_per_article" label="单篇最大 Chunk">
+                              <InputNumber min={1} style={{ width: '100%' }} />
+                            </Form.Item>
+                          </Col>
+                          <Col span={8}>
+                            <Form.Item name="retrieval_min_rrf_score" label="最小 RRF 分数">
+                              <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} />
+                            </Form.Item>
+                          </Col>
+                        </Row>
+
+                        <Divider orientation="left" plain>重排序参数</Divider>
+                        <Row gutter={16}>
+                          <Col span={8}>
+                            <Form.Item name="rerank_enable_rerank" label="启用重排序" valuePropName="checked">
+                              <Switch checkedChildren="开" unCheckedChildren="关" />
+                            </Form.Item>
+                          </Col>
+                          <Col span={8}>
+                            <Form.Item name="rerank_reranker_type" label="重排序器">
+                              <Select options={[
+                                { value: 'gguf', label: 'GGUF' },
+                                { value: 'llm', label: 'LLM' },
+                                { value: 'none', label: 'None' },
+                              ]} />
+                            </Form.Item>
+                          </Col>
+                          <Col span={8}>
+                            <Form.Item name="rerank_rerank_top_k" label="重排序 Top-K">
+                              <InputNumber min={1} style={{ width: '100%' }} />
+                            </Form.Item>
+                          </Col>
+                        </Row>
+                        <Row gutter={16}>
+                          <Col span={8}>
+                            <Form.Item name="rerank_rerank_min_score" label="最小重排序分数">
+                              <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} />
+                            </Form.Item>
+                          </Col>
+                        </Row>
+
+                        <Divider orientation="left" plain>生成参数</Divider>
+                        <Row gutter={16}>
+                          <Col span={8}>
+                            <Form.Item name="generation_max_context_chars" label="最大上下文字符数">
+                              <InputNumber min={500} max={50000} step={1000} style={{ width: '100%' }} />
+                            </Form.Item>
+                          </Col>
+                        </Row>
+
+                        <Form.Item style={{ marginBottom: 0, marginTop: 8 }}>
+                          <Space>
+                            <Button type="primary" onClick={save_config}>保存</Button>
+                            <Button onClick={() => { setEditingConfig(false); setViewingConfig(null); }}>取消</Button>
+                          </Space>
+                        </Form.Item>
+                      </Form>
+                    </>
+                  )}
+
+                  {!configCompareResult && !editingConfig && !viewingConfig && (
+                    <div style={{ textAlign: 'center', paddingTop: 80 }}>
+                      <Text type="secondary">选择左侧的配置查看详情，或新建配置</Text>
+                    </div>
+                  )}
+                </Col>
+              </Row>
+            ),
+          },
+          {
             key: 'runs',
             label: '评测历史',
             children: (
               <>
                 <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Space>
-                    <Button
-                      icon={<SettingOutlined />}
-                      onClick={open_config_drawer}
-                      type={selectedConfigId ? 'default' : 'dashed'}
-                    >
-                      {selectedConfigId
-                        ? (() => {
-                            const cfg = evalConfigs.find((c) => c.id === selectedConfigId);
-                            return cfg ? `${cfg.name} (v${cfg.version})` : '选择配置';
-                          })()
-                        : '选择配置'}
-                    </Button>
+                    <Select
+                      style={{ width: 200 }}
+                      placeholder="选择评测配置"
+                      value={selectedConfigId}
+                      onChange={setSelectedConfigId}
+                      options={evalConfigs.map((c) => ({
+                        value: c.id,
+                        label: `v${c.version}${c.description ? ` ${c.description}` : ''}${!!c.is_active ? ' (生效中)' : ''}`,
+                      }))}
+                    />
                     <Button icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('retrieval')}>检索评测</Button>
                     <Button icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('generation')}>生成评测</Button>
                     <Button type="primary" icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('full')}>完整评测</Button>
@@ -1010,249 +1287,6 @@ export default function EvalPage() {
           );
         })()}
       </Modal>
-
-      <Drawer
-        title="评测配置管理"
-        size="large"
-        open={configDrawerOpen}
-        onClose={() => {
-          setConfigDrawerOpen(false);
-          setRightPanelMode('empty');
-          setSelectedVersion(null);
-        }}
-        destroyOnClose
-      >
-        <Row gutter={16} style={{ height: 'calc(100vh - 108px)' }}>
-          <Col span={10} style={{ borderRight: '1px solid #f0f0f0', paddingRight: 16, overflowY: 'auto' }}>
-            <Button
-              type="primary"
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={handle_new_config}
-              style={{ marginBottom: 12, width: '100%' }}
-            >
-              新建配置
-            </Button>
-            {configGroups.length === 0 ? (
-              <Text type="secondary">暂无配置</Text>
-            ) : (
-              <Collapse
-                accordion
-                activeKey={expandedConfigName ?? undefined}
-                onChange={(key) => setExpandedConfigName(key as string)}
-              >
-                {configGroups.map((group) => (
-                  <Collapse.Panel
-                    key={group.name}
-                    header={
-                      <span>
-                        <Text strong>{group.name}</Text>
-                        <Text type="secondary" style={{ marginLeft: 8 }}>
-                          ({group.versions.length}个版本)
-                        </Text>
-                      </span>
-                    }
-                  >
-                    {group.versions.map((v) => (
-                      <div
-                        key={v.id}
-                        onClick={() => select_version(v)}
-                        style={{
-                          padding: '6px 8px',
-                          cursor: 'pointer',
-                          borderRadius: 4,
-                          background: selectedVersion?.id === v.id ? '#e6f4ff' : undefined,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          marginBottom: 2,
-                        }}
-                      >
-                        <span>
-                          {v.is_active ? <Badge status="success" style={{ marginRight: 6 }} /> : null}
-                          <Text>v{v.version}</Text>
-                          <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-                            {v.created_at?.slice(0, 10)}
-                          </Text>
-                        </span>
-                        {v.is_active ? <Tag color="green" style={{ marginRight: 0 }}>当前</Tag> : null}
-                      </div>
-                    ))}
-                  </Collapse.Panel>
-                ))}
-              </Collapse>
-            )}
-          </Col>
-
-          <Col span={14} style={{ paddingLeft: 16, overflowY: 'auto' }}>
-            {rightPanelMode === 'empty' && (
-              <div style={{ textAlign: 'center', paddingTop: 80 }}>
-                <Text type="secondary">选择左侧的配置版本查看详情</Text>
-              </div>
-            )}
-
-            {rightPanelMode === 'view' && selectedVersion && selectedVersionConfigJson && (
-              <>
-                <Descriptions bordered size="small" column={2}>
-                  <Descriptions.Item label="名称">{selectedVersion.name}</Descriptions.Item>
-                  <Descriptions.Item label="版本">v{selectedVersion.version}</Descriptions.Item>
-                  <Descriptions.Item label="说明" span={2}>
-                    {selectedVersion.description || '-'}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="创建时间" span={2}>
-                    {selectedVersion.created_at}
-                  </Descriptions.Item>
-                </Descriptions>
-
-                <Card size="small" title="检索参数" style={{ marginTop: 16 }}>
-                  <Descriptions bordered size="small" column={2}>
-                    <Descriptions.Item label="向量 Top-K">{selectedVersionConfigJson.retrieval?.vector_top_k}</Descriptions.Item>
-                    <Descriptions.Item label="关键词 Top-K">{selectedVersionConfigJson.retrieval?.keyword_top_k}</Descriptions.Item>
-                    <Descriptions.Item label="RRF K">{selectedVersionConfigJson.retrieval?.rrf_k}</Descriptions.Item>
-                    <Descriptions.Item label="单篇最大 Chunk">{selectedVersionConfigJson.retrieval?.max_chunks_per_article}</Descriptions.Item>
-                    <Descriptions.Item label="最小 RRF 分数">{selectedVersionConfigJson.retrieval?.min_rrf_score}</Descriptions.Item>
-                  </Descriptions>
-                </Card>
-
-                <Card size="small" title="重排序参数" style={{ marginTop: 12 }}>
-                  <Descriptions bordered size="small" column={2}>
-                    <Descriptions.Item label="启用重排序">
-                      {selectedVersionConfigJson.rerank?.enable_rerank ? '是' : '否'}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="重排序器">{selectedVersionConfigJson.rerank?.reranker_type}</Descriptions.Item>
-                    <Descriptions.Item label="重排序 Top-K">{selectedVersionConfigJson.rerank?.rerank_top_k}</Descriptions.Item>
-                    <Descriptions.Item label="最小重排序分数">{selectedVersionConfigJson.rerank?.rerank_min_score}</Descriptions.Item>
-                  </Descriptions>
-                </Card>
-
-                <Card size="small" title="生成参数" style={{ marginTop: 12 }}>
-                  <Descriptions bordered size="small" column={2}>
-                    <Descriptions.Item label="最大上下文字符数">{selectedVersionConfigJson.generation?.max_context_chars}</Descriptions.Item>
-                  </Descriptions>
-                </Card>
-
-                <div style={{ marginTop: 16, display: 'flex', justifyContent: 'space-between' }}>
-                  <Space>
-                    <Button icon={<CopyOutlined />} onClick={handle_clone}>克隆并编辑</Button>
-                    {!selectedVersion.is_active && (
-                      <Popconfirm title="将此版本设为当前激活版本？" onConfirm={handle_activate}>
-                        <Button icon={<CheckCircleOutlined />}>设为当前</Button>
-                      </Popconfirm>
-                    )}
-                  </Space>
-                  {!selectedVersion.is_active && (
-                    <Popconfirm title="确定删除此配置版本？" onConfirm={handle_delete_config}>
-                      <Button danger icon={<DeleteOutlined />}>删除</Button>
-                    </Popconfirm>
-                  )}
-                </div>
-              </>
-            )}
-
-            {rightPanelMode === 'edit' && (
-              <>
-                <Text strong>
-                  {selectedVersion ? `克隆 ${selectedVersion.name} v${selectedVersion.version}` : '新建配置'}
-                </Text>
-                <Form form={editForm} layout="vertical" style={{ marginTop: 16 }}>
-                  <Row gutter={16}>
-                    <Col span={12}>
-                      <Form.Item name="name" label="配置名称" rules={[{ required: true, message: '请输入配置名称' }]}>
-                        <Input placeholder="如 默认" />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item name="description" label="说明">
-                        <Input placeholder="配置说明" />
-                      </Form.Item>
-                    </Col>
-                  </Row>
-
-                  <Divider orientation="left" plain>检索参数</Divider>
-                  <Row gutter={16}>
-                    <Col span={8}>
-                      <Form.Item name="retrieval_vector_top_k" label="向量 Top-K">
-                        <InputNumber min={1} style={{ width: '100%' }} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={8}>
-                      <Form.Item name="retrieval_keyword_top_k" label="关键词 Top-K">
-                        <InputNumber min={1} style={{ width: '100%' }} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={8}>
-                      <Form.Item name="retrieval_rrf_k" label="RRF K">
-                        <InputNumber min={1} style={{ width: '100%' }} />
-                      </Form.Item>
-                    </Col>
-                  </Row>
-                  <Row gutter={16}>
-                    <Col span={8}>
-                      <Form.Item name="retrieval_max_chunks_per_article" label="单篇最大 Chunk">
-                        <InputNumber min={1} style={{ width: '100%' }} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={8}>
-                      <Form.Item name="retrieval_min_rrf_score" label="最小 RRF 分数">
-                        <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} />
-                      </Form.Item>
-                    </Col>
-                  </Row>
-
-                  <Divider orientation="left" plain>重排序参数</Divider>
-                  <Row gutter={16}>
-                    <Col span={8}>
-                      <Form.Item name="rerank_enable_rerank" label="启用重排序" valuePropName="checked">
-                        <Switch checkedChildren="开" unCheckedChildren="关" />
-                      </Form.Item>
-                    </Col>
-                    <Col span={8}>
-                      <Form.Item name="rerank_reranker_type" label="重排序器">
-                        <Select options={[
-                          { value: 'gguf', label: 'GGUF' },
-                          { value: 'llm', label: 'LLM' },
-                          { value: 'none', label: 'None' },
-                        ]} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={8}>
-                      <Form.Item name="rerank_rerank_top_k" label="重排序 Top-K">
-                        <InputNumber min={1} style={{ width: '100%' }} />
-                      </Form.Item>
-                    </Col>
-                  </Row>
-                  <Row gutter={16}>
-                    <Col span={8}>
-                      <Form.Item name="rerank_rerank_min_score" label="最小重排序分数">
-                        <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} />
-                      </Form.Item>
-                    </Col>
-                  </Row>
-
-                  <Divider orientation="left" plain>生成参数</Divider>
-                  <Row gutter={16}>
-                    <Col span={8}>
-                      <Form.Item name="generation_max_context_chars" label="最大上下文字符数">
-                        <InputNumber min={500} max={50000} step={1000} style={{ width: '100%' }} />
-                      </Form.Item>
-                    </Col>
-                  </Row>
-
-                  <Form.Item style={{ marginBottom: 0, marginTop: 8 }}>
-                    <Space>
-                      <Button type="primary" onClick={handle_save_config}>保存为新版本</Button>
-                      <Button onClick={() => {
-                        setRightPanelMode('empty');
-                        setSelectedVersion(null);
-                      }}>取消</Button>
-                    </Space>
-                  </Form.Item>
-                </Form>
-              </>
-            )}
-          </Col>
-        </Row>
-      </Drawer>
     </div>
   );
 }
