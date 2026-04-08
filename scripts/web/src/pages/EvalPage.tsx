@@ -374,6 +374,7 @@ export default function EvalPage() {
   const [importText, setImportText] = useState('');
   const [snapshotModalOpen, setSnapshotModalOpen] = useState(false);
   const [snapshotName, setSnapshotName] = useState('');
+  const [snapshotDescription, setSnapshotDescription] = useState('');
   const [form] = Form.useForm();
 
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
@@ -554,10 +555,11 @@ export default function EvalPage() {
       return;
     }
     try {
-      await evalApi.createSnapshot(snapshotName, '');
+      await evalApi.createSnapshot(snapshotName, snapshotDescription);
       message.success('快照创建成功');
       setSnapshotModalOpen(false);
       setSnapshotName('');
+      setSnapshotDescription('');
       load_samples();
     } catch (err) {
       message.error(`创建失败: ${err}`);
@@ -1080,10 +1082,21 @@ export default function EvalPage() {
                         snapshots.map((snapshot) => (
                           <div key={snapshot.id} style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <div>
-                              <Text strong>{snapshot.name}</Text>
+                              <Space>
+                                <Text strong>{snapshot.name}</Text>
+                                <Tag>v{snapshot.version}</Tag>
+                              </Space>
                               <Text type="secondary" style={{ marginLeft: 8 }}>{snapshot.sample_count} 条</Text>
                               <br />
-                              <Text type="secondary" style={{ fontSize: 12 }}>{snapshot.created_at}</Text>
+                              <Text type="secondary" style={{ fontSize: 12 }}>
+                                {snapshot.created_at}
+                                {snapshot.hash_code && (
+                                  <span style={{ marginLeft: 8, fontFamily: 'monospace' }}>{snapshot.hash_code}</span>
+                                )}
+                              </Text>
+                              {snapshot.description && (
+                                <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{snapshot.description}</div>
+                              )}
                             </div>
                             <Space>
                               <Popconfirm title={`确定恢复到 ${snapshot.name}？当前数据将被覆盖。`} onConfirm={() => restore_snapshot(snapshot.id)}>
@@ -1625,7 +1638,13 @@ export default function EvalPage() {
           placeholder="快照名称，如 v1.0"
           value={snapshotName}
           onChange={(e) => setSnapshotName(e.target.value)}
-          onPressEnter={create_snapshot}
+          style={{ marginBottom: 12 }}
+        />
+        <Input.TextArea
+          rows={2}
+          placeholder="描述（可选）"
+          value={snapshotDescription}
+          onChange={(e) => setSnapshotDescription(e.target.value)}
         />
       </Modal>
 

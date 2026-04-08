@@ -6,6 +6,8 @@
 
 import hashlib
 import json
+import os
+import shutil
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional, List, Dict
@@ -49,7 +51,9 @@ CREATE TABLE IF NOT EXISTS eval_snapshots (
     name TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     sample_count INTEGER NOT NULL DEFAULT 0,
-    samples_json TEXT,
+    file_path TEXT,
+    version INTEGER NOT NULL DEFAULT 0,
+    hash_code TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -279,6 +283,22 @@ def _migrate_db():
             conn.execute("ALTER TABLE eval_runs ADD COLUMN dataset_version TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_runs_config_version ON eval_runs(config_version)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_runs_dataset_version ON eval_runs(dataset_version)")
+
+        snap_cols = {row[1] for row in conn.execute("PRAGMA table_info(eval_snapshots)").fetchall()}
+        if 'samples_json' in snap_cols:
+            conn.execute("DROP TABLE IF EXISTS eval_snapshots")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS eval_snapshots (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    sample_count INTEGER NOT NULL DEFAULT 0,
+                    file_path TEXT,
+                    version INTEGER NOT NULL DEFAULT 0,
+                    hash_code TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+            """)
 
         conn.execute("""
         CREATE TABLE IF NOT EXISTS user_profiles (
@@ -561,24 +581,58 @@ def import_eval_samples(samples: List[Dict]) -> int:
     return count
 
 
+# ── 快照内部工具 ──────────────────────────────────────
+
+
+def _get_snapshots_base_dir() -> str:
+    from lib.config import get_eval_snapshots_dir
+    return get_eval_snapshots_dir()
+
+
+def _snapshot_file_path(snapshot_id: str) -> str:
+    return os.path.join(_get_snapshots_base_dir(), snapshot_id, "samples.json")
+
+
+def _hash_sample_ids(ids: List[str]) -> str:
+    if not ids:
+        return "empty"
+    return hashlib.sha256(",".join(sorted(ids)).encode()).hexdigest()[:12]
+
+
+def _compute_hash_code(samples: list) -> str:
+    return _hash_sample_ids([s["id"] for s in samples])
+
+
 def create_snapshot(name: str, description: str = "") -> str:
     snapshot_id = f"snap_{uuid.uuid4().hex[:8]}"
-    with get_connection() as conn:
-        samples = get_eval_samples()
-        conn.execute(
-            "INSERT INTO eval_snapshots (id, name, description, sample_count, samples_json) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (snapshot_id, name, description, len(samples),
-             json.dumps(samples, ensure_ascii=False)),
-        )
+    samples = get_eval_samples()
+    hash_code = _compute_hash_code(samples)
+    file_path = _snapshot_file_path(snapshot_id)
+
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(samples, f, ensure_ascii=False)
+
+        with get_connection() as conn:
+            row = conn.execute("SELECT COALESCE(MAX(version), 0) FROM eval_snapshots").fetchone()
+            next_version = row[0] + 1
+            conn.execute(
+                "INSERT INTO eval_snapshots (id, name, description, sample_count, file_path, version, hash_code) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (snapshot_id, name, description, len(samples), file_path, next_version, hash_code),
+            )
+    except Exception:
+        shutil.rmtree(os.path.dirname(file_path), ignore_errors=True)
+        raise
     return snapshot_id
 
 
 def get_snapshots() -> List[Dict]:
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT id, name, description, sample_count, created_at "
-            "FROM eval_snapshots ORDER BY created_at DESC"
+            "SELECT id, name, description, sample_count, version, hash_code, created_at "
+            "FROM eval_snapshots ORDER BY version DESC"
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -595,24 +649,23 @@ def restore_snapshot(snapshot_id: str) -> int:
 
 
 def get_snapshot_samples(snapshot_id: str) -> Optional[List[Dict]]:
-    """读取快照的样本数据（不修改当前 eval_samples 表）。"""
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT samples_json FROM eval_snapshots WHERE id = ?", (snapshot_id,)
+            "SELECT file_path FROM eval_snapshots WHERE id = ?", (snapshot_id,)
         ).fetchone()
-        if not row or not row["samples_json"]:
+        if not row or not row["file_path"]:
             return None
-        return json.loads(row["samples_json"])
+    file_path = row["file_path"]
+    if not os.path.isfile(file_path):
+        return None
+    with open(file_path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def compute_dataset_fingerprint() -> str:
-    """计算当前 eval_samples 的指纹（排序 ID 的 SHA-256 前 12 位）。"""
     with get_connection() as conn:
         rows = conn.execute("SELECT id FROM eval_samples ORDER BY id").fetchall()
-        ids = [r["id"] for r in rows]
-        if not ids:
-            return "empty"
-        return hashlib.sha256(",".join(ids).encode()).hexdigest()[:12]
+        return _hash_sample_ids([r["id"] for r in rows])
 
 
 # ── 评测配置版本管理 ──────────────────────────────────
@@ -685,12 +738,19 @@ def remove_eval_config(config_id: int) -> bool:
 
 
 def remove_snapshot(snapshot_id: str) -> bool:
-    """删除快照，但有关联评测记录时拒绝。"""
     with get_connection() as conn:
         if _has_eval_run_refs(conn, "dataset_version", f"snapshot:{snapshot_id}"):
             return False
+        row = conn.execute(
+            "SELECT file_path FROM eval_snapshots WHERE id = ?", (snapshot_id,)
+        ).fetchone()
+        file_path = row["file_path"] if row else None
         conn.execute("DELETE FROM eval_snapshots WHERE id = ?", (snapshot_id,))
-        return True
+    if file_path:
+        snap_dir = os.path.dirname(file_path)
+        if os.path.isdir(snap_dir):
+            shutil.rmtree(snap_dir, ignore_errors=True)
+    return True
 
 
 def activate_eval_config(config_id: int) -> bool:

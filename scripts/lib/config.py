@@ -143,6 +143,10 @@ class DatabaseConfig:
     def kb_version_dir(self) -> str:
         return self._config.get('kb_version_dir', 'lib/rag_engine/data/kb')
 
+    @property
+    def eval_snapshots_dir(self) -> str:
+        return self._config.get('eval_snapshots_dir', '../../data/eval_snapshots')
+
 
 # ===== 场景化 LLM 配置 =====
 
@@ -294,6 +298,9 @@ class Config:
     def get_sqlite_db_path(self) -> str:
         return self._resolve_path(self._data_paths.sqlite_db)
 
+    def get_eval_snapshots_dir(self) -> str:
+        return self._resolve_path(self._data_paths.eval_snapshots_dir)
+
 
 # ===== 全局配置实例（单例模式）=====
 
@@ -326,6 +333,9 @@ def get_regulations_dir() -> str:
 
 def get_kb_version_dir() -> str:
     return get_config().get_kb_version_dir()
+
+def get_eval_snapshots_dir() -> str:
+    return get_config().get_eval_snapshots_dir()
 
 def get_llm_config() -> LLMConfig:
     return get_config().llm
