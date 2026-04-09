@@ -520,14 +520,14 @@ async def search_knowledge_base(req: KbSearchRequest):
         results = engine.search(req.query, top_k=req.top_k)
         return [
             KbSearchResult(
-                doc_name=r.get("metadata", {}).get("source_file", ""),
-                article=r.get("metadata", {}).get("article_number", ""),
-                excerpt=r.get("text", "")[:500],
-                hierarchy_path=r.get("metadata", {}).get("hierarchy_path", ""),
-                chunk_id=r.get("metadata", {}).get("chunk_id", ""),
+                doc_name=r.get("source_file", ""),
+                article=r.get("article_number", ""),
+                excerpt=r.get("content", "")[:500],
+                hierarchy_path=r.get("hierarchy_path", ""),
+                chunk_id="",
             )
             for r in results
-            if r.get("text")
+            if r.get("content")
         ]
     except HTTPException:
         raise

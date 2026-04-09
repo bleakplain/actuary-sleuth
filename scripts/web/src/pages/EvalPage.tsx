@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Card, Table, Button, Space, Select, Tag, Modal, Form, Input, InputNumber, Switch,
   Typography, message, Row, Col, Popconfirm, Progress, Descriptions, Tabs, Tooltip,
-  Divider, Checkbox, Drawer,
+  Divider, Checkbox, Drawer, Tree,
 } from 'antd';
 import {
   PlusOutlined, ImportOutlined, SaveOutlined, RollbackOutlined,
   PlayCircleOutlined, DownloadOutlined, SwapOutlined,
   DeleteOutlined, CopyOutlined, CheckCircleOutlined, SearchOutlined, CloseCircleOutlined, LinkOutlined,
+  FolderOutlined,
 } from '@ant-design/icons';
 import * as evalApi from '../api/eval';
 import * as kbApi from '../api/knowledge';
@@ -55,6 +56,10 @@ interface KbChunkItem {
   source_file: string; doc_number: string; issuing_authority: string; text: string;
 }
 
+const MIN_DRAWER_WIDTH = 480;
+const MAX_DRAWER_WIDTH = 960;
+const DEFAULT_DRAWER_WIDTH = 750;
+
 function SampleDrawer({
   sample,
   open,
@@ -66,8 +71,12 @@ function SampleDrawer({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const [drawerWidth, setDrawerWidth] = useState(DEFAULT_DRAWER_WIDTH);
+  const [resizing, setResizing] = useState(false);
+  const resizeStartX = useRef(0);
+  const resizeStartWidth = useRef(0);
+
   const [editGroundTruth, setEditGroundTruth] = useState('');
-  const [editReviewer, setEditReviewer] = useState('');
   const [editComment, setEditComment] = useState('');
   const [kbQuery, setKbQuery] = useState('');
   const [kbResults, setKbResults] = useState<KbSearchResult[]>([]);
@@ -80,18 +89,48 @@ function SampleDrawer({
   const [docChunks, setDocChunks] = useState<KbChunkItem[]>([]);
   const [docChunksLoading, setDocChunksLoading] = useState(false);
   const [currentRefs, setCurrentRefs] = useState<RegulationRef[]>([]);
+  const [treeWidth, setTreeWidth] = useState(240);
+  const treeResizeStartX = useRef(0);
+  const treeResizeStartWidth = useRef(0);
+  const [treeResizing, setTreeResizing] = useState(false);
 
   useEffect(() => {
     if (sample) {
       setEditGroundTruth(sample.ground_truth);
-      setEditReviewer(sample.reviewer);
       setEditComment(sample.review_comment);
       setCurrentRefs([...(sample.regulation_refs || [])]);
       setKbQuery('');
       setKbResults([]);
       setKbSearchDone(false);
+      loadKbDocs();
     }
   }, [sample]);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    resizeStartX.current = e.clientX;
+    resizeStartWidth.current = drawerWidth;
+    setResizing(true);
+
+    const handleResizeMove = (ev: MouseEvent) => {
+      const delta = resizeStartX.current - ev.clientX;
+      const newWidth = Math.min(MAX_DRAWER_WIDTH, Math.max(MIN_DRAWER_WIDTH, resizeStartWidth.current + delta));
+      setDrawerWidth(newWidth);
+    };
+
+    const handleResizeEnd = () => {
+      setResizing(false);
+      document.removeEventListener('mousemove', handleResizeMove);
+      document.removeEventListener('mouseup', handleResizeEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', handleResizeMove);
+    document.addEventListener('mouseup', handleResizeEnd);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [drawerWidth]);
 
   const handleSearchKb = async () => {
     if (!kbQuery.trim()) return;
@@ -108,7 +147,6 @@ function SampleDrawer({
   };
 
   const loadKbDocs = async () => {
-    if (kbDocs.length > 0) return;
     setKbDocsLoading(true);
     try {
       const docs = await kbApi.fetchDocuments();
@@ -119,6 +157,33 @@ function SampleDrawer({
       setKbDocsLoading(false);
     }
   };
+
+  const handleTreeResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    treeResizeStartX.current = e.clientX;
+    treeResizeStartWidth.current = treeWidth;
+    setTreeResizing(true);
+
+    const handleMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - treeResizeStartX.current;
+      const newWidth = Math.min(300, Math.max(80, treeResizeStartWidth.current + delta));
+      setTreeWidth(newWidth);
+    };
+
+    const handleEnd = () => {
+      setTreeResizing(false);
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', handleMove);
+    document.addEventListener('mouseup', handleEnd);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [treeWidth]);
 
   const handleSelectDoc = async (filePath: string) => {
     setSelectedDocPath(filePath || undefined);
@@ -170,7 +235,7 @@ function SampleDrawer({
         ground_truth: editGroundTruth,
         regulation_refs: currentRefs,
       });
-      await evalApi.approveSample(sample.id, editReviewer, editComment);
+      await evalApi.approveSample(sample.id, 'admin', editComment);
       message.success('审核通过');
       onClose();
       onSaved();
@@ -178,6 +243,53 @@ function SampleDrawer({
       message.error(`审核失败: ${err}`);
     }
   };
+
+  // 构建目录树
+  const treeData = useMemo(() => {
+    const dirMap = new Map<string, { docs: { name: string; file_path: string; clause_count: number }[]; clauses: number }>();
+    kbDocs.forEach(doc => {
+      const parts = doc.file_path.split('/');
+      const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '根目录';
+      const existing = dirMap.get(dir) || { docs: [], clauses: 0 };
+      existing.docs.push(doc);
+      existing.clauses += doc.clause_count;
+      dirMap.set(dir, existing);
+    });
+
+    return Array.from(dirMap.entries()).map(([dir, info]) => {
+      const dirName = dir.split('/').pop() || dir;
+      const children = info.docs.map(d => ({
+        key: d.file_path,
+        title: (
+          <span>
+            <span>{d.name}</span>
+            <Tag style={{ marginLeft: 6, fontSize: 11 }}>{d.clause_count} 条</Tag>
+          </span>
+        ),
+        isLeaf: true,
+      }));
+      return {
+        key: dir,
+        title: (
+          <span>
+            <FolderOutlined style={{ marginRight: 6, color: '#1890ff' }} />
+            <span>{dirName}</span>
+            <Tag style={{ marginLeft: 6, fontSize: 11 }}>{info.docs.length} 篇</Tag>
+          </span>
+        ),
+        children,
+      };
+    });
+  }, [kbDocs]);
+
+  const handleTreeSelect = (selectedKeys: React.Key[]) => {
+    if (selectedKeys.length > 0) {
+      const key = selectedKeys[0] as string;
+      handleSelectDoc(key);
+    }
+  };
+
+  if (!sample) return null;
 
   const drawerTitle = (
     <Space>
@@ -189,22 +301,126 @@ function SampleDrawer({
     </Space>
   );
 
+  const searchTab = (
+    <div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Input
+          placeholder="输入问题关键词..."
+          value={kbQuery}
+          onChange={(e) => setKbQuery(e.target.value)}
+          onPressEnter={handleSearchKb}
+        />
+        <Button icon={<SearchOutlined />} loading={kbSearching} onClick={handleSearchKb}>搜索</Button>
+      </div>
+      {kbSearchDone && kbResults.length === 0 && !kbSearching && (
+        <div style={{ color: '#bfbfbf', fontSize: 13, marginTop: 8 }}>无搜索结果</div>
+      )}
+      {kbResults.length > 0 && (
+        <div style={{ marginTop: 8, maxHeight: 320, overflow: 'auto' }}>
+          {kbResults.map((r, idx) => (
+            <div key={idx} style={{
+              padding: '6px 8px', marginBottom: 4, background: '#fafafa',
+              border: '1px solid #f0f0f0', borderRadius: 4, fontSize: 13,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Space>
+                  <Tag>{r.article || '-'}</Tag>
+                  <Text ellipsis style={{ maxWidth: 200 }}>{r.doc_name}</Text>
+                </Space>
+                <Button type="link" size="small" icon={<LinkOutlined />}
+                  onClick={() => addRef({ doc_name: r.doc_name, article: r.article, excerpt: r.excerpt, chunk_id: r.chunk_id })} />
+              </div>
+              {r.hierarchy_path && (
+                <div style={{ marginTop: 2, color: '#999', fontSize: 11 }}>{r.hierarchy_path}</div>
+              )}
+              <div style={{ marginTop: 2, color: '#666', fontSize: 12 }}>
+                {r.excerpt.length > 120 ? r.excerpt.slice(0, 120) + '...' : r.excerpt}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const browseTab = (
+    <div style={{ minHeight: 320 }}>
+      {kbDocsLoading && <Text type="secondary" style={{ fontSize: 12 }}>加载中...</Text>}
+      {kbDocs.length > 0 && (
+        <div style={{ display: 'flex', height: 320 }}>
+          <div style={{ width: treeWidth, minWidth: treeWidth, overflow: 'auto', paddingRight: 4 }}>
+            <Tree
+              showLine
+              treeData={treeData}
+              onSelect={handleTreeSelect}
+              selectedKeys={selectedDocPath ? [selectedDocPath] : []}
+              style={{ fontSize: 13 }}
+            />
+          </div>
+          <div
+            onMouseDown={handleTreeResizeStart}
+            style={{
+              width: 4,
+              cursor: 'col-resize',
+              background: treeResizing ? '#1677ff' : '#f0f0f0',
+              flexShrink: 0,
+              transition: treeResizing ? 'none' : 'background 0.2s',
+            }}
+          />
+          <div style={{ flex: 1, overflow: 'auto', paddingLeft: 8 }}>
+            {docChunksLoading && (
+              <div style={{ color: '#bfbfbf', fontSize: 12 }}>加载条款中...</div>
+            )}
+            {selectedDocPath && !docChunksLoading && docChunks.length === 0 && (
+              <div style={{ color: '#bfbfbf', fontSize: 12 }}>该文档无条款数据</div>
+            )}
+            {!selectedDocPath && !docChunksLoading && (
+              <div style={{ color: '#bfbfbf', fontSize: 12 }}>请在左侧选择文档</div>
+            )}
+            {docChunks.map((chunk, idx) => (
+              <div key={idx} style={{
+                padding: '6px 8px', marginBottom: 4, background: '#fafafa',
+                border: '1px solid #f0f0f0', borderRadius: 4, fontSize: 13,
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Space>
+                    <Tag>{chunk.article_number || '-'}</Tag>
+                    {chunk.hierarchy_path && (
+                      <Text type="secondary" style={{ fontSize: 11 }}>{chunk.hierarchy_path.split(' > ').pop()}</Text>
+                    )}
+                  </Space>
+                  <Button type="link" size="small" icon={<LinkOutlined />}
+                    onClick={() => addRef({
+                      doc_name: chunk.source_file,
+                      article: chunk.article_number,
+                      excerpt: chunk.text,
+                      chunk_id: '',
+                    })} />
+                </div>
+                <div style={{ marginTop: 2, color: '#666', fontSize: 12 }}>
+                  {chunk.text.length > 120 ? chunk.text.slice(0, 120) + '...' : chunk.text}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <Drawer
       title={drawerTitle}
       open={open}
       onClose={onClose}
-      width={640}
+      width={drawerWidth}
       styles={{ body: { overflowY: 'auto', paddingBottom: 60 } }}
       footer={
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Space>
-            <span style={{ fontSize: 13 }}>审核人：</span>
-            <Input size="small" style={{ width: 100 }} value={editReviewer}
-              onChange={(e) => setEditReviewer(e.target.value)} placeholder="姓名" />
-            <span style={{ fontSize: 13, marginLeft: 8 }}>备注：</span>
-            <Input size="small" style={{ width: 200 }} value={editComment}
-              onChange={(e) => setEditComment(e.target.value)} placeholder="可选" />
+            <span style={{ fontSize: 13 }}>备注：</span>
+            <Input size="small" style={{ width: 400 }} value={editComment}
+              onChange={(e) => setEditComment(e.target.value)} placeholder="审核意见（可选）" />
           </Space>
           <Space>
             <Button onClick={handleSave}>保存</Button>
@@ -213,6 +429,28 @@ function SampleDrawer({
         </div>
       }
     >
+      {/* 拖拽把手 */}
+      <div
+        onMouseDown={handleResizeStart}
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 4,
+          cursor: 'col-resize',
+          zIndex: 10,
+          background: resizing ? '#1677ff' : 'transparent',
+          transition: resizing ? 'none' : 'background 0.2s',
+        }}
+        onMouseEnter={(e) => {
+          if (!resizing) (e.currentTarget as HTMLDivElement).style.background = '#e6e6e6';
+        }}
+        onMouseLeave={(e) => {
+          if (!resizing) (e.currentTarget as HTMLDivElement).style.background = 'transparent';
+        }}
+      />
+
       <div style={{ marginBottom: 16 }}>
         <Text type="secondary">问题</Text>
         <div style={{ marginTop: 4, fontSize: 14 }}>{sample.question}</div>
@@ -255,106 +493,13 @@ function SampleDrawer({
 
       <Divider style={{ margin: '12px 0' }} />
 
-      <div style={{ marginBottom: 16 }}>
-        <Text type="secondary">搜索法规库</Text>
-        <div style={{ marginTop: 4, display: 'flex', gap: 8 }}>
-          <Input
-            placeholder="输入问题关键词..."
-            value={kbQuery}
-            onChange={(e) => setKbQuery(e.target.value)}
-            onPressEnter={handleSearchKb}
-          />
-          <Button icon={<SearchOutlined />} loading={kbSearching} onClick={handleSearchKb}>搜索</Button>
-        </div>
-        {kbSearchDone && kbResults.length === 0 && !kbSearching && (
-          <div style={{ color: '#bfbfbf', fontSize: 13, marginTop: 8 }}>无搜索结果</div>
-        )}
-        {kbResults.length > 0 && (
-          <div style={{ marginTop: 8, maxHeight: 240, overflow: 'auto' }}>
-            {kbResults.map((r, idx) => (
-              <div key={idx} style={{
-                padding: '6px 8px', marginBottom: 4, background: '#fafafa',
-                border: '1px solid #f0f0f0', borderRadius: 4, fontSize: 13,
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Space>
-                    <Tag>{r.article || '-'}</Tag>
-                    <Text ellipsis style={{ maxWidth: 200 }}>{r.doc_name}</Text>
-                  </Space>
-                  <Button type="link" size="small" icon={<LinkOutlined />}
-                    onClick={() => addRef({ doc_name: r.doc_name, article: r.article, excerpt: r.excerpt, chunk_id: r.chunk_id })} />
-                </div>
-                {r.hierarchy_path && (
-                  <div style={{ marginTop: 2, color: '#999', fontSize: 11 }}>{r.hierarchy_path}</div>
-                )}
-                <div style={{ marginTop: 2, color: '#666', fontSize: 12 }}>
-                  {r.excerpt.length > 120 ? r.excerpt.slice(0, 120) + '...' : r.excerpt}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <Divider style={{ margin: '12px 0' }} />
-
-      <div style={{ marginBottom: 16 }}>
-        <Text type="secondary">浏览法规文档</Text>
-        {kbDocs.length === 0 && !kbDocsLoading && (
-          <Button type="link" size="small" onClick={loadKbDocs} style={{ marginLeft: 8 }}>
-            加载文档列表
-          </Button>
-        )}
-        {kbDocsLoading && <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>加载中...</Text>}
-        {kbDocs.length > 0 && (
-          <div style={{ marginTop: 8 }}>
-            <Select
-              size="small"
-              value={selectedDocPath}
-              onChange={handleSelectDoc}
-              allowClear
-              placeholder="选择法规文档"
-              style={{ width: '100%' }}
-              options={kbDocs.map(d => ({
-                value: d.file_path,
-                label: `${d.name} (${d.clause_count} 条)`,
-              }))}
-            />
-            {docChunksLoading && (
-              <div style={{ color: '#bfbfbf', fontSize: 12, marginTop: 4 }}>加载条款中...</div>
-            )}
-            {selectedDocPath && !docChunksLoading && docChunks.length > 0 && (
-              <div style={{ marginTop: 4, maxHeight: 240, overflow: 'auto' }}>
-                {docChunks.map((chunk, idx) => (
-                  <div key={idx} style={{
-                    padding: '6px 8px', marginBottom: 4, background: '#fafafa',
-                    border: '1px solid #f0f0f0', borderRadius: 4, fontSize: 13,
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Space>
-                        <Tag>{chunk.article_number || '-'}</Tag>
-                        {chunk.hierarchy_path && (
-                          <Text type="secondary" style={{ fontSize: 11 }}>{chunk.hierarchy_path.split(' > ').pop()}</Text>
-                        )}
-                      </Space>
-                      <Button type="link" size="small" icon={<LinkOutlined />}
-                        onClick={() => addRef({
-                          doc_name: chunk.source_file,
-                          article: chunk.article_number,
-                          excerpt: chunk.text,
-                          chunk_id: '',
-                        })} />
-                    </div>
-                    <div style={{ marginTop: 2, color: '#666', fontSize: 12 }}>
-                      {chunk.text.length > 120 ? chunk.text.slice(0, 120) + '...' : chunk.text}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      <Tabs
+        size="small"
+        items={[
+          { key: 'search', label: '搜索法规', children: searchTab },
+          { key: 'browse', label: '浏览法规', children: browseTab },
+        ]}
+      />
     </Drawer>
   );
 }
