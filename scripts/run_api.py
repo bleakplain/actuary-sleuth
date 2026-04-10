@@ -11,13 +11,17 @@ from pathlib import Path
 RUN_FILE = Path(__file__).parent / ".run"
 
 
-def _read_run_file() -> tuple[int | None, int | None]:
-    """读取 .run 文件，返回 (backend_pid, backend_port)。"""
+def _read_run_file() -> dict[str, str]:
+    """读取 .run 文件，返回 key=value 字典。"""
     try:
-        lines = RUN_FILE.read_text().strip().splitlines()
-        return int(lines[0]), int(lines[1])
-    except (FileNotFoundError, ValueError, IndexError):
-        return None, None
+        data = {}
+        for line in RUN_FILE.read_text().strip().splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                data[key.strip()] = value.strip()
+        return data
+    except FileNotFoundError:
+        return {}
 
 
 def _get_process_cwd(pid: int) -> str | None:
@@ -28,18 +32,23 @@ def _get_process_cwd(pid: int) -> str | None:
 
 
 def _stop_old_service(scripts_dir: str) -> None:
-    """通过 .run 文件中的 PID 精确停止旧服务（仅限同一 worktree）。"""
-    old_pid, _ = _read_run_file()
-    if old_pid is None:
+    """通过 .run 文件中的 backend_pid 精确停止旧服务（仅限同一 worktree）。"""
+    data = _read_run_file()
+    old_pid = data.get("backend_pid")
+    if not old_pid:
         return
-    cwd = _get_process_cwd(old_pid)
+    try:
+        pid = int(old_pid)
+    except ValueError:
+        return
+    cwd = _get_process_cwd(pid)
     if cwd is None or not cwd.startswith(scripts_dir):
         return
     try:
-        os.kill(old_pid, 9)
-        print(f"已停止旧后端服务 (PID {old_pid})")
+        os.kill(pid, 9)
+        print(f"已停止旧后端服务 (PID {pid})")
         for _ in range(10):
-            if _get_process_cwd(old_pid) is None:
+            if _get_process_cwd(pid) is None:
                 break
             time.sleep(0.2)
     except ProcessLookupError:
@@ -65,8 +74,7 @@ def _find_available_port(preferred: int = 0) -> int:
 
 
 def _write_run_file(backend_pid: int, backend_port: int) -> None:
-    """写入 .run 文件，格式：backend_pid\nbackend_port\nfrontend_pid"""
-    RUN_FILE.write_text(f"{backend_pid}\n{backend_port}\n")
+    RUN_FILE.write_text(f"backend_pid={backend_pid}\nbackend_port={backend_port}\n")
 
 
 if __name__ == "__main__":
