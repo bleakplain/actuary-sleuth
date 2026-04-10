@@ -27,18 +27,18 @@ _SEMANTIC_RELEVANCE_THRESHOLD = 0.65
 _SEMANTIC_COVERAGE_THRESHOLD = 0.7
 _SENTENCE_COVERAGE_THRESHOLD = 0.4
 
-_embed_model_cache: Optional[Any] = None
+_embed_model: Optional[Any] = None
 
 
 def _get_embed_model():
-    global _embed_model_cache
-    if _embed_model_cache is not None:
-        return _embed_model_cache
+    global _embed_model
+    if _embed_model is not None:
+        return _embed_model
     try:
         from lib.rag_engine.llamaindex_adapter import _create_embedding_model
         from lib.config import get_embed_llm_config
-        _embed_model_cache = _create_embedding_model(get_embed_llm_config())
-        return _embed_model_cache
+        _embed_model = _create_embedding_model(get_embed_llm_config())
+        return _embed_model
     except Exception as e:
         logger.warning(f"Embedding 模型加载失败，将仅使用关键词匹配: {e}")
         return None
