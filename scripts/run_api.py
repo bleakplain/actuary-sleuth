@@ -31,19 +31,21 @@ def _get_process_cwd(pid: int) -> str | None:
         return None
 
 
-def _stop_old_service(scripts_dir: str) -> None:
-    """通过 .run 文件中的 backend_pid 精确停止旧服务（仅限同一 worktree）。"""
+def _stop_old_service(scripts_dir: str) -> int:
+    """通过 .run 文件中的 backend_pid 精确停止旧服务（仅限同一 worktree）。
+    返回旧端口号（可用于端口复用），无记录时返回 0。"""
     data = _read_run_file()
+    old_port = int(data.get("backend_port", 0) or 0)
     old_pid = data.get("backend_pid")
     if not old_pid:
-        return
+        return old_port
     try:
         pid = int(old_pid)
     except ValueError:
-        return
+        return 0
     cwd = _get_process_cwd(pid)
-    if cwd is None or not cwd.startswith(scripts_dir):
-        return
+    if cwd is not None and not cwd.startswith(scripts_dir):
+        return 0
     try:
         os.kill(pid, 9)
         print(f"已停止旧后端服务 (PID {pid})")
@@ -53,11 +55,7 @@ def _stop_old_service(scripts_dir: str) -> None:
             time.sleep(0.2)
     except ProcessLookupError:
         pass
-    finally:
-        try:
-            RUN_FILE.unlink()
-        except FileNotFoundError:
-            pass
+    return old_port
 
 
 def _find_available_port(preferred: int = 0) -> int:
@@ -95,9 +93,9 @@ if __name__ == "__main__":
                     key, value = line.split("=", 1)
                     os.environ.setdefault(key.strip(), value.strip())
 
-    _stop_old_service(scripts_dir)
+    preferred_port = _stop_old_service(scripts_dir) or args.port
 
-    actual_port = _find_available_port(args.port)
+    actual_port = _find_available_port(preferred_port)
 
     import uvicorn
     from uvicorn.config import Config

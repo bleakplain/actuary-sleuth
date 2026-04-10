@@ -99,3 +99,8 @@ export async function fetchTrace(messageId: number): Promise<TraceData> {
   const { data } = await client.get(`/api/ask/messages/${messageId}/trace`);
   return data;
 }
+
+export async function deleteMessage(messageId: number): Promise<{ deleted_messages: number }> {
+  const { data } = await client.delete(`/api/ask/messages/${messageId}`);
+  return data;
+}

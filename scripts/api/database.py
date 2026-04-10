@@ -372,6 +372,32 @@ def add_message(
         return cur.lastrowid
 
 
+def delete_message(message_id: int) -> int:
+    """删除一条用户消息及其紧随的助手回复，返回删除行数。"""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT session_id, role, id FROM messages WHERE id = ?", (message_id,)
+        ).fetchone()
+        if not row:
+            return 0
+        session_id, role, _ = row["session_id"], row["role"], row["id"]
+        if role == "user":
+            next_msg = conn.execute(
+                "SELECT id FROM messages WHERE session_id = ? AND id > ? AND role = 'assistant' ORDER BY id LIMIT 1",
+                (session_id, message_id),
+            ).fetchone()
+            ids_to_delete = [message_id]
+            if next_msg:
+                ids_to_delete.append(next_msg["id"])
+            conn.execute(
+                f"DELETE FROM messages WHERE id IN ({','.join('?' * len(ids_to_delete))})",
+                ids_to_delete,
+            )
+            return len(ids_to_delete)
+        conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+        return 1
+
+
 def delete_session(session_id: str) -> int:
     with get_connection() as conn:
         cur = conn.execute(

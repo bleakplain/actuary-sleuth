@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Input, Button, Radio, Popconfirm, Switch, Checkbox, message, theme } from 'antd';
+import { Input, Button, Radio, Popconfirm, Switch, theme } from 'antd';
 import { SendOutlined, DeleteOutlined, CloseOutlined, BugOutlined, SearchOutlined } from '@ant-design/icons';
 import MessageBubble from './MessageBubble';
 import SourcePanel from './SourcePanel';
@@ -34,7 +34,6 @@ export default function ChatPanel() {
     toggleDebugMode,
     sessionSearch,
     setSessionSearch,
-    batchDeleteSessions,
   } = useAskStore();
 
   const [sourcePanelOpen, setSourcePanelOpen] = React.useState(false);
@@ -42,7 +41,6 @@ export default function ChatPanel() {
   const [panelSources, setPanelSources] = React.useState<Source[]>([]);
   const [traceWidth, setTraceWidth] = useState(DEFAULT_TRACE_WIDTH);
   const [dragging, setDragging] = useState(false);
-  const [selectedSessionIds, setSelectedSessionIds] = React.useState<string[]>([]);
   const dragStartX = useRef(0);
   const dragStartWidth = useRef(0);
 
@@ -93,16 +91,6 @@ export default function ChatPanel() {
     setSourcePanelOpen(true);
   };
 
-  const handleBatchDelete = async () => {
-    try {
-      await batchDeleteSessions(selectedSessionIds);
-      setSelectedSessionIds([]);
-      message.success('已删除');
-    } catch {
-      message.error('删除失败');
-    }
-  };
-
   const activeMessage = activeTraceMessageId
     ? messages.find((m) => m.id === activeTraceMessageId)
     : null;
@@ -131,18 +119,6 @@ export default function ChatPanel() {
             onChange={(e) => setSessionSearch(e.target.value)}
           />
         </div>
-        {selectedSessionIds.length > 0 && (
-          <div style={{ padding: '0 8px 8px' }}>
-            <Popconfirm
-              title={`确定删除选中的 ${selectedSessionIds.length} 个会话？`}
-              onConfirm={handleBatchDelete}
-            >
-              <Button type="primary" danger size="small" icon={<DeleteOutlined />} block>
-                删除 ({selectedSessionIds.length})
-              </Button>
-            </Popconfirm>
-          </div>
-        )}
         <div style={{ flex: 1, overflow: 'auto' }}>
           {sessions.map((session) => (
             <div
@@ -156,18 +132,6 @@ export default function ChatPanel() {
                 borderBottom: `1px solid ${token.colorBorderSecondary}`,
               }}
             >
-              <Checkbox
-                checked={selectedSessionIds.includes(session.id)}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    setSelectedSessionIds([...selectedSessionIds, session.id]);
-                  } else {
-                    setSelectedSessionIds(selectedSessionIds.filter((id) => id !== session.id));
-                  }
-                }}
-                style={{ marginRight: 4 }}
-              />
               <span
                 style={{
                   overflow: 'hidden',
