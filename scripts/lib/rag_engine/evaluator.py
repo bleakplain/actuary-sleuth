@@ -35,9 +35,9 @@ def _get_embed_model():
     if _embed_model_cache is not None:
         return _embed_model_cache
     try:
-        from lib.rag_engine.llamaindex_adapter import get_embedding_model
+        from lib.rag_engine.llamaindex_adapter import _create_embedding_model
         from lib.config import get_embed_llm_config
-        _embed_model_cache = get_embedding_model(get_embed_llm_config())
+        _embed_model_cache = _create_embedding_model(get_embed_llm_config())
         return _embed_model_cache
     except Exception as e:
         logger.warning(f"Embedding 模型加载失败，将仅使用关键词匹配: {e}")

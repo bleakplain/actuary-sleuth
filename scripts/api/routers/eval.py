@@ -204,10 +204,11 @@ async def create_evaluation(req: EvaluationRequest):
         try:
             _eval_tasks[evaluation_id]["status"] = "running"
 
+            filtered = samples_data
             if req.filters:
                 for key, val in req.filters.items():
-                    samples_data = [s for s in samples_data if s.get(key) == val]
-            samples = [EvalSample.from_dict(s) for s in samples_data]
+                    filtered = [s for s in filtered if s.get(key) == val]
+            samples = [EvalSample.from_dict(s) for s in filtered]
             total = len(samples)
 
             update_evaluation_config(
