@@ -1,3 +1,5 @@
+// Uses CSS variables (var(--ant-*)) instead of theme.useToken() to avoid
+// threading token through many pure sub-components defined in this file.
 import React, { useState, useMemo } from 'react';
 import {
   CheckCircleFilled,
@@ -8,19 +10,20 @@ import {
 import CopyBtn from './CopyBtn';
 import type { TraceSpan, TraceData } from '../types';
 
-/* ── category visual config ── */
+import { TRACE_CATEGORY_COLORS } from '../constants/traceColors';
 
-const CATEGORY_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  root: { label: 'Root', color: '#8c8c8c', bg: '#fafafa' },
-  preprocessing: { label: '预处理', color: '#722ed1', bg: '#f9f0ff' },
-  retrieval: { label: '检索', color: '#1677ff', bg: '#e6f4ff' },
-  rerank: { label: '重排序', color: '#fa8c16', bg: '#fff7e6' },
-  llm: { label: '生成', color: '#52c41a', bg: '#f6ffed' },
-  memory: { label: '记忆', color: '#13c2c2', bg: '#e6fffb' },
+const CATEGORY_LABELS: Record<string, string> = {
+  root: 'Root',
+  preprocessing: '预处理',
+  retrieval: '检索',
+  rerank: '重排序',
+  llm: '生成',
+  memory: '记忆',
 };
 
 function getCategoryStyle(category: string) {
-  return CATEGORY_CONFIG[category] || { label: category, color: '#8c8c8c', bg: '#fafafa' };
+  const colors = TRACE_CATEGORY_COLORS[category];
+  return { label: CATEGORY_LABELS[category] || category, color: colors?.color || 'var(--ant-color-text-secondary)', bg: colors?.bg || 'var(--ant-color-fill-quaternary)' };
 }
 
 /* ── helpers ── */
@@ -58,13 +61,13 @@ function CollapsibleText({ label, text, bg }: { label: string; text: string; bg:
       <div
         onClick={() => setExpanded(!expanded)}
         style={{
-          fontSize: 11, color: '#8c8c8c', cursor: 'pointer',
+          fontSize: 11, color: 'var(--ant-color-text-tertiary)', cursor: 'pointer',
           display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3,
           userSelect: 'none',
         }}
       >
         {isLong && (expanded ? <DownOutlined style={{ fontSize: 9 }} /> : <RightOutlined style={{ fontSize: 9 }} />)}
-        <span style={{ fontWeight: 500 }}>{label}</span>
+        <span style={{ fontWeight: 'var(--ant-font-weight-strong, 600)' }}>{label}</span>
         <CopyBtn text={text} />
       </div>
       <pre style={{
@@ -102,22 +105,22 @@ function RetrievalResults({ results, maxScore }: {
         const heat = Math.min(score / topScore, 1);
         return (
           <div key={i} style={{
-            padding: '5px 8px', marginBottom: 3, background: '#fff', borderRadius: 4,
-            border: '1px solid #f0f0f0',
+            padding: '5px 8px', marginBottom: 3, background: 'var(--ant-color-bg-container)', borderRadius: 4,
+            border: '1px solid var(--ant-color-border)',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 1 }}>
-              <span style={{ fontSize: 12, color: '#262626', fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 12, color: 'var(--ant-color-text)', fontWeight: 'var(--ant-font-weight-strong, 600)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {String(r.law_name || '未知法规')} {String(r.article_number || '')}
               </span>
               <span style={{
-                fontSize: 11, fontVariantNumeric: 'tabular-nums', color: '#595959',
-                background: `rgba(22, 119, 255, ${0.08 + heat * 0.15})`,
-                padding: '1px 6px', borderRadius: 3, flexShrink: 0,
+                fontSize: 11, fontVariantNumeric: 'tabular-nums', color: 'var(--ant-color-text-secondary)',
+                background: `rgba(30, 64, 175, ${0.08 + heat * 0.15})`,
+                padding: '1px 6px', borderRadius: 4, flexShrink: 0,
               }}>
                 {score > 0 ? score.toFixed(4) : '-'}
               </span>
             </div>
-            <div style={{ fontSize: 11, color: '#8c8c8c', lineHeight: 1.5 }}>
+            <div style={{ fontSize: 11, color: 'var(--ant-color-text-tertiary)', lineHeight: 1.5 }}>
               {String(r.content_preview || '')}
             </div>
           </div>
@@ -125,13 +128,13 @@ function RetrievalResults({ results, maxScore }: {
       })}
       {isLong && !expanded && (
         <div onClick={() => setExpanded(true)}
-          style={{ textAlign: 'center', padding: '4px 0', cursor: 'pointer', fontSize: 11, color: '#1677ff' }}>
+          style={{ textAlign: 'center', padding: '4px 0', cursor: 'pointer', fontSize: 11, color: 'var(--ant-color-primary)' }}>
           展开剩余 {hidden} 条
         </div>
       )}
       {isLong && expanded && (
         <div onClick={() => setExpanded(false)}
-          style={{ textAlign: 'center', padding: '4px 0', cursor: 'pointer', fontSize: 11, color: '#bfbfbf' }}>
+          style={{ textAlign: 'center', padding: '4px 0', cursor: 'pointer', fontSize: 11, color: 'var(--ant-color-text-quaternary)' }}>
           收起
         </div>
       )}
@@ -147,17 +150,17 @@ function RerankResults({ results }: { results: Array<Record<string, unknown>> })
     <div style={{ marginTop: 4 }}>
       {results.map((r, i) => (
         <div key={i} style={{
-          padding: '4px 8px', marginBottom: 2, background: '#fff',
-          borderRadius: 4, border: '1px solid #f0f0f0',
+          padding: '4px 8px', marginBottom: 2, background: 'var(--ant-color-bg-container)',
+          borderRadius: 4, border: '1px solid var(--ant-color-border)',
           display: 'flex', alignItems: 'center', gap: 8,
         }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: '#fa8c16', width: 20, textAlign: 'center' }}>
+          <span style={{ fontSize: 11, fontWeight: 'var(--ant-font-weight-strong, 600)', color: 'var(--ant-color-warning)', width: 20, textAlign: 'center' }}>
             #{String(r.rank || i + 1)}
           </span>
-          <span style={{ fontSize: 12, color: '#262626', flex: 1 }}>
+          <span style={{ fontSize: 12, color: 'var(--ant-color-text)', flex: 1 }}>
             {String(r.law_name || '')} {String(r.article_number || '')}
           </span>
-          <span style={{ fontSize: 11, color: '#595959', fontVariantNumeric: 'tabular-nums' }}>
+          <span style={{ fontSize: 11, color: 'var(--ant-color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
             {r.rerank_score != null ? Number(r.rerank_score).toFixed(2) : '-'}
           </span>
         </div>
@@ -177,11 +180,11 @@ function SectionHeader({ label, count, shown }: { label: string; count?: number;
   }
   return (
     <div style={{
-      fontSize: 11, color: '#595959', marginBottom: 4, marginTop: 10,
-      fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4,
+      fontSize: 11, color: 'var(--ant-color-text-secondary)', marginBottom: 4, marginTop: 10,
+      fontWeight: 'var(--ant-font-weight-strong, 600)', display: 'flex', alignItems: 'center', gap: 4,
     }}>
       <span>{label}</span>
-      {detail && <span style={{ fontSize: 10, color: '#bfbfbf' }}>({detail})</span>}
+      {detail && <span style={{ fontSize: 10, color: 'var(--ant-color-text-quaternary)' }}>({detail})</span>}
     </div>
   );
 }
@@ -192,12 +195,12 @@ function MetaTable({ entries }: { entries: [string, unknown][] }) {
   if (entries.length === 0) return null;
   return (
     <div style={{
-      margin: '0 0 8px', fontSize: 11, lineHeight: 1.8, color: '#8c8c8c',
+      margin: '0 0 8px', fontSize: 11, lineHeight: 1.8, color: 'var(--ant-color-text-tertiary)',
     }}>
       {entries.map(([k, v]) => (
         <span key={k} style={{ marginRight: 16 }}>
-          <span style={{ color: '#bfbfbf' }}>{k}:</span>{' '}
-          <span style={{ color: '#595959' }}>{String(v)}</span>
+          <span style={{ color: 'var(--ant-color-text-quaternary)' }}>{k}:</span>{' '}
+          <span style={{ color: 'var(--ant-color-text-secondary)' }}>{String(v)}</span>
         </span>
       ))}
     </div>
@@ -229,24 +232,24 @@ function SpanDetails({ span, depth }: { span: TraceSpan; depth: number }) {
               <SectionHeader label="分查询检索明细" />
               {(out.per_query_results as Array<Record<string, unknown>>).map((qr, qi) => (
                 <div key={qi} style={{
-                  marginBottom: 8, padding: '6px 8px', background: '#fff',
-                  borderRadius: 4, border: '1px solid #f0f0f0',
+                  marginBottom: 8, padding: '6px 8px', background: 'var(--ant-color-bg-container)',
+                  borderRadius: 4, border: '1px solid var(--ant-color-border)',
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                     <span style={{
-                      fontSize: 11, fontWeight: 600, padding: '0 5px',
-                      borderRadius: 3, background: qi === 0 ? '#e6f4ff' : '#f0f0f0',
-                      color: qi === 0 ? '#1677ff' : '#595959',
+                      fontSize: 11, fontWeight: 'var(--ant-font-weight-strong, 600)', padding: '0 5px',
+                      borderRadius: 4, background: qi === 0 ? 'var(--ant-color-primary-bg)' : 'var(--ant-color-border)',
+                      color: qi === 0 ? 'var(--ant-color-primary)' : 'var(--ant-color-text-secondary)',
                     }}>
                       {String(qr.label || `查询 ${qi + 1}`)}
                     </span>
-                    <span style={{ fontSize: 11, color: '#8c8c8c', fontStyle: 'italic' }}>
+                    <span style={{ fontSize: 11, color: 'var(--ant-color-text-tertiary)', fontStyle: 'italic' }}>
                       {String(qr.query || '')}
                     </span>
                   </div>
                   {qr.vector_top && (qr.vector_top as Array<Record<string, unknown>>).length > 0 && (
                     <div style={{ marginBottom: 4 }}>
-                      <span style={{ fontSize: 10, color: '#bfbfbf' }}>
+                      <span style={{ fontSize: 10, color: 'var(--ant-color-text-quaternary)' }}>
                         向量检索 ({qr.vector_count} 条)
                       </span>
                       <RetrievalResults results={qr.vector_top as Array<Record<string, unknown>>} />
@@ -254,7 +257,7 @@ function SpanDetails({ span, depth }: { span: TraceSpan; depth: number }) {
                   )}
                   {qr.keyword_top && (qr.keyword_top as Array<Record<string, unknown>>).length > 0 && (
                     <div>
-                      <span style={{ fontSize: 10, color: '#bfbfbf' }}>
+                      <span style={{ fontSize: 10, color: 'var(--ant-color-text-quaternary)' }}>
                         BM25 检索 ({qr.keyword_count} 条)
                       </span>
                       <RetrievalResults results={qr.keyword_top as Array<Record<string, unknown>>} />
@@ -280,10 +283,10 @@ function SpanDetails({ span, depth }: { span: TraceSpan; depth: number }) {
       {cat === 'rerank' && (
         <>
           {span.input && typeof span.input === 'object' && 'prompt' in span.input && (
-            <CollapsibleText label="Rerank Prompt" text={String(span.input.prompt)} bg="#fff7e6" />
+            <CollapsibleText label="Rerank Prompt" text={String(span.input.prompt)} bg="var(--ant-color-warning-bg)" />
           )}
           {span.output && typeof span.output === 'object' && 'raw_response' in span.output && (
-            <CollapsibleText label="LLM 回复" text={String(span.output.raw_response)} bg="#fafafa" />
+            <CollapsibleText label="LLM 回复" text={String(span.output.raw_response)} bg="var(--ant-color-fill-quaternary)" />
           )}
           {span.output && typeof span.output === 'object' && 'results' in span.output && (
             <RerankResults results={span.output.results as Array<Record<string, unknown>>} />
@@ -295,13 +298,13 @@ function SpanDetails({ span, depth }: { span: TraceSpan; depth: number }) {
       {cat === 'llm' && (
         <>
           {span.input && typeof span.input === 'object' && 'system_prompt' in span.input && (
-            <CollapsibleText label="System Prompt" text={String(span.input.system_prompt)} bg="#fafafa" />
+            <CollapsibleText label="System Prompt" text={String(span.input.system_prompt)} bg="var(--ant-color-fill-quaternary)" />
           )}
           {span.input && typeof span.input === 'object' && 'user_prompt' in span.input && (
-            <CollapsibleText label="User Prompt（含检索上下文）" text={String(span.input.user_prompt)} bg="#f6ffed" />
+            <CollapsibleText label="User Prompt（含检索上下文）" text={String(span.input.user_prompt)} bg="var(--ant-color-success-bg)" />
           )}
           {span.output && typeof span.output === 'object' && 'answer' in span.output && (
-            <CollapsibleText label="LLM 回复" text={String(span.output.answer)} bg="#f6ffed" />
+            <CollapsibleText label="LLM 回复" text={String(span.output.answer)} bg="var(--ant-color-success-bg)" />
           )}
         </>
       )}
@@ -310,20 +313,20 @@ function SpanDetails({ span, depth }: { span: TraceSpan; depth: number }) {
       {cat === 'root' && (
         <>
           {span.input && typeof span.input === 'object' && span.input.question && (
-            <div style={{ fontSize: 12, color: '#595959', lineHeight: 1.6 }}>
-              <span style={{ color: '#bfbfbf' }}>问题:</span> {String(span.input.question)}
+            <div style={{ fontSize: 12, color: 'var(--ant-color-text-secondary)', lineHeight: 1.6 }}>
+              <span style={{ color: 'var(--ant-color-text-quaternary)' }}>问题:</span> {String(span.input.question)}
             </div>
           )}
           {out && out.answer && (
-            <CollapsibleText label="最终回复" text={String(out.answer)} bg="#f5f5f5" />
+            <CollapsibleText label="最终回复" text={String(out.answer)} bg="var(--ant-color-fill-tertiary)" />
           )}
         </>
       )}
 
       {/* memory */}
       {cat === 'memory' && out && out.memory_count !== undefined && (
-        <div style={{ fontSize: 11, color: '#595959', lineHeight: 1.6 }}>
-          检索到 <span style={{ fontWeight: 600, color: '#13c2c2' }}>{String(out.memory_count)}</span> 条记忆
+        <div style={{ fontSize: 11, color: 'var(--ant-color-text-secondary)', lineHeight: 1.6 }}>
+          检索到 <span style={{ fontWeight: 'var(--ant-font-weight-strong, 600)', color: catStyle.color }}>{String(out.memory_count)}</span> 条记忆
           {out.has_profile ? '，含用户画像' : ''}
         </div>
       )}
@@ -331,15 +334,15 @@ function SpanDetails({ span, depth }: { span: TraceSpan; depth: number }) {
       {/* fallback */}
       {cat !== 'retrieval' && cat !== 'rerank' && cat !== 'llm' && cat !== 'root' && cat !== 'memory' && (
         <>
-          <CollapsibleText label="Input" text={JSON.stringify(span.input ?? {}, null, 2)} bg="#fafafa" />
-          <CollapsibleText label="Output" text={JSON.stringify(span.output ?? {}, null, 2)} bg="#f6ffed" />
+          <CollapsibleText label="Input" text={JSON.stringify(span.input ?? {}, null, 2)} bg="var(--ant-color-fill-quaternary)" />
+          <CollapsibleText label="Output" text={JSON.stringify(span.output ?? {}, null, 2)} bg="var(--ant-color-success-bg)" />
         </>
       )}
 
       {span.error && (
         <div style={{
-          marginTop: 6, padding: '6px 10px', background: '#fff2f0',
-          borderRadius: 6, fontSize: 12, color: '#cf1322',
+          marginTop: 6, padding: '6px 10px', background: 'var(--ant-color-error-bg)',
+          borderRadius: 6, fontSize: 12, color: 'var(--ant-color-error-text)',
         }}>
           {span.error}
         </div>
@@ -371,29 +374,29 @@ function SpanRow({ span, depth, maxDuration }: {
           transition: 'background 0.15s',
           marginLeft: depth * 16,
         }}
-        onMouseEnter={(e) => { if (!expanded) e.currentTarget.style.background = '#fafafa'; }}
+        onMouseEnter={(e) => { if (!expanded) e.currentTarget.style.background = 'var(--ant-color-fill-quaternary)'; }}
         onMouseLeave={(e) => { if (!expanded) e.currentTarget.style.background = 'transparent'; }}
       >
-        <span style={{ fontSize: 10, color: '#bfbfbf', width: 12, flexShrink: 0, textAlign: 'center' }}>
+        <span style={{ fontSize: 10, color: 'var(--ant-color-text-quaternary)', width: 12, flexShrink: 0, textAlign: 'center' }}>
           {expanded ? <DownOutlined /> : <RightOutlined />}
         </span>
         {isError ? (
-          <CloseCircleFilled style={{ color: '#ff4d4f', fontSize: 14, flexShrink: 0 }} />
+          <CloseCircleFilled style={{ color: 'var(--ant-color-error)', fontSize: 14, flexShrink: 0 }} />
         ) : (
           <CheckCircleFilled style={{ color: cat.color, fontSize: 14, flexShrink: 0 }} />
         )}
-        <span style={{ fontWeight: 500, fontSize: 13, color: '#262626', flexShrink: 0 }}>
+        <span style={{ fontWeight: 'var(--ant-font-weight-strong, 600)', fontSize: 13, color: 'var(--ant-color-text)', flexShrink: 0 }}>
           {span.name}
         </span>
         <span style={{
-          fontSize: 10, color: '#bfbfbf', fontVariantNumeric: 'tabular-nums',
+          fontSize: 10, color: 'var(--ant-color-text-quaternary)', fontVariantNumeric: 'tabular-nums',
           fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
           flexShrink: 0,
         }}>
           {formatTimestamp(span.start_time)}
         </span>
         <span style={{
-          fontSize: 10, color: '#bfbfbf',
+          fontSize: 10, color: 'var(--ant-color-text-quaternary)',
           fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
           flexShrink: 0,
         }}>
@@ -401,21 +404,21 @@ function SpanRow({ span, depth, maxDuration }: {
         </span>
         <span style={{
           fontSize: 10, color: cat.color, background: cat.bg,
-          padding: '0 6px', borderRadius: 3, lineHeight: '18px', flexShrink: 0,
+          padding: '0 6px', borderRadius: 4, lineHeight: '18px', flexShrink: 0,
         }}>
           {cat.label}
         </span>
         <div style={{ flex: 1, minWidth: 40, display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{
             height: 4, borderRadius: 2,
-            background: isError ? '#ffccc7' : cat.color,
+            background: isError ? 'var(--ant-color-error-bg-hover)' : cat.color,
             opacity: 0.4,
             width: `${barWidth}%`,
             minWidth: 4,
           }} />
         </div>
         <span style={{
-          fontSize: 11, color: '#8c8c8c', fontVariantNumeric: 'tabular-nums',
+          fontSize: 11, color: 'var(--ant-color-text-tertiary)', fontVariantNumeric: 'tabular-nums',
           flexShrink: 0, minWidth: 48, textAlign: 'right',
         }}>
           {formatDuration(span.duration_ms)}
@@ -464,18 +467,18 @@ interface Props {
 export default function TracePanel({ trace, loading }: Props) {
   if (loading) {
     return (
-      <div style={{ padding: '40px 16px', textAlign: 'center' }}>
-        <span style={{ fontSize: 13, color: '#8c8c8c' }}>加载中...</span>
+      <div className="empty-state">
+        <span style={{ fontSize: 13 }}>加载中...</span>
       </div>
     );
   }
 
   if (!trace) {
     return (
-      <div style={{ padding: '40px 16px', textAlign: 'center' }}>
+      <div className="empty-state">
         <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.25 }}>&#x1f50d;</div>
-        <span style={{ fontSize: 13, color: '#8c8c8c' }}>暂无 Trace 数据</span>
-        <div style={{ fontSize: 12, color: '#bfbfbf', marginTop: 4 }}>
+        <span style={{ fontSize: 13 }}>暂无 Trace 数据</span>
+        <div style={{ fontSize: 12, color: 'var(--ant-color-text-quaternary)', marginTop: 4 }}>
           发送新消息后将自动记录链路
         </div>
       </div>
@@ -494,38 +497,38 @@ export default function TracePanel({ trace, loading }: Props) {
       {/* summary bar */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
-        padding: '8px 16px', borderBottom: '1px solid #f0f0f0',
+        padding: '8px 16px', borderBottom: '1px solid var(--ant-color-border)',
         flexWrap: 'wrap',
       }}>
         <span style={{
-          fontSize: 11, color: '#595959', background: '#f5f5f5',
-          padding: '2px 8px', borderRadius: 10,
+          fontSize: 11, color: 'var(--ant-color-text-secondary)', background: 'var(--ant-color-fill-tertiary)',
+          padding: '2px 8px', borderRadius: 4,
           fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
         }}>
           Trace ID:{' '}{trace.trace_id}<CopyBtn text={trace.trace_id} />
         </span>
         <span style={{
-          fontSize: 11, color: '#fff', background: '#262626',
-          padding: '2px 8px', borderRadius: 10,
+          fontSize: 11, color: 'var(--ant-color-text-inverse)', background: 'var(--ant-color-bg-text-hover)',
+          padding: '2px 8px', borderRadius: 4,
         }}>
           {trace.summary.span_count} 步骤
         </span>
         <span style={{
-          fontSize: 11, color: '#389e0d', background: '#f6ffed',
-          padding: '2px 8px', borderRadius: 10,
+          fontSize: 11, color: 'var(--ant-color-success)', background: 'var(--ant-color-success-bg)',
+          padding: '2px 8px', borderRadius: 4,
         }}>
           {trace.summary.llm_call_count} 次 LLM
         </span>
         <span style={{
-          fontSize: 11, color: '#595959', background: '#f5f5f5',
-          padding: '2px 8px', borderRadius: 10,
+          fontSize: 11, color: 'var(--ant-color-text-secondary)', background: 'var(--ant-color-fill-tertiary)',
+          padding: '2px 8px', borderRadius: 4,
         }}>
           耗时 {formatDuration(trace.summary.total_duration_ms)}
         </span>
         {trace.summary.error_count > 0 && (
           <span style={{
-            fontSize: 11, color: '#fff', background: '#ff4d4f',
-            padding: '2px 8px', borderRadius: 10,
+            fontSize: 11, color: 'var(--ant-color-text-inverse)', background: 'var(--ant-color-error)',
+            padding: '2px 8px', borderRadius: 4,
           }}>
             {trace.summary.error_count} 错误
           </span>

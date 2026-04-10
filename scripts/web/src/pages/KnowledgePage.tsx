@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Card, Table, Button, Space, Modal, Typography, message, Progress, Statistic, Row, Col, Popconfirm, Descriptions, Tag, Spin, Drawer, Input, Badge, Tree } from 'antd';
+import { Card, Table, Button, Space, Modal, Typography, message, Progress, Statistic, Row, Col, Popconfirm, Descriptions, Tag, Spin, Drawer, Input, Badge, Tree, theme } from 'antd';
 import { DatabaseOutlined, ReloadOutlined, ImportOutlined, PlusOutlined, UnorderedListOutlined, HistoryOutlined, DeleteOutlined, CheckCircleOutlined, FolderOutlined, FileOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -7,6 +7,7 @@ import rehypeRaw from 'rehype-raw';
 import * as kbApi from '../api/knowledge';
 import type { KBVersion } from '../api/knowledge';
 import type { Document, IndexStatus } from '../types';
+import { DRAWER_MD } from '../constants/layout';
 
 const { Title, Text } = Typography;
 
@@ -24,6 +25,7 @@ interface ChunkItem {
 }
 
 export default function KnowledgePage() {
+  const { token } = theme.useToken();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
   const [loading, setLoading] = useState(false);
@@ -290,7 +292,7 @@ export default function KnowledgePage() {
         key: dir,
         title: (
           <span>
-            <FolderOutlined style={{ marginRight: 6, color: '#1890ff' }} />
+            <FolderOutlined style={{ marginRight: 6, color: token.colorPrimary }} />
             <span>{dirName}</span>
             <Tag style={{ marginLeft: 8 }}>{docCount} 篇</Tag>
             <Tag color="orange" style={{ marginLeft: 4 }}>{info.clauses} 条</Tag>
@@ -345,7 +347,7 @@ export default function KnowledgePage() {
 
   return (
     <div>
-      <Title level={4} style={{ marginBottom: 16 }}>知识库管理</Title>
+      <Title level={4} className="mb-16">知识库管理</Title>
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}>
@@ -416,12 +418,12 @@ export default function KnowledgePage() {
           <Col
             span={6}
             style={{
-              borderRight: '1px solid #f0f0f0',
-              maxHeight: 'calc(100vh - 320px)',
+              borderRight: `1px solid ${token.colorBorderSecondary}`,
+              maxHeight: 'calc(100vh - var(--header-height) - 256px)',
               overflow: 'auto',
             }}
           >
-            <div style={{ padding: '8px 12px', fontWeight: 600, borderBottom: '1px solid #f0f0f0', marginBottom: 8 }}>
+            <div className="section-header" style={{ marginBottom: 8 }}>
               法规分类
             </div>
             <Tree
@@ -435,7 +437,7 @@ export default function KnowledgePage() {
 
           {/* 右栏：文档列表 */}
           <Col span={18}>
-            <div style={{ padding: '8px 12px', fontWeight: 600, borderBottom: '1px solid #f0f0f0', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="section-header flex-between" style={{ marginBottom: 8 }}>
               <span>
                 {selectedDir
                   ? <><FileOutlined style={{ marginRight: 6 }} />{selectedDir.split('/').pop()}</>
@@ -453,29 +455,29 @@ export default function KnowledgePage() {
               rowKey="name"
               loading={loading}
               pagination={{ pageSize: 20 }}
-              size="middle"
+              size="small"
             />
           </Col>
         </Row>
       </Card>
 
       <Modal
-        title={<span title={chunksDocName} style={{ display: 'inline-block', maxWidth: 'calc(95vw - 100px)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{`分块验证 — ${chunksDocName}`}</span>}
+        title={<span title={chunksDocName} style={{ display: 'inline-block', maxWidth: 'calc(95vw - var(--content-padding) * 6)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{`分块验证 — ${chunksDocName}`}</span>}
         open={chunksOpen}
         onCancel={() => { setChunksOpen(false); setSelectedChunk(null); setEditing(false); }}
         footer={null}
         width="95vw"
         style={{ top: 20, maxWidth: 1600 }}
-        styles={{ body: { padding: 0, height: 'calc(100vh - 120px)' } }}
+        styles={{ body: { padding: 0, height: 'calc(100vh - var(--header-height) - 56px)' } }}
       >
         {chunksLoading ? (
-          <div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" /></div>
+          <div className="empty-state"><Spin size="large" /></div>
         ) : (
           <div style={{ display: 'flex', height: '100%' }}>
             {/* 左栏：md 原文 */}
-            <div style={{ width: '45%', height: '100%', borderRight: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '6px 12px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, background: '#fafafa' }}>
-                <Text strong style={{ fontSize: 13 }}>原文</Text>
+            <div style={{ width: '45%', height: '100%', borderRight: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column' }}>
+              <div className="section-header flex-between" style={{ flexShrink: 0, background: token.colorFillQuaternary, padding: '6px 12px' }}>
+                <Text strong style={{ fontSize: token.fontSize }}>原文</Text>
                 <Space size={4}>
                   {editing ? (
                     <>
@@ -497,7 +499,7 @@ export default function KnowledgePage() {
                       height: '100%',
                       border: 'none',
                       padding: 8,
-                      fontSize: 12,
+                      fontSize: token.fontSizeSM,
                       lineHeight: 1.6,
                       fontFamily: 'inherit',
                       resize: 'none',
@@ -505,7 +507,7 @@ export default function KnowledgePage() {
                     }}
                   />
                 ) : (
-                  <div ref={sourceRef} className="markdown-body" style={{ margin: 0, fontSize: 12, lineHeight: 1.6 }}>
+                  <div ref={sourceRef} className="markdown-body" style={{ margin: 0, fontSize: token.fontSizeSM, lineHeight: 1.6 }}>
                     <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{sourceContent}</ReactMarkdown>
                   </div>
                 )}
@@ -514,7 +516,7 @@ export default function KnowledgePage() {
 
             {/* 右栏：提取的条款列表 */}
             <div style={{ width: '55%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '8px 12px', fontWeight: 600, borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
+              <div className="section-header" style={{ flexShrink: 0 }}>
                 提取条款 ({chunks.length})
               </div>
               {selectedChunk ? (
@@ -549,12 +551,12 @@ export default function KnowledgePage() {
                   <div
                     className="markdown-body"
                     style={{
-                      background: '#fafafa',
+                      background: token.colorFillQuaternary,
                       padding: 12,
                       borderRadius: 6,
-                      fontSize: 13,
+                      fontSize: token.fontSize,
                       lineHeight: 1.8,
-                      maxHeight: 'calc(100vh - 400px)',
+                      maxHeight: 'calc(100vh - var(--header-height) - 336px)',
                       overflow: 'auto',
                     }}
                   >
@@ -586,7 +588,7 @@ export default function KnowledgePage() {
                         title: '条款号',
                         dataIndex: 'article_number',
                         key: 'article_number',
-                        width: 70,
+                        width: 90,
                         ellipsis: true,
                         render: (v: string) => v === '未知' ? <Text type="secondary">{v}</Text> : v,
                       },
@@ -602,13 +604,13 @@ export default function KnowledgePage() {
                         title: '字数',
                         dataIndex: 'text_length',
                         key: 'text_length',
-                        width: 50,
+                        width: 60,
                       },
                       {
                         title: '内容摘要',
                         key: 'preview',
                         render: (_: unknown, r: ChunkItem) => (
-                          <Text type="secondary" style={{ fontSize: 12 }}>
+                          <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
                             {r.text.slice(0, 80)}...
                           </Text>
                         ),
@@ -630,7 +632,7 @@ export default function KnowledgePage() {
         okText="创建"
         cancelText="取消"
       >
-        <p style={{ color: '#666', marginBottom: 12 }}>
+        <p style={{ color: token.colorTextSecondary, marginBottom: 12 }}>
           将从当前工作目录的源文件创建快照，并重建索引。创建完成后自动切换到新版本。
         </p>
         <Input.TextArea
@@ -645,7 +647,7 @@ export default function KnowledgePage() {
         title="版本管理"
         open={versionDrawerOpen}
         onClose={() => setVersionDrawerOpen(false)}
-        width={600}
+        width={DRAWER_MD}
       >
         <Table
           dataSource={versions}

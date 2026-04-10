@@ -1,4 +1,4 @@
-import { Typography, Button } from 'antd';
+import { Typography, Button, theme } from 'antd';
 import { BugOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -23,6 +23,7 @@ interface Props {
 }
 
 export default function MessageBubble({ message, streaming, onCitationClick }: Props) {
+  const { token } = theme.useToken();
   const { activeTraceMessageId, openTrace, debugMode } = useAskStore();
 
   const handleCitationClick = (citation: Citation) => {
@@ -38,15 +39,15 @@ export default function MessageBubble({ message, streaming, onCitationClick }: P
         <div
           style={{
             maxWidth: '70%',
-            background: '#1677ff',
-            color: '#fff',
+            background: token.colorPrimary,
+            color: token.colorTextInverse,
             padding: '8px 16px',
             borderRadius: 12,
             borderBottomRightRadius: 4,
           }}
         >
           {message.content}
-          <div style={{ fontSize: 11, opacity: 0.7, textAlign: 'right', marginTop: 4 }}>
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', textAlign: 'right', marginTop: 4 }}>
             {formatMsgTime(message.timestamp)}
           </div>
         </div>
@@ -64,7 +65,7 @@ export default function MessageBubble({ message, streaming, onCitationClick }: P
       <div
         style={{
           maxWidth: '85%',
-          background: '#f5f5f5',
+          background: token.colorFillTertiary,
           padding: '8px 16px',
           borderRadius: 12,
           borderBottomLeftRadius: 4,
@@ -93,7 +94,7 @@ export default function MessageBubble({ message, streaming, onCitationClick }: P
         )}
         {message.role === 'assistant' && !isThinking && (
           <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, color: '#bfbfbf', marginRight: 4 }}>
+            <span style={{ fontSize: 11, color: token.colorTextQuaternary, marginRight: 4 }}>
               {formatMsgTime(message.timestamp)}
             </span>
             <FeedbackButtons messageId={message.id} />
@@ -103,7 +104,7 @@ export default function MessageBubble({ message, streaming, onCitationClick }: P
                 size="small"
                 icon={<BugOutlined />}
                 onClick={() => openTrace(message.id)}
-                style={{ color: isActive ? '#1677ff' : undefined }}
+                style={{ color: isActive ? token.colorPrimary : undefined }}
               >
                 调试
               </Button>

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Card, Table, Button, Space, Select, Tag, Modal, Form, Input, InputNumber, Switch,
   Typography, message, Row, Col, Popconfirm, Progress, Descriptions, Tabs, Tooltip,
-  Divider, Checkbox, Drawer, Tree,
+  Divider, Checkbox, Drawer, Tree, theme,
 } from 'antd';
 import {
   PlusOutlined, ImportOutlined, SaveOutlined, RollbackOutlined,
@@ -15,8 +15,9 @@ import * as kbApi from '../api/knowledge';
 import MetricsChart, { formatMetric, ComparisonChart, TrendChart } from '../components/MetricsChart';
 import type { EvalSample, EvalSnapshot, Evaluation, EvalConfig, SampleResult, MetricsDiff, RegulationRef } from '../types';
 import { resolveMetricMeta } from '../utils/evalMetrics';
+import { DRAWER_SM, DRAWER_LG, MODAL_MD, MODAL_LG } from '../constants/layout';
 
-const { Text } = Typography;
+const { Text, Title } = Typography;
 
 const QUESTION_TYPE_OPTIONS = [
   { value: 'factual', label: 'FACTUAL（事实类）' },
@@ -56,9 +57,9 @@ interface KbChunkItem {
   source_file: string; doc_number: string; issuing_authority: string; text: string;
 }
 
-const MIN_DRAWER_WIDTH = 480;
-const MAX_DRAWER_WIDTH = 960;
-const DEFAULT_DRAWER_WIDTH = 750;
+const MIN_DRAWER_WIDTH = DRAWER_SM;
+const MAX_DRAWER_WIDTH = DRAWER_LG + 160;
+const DEFAULT_DRAWER_WIDTH = Math.round((DRAWER_SM + MAX_DRAWER_WIDTH) / 2);
 
 function SampleDrawer({
   sample,
@@ -71,6 +72,7 @@ function SampleDrawer({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { token } = theme.useToken();
   const [drawerWidth, setDrawerWidth] = useState(DEFAULT_DRAWER_WIDTH);
   const [resizing, setResizing] = useState(false);
   const resizeStartX = useRef(0);
@@ -263,7 +265,7 @@ function SampleDrawer({
         title: (
           <span>
             <span>{d.name}</span>
-            <Tag style={{ marginLeft: 6, fontSize: 11 }}>{d.clause_count} 条</Tag>
+            <Tag style={{ marginLeft: 6, fontSize: token.fontSizeSM }}>{d.clause_count} 条</Tag>
           </span>
         ),
         isLeaf: true,
@@ -272,9 +274,9 @@ function SampleDrawer({
         key: dir,
         title: (
           <span>
-            <FolderOutlined style={{ marginRight: 6, color: '#1890ff' }} />
+            <FolderOutlined style={{ marginRight: 6, color: token.colorPrimary }} />
             <span>{dirName}</span>
-            <Tag style={{ marginLeft: 6, fontSize: 11 }}>{info.docs.length} 篇</Tag>
+            <Tag style={{ marginLeft: 6, fontSize: token.fontSizeSM }}>{info.docs.length} 篇</Tag>
           </span>
         ),
         children,
@@ -313,16 +315,13 @@ function SampleDrawer({
         <Button icon={<SearchOutlined />} loading={kbSearching} onClick={handleSearchKb}>搜索</Button>
       </div>
       {kbSearchDone && kbResults.length === 0 && !kbSearching && (
-        <div style={{ color: '#bfbfbf', fontSize: 13, marginTop: 8 }}>无搜索结果</div>
+        <div style={{ color: token.colorTextQuaternary, fontSize: token.fontSize, marginTop: 8 }}>无搜索结果</div>
       )}
       {kbResults.length > 0 && (
         <div style={{ marginTop: 8, maxHeight: 320, overflow: 'auto' }}>
           {kbResults.map((r, idx) => (
-            <div key={idx} style={{
-              padding: '6px 8px', marginBottom: 4, background: '#fafafa',
-              border: '1px solid #f0f0f0', borderRadius: 4, fontSize: 13,
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div key={idx} className="info-card" style={{ fontSize: token.fontSize }}>
+              <div className="flex-between">
                 <Space>
                   <Tag>{r.article || '-'}</Tag>
                   <Text ellipsis style={{ maxWidth: 200 }}>{r.doc_name}</Text>
@@ -331,9 +330,9 @@ function SampleDrawer({
                   onClick={() => addRef({ doc_name: r.doc_name, article: r.article, excerpt: r.excerpt, chunk_id: r.chunk_id })} />
               </div>
               {r.hierarchy_path && (
-                <div style={{ marginTop: 2, color: '#999', fontSize: 11 }}>{r.hierarchy_path}</div>
+                <div style={{ marginTop: 2, color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>{r.hierarchy_path}</div>
               )}
-              <div style={{ marginTop: 2, color: '#666', fontSize: 12 }}>
+              <div style={{ marginTop: 2, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
                 {r.excerpt.length > 120 ? r.excerpt.slice(0, 120) + '...' : r.excerpt}
               </div>
             </div>
@@ -345,7 +344,7 @@ function SampleDrawer({
 
   const browseTab = (
     <div style={{ minHeight: 320 }}>
-      {kbDocsLoading && <Text type="secondary" style={{ fontSize: 12 }}>加载中...</Text>}
+      {kbDocsLoading && <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>加载中...</Text>}
       {kbDocs.length > 0 && (
         <div style={{ display: 'flex', height: 320 }}>
           <div style={{ width: treeWidth, minWidth: treeWidth, overflow: 'auto', paddingRight: 4 }}>
@@ -354,7 +353,7 @@ function SampleDrawer({
               treeData={treeData}
               onSelect={handleTreeSelect}
               selectedKeys={selectedDocPath ? [selectedDocPath] : []}
-              style={{ fontSize: 13 }}
+              style={{ fontSize: token.fontSize }}
             />
           </div>
           <div
@@ -362,31 +361,28 @@ function SampleDrawer({
             style={{
               width: 4,
               cursor: 'col-resize',
-              background: treeResizing ? '#1677ff' : '#f0f0f0',
+              background: treeResizing ? token.colorPrimary : token.colorBorderSecondary,
               flexShrink: 0,
               transition: treeResizing ? 'none' : 'background 0.2s',
             }}
           />
           <div style={{ flex: 1, overflow: 'auto', paddingLeft: 8 }}>
             {docChunksLoading && (
-              <div style={{ color: '#bfbfbf', fontSize: 12 }}>加载条款中...</div>
+              <div style={{ color: token.colorTextQuaternary, fontSize: token.fontSizeSM }}>加载条款中...</div>
             )}
             {selectedDocPath && !docChunksLoading && docChunks.length === 0 && (
-              <div style={{ color: '#bfbfbf', fontSize: 12 }}>该文档无条款数据</div>
+              <div style={{ color: token.colorTextQuaternary, fontSize: token.fontSizeSM }}>该文档无条款数据</div>
             )}
             {!selectedDocPath && !docChunksLoading && (
-              <div style={{ color: '#bfbfbf', fontSize: 12 }}>请在左侧选择文档</div>
+              <div style={{ color: token.colorTextQuaternary, fontSize: token.fontSizeSM }}>请在左侧选择文档</div>
             )}
             {docChunks.map((chunk, idx) => (
-              <div key={idx} style={{
-                padding: '6px 8px', marginBottom: 4, background: '#fafafa',
-                border: '1px solid #f0f0f0', borderRadius: 4, fontSize: 13,
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div key={idx} className="info-card" style={{ fontSize: token.fontSize }}>
+                <div className="flex-between">
                   <Space>
                     <Tag>{chunk.article_number || '-'}</Tag>
                     {chunk.hierarchy_path && (
-                      <Text type="secondary" style={{ fontSize: 11 }}>{chunk.hierarchy_path.split(' > ').pop()}</Text>
+                      <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>{chunk.hierarchy_path.split(' > ').pop()}</Text>
                     )}
                   </Space>
                   <Button type="link" size="small" icon={<LinkOutlined />}
@@ -397,7 +393,7 @@ function SampleDrawer({
                       chunk_id: '',
                     })} />
                 </div>
-                <div style={{ marginTop: 2, color: '#666', fontSize: 12 }}>
+                <div style={{ marginTop: 2, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
                   {chunk.text.length > 120 ? chunk.text.slice(0, 120) + '...' : chunk.text}
                 </div>
               </div>
@@ -416,9 +412,9 @@ function SampleDrawer({
       width={drawerWidth}
       styles={{ body: { overflowY: 'auto', paddingBottom: 60 } }}
       footer={
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="flex-between">
           <Space>
-            <span style={{ fontSize: 13 }}>备注：</span>
+            <span style={{ fontSize: token.fontSize }}>备注：</span>
             <Input size="small" style={{ width: 400 }} value={editComment}
               onChange={(e) => setEditComment(e.target.value)} placeholder="审核意见（可选）" />
           </Space>
@@ -440,11 +436,11 @@ function SampleDrawer({
           width: 4,
           cursor: 'col-resize',
           zIndex: 10,
-          background: resizing ? '#1677ff' : 'transparent',
+          background: resizing ? token.colorPrimary : 'transparent',
           transition: resizing ? 'none' : 'background 0.2s',
         }}
         onMouseEnter={(e) => {
-          if (!resizing) (e.currentTarget as HTMLDivElement).style.background = '#e6e6e6';
+          if (!resizing) (e.currentTarget as HTMLDivElement).style.background = token.colorBorder;
         }}
         onMouseLeave={(e) => {
           if (!resizing) (e.currentTarget as HTMLDivElement).style.background = 'transparent';
@@ -469,14 +465,11 @@ function SampleDrawer({
       <div style={{ marginBottom: 16 }}>
         <Text type="secondary">已引用法规 ({currentRefs.length})</Text>
         {currentRefs.length === 0 && (
-          <div style={{ color: '#bfbfbf', fontSize: 13, marginTop: 4 }}>暂无引用，请在下方搜索或浏览法规库添加</div>
+          <div style={{ color: token.colorTextQuaternary, fontSize: token.fontSize, marginTop: 4 }}>暂无引用，请在下方搜索或浏览法规库添加</div>
         )}
         {currentRefs.map((ref, idx) => (
-          <div key={idx} style={{
-            marginTop: 4, padding: '6px 8px', background: '#fafafa',
-            border: '1px solid #f0f0f0', borderRadius: 4, fontSize: 13,
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div key={idx} className="info-card" style={{ marginTop: 4, fontSize: token.fontSize }}>
+            <div className="flex-between">
               <Space>
                 <Tag>{ref.article}</Tag>
                 <Text>{ref.doc_name}</Text>
@@ -484,7 +477,7 @@ function SampleDrawer({
               <Button type="text" size="small" danger icon={<CloseCircleOutlined />}
                 onClick={() => removeRef(idx)} />
             </div>
-            <div style={{ marginTop: 2, color: '#666', fontSize: 12 }}>
+            <div style={{ marginTop: 2, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
               {ref.excerpt && ref.excerpt.length > 150 ? ref.excerpt.slice(0, 150) + '...' : ref.excerpt}
             </div>
           </div>
@@ -505,6 +498,7 @@ function SampleDrawer({
 }
 
 export default function EvalPage() {
+  const { token } = theme.useToken();
   const [activeTab, setActiveTab] = useState('dataset');
 
   const [samples, setSamples] = useState<EvalSample[]>([]);
@@ -602,7 +596,7 @@ export default function EvalPage() {
   );
 
   const [evalPage, setEvalPage] = useState(1);
-  const EVAL_PAGE_SIZE = 15;
+  const EVAL_PAGE_SIZE = 20;
 
   const hasSelection = selectedEvalIds.length > 0;
   const evalPaged = useMemo(
@@ -729,7 +723,7 @@ export default function EvalPage() {
         return <Tag color={info.color} style={{ margin: 0 }}>{info.label}</Tag>;
       },
     },
-    { title: 'ID', dataIndex: 'id', key: 'id', width: 80 },
+    { title: 'ID', dataIndex: 'id', key: 'id', width: 100, ellipsis: true },
     { title: '问题', dataIndex: 'question', key: 'question', ellipsis: true },
     {
       title: '类型', dataIndex: 'question_type', key: 'question_type', width: 140,
@@ -1155,6 +1149,7 @@ export default function EvalPage() {
 
   return (
     <div>
+      <Title level={4} className="mb-16">评测管理</Title>
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
@@ -1164,7 +1159,7 @@ export default function EvalPage() {
             label: '评测数据集',
             children: (
               <>
-                <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="flex-between" style={{ marginBottom: 12 }}>
                   <Space>
                     <Select
                       placeholder="审核状态" allowClear style={{ width: 110 }}
@@ -1210,7 +1205,7 @@ export default function EvalPage() {
                         rowKey="id"
                         loading={samplesLoading}
                         pagination={{ pageSize: 20 }}
-                        size="middle"
+                        size="small"
                         scroll={{ x: 750 }}
                         onRow={(sample) => ({
                           onClick: () => setDrawerSample(sample),
@@ -1225,7 +1220,7 @@ export default function EvalPage() {
                         <Text type="secondary">暂无快照</Text>
                       ) : (
                         snapshots.map((snapshot) => (
-                          <div key={snapshot.id} style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div key={snapshot.id} className="flex-between" style={{ marginBottom: 8 }}>
                             <div>
                               <Space>
                                 <Text strong>{snapshot.name}</Text>
@@ -1233,14 +1228,14 @@ export default function EvalPage() {
                               </Space>
                               <Text type="secondary" style={{ marginLeft: 8 }}>{snapshot.sample_count} 条</Text>
                               <br />
-                              <Text type="secondary" style={{ fontSize: 12 }}>
+                              <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
                                 {snapshot.created_at}
                                 {snapshot.hash_code && (
                                   <span style={{ marginLeft: 8, fontFamily: 'monospace' }}>{snapshot.hash_code}</span>
                                 )}
                               </Text>
                               {snapshot.description && (
-                                <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{snapshot.description}</div>
+                                <div style={{ fontSize: token.fontSizeSM, color: token.colorTextSecondary, marginTop: 2 }}>{snapshot.description}</div>
                               )}
                             </div>
                             <Space>
@@ -1277,7 +1272,7 @@ export default function EvalPage() {
                   <Card title="配置列表" size="small" bodyStyle={{ padding: 0, overflow: 'hidden' }}
                     extra={<Button type="primary" size="small" icon={<PlusOutlined />} onClick={start_new_config}>新增</Button>}
                   >
-                    <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 270px)' }}>
+                    <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - var(--header-height) - 206px)' }}>
                       <Table
                         dataSource={evalConfigs}
                         columns={[
@@ -1322,16 +1317,12 @@ export default function EvalPage() {
                           onClick: () => view_config(cfg),
                           style: {
                             cursor: 'pointer',
-                            background: viewingConfig?.id === cfg.id ? '#e6f4ff' : undefined,
+                            background: viewingConfig?.id === cfg.id ? token.colorPrimaryBg : undefined,
                           },
                         })}
                       />
                     </div>
-                    <div style={{
-                      padding: '8px 16px', borderTop: '1px solid #f0f0f0',
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      fontSize: 12, color: '#8c8c8c', flexShrink: 0,
-                    }}>
+                    <div className="table-footer">
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <Checkbox
                           checked={evalConfigs.length > 0 && configSelectedIds.length === evalConfigs.length}
@@ -1342,8 +1333,8 @@ export default function EvalPage() {
                         </Checkbox>
                         {configSelectedIds.length > 0 ? (
                           <>
-                            <span style={{ color: '#1677ff' }}>{configSelectedIds.length} 项</span>
-                            <span style={{ fontSize: 12, color: '#bfbfbf' }}>(含生效中不可删除)</span>
+                            <span style={{ color: token.colorPrimary }}>{configSelectedIds.length} 项</span>
+                            <span style={{ fontSize: token.fontSizeSM, color: token.colorTextQuaternary }}>(含生效中不可删除)</span>
                             <Divider type="vertical" style={{ margin: '0 4px' }} />
                             <Popconfirm
                               title={`确定删除选中的 ${configSelectedIds.length} 条配置？`}
@@ -1369,8 +1360,8 @@ export default function EvalPage() {
                 <Col span={14}>
                   {!editingConfig && viewingConfig && viewingConfigJson && (
                     <>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                        <Text strong>配置详情</Text>
+                      <div className="flex-between mb-16">
+                        <span style={{ fontWeight: token.fontWeightStrong }}>配置详情</span>
                         <Space>
                           <Button size="small" icon={<CopyOutlined />} onClick={clone_config}>克隆</Button>
                           {!viewingConfig.is_active && (
@@ -1403,7 +1394,7 @@ export default function EvalPage() {
                       <Card size="small" title="重排序参数" style={{ marginTop: 8 }}
                         extra={
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <Text type="secondary" style={{ fontSize: 13 }}>启用重排序</Text>
+                            <Text type="secondary">启用重排序</Text>
                             <Tag color={viewingConfigJson.rerank?.enable_rerank ? 'green' : 'default'}>{viewingConfigJson.rerank?.enable_rerank ? '是' : '否'}</Tag>
                           </div>
                         }
@@ -1411,7 +1402,7 @@ export default function EvalPage() {
                         <Descriptions bordered size="small" column={3}>
                           <Descriptions.Item label="重排序器">{viewingConfigJson.rerank?.reranker_type}</Descriptions.Item>
                           <Descriptions.Item label="重排序 Top-K">{viewingConfigJson.rerank?.rerank_top_k}</Descriptions.Item>
-                          <Descriptions.Item label="最小重排序分数">{viewingConfigJson.rerank?.rerank_min_score}</Descriptions.Item>
+                          <Descriptions.Item label="最小重排序分数">{viewingConfigJson.rerank?.min_score}</Descriptions.Item>
                         </Descriptions>
                       </Card>
 
@@ -1425,35 +1416,47 @@ export default function EvalPage() {
 
                   {editingConfig && (
                     <>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                        <Text strong>新建配置</Text>
+                      <div className="flex-between mb-16">
+                        <span style={{ fontWeight: token.fontWeightStrong }}>新建配置</span>
                         <Space>
                           <Button type="primary" onClick={save_config}>保存</Button>
                           <Button onClick={() => { setEditingConfig(false); setViewingConfig(null); }}>取消</Button>
                         </Space>
                       </div>
 
-                      <Form form={editForm} layout="horizontal">
-                        <Form.Item name="description" label="配置说明" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
+                      <Form form={editForm} layout="vertical">
+                        <Form.Item name="description" label="配置说明">
                           <Input placeholder="如：关闭 reranker 的配置" />
                         </Form.Item>
 
                         <Card size="small" title="检索参数" style={{ marginBottom: 8 }}>
-                          <Form.Item name="retrieval_vector_top_k" label="向量 Top-K" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }} style={{ display: 'inline-block', width: '50%', verticalAlign: 'top' }}>
-                            <InputNumber min={1} style={{ width: '100%' }} />
-                          </Form.Item>
-                          <Form.Item name="retrieval_keyword_top_k" label="关键词 Top-K" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }} style={{ display: 'inline-block', width: '50%', verticalAlign: 'top' }}>
-                            <InputNumber min={1} style={{ width: '100%' }} />
-                          </Form.Item>
-                          <Form.Item name="retrieval_rrf_k" label="RRF K" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }} style={{ display: 'inline-block', width: '50%', verticalAlign: 'top' }}>
-                            <InputNumber min={1} style={{ width: '100%' }} />
-                          </Form.Item>
-                          <Form.Item name="retrieval_max_chunks_per_article" label="单篇最大 Chunk" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }} style={{ display: 'inline-block', width: '50%', verticalAlign: 'top' }}>
-                            <InputNumber min={1} style={{ width: '100%' }} />
-                          </Form.Item>
-                          <Form.Item name="retrieval_min_rrf_score" label="最小 RRF 分数" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }} style={{ display: 'inline-block', width: '50%', verticalAlign: 'top' }}>
-                            <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} />
-                          </Form.Item>
+                          <Row gutter={16}>
+                            <Col span={12}>
+                              <Form.Item name="retrieval_vector_top_k" label="向量 Top-K">
+                                <InputNumber min={1} style={{ width: '100%' }} />
+                              </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                              <Form.Item name="retrieval_keyword_top_k" label="关键词 Top-K">
+                                <InputNumber min={1} style={{ width: '100%' }} />
+                              </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                              <Form.Item name="retrieval_rrf_k" label="RRF K">
+                                <InputNumber min={1} style={{ width: '100%' }} />
+                              </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                              <Form.Item name="retrieval_max_chunks_per_article" label="单篇最大 Chunk">
+                                <InputNumber min={1} style={{ width: '100%' }} />
+                              </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                              <Form.Item name="retrieval_min_rrf_score" label="最小 RRF 分数">
+                                <InputNumber min={0} max={1} step={0.1} style={{ width: '100%' }} />
+                              </Form.Item>
+                            </Col>
+                          </Row>
                         </Card>
 
                         <Card
@@ -1462,31 +1465,39 @@ export default function EvalPage() {
                           style={{ marginBottom: 8 }}
                           extra={
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <Text type="secondary" style={{ fontSize: 13 }}>启用重排序</Text>
+                              <Text type="secondary">启用重排序</Text>
                               <Form.Item name="rerank_enable_rerank" valuePropName="checked" style={{ marginBottom: 0 }}>
                                 <Switch checkedChildren="开" unCheckedChildren="关" />
                               </Form.Item>
                             </div>
                           }
                         >
-                          <Form.Item name="rerank_reranker_type" label="重排序器" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }} style={{ display: 'inline-block', width: '50%', verticalAlign: 'top' }}>
-                            <Select disabled={!rerankEnabled} options={[
-                              { value: 'gguf', label: 'GGUF' },
-                              { value: 'llm', label: 'LLM' },
-                              { value: 'none', label: 'None' },
-                            ]} />
-                          </Form.Item>
-                          <Form.Item name="rerank_rerank_top_k" label="重排序 Top-K" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }} style={{ display: 'inline-block', width: '50%', verticalAlign: 'top' }}>
-                            <InputNumber min={1} disabled={!rerankEnabled} style={{ width: '100%' }} />
-                          </Form.Item>
-                          <Form.Item name="rerank_min_score" label="最小重排序分数" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }} style={{ display: 'inline-block', width: '50%', verticalAlign: 'top' }}>
-                            <InputNumber min={0} max={1} step={0.1} disabled={!rerankEnabled} style={{ width: '100%' }} />
-                          </Form.Item>
+                          <Row gutter={16}>
+                            <Col span={12}>
+                              <Form.Item name="rerank_reranker_type" label="重排序器">
+                                <Select disabled={!rerankEnabled} options={[
+                                  { value: 'gguf', label: 'GGUF' },
+                                  { value: 'llm', label: 'LLM' },
+                                  { value: 'none', label: 'None' },
+                                ]} />
+                              </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                              <Form.Item name="rerank_rerank_top_k" label="重排序 Top-K">
+                                <InputNumber min={1} disabled={!rerankEnabled} style={{ width: '100%' }} />
+                              </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                              <Form.Item name="rerank_min_score" label="最小重排序分数">
+                                <InputNumber min={0} max={1} step={0.1} disabled={!rerankEnabled} style={{ width: '100%' }} />
+                              </Form.Item>
+                            </Col>
+                          </Row>
                         </Card>
 
                         <Card size="small" title="生成参数">
-                          <Form.Item name="generation_max_context_chars" label="最大上下文字符数" labelCol={{ span: 6 }} wrapperCol={{ span: 18 }}>
-                            <InputNumber min={500} max={50000} step={1000} />
+                          <Form.Item name="generation_max_context_chars" label="最大上下文字符数">
+                            <InputNumber min={500} max={50000} step={1000} style={{ width: '100%' }} />
                           </Form.Item>
                         </Card>
                       </Form>
@@ -1494,7 +1505,7 @@ export default function EvalPage() {
                   )}
 
                   {!editingConfig && !viewingConfig && (
-                    <div style={{ textAlign: 'center', paddingTop: 80 }}>
+                    <div className="empty-state">
                       <Text type="secondary">选择左侧的配置查看详情，或新建配置</Text>
                     </div>
                   )}
@@ -1507,7 +1518,7 @@ export default function EvalPage() {
             label: '评测历史',
             children: (
               <>
-                <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="flex-between" style={{ marginBottom: 12 }}>
                   <Space>
                     <Select
                       style={{ width: 200 }}
@@ -1528,7 +1539,7 @@ export default function EvalPage() {
 
                 {trendMetricOptions.length > 0 && (
                   <Card size="small" style={{ marginBottom: 12 }} bodyStyle={{ paddingBottom: 0 }}>
-                    <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div className="flex-between" style={{ marginBottom: 8 }}>
                       <Text type="secondary">指标趋势</Text>
                       <Select
                         size="small"
@@ -1547,9 +1558,9 @@ export default function EvalPage() {
                     <Card title="评测记录" size="small" bodyStyle={{ padding: 0, overflow: 'hidden' }}>
                       <div style={{ overflow: 'auto', maxHeight: 400 }}>
                         {evaluationsLoading ? (
-                          <div style={{ padding: '40px 16px', textAlign: 'center', color: '#bfbfbf', fontSize: 12 }}>加载中...</div>
+                          <div className="empty-state" style={{ fontSize: token.fontSizeSM }}>加载中...</div>
                         ) : evalPaged.length === 0 ? (
-                          <div style={{ padding: '40px 16px', textAlign: 'center', color: '#bfbfbf', fontSize: 12 }}>暂无评测记录</div>
+                          <div className="empty-state" style={{ fontSize: token.fontSizeSM }}>暂无评测记录</div>
                         ) : (
                           <Table
                             dataSource={evalPaged}
@@ -1576,17 +1587,13 @@ export default function EvalPage() {
                               onClick: () => view_evaluation(evaluation),
                               style: {
                                 cursor: 'pointer',
-                                background: selectedEvaluation?.id === evaluation.id ? '#e6f4ff' : undefined,
+                                background: selectedEvaluation?.id === evaluation.id ? token.colorPrimaryBg : undefined,
                               },
                             })}
                           />
                         )}
                       </div>
-                      <div style={{
-                        padding: '8px 16px', borderTop: '1px solid #f0f0f0',
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        fontSize: 12, color: '#8c8c8c', flexShrink: 0,
-                      }}>
+                      <div className="table-footer">
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <Checkbox
                             checked={evalAllSelected}
@@ -1597,7 +1604,7 @@ export default function EvalPage() {
                           </Checkbox>
                           {hasSelection && (
                             <>
-                              <span style={{ color: '#1677ff' }}>{selectedEvalIds.length} 项</span>
+                              <span style={{ color: token.colorPrimary }}>{selectedEvalIds.length} 项</span>
                               <Popconfirm
                                 title={`确定删除 ${selectedEvalIds.length} 条评测？`}
                                 onConfirm={handle_batch_delete_evals}
@@ -1678,14 +1685,14 @@ export default function EvalPage() {
                                   expandedRowRender: (record) => (
                                     <div style={{ padding: '8px 16px' }}>
                                       <Text strong>生成回答：</Text>
-                                      <div style={{ marginTop: 4, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+                                      <div style={{ marginTop: 4, padding: 8, background: token.colorFillTertiary, borderRadius: 4 }}>
                                         {record.generated_answer || '-'}
                                       </div>
                                       {record.retrieved_docs.length > 0 && (
                                         <>
                                           <Text strong style={{ marginTop: 8, display: 'block' }}>检索结果：</Text>
                                           {record.retrieved_docs.map((doc, i) => (
-                                            <div key={i} style={{ padding: 4, fontSize: 13 }}>
+                                            <div key={i} style={{ padding: 4, fontSize: token.fontSize }}>
                                               [{i + 1}] {doc.law_name} {doc.article_number}
                                             </div>
                                           ))}
@@ -1724,7 +1731,7 @@ export default function EvalPage() {
         open={editModalOpen}
         onCancel={() => setEditModalOpen(false)}
         onOk={save_sample}
-        width={600}
+        width={MODAL_MD}
       >
         <Form form={form} layout="vertical">
           {!editingSample && (
@@ -1761,7 +1768,7 @@ export default function EvalPage() {
         open={importModalOpen}
         onCancel={() => setImportModalOpen(false)}
         onOk={import_samples}
-        width={600}
+        width={MODAL_MD}
       >
         <Text type="secondary">粘贴 JSON 数组或 {"{samples: [...]}"} 格式</Text>
         <Input.TextArea
@@ -1797,7 +1804,7 @@ export default function EvalPage() {
         title="版本对比"
         open={compareModalOpen}
         onCancel={() => { setCompareModalOpen(false); setCompareResult(null); }}
-        width={800}
+        width={MODAL_LG}
         footer={null}
       >
         <Space style={{ marginBottom: 16 }}>
@@ -1836,9 +1843,9 @@ export default function EvalPage() {
                 { title: '基准', dataIndex: 'baseline', key: 'baseline', render: (v: number) => (v * 100).toFixed(2) + '%' },
                 { title: '对比', dataIndex: 'compare', key: 'compare', render: (v: number) => (v * 100).toFixed(2) + '%' },
                 { title: '变化', dataIndex: 'pct_change', key: 'pct_change',
-                  render: (v: number) => <span style={{ color: v > 0 ? '#52c41a' : v < 0 ? '#ff4d4f' : '#999' }}>{v > 0 ? '+' : ''}{v.toFixed(1)}%</span> },
+                  render: (v: number) => <span style={{ color: v > 0 ? token.colorSuccess : v < 0 ? token.colorError : token.colorTextTertiary }}>{v > 0 ? '+' : ''}{v.toFixed(1)}%</span> },
                 { title: '趋势', dataIndex: 'trend', key: 'trend', width: 60,
-                  render: (v: string) => <span style={{ color: v === '\u2191' ? '#52c41a' : v === '\u2193' ? '#ff4d4f' : '#999', fontWeight: 600 }}>{v}</span> },
+                  render: (v: string) => <span style={{ color: v === '\u2191' ? token.colorSuccess : v === '\u2193' ? token.colorError : token.colorTextTertiary, fontWeight: token.fontWeightStrong }}>{v}</span> },
               ]}
               size="small"
               pagination={false}
@@ -1854,7 +1861,7 @@ export default function EvalPage() {
         onCancel={() => { setConfigCompareOpen(false); setConfigCompareResult(null); }}
         width={Math.min(Math.max(500, 200 + configSelectedIds.length * 120), 1200)}
         footer={null}
-        styles={{ body: { maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' } }}
+        styles={{ body: { maxHeight: 'calc(100vh - var(--header-height) - 136px)', overflowY: 'auto' } }}
       >
         {!configCompareResult && (
           <div style={{ padding: '20px 0', textAlign: 'center' }}>
@@ -1875,7 +1882,7 @@ export default function EvalPage() {
               render: (_: unknown, r: { values: (string | number | boolean)[] }) => {
                 const val = r.values[idx];
                 const unique = new Set(r.values).size > 1;
-                return <span style={{ color: unique ? '#1677ff' : undefined, fontWeight: unique ? 600 : undefined }}>{String(val)}</span>;
+                return <span style={{ color: unique ? token.colorPrimary : undefined, fontWeight: unique ? token.fontWeightStrong : undefined }}>{String(val)}</span>;
               },
             })),
           ];

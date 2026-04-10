@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Input, Button, Radio, Popconfirm, Switch, Checkbox, message } from 'antd';
+import { Input, Button, Radio, Popconfirm, Switch, Checkbox, message, theme } from 'antd';
 import { SendOutlined, DeleteOutlined, CloseOutlined, BugOutlined, SearchOutlined } from '@ant-design/icons';
 import MessageBubble from './MessageBubble';
 import SourcePanel from './SourcePanel';
@@ -14,6 +14,7 @@ const MIN_TRACE_WIDTH = 360;
 const MAX_TRACE_WIDTH = 800;
 
 export default function ChatPanel() {
+  const { token } = theme.useToken();
   const [input, setInput] = React.useState('');
   const [mode, setMode] = React.useState<'qa' | 'search'>('qa');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -95,7 +96,7 @@ export default function ChatPanel() {
   const handleBatchDelete = async () => {
     try {
       await batchDeleteSessions(selectedSessionIds);
-      setSelectedConvIds([]);
+      setSelectedSessionIds([]);
       message.success('已删除');
     } catch {
       message.error('删除失败');
@@ -111,19 +112,19 @@ export default function ChatPanel() {
       <div
         style={{
           width: 220,
-          borderRight: '1px solid #f0f0f0',
+          borderRight: `1px solid ${token.colorBorderSecondary}`,
           overflow: 'auto',
           display: 'flex',
           flexDirection: 'column',
         }}
       >
-        <div style={{ padding: '8px 12px', fontWeight: 600, fontSize: 14 }}>
+        <div className="section-header">
           对话历史
         </div>
         <div style={{ padding: '0 8px 8px' }}>
           <Input
             placeholder="搜索会话..."
-            prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
+            prefix={<SearchOutlined style={{ color: token.colorTextQuaternary }} />}
             size="small"
             allowClear
             value={sessionSearch}
@@ -147,14 +148,12 @@ export default function ChatPanel() {
             <div
               key={session.id}
               onClick={() => selectSession(session.id)}
+              className="flex-between"
               style={{
                 padding: '8px 12px',
                 cursor: 'pointer',
-                background: currentSessionId === session.id ? '#e6f4ff' : '#fff',
-                borderBottom: '1px solid #f5f5f5',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
+                background: currentSessionId === session.id ? token.colorPrimaryBg : token.colorBgContainer,
+                borderBottom: `1px solid ${token.colorBorderSecondary}`,
               }}
             >
               <Checkbox
@@ -162,9 +161,9 @@ export default function ChatPanel() {
                 onClick={(e) => e.stopPropagation()}
                 onChange={(e) => {
                   if (e.target.checked) {
-                    setSelectedConvIds([...selectedSessionIds, session.id]);
+                    setSelectedSessionIds([...selectedSessionIds, session.id]);
                   } else {
-                    setSelectedConvIds(selectedSessionIds.filter((id) => id !== session.id));
+                    setSelectedSessionIds(selectedSessionIds.filter((id) => id !== session.id));
                   }
                 }}
                 style={{ marginRight: 4 }}
@@ -176,6 +175,7 @@ export default function ChatPanel() {
                   whiteSpace: 'nowrap',
                   flex: 1,
                   fontSize: 13,
+                  color: token.colorText,
                 }}
               >
                 {session.title || session.id}
@@ -193,7 +193,7 @@ export default function ChatPanel() {
                   size="small"
                   icon={<DeleteOutlined />}
                   onClick={(e) => e.stopPropagation()}
-                  style={{ color: '#999' }}
+                  style={{ color: token.colorTextTertiary }}
                 />
               </Popconfirm>
             </div>
@@ -204,7 +204,7 @@ export default function ChatPanel() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <div style={{ flex: 1, overflow: 'auto', padding: '16px 24px' }}>
           {messages.length === 0 && (
-            <div style={{ textAlign: 'center', color: '#999', marginTop: 100 }}>
+            <div className="empty-state" style={{ marginTop: 100 }}>
               <div style={{ fontSize: 24, marginBottom: 8 }}>法规问答</div>
               <div>输入问题，检索保险法规并获取带引用的回答</div>
             </div>
@@ -217,8 +217,8 @@ export default function ChatPanel() {
           <div ref={messagesEndRef} />
         </div>
 
-        <div style={{ borderTop: '1px solid #f0f0f0', padding: '12px 24px' }}>
-          <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ borderTop: `1px solid ${token.colorBorderSecondary}`, padding: '12px 24px' }}>
+          <div className="flex-between" style={{ marginBottom: 8 }}>
             <Radio.Group
               value={mode}
               onChange={(e) => setMode(e.target.value)}
@@ -227,7 +227,7 @@ export default function ChatPanel() {
               <Radio.Button value="qa">智能问答</Radio.Button>
               <Radio.Button value="search">精确检索</Radio.Button>
             </Radio.Group>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: debugMode ? '#1677ff' : '#8c8c8c' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: debugMode ? token.colorPrimary : token.colorTextTertiary }}>
               <BugOutlined />
               <span>调试</span>
               <Switch size="small" checked={debugMode} onChange={toggleDebugMode} />
@@ -267,15 +267,15 @@ export default function ChatPanel() {
             style={{
               width: 4,
               cursor: 'col-resize',
-              background: dragging ? '#1677ff' : 'transparent',
-              borderLeft: '1px solid #e8e8e8',
+              background: dragging ? token.colorPrimary : 'transparent',
+              borderLeft: `1px solid ${token.colorBorderSecondary}`,
               transition: dragging ? 'none' : 'background 0.2s',
               position: 'relative',
               flexShrink: 0,
             }}
             onMouseEnter={(e) => {
               if (!dragging) {
-                (e.currentTarget as HTMLDivElement).style.background = '#d9d9d9';
+                (e.currentTarget as HTMLDivElement).style.background = token.colorBorder;
               }
             }}
             onMouseLeave={(e) => {
@@ -293,8 +293,8 @@ export default function ChatPanel() {
                 transform: 'translateY(-50%)',
                 width: 6,
                 height: 32,
-                borderRadius: 3,
-                background: dragging ? '#1677ff' : '#d9d9d9',
+                borderRadius: 4,
+                background: dragging ? token.colorPrimary : token.colorBorder,
                 opacity: 0.6,
                 transition: dragging ? 'none' : 'opacity 0.2s',
               }}
@@ -309,19 +309,17 @@ export default function ChatPanel() {
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
-              background: '#fff',
+              background: token.colorBgContainer,
             }}
           >
             <div
+              className="section-header flex-between"
               style={{
                 padding: '10px 16px',
-                borderBottom: '1px solid #f0f0f0',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
+                borderBottom: `1px solid ${token.colorBorderSecondary}`,
               }}
             >
-              <span style={{ fontWeight: 600, fontSize: 14, color: '#262626' }}>
+              <span style={{ fontWeight: token.fontWeightStrong, fontSize: 14, color: token.colorText }}>
                 调试
               </span>
               <Button
@@ -329,7 +327,7 @@ export default function ChatPanel() {
                 size="small"
                 icon={<CloseOutlined />}
                 onClick={closeTrace}
-                style={{ color: '#8c8c8c' }}
+                style={{ color: token.colorTextTertiary }}
               />
             </div>
             <div style={{ flex: 1, overflow: 'auto' }}>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button, Select, Input, Space, message } from 'antd';
+import { Button, Select, Input, Space, message, theme } from 'antd';
 import { LikeOutlined, DislikeOutlined } from '@ant-design/icons';
 import * as feedbackApi from '../api/feedback';
 
@@ -18,6 +18,7 @@ interface Props {
 }
 
 export default function FeedbackButtons({ messageId, existingFeedback }: Props) {
+  const { token } = theme.useToken();
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(existingFeedback || null);
   const [showReason, setShowReason] = useState(false);
   const [reason, setReason] = useState('');
@@ -54,7 +55,7 @@ export default function FeedbackButtons({ messageId, existingFeedback }: Props) 
 
   if (feedback === 'up' && !showReason) {
     return (
-      <Button type="text" size="small" icon={<LikeOutlined />} style={{ color: '#52c41a' }}>
+      <Button type="text" size="small" icon={<LikeOutlined />} style={{ color: token.colorSuccess }}>
         已标记有用
       </Button>
     );
@@ -69,7 +70,7 @@ export default function FeedbackButtons({ messageId, existingFeedback }: Props) 
           icon={<LikeOutlined />}
           onClick={handleUpClick}
           disabled={submitting}
-          style={{ color: feedback === 'up' ? '#52c41a' : undefined }}
+          style={{ color: feedback === 'up' ? token.colorSuccess : undefined }}
         >
           有用
         </Button>
@@ -79,7 +80,7 @@ export default function FeedbackButtons({ messageId, existingFeedback }: Props) 
           icon={<DislikeOutlined />}
           onClick={handleDownClick}
           disabled={submitting}
-          style={{ color: feedback === 'down' ? '#ff4d4f' : undefined }}
+          style={{ color: feedback === 'down' ? token.colorError : undefined }}
         >
           有问题
         </Button>

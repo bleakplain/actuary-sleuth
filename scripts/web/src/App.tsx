@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
+import { appTheme } from './theme';
 import AppLayout from './components/AppLayout';
 import AskPage from './pages/AskPage';
 import KnowledgePage from './pages/KnowledgePage';
@@ -11,7 +12,7 @@ import ObservabilityPage from './pages/ObservabilityPage';
 
 export default function App() {
   return (
-    <ConfigProvider locale={zhCN}>
+    <ConfigProvider locale={zhCN} theme={appTheme}>
       <BrowserRouter>
         <Routes>
           <Route element={<AppLayout />}>

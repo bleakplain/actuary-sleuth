@@ -1,7 +1,9 @@
 import { useState, useCallback } from 'react';
 import { CopyOutlined } from '@ant-design/icons';
+import { theme } from 'antd';
 
 export default function CopyBtn({ text }: { text: string }) {
+  const { token } = theme.useToken();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback((e: React.MouseEvent) => {
@@ -30,7 +32,7 @@ export default function CopyBtn({ text }: { text: string }) {
 
   return (
     <CopyOutlined
-      style={{ fontSize: 11, color: '#d9d9d9', cursor: 'pointer', marginLeft: 4 }}
+      style={{ fontSize: 11, color: token.colorBorder, cursor: 'pointer', marginLeft: 4 }}
       onClick={handleCopy}
       title={copied ? '已复制' : '复制'}
     />

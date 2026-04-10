@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Card, Form, Input, Button, Table, Tag, Typography,
+  Card, Form, Input, Button, Table, Tag, Typography, theme,
   message, Tabs, Space, Descriptions, Popconfirm, Drawer,
 } from 'antd';
 import {
@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons';
 import * as complianceApi from '../api/compliance';
 import type { ComplianceReport, ComplianceItem, Source } from '../types';
+import { DRAWER_MD } from '../constants/layout';
 
 const { Title } = Typography;
 const { TextArea } = Input;
@@ -30,13 +31,15 @@ function SourceDrawer({
   excerpt?: string;
   onClose: () => void;
 }) {
+  const { token } = theme.useToken();
+
   if (!source) return null;
 
   return (
     <Drawer
       title={<Space><BookOutlined />法规来源详情</Space>}
       placement="right"
-      width={560}
+      width={DRAWER_MD}
       open={visible}
       onClose={onClose}
     >
@@ -72,12 +75,12 @@ function SourceDrawer({
           </Typography.Text>
           <div
             style={{
-              background: '#e6f7ff',
-              border: '1px solid #91d5ff',
+              background: token.colorPrimaryBg,
+              border: `1px solid ${token.colorPrimaryBorder}`,
               borderRadius: 4,
               padding: '8px 12px',
-              color: '#0050b3',
-              fontSize: 13,
+              color: token.colorPrimaryText,
+              fontSize: token.fontSize,
             }}
           >
             {excerpt}
@@ -91,14 +94,14 @@ function SourceDrawer({
         </Typography.Text>
         <div
           style={{
-            background: '#fafafa',
-            border: '1px solid #d9d9d9',
+            background: token.colorFillQuaternary,
+            border: `1px solid ${token.colorBorder}`,
             borderRadius: 4,
             padding: '12px',
             maxHeight: 300,
             overflow: 'auto',
             whiteSpace: 'pre-wrap',
-            fontSize: 13,
+            fontSize: token.fontSize,
           }}
         >
           {source.content}
@@ -227,7 +230,7 @@ export default function CompliancePage() {
       },
     },
     {
-      title: '建议', dataIndex: 'suggestion', key: 'suggestion', ellipsis: true,
+      title: '建议', dataIndex: 'suggestion', key: 'suggestion', ellipsis: true, width: 200,
     },
   ];
 
@@ -262,7 +265,7 @@ export default function CompliancePage() {
 
   return (
     <div>
-      <Title level={4} style={{ marginBottom: 16 }}>合规检查助手</Title>
+      <Title level={4} className="mb-16">合规检查助手</Title>
 
       <Tabs
         activeKey={activeTab}
@@ -319,7 +322,7 @@ export default function CompliancePage() {
                 loading={historyLoading}
                 rowKey="id"
                 size="small"
-                pagination={{ pageSize: 10 }}
+                pagination={{ pageSize: 20 }}
                 onRow={(record) => ({
                   onClick: () => handleSelectReport(record),
                   style: { cursor: 'pointer' },
@@ -350,7 +353,7 @@ export default function CompliancePage() {
 
       {result && summary && (
         <div ref={reportRef}>
-        <Card title={`检查报告 - ${currentReport?.product_name || ''}`} style={{ marginTop: 16 }}>
+        <Card title={`检查报告 - ${currentReport?.product_name || ''}`} className="mt-16">
           <Descriptions size="small" style={{ marginBottom: 16 }}>
             <Descriptions.Item label="模式">
               {currentReport?.mode === 'product' ? '产品参数检查' : '条款文档审查'}
@@ -359,13 +362,13 @@ export default function CompliancePage() {
           </Descriptions>
 
           <Space size="large" style={{ marginBottom: 16 }}>
-            <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 14, padding: '4px 12px' }}>
+            <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: token.fontSize, padding: '4px 12px' }}>
               合规 {summary.compliant} 项
             </Tag>
-            <Tag color="error" icon={<CloseCircleOutlined />} style={{ fontSize: 14, padding: '4px 12px' }}>
+            <Tag color="error" icon={<CloseCircleOutlined />} style={{ fontSize: token.fontSize, padding: '4px 12px' }}>
               不合规 {summary.non_compliant} 项
             </Tag>
-            <Tag color="warning" icon={<ExclamationCircleOutlined />} style={{ fontSize: 14, padding: '4px 12px' }}>
+            <Tag color="warning" icon={<ExclamationCircleOutlined />} style={{ fontSize: token.fontSize, padding: '4px 12px' }}>
               需关注 {summary.attention} 项
             </Tag>
           </Space>
@@ -374,7 +377,7 @@ export default function CompliancePage() {
             dataSource={result.items || []}
             columns={itemColumns}
             rowKey={(r: ComplianceItem) => r.param}
-            size="middle"
+            size="small"
             pagination={false}
             rowClassName={(record: ComplianceItem) => {
               if (record.status === 'non_compliant') return 'ant-table-row-error';

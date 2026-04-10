@@ -1,5 +1,6 @@
-import { Drawer, Typography, Empty } from 'antd';
+import { Drawer, Typography, Empty, theme } from 'antd';
 import type { Source } from '../types';
+import { DRAWER_SM } from '../constants/layout';
 
 const { Text, Paragraph } = Typography;
 
@@ -12,11 +13,13 @@ interface Props {
 }
 
 export default function SourcePanel({ open, sources, selectedSource, onSelect, onClose }: Props) {
+  const { token } = theme.useToken();
+
   return (
     <Drawer
       title="法规来源"
       placement="right"
-      width={420}
+      width={DRAWER_SM}
       open={open}
       onClose={onClose}
     >
@@ -30,11 +33,11 @@ export default function SourcePanel({ open, sources, selectedSource, onSelect, o
               onClick={() => onSelect(s)}
               style={{
                 padding: 12,
-                border: '1px solid #f0f0f0',
-                borderRadius: 8,
+                border: `1px solid ${token.colorBorderSecondary}`,
+                borderRadius: token.borderRadiusLG,
                 cursor: 'pointer',
-                background: selectedSource === s ? '#e6f4ff' : '#fff',
-                borderLeft: selectedSource === s ? '3px solid #1677ff' : '3px solid transparent',
+                background: selectedSource === s ? token.colorPrimaryBg : token.colorBgContainer,
+                borderLeft: selectedSource === s ? `3px solid ${token.colorPrimary}` : '3px solid transparent',
               }}
             >
               <Text strong>
@@ -47,7 +50,7 @@ export default function SourcePanel({ open, sources, selectedSource, onSelect, o
               )}
               <Paragraph
                 ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}
-                style={{ marginTop: 4, marginBottom: 0, fontSize: 13 }}
+                style={{ marginTop: 4, marginBottom: 0, fontSize: token.fontSizeSM }}
               >
                 {s.content}
               </Paragraph>

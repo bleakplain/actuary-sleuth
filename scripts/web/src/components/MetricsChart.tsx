@@ -5,6 +5,7 @@ import {
   PolarAngleAxis, PolarRadiusAxis, LineChart, Line, Legend,
 } from 'recharts';
 import { resolveMetricMeta, stripCategoryPrefix } from '../utils/evalMetrics';
+import { CHART_COLORS } from '../constants/chartColors';
 
 interface MetricItem {
   name: string;
@@ -28,8 +29,8 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
-  retrieval: '#1677ff',
-  generation: '#52c41a',
+  retrieval: CHART_COLORS.retrieval,
+  generation: CHART_COLORS.generation,
 };
 
 function groupByCategory(items: MetricItem[]): Record<string, MetricItem[]> {
@@ -83,7 +84,7 @@ export default function MetricsChart({ metrics, title = '评测指标', k }: Pro
               <XAxis dataKey="name" tick={{ fontSize: 11 }} />
               <YAxis domain={[0, 100]} />
               <RechartsTooltip formatter={(v) => `${Number(v)}%`} />
-              <Bar dataKey="value" fill={CATEGORY_COLORS[category] || '#1677ff'} />
+              <Bar dataKey="value" fill={CATEGORY_COLORS[category] || CHART_COLORS.primary} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -135,8 +136,8 @@ export function ComparisonChart({ data, title = '指标对比', k }: ComparisonC
               <PolarGrid />
               <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11 }} />
               <PolarRadiusAxis domain={[0, 100]} />
-              <Radar name="基准" dataKey="baseline" stroke="#1677ff" fill="#1677ff" fillOpacity={0.2} />
-              <Radar name="对比" dataKey="compare" stroke="#52c41a" fill="#52c41a" fillOpacity={0.2} />
+              <Radar name="基准" dataKey="baseline" stroke={CHART_COLORS.primary} fill={CHART_COLORS.primary} fillOpacity={0.2} />
+              <Radar name="对比" dataKey="compare" stroke={CHART_COLORS.success} fill={CHART_COLORS.success} fillOpacity={0.2} />
               <Legend />
               <RechartsTooltip />
             </RadarChart>
@@ -161,8 +162,8 @@ export function ComparisonChart({ data, title = '指标对比', k }: ComparisonC
                 <YAxis domain={[0, 100]} />
                 <RechartsTooltip formatter={(v) => `${Number(v)}%`} />
                 <Legend />
-                <Bar dataKey="baseline" fill="#1677ff" name="基准" />
-                <Bar dataKey="compare" fill="#52c41a" name="对比" />
+                <Bar dataKey="baseline" fill={CHART_COLORS.primary} name="基准" />
+                <Bar dataKey="compare" fill={CHART_COLORS.success} name="对比" />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -203,7 +204,7 @@ export function TrendChart({ data, metricName, title = '指标趋势' }: TrendCh
           <XAxis dataKey="label" tick={{ fontSize: 11 }} />
           <YAxis domain={[0, 100]} />
           <RechartsTooltip formatter={(v) => `${metricName || '指标'}: ${Number(v)}%`} />
-          <Line type="monotone" dataKey="value" stroke="#1677ff" strokeWidth={2} dot={{ r: 4 }} />
+          <Line type="monotone" dataKey="value" stroke={CHART_COLORS.primary} strokeWidth={2} dot={{ r: 4 }} />
         </LineChart>
       </ResponsiveContainer>
     </Card>

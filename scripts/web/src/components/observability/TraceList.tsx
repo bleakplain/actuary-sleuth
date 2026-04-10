@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { Input, Button, Checkbox, Popconfirm, message } from 'antd';
+import { Input, Button, Checkbox, Popconfirm, message, theme } from 'antd';
 import { SearchOutlined, DeleteOutlined, ClearOutlined } from '@ant-design/icons';
 import { useObservabilityStore } from '../../stores/observabilityStore';
 import type { Dayjs } from 'dayjs';
@@ -35,6 +35,7 @@ function loadColumnWidths(): Record<string, number> {
 }
 
 export default function TraceList() {
+  const { token } = theme.useToken();
   const {
     traceList, traceTotal, tracePage,
     selectedTraceId, selectTrace,
@@ -133,7 +134,7 @@ export default function TraceList() {
     switch (key) {
       case 'time':
         return (
-          <span style={{ color: '#8c8c8c', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+          <span style={{ color: token.colorTextTertiary, fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
             {fmtTime(item.created_at)}
           </span>
         );
@@ -141,7 +142,7 @@ export default function TraceList() {
         return (
           <span style={{
             fontFamily: "'SF Mono','Menlo','Consolas',monospace",
-            fontSize: 12, color: '#262626',
+            fontSize: 12, color: token.colorText,
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }} title={item.trace_id}>
             {item.trace_id}
@@ -150,27 +151,27 @@ export default function TraceList() {
       case 'name':
         return (
           <span style={{
-            color: '#262626', fontSize: 13,
+            color: token.colorText, fontSize: 13,
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }} title={item.trace_name || undefined}>
             {item.trace_name || '-'}
           </span>
         );
       case 'spans':
-        return <span style={{ color: '#8c8c8c', fontSize: 12 }}>{item.span_count}</span>;
+        return <span style={{ color: token.colorTextTertiary, fontSize: 12 }}>{item.span_count}</span>;
       case 'llmCalls':
-        return <span style={{ color: '#8c8c8c', fontSize: 12 }}>{item.llm_call_count}</span>;
+        return <span style={{ color: token.colorTextTertiary, fontSize: 12 }}>{item.llm_call_count}</span>;
       case 'latency':
         return (
           <span style={{
-            color: item.status === 'error' ? '#ff4d4f' : '#52c41a',
+            color: item.status === 'error' ? token.colorError : token.colorSuccess,
             fontSize: 12, fontVariantNumeric: 'tabular-nums',
             position: 'relative',
           }}>
             <span style={{
               position: 'absolute', left: 0, top: 4, bottom: 4,
               width: `${Math.max((item.total_duration_ms / maxDuration) * 100, 2)}%`,
-              background: item.status === 'error' ? 'rgba(255,77,79,0.1)' : 'rgba(82,196,26,0.1)',
+              background: item.status === 'error' ? token.colorErrorBg : token.colorSuccessBg,
               borderRadius: 2,
             }} />
             <span style={{ position: 'relative' }}>{fmtDuration(item.total_duration_ms)}</span>
@@ -191,10 +192,10 @@ export default function TraceList() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Filter bar */}
-      <div style={{
-        padding: '10px 16px', borderBottom: '1px solid #f0f0f0',
-        display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
-      }}>
+      <div
+        className="section-header"
+        style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}
+      >
         <Input
           placeholder="Trace ID"
           size="small"
@@ -216,11 +217,15 @@ export default function TraceList() {
       </div>
 
       {/* Table header */}
-      <div style={{
-        padding: '6px 16px', borderBottom: '1px solid #f0f0f0', background: '#fafafa',
-        display: 'flex', alignItems: 'center', fontSize: 12, color: '#8c8c8c',
-        flexShrink: 0,
-      }}>
+      <div
+        className="section-header"
+        style={{
+          padding: '6px 16px', background: token.colorFillQuaternary,
+          fontSize: 12, color: token.colorTextTertiary,
+          display: 'flex', alignItems: 'center',
+          flexShrink: 0,
+        }}
+      >
         <span style={{ width: 28, flexShrink: 0 }} />
         {COLUMNS.map((col) => (
           <span key={col.key} data-col={col.key} style={{ ...colStyle(col), position: 'relative', overflow: 'visible' }}>
@@ -239,7 +244,7 @@ export default function TraceList() {
       {/* List */}
       <div style={{ flex: 1, overflow: 'auto' }}>
         {traceList.length === 0 && (
-          <div style={{ padding: '40px 16px', textAlign: 'center', color: '#bfbfbf', fontSize: 12 }}>
+          <div className="empty-state" style={{ fontSize: 12 }}>
             暂无 Trace 数据
           </div>
         )}
@@ -250,15 +255,15 @@ export default function TraceList() {
             style={{
               padding: '6px 16px',
               cursor: 'pointer',
-              background: selectedTraceId === item.trace_id ? '#e6f4ff' : '#fff',
-              borderBottom: '1px solid #f5f5f5',
+              background: selectedTraceId === item.trace_id ? token.colorPrimaryBg : token.colorBgContainer,
+              borderBottom: `1px solid ${token.colorBorderSecondary}`,
               display: 'flex',
               alignItems: 'center',
               fontSize: 13,
               transition: 'background 0.15s',
             }}
-            onMouseEnter={(e) => { if (selectedTraceId !== item.trace_id) e.currentTarget.style.background = '#fafafa'; }}
-            onMouseLeave={(e) => { if (selectedTraceId !== item.trace_id) e.currentTarget.style.background = '#fff'; }}
+            onMouseEnter={(e) => { if (selectedTraceId !== item.trace_id) e.currentTarget.style.background = token.colorFillQuaternary; }}
+            onMouseLeave={(e) => { if (selectedTraceId !== item.trace_id) e.currentTarget.style.background = token.colorBgContainer; }}
           >
             <span style={{ width: 28, flexShrink: 0 }}>
               <Checkbox
@@ -281,11 +286,7 @@ export default function TraceList() {
       </div>
 
       {/* Bottom bar */}
-      <div style={{
-        padding: '8px 16px', borderTop: '1px solid #f0f0f0',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        fontSize: 12, color: '#8c8c8c', flexShrink: 0,
-      }}>
+      <div className="table-footer">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Checkbox
             checked={allSelected}
@@ -296,7 +297,7 @@ export default function TraceList() {
           </Checkbox>
           {hasSelection && (
             <>
-              <span style={{ color: '#1677ff' }}>{selectedIds.length} 项</span>
+              <span style={{ color: token.colorPrimary }}>{selectedIds.length} 项</span>
               <Popconfirm title={`确定删除 ${selectedIds.length} 条 trace？`} onConfirm={handleBatchDelete}>
                 <Button type="primary" danger size="small" icon={<DeleteOutlined />}>删除</Button>
               </Popconfirm>

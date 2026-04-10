@@ -1,7 +1,8 @@
 import React, { useEffect } from 'react';
-import { Table, Tag, Select, Button, Space, message, Popconfirm, Modal, Descriptions, Card, Statistic, Row, Col, Tooltip } from 'antd';
+import { Table, Tag, Select, Button, Space, message, Popconfirm, Modal, Descriptions, Card, Statistic, Row, Col, Tooltip, Typography, theme } from 'antd';
 import { ReloadOutlined, ThunderboltOutlined, DislikeOutlined, LikeOutlined, WarningOutlined } from '@ant-design/icons';
 import { useFeedbackStore } from '../stores/feedbackStore';
+import { DRAWER_LG } from '../constants/layout';
 import { verifyBadcase, convertBadcase } from '../api/feedback';
 
 const TYPE_COLORS: Record<string, string> = {
@@ -19,6 +20,7 @@ const RISK_LABELS: Record<number, string> = { 0: '低', 1: '中', 2: '高' };
 
 export default function FeedbackPage() {
   const { badcases, stats, loading, loadBadcases, loadStats, classifyAll, updateBadcase } = useFeedbackStore();
+  const { token } = theme.useToken();
   const [filterStatus, setFilterStatus] = React.useState<string | undefined>();
 
   useEffect(() => { loadBadcases({ status: filterStatus }); }, [filterStatus, loadBadcases]);
@@ -37,7 +39,7 @@ export default function FeedbackPage() {
     <div style={{ padding: '8px 16px' }}>
       <Descriptions bordered size="small" column={1}>
         <Descriptions.Item label="用户问题">
-          <span style={{ fontWeight: 500 }}>{record.user_question || '（无法获取）'}</span>
+          <span style={{ fontWeight: token.fontWeightStrong }}>{record.user_question || '（无法获取）'}</span>
         </Descriptions.Item>
         <Descriptions.Item label="助手回答">
           <div style={{ maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
@@ -51,7 +53,7 @@ export default function FeedbackPage() {
               : <Tag icon={<DislikeOutlined />} color="red">不满意</Tag>}
             {record.reason && <span>原因：{record.reason}</span>}
             {record.correction && (
-              <span>修正建议：<span style={{ color: '#1890ff' }}>{record.correction}</span></span>
+              <span>修正建议：<span style={{ color: token.colorPrimary }}>{record.correction}</span></span>
             )}
           </Space>
         </Descriptions.Item>
@@ -84,7 +86,7 @@ export default function FeedbackPage() {
   const columns = [
     { title: 'ID', dataIndex: 'id', key: 'id', width: 140, ellipsis: true },
     {
-      title: '问题摘要', dataIndex: 'user_question', key: 'user_question', width: 220, ellipsis: true,
+      title: '问题摘要', dataIndex: 'user_question', key: 'user_question', ellipsis: true,
       render: (q: string) => q || '-',
     },
     {
@@ -122,15 +124,15 @@ export default function FeedbackPage() {
               const result = await verifyBadcase(record.id);
               Modal.info({
                 title: '验证结果',
-                width: 700,
+                width: DRAWER_LG,
                 content: (
                   <div>
-                    <h4>新回答:</h4>
+                    <Typography.Text strong>新回答：</Typography.Text>
                     <p>{result.new_answer}</p>
                     <p>忠实度: {result.new_faithfulness != null ? (result.new_faithfulness as number).toFixed(2) : '未计算'}</p>
                     {result.new_unverified_claims?.length > 0 && (
                       <>
-                        <h4>未验证陈述:</h4>
+                        <Typography.Text strong>未验证陈述：</Typography.Text>
                         <ul>{(result.new_unverified_claims as string[]).map((c, i) => <li key={i}>{c}</li>)}</ul>
                       </>
                     )}
@@ -176,40 +178,40 @@ export default function FeedbackPage() {
     .filter(([k]) => k !== '0').reduce((sum, [, v]) => sum + v, 0);
 
   return (
-    <div style={{ padding: 24 }}>
-      <h2 style={{ marginBottom: 16 }}>问题反馈</h2>
+    <div>
+      <Typography.Title level={4} className="mb-16">问题反馈</Typography.Title>
 
       {/* 统计概览 */}
       {stats && (
         <Row gutter={16} style={{ marginBottom: 24 }}>
-          <Col span={4}>
+          <Col span={8}>
             <Card size="small"><Statistic title="总反馈" value={stats.total} /></Card>
           </Col>
-          <Col span={4}>
-            <Card size="small"><Statistic title="好评" value={stats.up_count} valueStyle={{ color: '#52c41a' }} /></Card>
+          <Col span={8}>
+            <Card size="small"><Statistic title="好评" value={stats.up_count} valueStyle={{ color: token.colorSuccess }} /></Card>
           </Col>
-          <Col span={4}>
-            <Card size="small"><Statistic title="差评" value={stats.down_count} valueStyle={{ color: '#ff4d4f' }} /></Card>
+          <Col span={8}>
+            <Card size="small"><Statistic title="差评" value={stats.down_count} valueStyle={{ color: token.colorError }} /></Card>
           </Col>
-          <Col span={4}>
+          <Col span={8}>
             <Card size="small"><Statistic title="满意度" value={stats.satisfaction_rate * 100} suffix="%" precision={1} /></Card>
           </Col>
-          <Col span={4}>
+          <Col span={8}>
             <Tooltip title="待分类的反馈数量">
-              <Card size="small"><Statistic title="待处理" value={pendingCount} valueStyle={{ color: pendingCount > 0 ? '#faad14' : undefined }} /></Card>
+              <Card size="small"><Statistic title="待处理" value={pendingCount} valueStyle={{ color: pendingCount > 0 ? token.colorWarning : undefined }} /></Card>
             </Tooltip>
           </Col>
-          <Col span={4}>
+          <Col span={8}>
             <Tooltip title="合规风险为中/高的反馈数量">
-              <Card size="small"><Statistic title="高风险" value={highRiskCount} prefix={<WarningOutlined />} valueStyle={{ color: highRiskCount > 0 ? '#ff4d4f' : undefined }} /></Card>
+              <Card size="small"><Statistic title="高风险" value={highRiskCount} prefix={<WarningOutlined />} valueStyle={{ color: highRiskCount > 0 ? token.colorError : undefined }} /></Card>
             </Tooltip>
           </Col>
         </Row>
       )}
 
       {/* Badcase 列表 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-        <span style={{ color: '#666', fontSize: 13 }}>
+      <div className="flex-between" style={{ marginBottom: 16 }}>
+        <span style={{ color: token.colorTextSecondary, fontSize: token.fontSize }}>
           共 {badcases.length} 条反馈，点击行展开查看详情
         </span>
         <Space>

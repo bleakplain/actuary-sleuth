@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Layout, Menu } from 'antd';
+import { Layout, Menu, ConfigProvider, theme } from 'antd';
 import {
   MessageOutlined,
   DatabaseOutlined,
@@ -9,8 +9,28 @@ import {
   ExperimentOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
+import { sidebarDarkTheme } from '../theme';
 
 const { Sider, Content, Header } = Layout;
+
+function SidebarLogo({ collapsed }: { collapsed: boolean }) {
+  const { token } = theme.useToken();
+  return (
+    <div
+      style={{
+        height: 48,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderBottom: `1px solid ${token.colorBorder}`,
+      }}
+    >
+      <span style={{ fontWeight: token.fontWeightStrong, fontSize: collapsed ? 14 : 16, color: token.colorText }}>
+        {collapsed ? 'AS' : '精算助手'}
+      </span>
+    </div>
+  );
+}
 
 const menuItems = [
   { key: '/ask', icon: <MessageOutlined />, label: '法规问答' },
@@ -25,52 +45,40 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+  const { token } = theme.useToken();
 
   const selectedKey = menuItems.find((item) => location.pathname.startsWith(item.key))?.key || '/ask';
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider
-        collapsible
-        collapsed={collapsed}
-        onCollapse={setCollapsed}
-        theme="light"
-        style={{ borderRight: '1px solid #f0f0f0' }}
-      >
-        <div
-          style={{
-            height: 48,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderBottom: '1px solid #f0f0f0',
-          }}
+      <ConfigProvider theme={sidebarDarkTheme}>
+        <Sider
+          collapsible
+          collapsed={collapsed}
+          onCollapse={setCollapsed}
+          theme="dark"
         >
-          <span style={{ fontWeight: 600, fontSize: collapsed ? 14 : 16 }}>
-            {collapsed ? 'AS' : '精算助手'}
-          </span>
-        </div>
-        <Menu
-          mode="inline"
-          selectedKeys={[selectedKey]}
-          items={menuItems}
-          onClick={({ key }) => navigate(key)}
-          style={{ borderRight: 0 }}
-        />
-      </Sider>
+          <SidebarLogo collapsed={collapsed} />
+          <Menu
+            mode="inline"
+            selectedKeys={[selectedKey]}
+            items={menuItems}
+            onClick={({ key }) => navigate(key)}
+            style={{ borderRight: 0 }}
+          />
+        </Sider>
+      </ConfigProvider>
       <Layout>
         <Header
           style={{
-            background: '#fff',
             padding: '0 24px',
-            borderBottom: '1px solid #f0f0f0',
             display: 'flex',
             alignItems: 'center',
           }}
         >
-          <span style={{ fontSize: 16, fontWeight: 500 }}>精算法规知识平台</span>
+          <span style={{ fontSize: 16, fontWeight: token.fontWeightStrong }}>精算法规知识平台</span>
         </Header>
-        <Content style={{ margin: 16, overflow: 'auto' }}>
+        <Content style={{ margin: 'var(--content-padding)', overflow: 'auto' }}>
           <Outlet />
         </Content>
       </Layout>
