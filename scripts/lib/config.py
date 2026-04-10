@@ -145,7 +145,15 @@ class DatabaseConfig:
 
     @property
     def eval_snapshots_dir(self) -> str:
-        return self._config.get('eval_snapshots_dir', '../../data/eval_snapshots')
+        return self._config.get('eval_snapshots_dir', '')
+
+    @property
+    def models_dir(self) -> str:
+        return self._config.get('models_dir', '')
+
+    @property
+    def tools_dir(self) -> str:
+        return self._config.get('tools_dir', '')
 
 
 # ===== 场景化 LLM 配置 =====
@@ -301,6 +309,12 @@ class Config:
     def get_eval_snapshots_dir(self) -> str:
         return self._resolve_path(self._data_paths.eval_snapshots_dir)
 
+    def get_models_dir(self) -> str:
+        return self._resolve_path(self._data_paths.models_dir)
+
+    def get_tools_dir(self) -> str:
+        return self._resolve_path(self._data_paths.tools_dir)
+
 
 # ===== 全局配置实例（单例模式）=====
 
@@ -336,6 +350,12 @@ def get_kb_version_dir() -> str:
 
 def get_eval_snapshots_dir() -> str:
     return get_config().get_eval_snapshots_dir()
+
+def get_models_dir() -> str:
+    return get_config().get_models_dir()
+
+def get_tools_dir() -> str:
+    return get_config().get_tools_dir()
 
 def get_llm_config() -> LLMConfig:
     return get_config().llm

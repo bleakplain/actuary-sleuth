@@ -23,11 +23,10 @@ def _ensure_knowledge_base():
 
     # 无版本时从当前 references 创建 v1
     if not kb_mgr.list_versions():
-        working_config = RAGConfig()
-        refs_dir = Path(working_config.regulations_dir)
+        from lib.config import get_regulations_dir
+        refs_dir = Path(get_regulations_dir())
         if refs_dir.exists() and list(refs_dir.glob("**/*.md")):
             kb_mgr.create_version(
-                regulations_dir=working_config.regulations_dir,
                 description="初始版本",
             )
         else:

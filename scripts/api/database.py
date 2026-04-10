@@ -140,7 +140,6 @@ CREATE TABLE IF NOT EXISTS kb_versions (
     document_count INTEGER NOT NULL DEFAULT 0,
     chunk_count INTEGER NOT NULL DEFAULT 0,
     description TEXT NOT NULL DEFAULT '',
-    regulations_dir TEXT NOT NULL DEFAULT '',
     active INTEGER NOT NULL DEFAULT 0
 );
 

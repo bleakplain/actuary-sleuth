@@ -30,10 +30,6 @@ scripts/.coverage
 node_modules/
 package-lock.json
 
-# Database (runtime data, not source)
-data/
-scripts/lib/rag_engine/data/kb/
-
 # Environment variables (contains sensitive data)
 .env
 .env.local
@@ -49,8 +45,4 @@ scripts/.vite/
 # Playwright / test results
 scripts/web/test-results/
 scripts/test-results/
-
-# Reranker model files (large binaries, not tracked)
-scripts/lib/rag_engine/models/
-scripts/lib/rag_engine/tools/
 

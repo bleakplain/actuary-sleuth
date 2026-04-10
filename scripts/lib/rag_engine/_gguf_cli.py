@@ -14,10 +14,6 @@ from typing import Dict, List, Optional
 import numpy as np
 from safetensors import safe_open
 
-_MODULE_DIR = Path(__file__).parent
-_DATA_DIR = _MODULE_DIR / "models" / "reranker"
-_TOOLS_DIR = _MODULE_DIR / "tools" / "hanxiao-llama.cpp"
-
 
 class MLPProjector:
     """MLP projector to project hidden states to embedding space."""
@@ -95,9 +91,14 @@ class GGUFReranker:
         projector_path: Optional[str] = None,
         llama_embedding_path: Optional[str] = None,
     ):
-        model_path = model_path or str(_DATA_DIR / "jina-reranker-v3-Q4_K_M.gguf")
-        projector_path = projector_path or str(_DATA_DIR / "projector.safetensors")
-        llama_embedding_path = llama_embedding_path or str(_TOOLS_DIR / "build" / "bin" / "llama-embedding")
+        from lib.config import get_models_dir, get_tools_dir
+
+        models_dir = get_models_dir()
+        tools_dir = get_tools_dir()
+
+        model_path = model_path or str(Path(models_dir) / "jina-reranker-v3-Q4_K_M.gguf")
+        projector_path = projector_path or str(Path(models_dir) / "projector.safetensors")
+        llama_embedding_path = llama_embedding_path or str(Path(tools_dir) / "build" / "bin" / "llama-embedding")
 
         for path, label in [(model_path, "model"), (projector_path, "projector"), (llama_embedding_path, "llama-embedding")]:
             if not os.path.isfile(path):
