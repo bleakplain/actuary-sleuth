@@ -35,6 +35,9 @@ package-lock.json
 .env.local
 .env.*.local
 
+# Runtime state (PID, port)
+.run
+
 # Claude worktrees
 .claude/worktrees/
 
