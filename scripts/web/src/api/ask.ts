@@ -42,9 +42,7 @@ export function chatSSE(
   },
 ): AbortController {
   const controller = new AbortController();
-  const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
-
-  fetch(`${API_BASE}/api/ask/chat`, {
+  fetch('/api/ask/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
