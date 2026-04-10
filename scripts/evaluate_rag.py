@@ -34,7 +34,6 @@ from lib.rag_engine.evaluator import (
 from lib.rag_engine.eval_dataset import (
     EvalSample,
     QuestionType,
-    create_default_eval_dataset,
     load_eval_dataset,
 )
 from lib.rag_engine.llamaindex_adapter import ClientLLMAdapter

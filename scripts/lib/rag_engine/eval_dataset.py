@@ -84,27 +84,25 @@ class EvalSample:
 
 
 def load_eval_dataset() -> List[EvalSample]:
-    """从数据库加载评估数据集。数据库为空时回退到内置默认数据集。"""
+    """从数据库加载评估数据集。数据库为空时返回空列表。"""
     try:
         from api.database import get_eval_samples as _get_db_samples
         db_rows = _get_db_samples()
-        if db_rows:
-            samples = []
-            for d in db_rows:
-                d = dict(d)
-                # DB returns already-deserialized lists; only keep EvalSample fields
-                db_only = {'created_at', 'updated_at', 'reviewer', 'reviewed_at',
-                           'review_comment', 'created_by', 'kb_version'}
-                for k in db_only:
-                    d.pop(k, None)
-                samples.append(EvalSample.from_dict(d))
-            logger.info(f"从 DB 加载 {len(samples)} 条评测数据")
-            return samples
+        if not db_rows:
+            return []
+        samples = []
+        for d in db_rows:
+            d = dict(d)
+            db_only = {'created_at', 'updated_at', 'reviewer', 'reviewed_at',
+                       'review_comment', 'created_by', 'kb_version'}
+            for k in db_only:
+                d.pop(k, None)
+            samples.append(EvalSample.from_dict(d))
+        logger.info(f"从 DB 加载 {len(samples)} 条评测数据")
+        return samples
     except Exception as e:
         logger.warning(f"从 DB 加载评测数据失败: {e}")
-
-    logger.info("数据库为空，使用内置默认数据集")
-    return create_default_eval_dataset()
+        return []
 
 
 def save_eval_dataset(samples: List[EvalSample], path: str) -> None:
