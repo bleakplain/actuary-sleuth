@@ -220,7 +220,6 @@ async def create_evaluation(req: EvaluationRequest):
 
             from lib.rag_engine.kb_manager import KBManager
             kb_config = KBManager().load_kb()
-            config.regulations_dir = kb_config.regulations_dir
             config.vector_db_path = kb_config.vector_db_path
 
             eval_engine = RAGEngine(config)

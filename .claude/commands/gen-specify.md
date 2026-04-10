@@ -39,7 +39,12 @@ arguments:
    ```bash
    git worktree add .claude/worktrees/<feature-name> -b <feature-name> origin/master
    ```
-4. **创建产物目录**：
+4. **拷贝配置文件** — 从当前工作目录拷贝到新 worktree：
+   ```bash
+   cp scripts/config/settings.json .claude/worktrees/<feature-name>/scripts/config/settings.json
+   cp scripts/.env .claude/worktrees/<feature-name>/scripts/.env
+   ```
+5. **创建产物目录**：
    ```bash
    mkdir -p .claude/worktrees/<feature-name>/specs/<feature-name>
    ```

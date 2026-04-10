@@ -44,6 +44,18 @@ arguments:
 
 **执行任何代码变更前，必须确保在 worktree 中工作。**
 
+#### 前置检查（worktree 就绪后、执行任务前）
+
+1. **检查并拷贝 settings.json**: 确认 `scripts/config/settings.json` 存在，若不存在则从主仓库拷贝：
+   ```bash
+   cp <主仓库>/scripts/config/settings.json scripts/config/settings.json
+   ```
+2. **检查并拷贝 .env**: 确认 `scripts/.env` 存在，若不存在则从主仓库拷贝：
+   ```bash
+   cp <主仓库>/scripts/.env scripts/.env
+   ```
+3. **检查数据路径可达**: 读取 settings.json 中 `data_paths` 的绝对路径，验证关键目录（db、kb、models、tools）的父目录存在，如果路径不存在则提示用户检查配置，不继续执行任务
+
 ### 检测是否已在 worktree 中
 
 1. 运行 `git worktree list` 检查当前工作目录
@@ -59,11 +71,16 @@ arguments:
    ```bash
    git worktree add .claude/worktrees/<feature-name> -b <feature-name> origin/master
    ```
-5. **将 plan.md 和相关产物复制到 worktree**：
+5. **拷贝配置文件** — 从当前工作目录拷贝到新 worktree：
+   ```bash
+   cp scripts/config/settings.json .claude/worktrees/<feature-name>/scripts/config/settings.json
+   cp scripts/.env .claude/worktrees/<feature-name>/scripts/.env
+   ```
+6. **将 plan.md 和相关产物复制到 worktree**：
    ```bash
    cp -r specs/<feature-name>/ .claude/worktrees/<feature-name>/specs/<feature-name>/
    ```
-6. **切换工作目录到 worktree**：
+7. **切换工作目录到 worktree**：
    ```
    后续所有操作在 .claude/worktrees/<feature-name>/ 下执行
    ```

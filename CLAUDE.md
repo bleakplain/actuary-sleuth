@@ -114,13 +114,19 @@ Edit `lib/reporting/template.py` → `ReportGenerationTemplate` class
 ## Configuration
 Located at `scripts/config/settings.json`, overrideable via env vars.
 
-```json
-{
-  "llm": {"default_provider": "ollama", "models": {...}},
-  "feishu": {...},
-  "report": {...}
-}
+数据文件存储在代码仓库外部的数据根目录中，通过 settings.json 中的绝对路径配置。
+
 ```
+<data_root>/
+├── db/              ← SQLite 数据库
+├── kb/              ← 知识库版本（向量库、BM25 索引）
+│   └── references/  ← 法规文档
+├── eval/            ← 评估快照
+├── models/          ← ML 模型权重
+└── tools/           ← 编译工具
+```
+
+Worktree 创建时自动拷贝 settings.json 和 .env，各 worktree 配置独立。
 
 ## Constraints Summary
 1. Business-semantic function names

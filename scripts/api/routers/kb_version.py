@@ -69,11 +69,7 @@ async def create_version(req: CreateVersionRequest):
 
             kb_mgr = _get_kb_manager()
 
-            from lib.rag_engine.config import RAGConfig
-            working_config = RAGConfig()
-
             result = kb_mgr.build_kb(
-                regulations_dir=working_config.regulations_dir,
                 description=req.description,
                 force_rebuild=True,
             )

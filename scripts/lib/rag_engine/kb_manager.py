@@ -32,7 +32,6 @@ class VersionMeta:
     chunk_count: int = 0
     active: bool = False
     description: str = ""
-    regulations_dir: str = ""
 
 
 def _get_connection():
@@ -47,7 +46,6 @@ CREATE TABLE IF NOT EXISTS kb_versions (
     document_count INTEGER NOT NULL DEFAULT 0,
     chunk_count INTEGER NOT NULL DEFAULT 0,
     description TEXT NOT NULL DEFAULT '',
-    regulations_dir TEXT NOT NULL DEFAULT '',
     active INTEGER NOT NULL DEFAULT 0
 );
 """
@@ -82,7 +80,6 @@ class KBManager:
             chunk_count=row["chunk_count"],
             active=bool(row["active"]),
             description=row["description"],
-            regulations_dir=row["regulations_dir"],
         )
 
     # ── 查询 ──────────────────────────────────────────────────
@@ -127,15 +124,15 @@ class KBManager:
 
     def create_version(
         self,
-        regulations_dir: str,
         description: str = "",
     ) -> VersionMeta:
-        """创建新版本：仅管理索引，源文件保持在 regulations_dir。"""
+        """创建新版本：仅管理索引，源文件保持在 settings.json 配置的目录。"""
         version_id = self.next_version_id()
         version_dir = self.base_dir / version_id
         version_dir.mkdir(parents=True, exist_ok=True)
 
-        reg_path = Path(regulations_dir)
+        from lib.config import get_regulations_dir
+        reg_path = Path(get_regulations_dir())
         doc_count = len(list(reg_path.rglob("*.md"))) if reg_path.exists() else 0
 
         now = datetime.now(timezone.utc).isoformat()
@@ -145,9 +142,9 @@ class KBManager:
             conn.execute(
                 "INSERT INTO kb_versions "
                 "(version_id, created_at, document_count, chunk_count, "
-                "description, regulations_dir, active) "
-                "VALUES (?, ?, ?, ?, ?, ?, 1)",
-                (version_id, now, doc_count, 0, description, str(reg_path)),
+                "description, active) "
+                "VALUES (?, ?, ?, ?, ?, 1)",
+                (version_id, now, doc_count, 0, description),
             )
 
         meta = VersionMeta(
@@ -157,7 +154,6 @@ class KBManager:
             chunk_count=0,
             active=True,
             description=description,
-            regulations_dir=str(reg_path),
         )
 
         logger.info(f"创建知识库版本 {version_id}: {doc_count} 个文档")
@@ -213,10 +209,7 @@ class KBManager:
     def get_version_paths(self, version_id: str) -> Dict[str, str]:
         """返回指定版本的路径映射。"""
         version_dir = self.base_dir / version_id
-        meta = self.get_version_meta(version_id)
-        reg_dir = meta.regulations_dir if meta and meta.regulations_dir else str(version_dir / "references")
         return {
-            "regulations_dir": reg_dir,
             "vector_db_path": str(version_dir / "lancedb"),
             "bm25_index_path": str(version_dir / "bm25_index.pkl"),
         }
@@ -236,13 +229,11 @@ class KBManager:
             raise ValueError("无可用知识库版本，请先创建版本并构建索引")
         paths = self.get_version_paths(vid)
         return RAGConfig(
-            regulations_dir=paths["regulations_dir"],
             vector_db_path=paths["vector_db_path"],
         )
 
     def build_kb(
         self,
-        regulations_dir: str,
         description: str = "",
         file_pattern: str = "**/*.md",
         force_rebuild: bool = False,
@@ -254,7 +245,6 @@ class KBManager:
             {"version_id": str, "meta": VersionMeta, "stats": dict}
         """
         meta = self.create_version(
-            regulations_dir=regulations_dir,
             description=description,
         )
         version_config = self.load_kb(meta.version_id)

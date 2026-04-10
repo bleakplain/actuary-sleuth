@@ -114,12 +114,9 @@ async def rebuild_index(req: RebuildRequest):
             _tasks[task_id]["progress"] = "正在创建新版本并重建索引..."
 
             from lib.rag_engine.kb_manager import KBManager
-            from lib.rag_engine.config import RAGConfig
             kb_mgr = KBManager()
-            working_config = RAGConfig()
 
             result = kb_mgr.build_kb(
-                regulations_dir=working_config.regulations_dir,
                 description="从当前源文件重建",
                 force_rebuild=True,
             )
