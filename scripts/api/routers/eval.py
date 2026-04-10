@@ -33,7 +33,7 @@ from api.database import (
 from lib.rag_engine.eval_dataset import EvalSample, ReviewStatus
 from lib.rag_engine.config import RAGConfig
 from lib.rag_engine.rag_engine import RAGEngine
-from lib.rag_engine import RetrievalEvaluator, GenerationEvaluator, load_eval_dataset
+from lib.rag_engine import RetrievalEvaluator, GenerationEvaluator
 from lib.rag_engine.eval_rating import generate_eval_summary
 from lib.rag_engine.dataset_validator import validate_dataset
 from lib.llm import LLMClientFactory
@@ -553,7 +553,7 @@ async def search_knowledge_base(req: KbSearchRequest):
 @router.post("/dataset/synthesize")
 async def synthesize_samples(req: SynthesizeRequest = SynthesizeRequest()):
     from lib.rag_engine.sample_synthesizer import SynthQA, SynthConfig
-    from lib.rag_engine.eval_dataset import load_eval_dataset, save_eval_dataset
+    from lib.rag_engine.eval_dataset import load_eval_dataset
 
     synth = SynthQA(SynthConfig())
     chunks = synth.load_chunks()
@@ -561,10 +561,6 @@ async def synthesize_samples(req: SynthesizeRequest = SynthesizeRequest()):
 
     existing = load_eval_dataset()
     result = synth.synthesize(chunks=chunks, existing_samples=existing)
-
-    if result.samples:
-        merged = existing + result.samples
-        save_eval_dataset(merged)
 
     return result.to_dict()
 

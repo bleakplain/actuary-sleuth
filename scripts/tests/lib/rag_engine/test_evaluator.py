@@ -12,7 +12,6 @@ import pytest
 from lib.rag_engine.eval_dataset import (
     EvalSample,
     QuestionType,
-    DEFAULT_DATASET_PATH,
     create_default_eval_dataset,
     load_eval_dataset,
     save_eval_dataset,
@@ -178,11 +177,10 @@ class TestEvalDataset:
         save_eval_dataset(create_default_eval_dataset()[:1], str(nested_path))
         assert nested_path.exists()
 
-    def test_default_dataset_path_defined(self):
-        assert DEFAULT_DATASET_PATH is not None
-        assert DEFAULT_DATASET_PATH.endswith('eval_dataset.json')
-
-
+    def test_load_eval_dataset_returns_list(self):
+        dataset = load_eval_dataset()
+        assert isinstance(dataset, list)
+        assert len(dataset) > 0
 
 
 

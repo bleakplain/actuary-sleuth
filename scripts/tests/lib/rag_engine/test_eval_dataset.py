@@ -136,14 +136,9 @@ def test_default_dataset_includes_unanswerable():
     assert len(unanswerable) >= 5
 
 
-def test_load_creates_json_on_first_call(tmp_path):
-    from lib.rag_engine.eval_dataset import load_eval_dataset, DEFAULT_DATASET_PATH
-    import os
-    test_path = str(tmp_path / "test_eval_dataset.json")
-    assert not os.path.exists(test_path)
-
-    loaded = load_eval_dataset(test_path)
-    assert os.path.exists(test_path)
-
-    loaded_again = load_eval_dataset(test_path)
-    assert len(loaded_again) == len(loaded)
+def test_load_eval_dataset_from_db():
+    from lib.rag_engine.eval_dataset import load_eval_dataset
+    # DB is empty in tests, so falls back to built-in default
+    loaded = load_eval_dataset()
+    assert isinstance(loaded, list)
+    assert len(loaded) > 0

@@ -12,10 +12,6 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DATASET_PATH = str(
-    Path(__file__).parent / 'data' / 'eval_dataset.json'
-)
-
 
 class QuestionType(Enum):
     FACTUAL = "factual"
@@ -87,35 +83,32 @@ class EvalSample:
         return cls(**d)
 
 
-def load_eval_dataset(path: Optional[str] = None) -> List[EvalSample]:
-    """从 JSON 文件加载评估数据集。默认路径不存在时回退到内置数据集并保存。"""
-    if path is None:
-        path = DEFAULT_DATASET_PATH
-
+def load_eval_dataset() -> List[EvalSample]:
+    """从数据库加载评估数据集。数据库为空时回退到内置默认数据集。"""
     try:
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        logger.info(f"评估数据集文件不存在: {path}，使用默认数据集")
-        samples = create_default_eval_dataset()
-        save_eval_dataset(samples, path)
-        return samples
+        from api.database import get_eval_samples as _get_db_samples
+        db_rows = _get_db_samples()
+        if db_rows:
+            samples = []
+            for d in db_rows:
+                d = dict(d)
+                # DB returns already-deserialized lists; only keep EvalSample fields
+                db_only = {'created_at', 'updated_at', 'reviewer', 'reviewed_at',
+                           'review_comment', 'created_by', 'kb_version'}
+                for k in db_only:
+                    d.pop(k, None)
+                samples.append(EvalSample.from_dict(d))
+            logger.info(f"从 DB 加载 {len(samples)} 条评测数据")
+            return samples
+    except Exception as e:
+        logger.warning(f"从 DB 加载评测数据失败: {e}")
 
-    if isinstance(data, list):
-        items = data
-    elif isinstance(data, dict) and 'samples' in data:
-        items = data['samples']
-    else:
-        raise ValueError(f"不支持的评估数据集格式: {path}")
-
-    return [EvalSample.from_dict(item) for item in items]
+    logger.info("数据库为空，使用内置默认数据集")
+    return create_default_eval_dataset()
 
 
-def save_eval_dataset(samples: List[EvalSample], path: Optional[str] = None) -> None:
-    """将评估数据集保存为 JSON 文件。"""
-    if path is None:
-        path = DEFAULT_DATASET_PATH
-
+def save_eval_dataset(samples: List[EvalSample], path: str) -> None:
+    """将评估数据集保存为 JSON 文件（需指定路径）。"""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     data = {

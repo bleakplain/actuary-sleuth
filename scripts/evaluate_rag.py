@@ -36,7 +36,6 @@ from lib.rag_engine.eval_dataset import (
     QuestionType,
     create_default_eval_dataset,
     load_eval_dataset,
-    DEFAULT_DATASET_PATH,
 )
 from lib.rag_engine.llamaindex_adapter import ClientLLMAdapter
 from lib.llm import LLMClientFactory
@@ -263,11 +262,15 @@ def main():
 
     # 加载评估数据
     if args.questions:
-        samples = load_eval_dataset(args.questions)
+        import json
+        with open(args.questions, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        items = data if isinstance(data, list) else data.get('samples', [])
+        samples = [EvalSample.from_dict(item) for item in items]
         logger.info(f"加载自定义问题集: {len(samples)} 个问题")
     else:
-        samples = create_default_eval_dataset()
-        logger.info(f"使用默认评估集: {len(samples)} 个问题")
+        samples = load_eval_dataset()
+        logger.info(f"使用评测数据集: {len(samples)} 个问题")
 
     # 创建 RAG 引擎（仅检索模式不需要 LLM，但仍需 embedding）
     config = RAGConfig(chunking_strategy=args.chunking)
