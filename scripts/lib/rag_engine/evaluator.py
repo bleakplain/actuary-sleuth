@@ -10,11 +10,12 @@ RAG 量化评估器
 import math
 import re
 import logging
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Set, Tuple
 from dataclasses import dataclass, field
 
 from .eval_dataset import EvalSample, QuestionType
-from .tokenizer import tokenize_chinese
+from .tokenizer import tokenize_chinese, tokenize_to_set as _tokenize_to_set, jaccard_similarity as _jaccard_similarity
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ _RAGAS_METRICS = ('faithfulness', 'answer_relevancy', 'answer_correctness')
 _ANSWER_SENTENCE_PATTERN = re.compile(r'[^。！？\n]+[。！？\n]?')
 
 _SEMANTIC_RELEVANCE_THRESHOLD = 0.65
+_SEMANTIC_COVERAGE_THRESHOLD = 0.7
 _SENTENCE_COVERAGE_THRESHOLD = 0.4
 
 _embed_model_cache: Optional[Any] = None
@@ -60,7 +62,7 @@ def _compute_embedding_similarity(text_a: str, text_b: str) -> float:
         return 0.0
 
 
-@dataclass
+@dataclass(frozen=True)
 class RetrievalEvalReport:
     """检索评估报告"""
     precision_at_k: float = 0.0
@@ -69,10 +71,11 @@ class RetrievalEvalReport:
     ndcg: float = 0.0
     redundancy_rate: float = 0.0
     context_relevance: float = 0.0
+    rejection_rate: Optional[float] = None
     by_type: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result: Dict[str, Any] = {
             'precision_at_k': self.precision_at_k,
             'recall_at_k': self.recall_at_k,
             'mrr': self.mrr,
@@ -81,6 +84,9 @@ class RetrievalEvalReport:
             'context_relevance': self.context_relevance,
             'by_type': self.by_type,
         }
+        if self.rejection_rate is not None:
+            result['rejection_rate'] = self.rejection_rate
+        return result
 
     def print_report(self):
         print("\n" + "=" * 60)
@@ -103,7 +109,7 @@ class RetrievalEvalReport:
         print("=" * 60 + "\n")
 
 
-@dataclass
+@dataclass(frozen=True)
 class GenerationEvalReport:
     """生成评估报告"""
     faithfulness: Optional[float] = None
@@ -131,7 +137,7 @@ class GenerationEvalReport:
         if self.answer_correctness is not None:
             print(f"  Answer Correctness:{self.answer_correctness:.3f}")
 
-        if not any([self.faithfulness, self.answer_relevancy, self.answer_correctness]):
+        if all(v is None for v in [self.faithfulness, self.answer_relevancy, self.answer_correctness]):
             print("  无生成评估结果")
 
         if self.by_type:
@@ -145,7 +151,7 @@ class GenerationEvalReport:
         print("=" * 60 + "\n")
 
 
-@dataclass
+@dataclass(frozen=True)
 class RAGEvalReport:
     """RAG 综合评估报告"""
     retrieval: RetrievalEvalReport = field(default_factory=RetrievalEvalReport)
@@ -183,8 +189,79 @@ class RAGEvalReport:
         print("=" * 70 + "\n")
 
 
+def _normalize_doc_name(doc: str) -> str:
+    return doc.replace('.md', '').replace('_', '').strip()
+
+
+def _match_source_to_evidence(source_file: str, evidence_docs: List[str]) -> Optional[str]:
+    if not source_file or not evidence_docs:
+        return None
+    src_normalized = _normalize_doc_name(source_file)
+    for doc in evidence_docs:
+        if src_normalized == _normalize_doc_name(doc):
+            return doc
+        if '/' in source_file or '\\' in source_file:
+            fname = Path(source_file).stem.replace('_', '')
+            if fname == _normalize_doc_name(doc):
+                return doc
+    return None
+
+
 def _contains_keyword(content: str, keywords: List[str]) -> bool:
     return any(kw in content for kw in keywords if len(kw) >= 2)
+
+
+def _build_synonym_reverse_index() -> Dict[str, Set[str]]:
+    from .query_preprocessor import _INSURANCE_SYNONYMS
+    reverse: Dict[str, Set[str]] = {}
+    for standard, variants in _INSURANCE_SYNONYMS.items():
+        for variant in variants:
+            if variant not in reverse:
+                reverse[variant] = set()
+            reverse[variant].add(standard)
+            reverse[variant].update(variants)
+    return reverse
+
+
+_SYNONYM_REVERSE_INDEX: Dict[str, Set[str]] = _build_synonym_reverse_index()
+
+
+def _expand_keywords_with_synonyms(keywords: List[str]) -> Set[str]:
+    from .query_preprocessor import _INSURANCE_SYNONYMS
+    expanded: Set[str] = set(keywords)
+    for kw in keywords:
+        if kw in _INSURANCE_SYNONYMS:
+            expanded.update(_INSURANCE_SYNONYMS[kw])
+        if kw in _SYNONYM_REVERSE_INDEX:
+            expanded.update(_SYNONYM_REVERSE_INDEX[kw])
+    return expanded
+
+
+def _build_generic_keywords() -> Set[str]:
+    import json
+    domain_terms: Set[str] = set()
+    synonyms_file = Path(__file__).parent / 'data' / 'synonyms.json'
+    if synonyms_file.exists():
+        with open(synonyms_file, 'r', encoding='utf-8') as f:
+            for standard, variants in json.load(f).items():
+                domain_terms.add(standard)
+                domain_terms.update(variants)
+    dict_file = Path(__file__).parent / 'data' / 'insurance_dict.txt'
+    if dict_file.exists():
+        with open(dict_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                term = line.strip().split()[0] if line.strip() else ''
+                if term:
+                    domain_terms.add(term)
+    generic = {
+        '保险', '条款', '规定', '办法', '通知', '要求', '内容',
+        '相关', '应当', '可以', '不得', '按照', '根据', '关于',
+        '合同', '产品', '公司', '投保', '被保', '人身', '财产',
+    }
+    return generic - domain_terms
+
+
+GENERIC_KEYWORDS: Set[str] = _build_generic_keywords()
 
 
 def _is_relevant(
@@ -192,25 +269,46 @@ def _is_relevant(
     evidence_docs: List[str],
     evidence_keywords: List[str],
 ) -> bool:
+    """判定检索结果是否与评估样本相关。
+
+    匹配层级（快速确定性 → 慢速概率性）：
+    1. 领域关键词匹配（≥2个命中即相关，单关键词需 source_file 匹配）
+    2. source_file + 任意关键词匹配
+    3. law_name + 关键词/doc 匹配
+    4. 同义词扩展关键词匹配
+    5. embedding 语义相似度
+
+    注意：precision 使用本函数的宽松判定，recall 使用 _match_source_to_evidence
+    的严格文档名匹配，二者衡量不同维度。
+    """
     content = result.get('content', '')
     source_file = result.get('source_file', '')
     law_name = result.get('law_name', '')
 
+    doc_set = set(evidence_docs)
+
     if evidence_keywords:
-        long_keywords = [kw for kw in evidence_keywords if len(kw) >= 2]
-        matched = sum(1 for kw in long_keywords if kw in content)
-        required = min(2, len(long_keywords))
-        if matched >= required:
+        domain_kw = [kw for kw in evidence_keywords
+                     if len(kw) >= 2 and kw not in GENERIC_KEYWORDS]
+        generic_kw = [kw for kw in evidence_keywords
+                      if len(kw) >= 2 and kw in GENERIC_KEYWORDS]
+        domain_matched = sum(1 for kw in domain_kw if kw in content)
+        generic_matched = sum(1 for kw in generic_kw if kw in content)
+
+        if domain_matched >= 2:
+            return True
+        if domain_matched >= 1 and generic_matched >= 1 and source_file in doc_set:
+            return True
+        if len(domain_kw) == 1 and domain_matched >= 1 and source_file in doc_set:
             return True
 
-    doc_set = set(evidence_docs)
     if source_file and source_file in doc_set and evidence_keywords:
         if _contains_keyword(content, evidence_keywords):
             return True
 
     if law_name and evidence_docs:
         for doc in evidence_docs:
-            doc_stem = doc.replace('.md', '').replace('_', '')
+            doc_stem = _normalize_doc_name(doc)
             if doc_stem and len(doc_stem) >= 4 and doc_stem in law_name:
                 if evidence_keywords:
                     if _contains_keyword(content, evidence_keywords):
@@ -219,28 +317,21 @@ def _is_relevant(
                     return True
 
     if evidence_keywords:
+        expanded = _expand_keywords_with_synonyms(evidence_keywords)
+        expanded_long = [kw for kw in expanded if len(kw) >= 2 and kw not in GENERIC_KEYWORDS]
+        matched = sum(1 for kw in expanded_long if kw in content)
+        if matched >= 2:
+            return True
+        if matched >= 1 and source_file in doc_set:
+            return True
+
+    if evidence_keywords:
         query_text = ' '.join(evidence_keywords)
         similarity = _compute_embedding_similarity(query_text, content)
         if similarity >= _SEMANTIC_RELEVANCE_THRESHOLD:
             return True
 
     return False
-
-
-def _tokenize_to_set(text: str) -> Optional[Set[str]]:
-    """分词并返回 token 集合，空文本返回 None"""
-    if not text:
-        return None
-    tokens = set(tokenize_chinese(text))
-    return tokens if tokens else None
-
-
-def _jaccard_similarity(set_a: Set[str], set_b: Set[str]) -> float:
-    if not set_a or not set_b:
-        return 0.0
-    intersection = set_a & set_b
-    union = set_a | set_b
-    return len(intersection) / len(union)
 
 
 def _compute_redundancy_rate(results: List[Dict[str, Any]]) -> float:
@@ -278,16 +369,33 @@ def _bigram_overlap(bigrams_a: Set[str], bigrams_b: Set[str]) -> float:
 
 
 def compute_faithfulness(contexts: List[str], answer: str) -> float:
-    """基于 bigram 重叠度评估答案对检索上下文的忠实度（供 feedback 等模块独立使用）。"""
+    """评估答案对检索上下文的忠实度。embedding 可用时使用语义相似度，否则回退 bigram。"""
     if not contexts or not answer:
         return 0.0
 
     context_text = ' '.join(contexts)
-    context_bigrams = _token_bigrams(context_text)
-    answer_bigrams = _token_bigrams(answer)
 
     sentences = _ANSWER_SENTENCE_PATTERN.findall(answer)
     sentences = [s.strip() for s in sentences if len(s.strip()) > 3]
+
+    embed_model = _get_embed_model()
+    if embed_model and sentences:
+        supported_count = 0
+        for sentence in sentences:
+            similarity = _compute_embedding_similarity(sentence, context_text)
+            if similarity >= _SEMANTIC_COVERAGE_THRESHOLD:
+                supported_count += 1
+        sentence_coverage = supported_count / len(sentences)
+
+        answer_bigrams = _token_bigrams(answer)
+        context_bigrams = _token_bigrams(context_text)
+        bigram_overlap = _bigram_overlap(answer_bigrams, context_bigrams)
+
+        return 0.7 * sentence_coverage + 0.3 * bigram_overlap
+
+    context_bigrams = _token_bigrams(context_text)
+    answer_bigrams = _token_bigrams(answer)
+
     if not sentences:
         return _bigram_overlap(answer_bigrams, context_bigrams)
 
@@ -357,15 +465,24 @@ class RetrievalEvaluator:
                 'num_results': 0,
             }
 
-        # 判断每个结果是否相关
-        relevance = [
-            1 if _is_relevant(r, sample.evidence_docs, sample.evidence_keywords) else 0
-            for r in results
-        ]
+        matched_docs: Set[str] = set()
+        relevance = []
+        for r in results:
+            is_rel = _is_relevant(r, sample.evidence_docs, sample.evidence_keywords)
+            relevance.append(1 if is_rel else 0)
+            if is_rel:
+                matched_doc = _match_source_to_evidence(
+                    r.get('source_file', ''), sample.evidence_docs
+                )
+                if matched_doc:
+                    matched_docs.add(matched_doc)
 
         precision = sum(relevance) / len(relevance)
 
-        recall = sum(relevance) / len(sample.evidence_docs) if sample.evidence_docs else 0.0
+        if not sample.evidence_docs:
+            recall = 0.0
+        else:
+            recall = len(matched_docs) / len(sample.evidence_docs)
 
         mrr = 0.0
         first_relevant_rank = None
@@ -375,7 +492,7 @@ class RetrievalEvaluator:
                 first_relevant_rank = rank
                 break
 
-        # NDCG: 二值相关性下 DCG = IDCG，所以 NDCG = DCG / IDCG
+        # NDCG: IDCG 将所有相关结果排在最前，DCG 除以 IDCG 得到归一化分数
         dcg = sum(rel / math.log2(rank + 1) for rank, rel in enumerate(relevance, 1))
         # Ideal DCG: 所有相关结果排在最前
         n_relevant = min(sum(relevance), len(relevance))
@@ -426,23 +543,43 @@ class RetrievalEvaluator:
             return RetrievalEvalReport(), []
 
         n = len(all_results)
-        report = RetrievalEvalReport(
-            precision_at_k=sum(r['precision'] for r in all_results) / n,
-            recall_at_k=sum(r['recall'] for r in all_results) / n,
-            mrr=sum(r['mrr'] for r in all_results) / n,
-            ndcg=sum(r['ndcg'] for r in all_results) / n,
-            redundancy_rate=sum(r['redundancy_rate'] for r in all_results) / n,
-            context_relevance=sum(r['context_relevance'] for r in all_results) / n,
+        recall_results = [
+            r for r, s in zip(all_results, samples) if s.evidence_docs
+        ]
+        recall_avg = (
+            sum(r['recall'] for r in recall_results) / len(recall_results)
+            if recall_results else 0.0
         )
 
+        unanswerable_results = [
+            r for r, s in zip(all_results, samples)
+            if s.question_type == QuestionType.UNANSWERABLE
+        ]
+        rejection_rate: Optional[float] = None
+        if unanswerable_results:
+            rejected = sum(1 for r in unanswerable_results if r['precision'] == 0.0)
+            rejection_rate = rejected / len(unanswerable_results)
+
+        by_type: Dict[str, Dict[str, float]] = {}
         for qtype, type_results in by_type_results.items():
             tn = len(type_results)
-            report.by_type[qtype] = {
+            by_type[qtype] = {
                 'precision_at_k': sum(r['precision'] for r in type_results) / tn,
                 'recall_at_k': sum(r['recall'] for r in type_results) / tn,
                 'mrr': sum(r['mrr'] for r in type_results) / tn,
                 'ndcg': sum(r['ndcg'] for r in type_results) / tn,
             }
+
+        report = RetrievalEvalReport(
+            precision_at_k=sum(r['precision'] for r in all_results) / n,
+            recall_at_k=recall_avg,
+            mrr=sum(r['mrr'] for r in all_results) / n,
+            ndcg=sum(r['ndcg'] for r in all_results) / n,
+            redundancy_rate=sum(r['redundancy_rate'] for r in all_results) / n,
+            context_relevance=sum(r['context_relevance'] for r in all_results) / n,
+            rejection_rate=rejection_rate,
+            by_type=by_type,
+        )
 
         return report, all_results
 
@@ -561,24 +698,33 @@ class GenerationEvaluator:
 
         df = result.to_pandas()
 
-        report = GenerationEvalReport()
-
+        metric_values: Dict[str, Optional[float]] = {
+            'faithfulness': None, 'answer_relevancy': None, 'answer_correctness': None,
+        }
         for column in _RAGAS_METRICS:
             if column in df.columns:
                 values = df[column].dropna()
                 if len(values) > 0:
-                    setattr(report, column, float(values.mean()))
+                    metric_values[column] = float(values.mean())
 
+        by_type: Dict[str, Dict[str, float]] = {}
         for qtype in set(question_types):
             type_mask = [qt == qtype for qt in question_types]
-            type_metrics = {}
+            type_metrics: Dict[str, float] = {}
             for column in _RAGAS_METRICS:
                 if column in df.columns:
                     type_values = df[column][type_mask].dropna()
                     if len(type_values) > 0:
                         type_metrics[column] = float(type_values.mean())
             if type_metrics:
-                report.by_type[qtype] = type_metrics
+                by_type[qtype] = type_metrics
+
+        report = GenerationEvalReport(
+            faithfulness=metric_values['faithfulness'],
+            answer_relevancy=metric_values['answer_relevancy'],
+            answer_correctness=metric_values['answer_correctness'],
+            by_type=by_type,
+        )
 
         return report
 

@@ -24,6 +24,7 @@ EVAL_THRESHOLDS: List[MetricThreshold] = [
     MetricThreshold('answer_relevancy', 0.85, 0.7, '是否回答了用户问题', True),
     MetricThreshold('answer_correctness', 0.8, 0.6, '答案与标准答案的一致性', True),
     MetricThreshold('context_relevance', 0.7, 0.5, '检索内容与问题相关程度', True),
+    MetricThreshold('rejection_rate', 0.8, 0.6, '无答案问题正确拒绝比例', True),
 ]
 
 

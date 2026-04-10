@@ -40,7 +40,7 @@ from .chunker import ChecklistChunker
 from .evaluator import RetrievalEvaluator, GenerationEvaluator, RAGEvalReport
 from .eval_dataset import EvalSample, QuestionType, load_eval_dataset, create_default_eval_dataset, save_eval_dataset, DEFAULT_DATASET_PATH
 from .dataset_validator import validate_dataset, QualityAuditReport
-from .eval_guide import interpret_metric, generate_eval_summary
+from .eval_rating import interpret_metric, generate_eval_summary
 from .quality_detector import detect_quality, compute_retrieval_relevance, compute_info_completeness
 from .badcase_classifier import classify_badcase, assess_compliance_risk
 

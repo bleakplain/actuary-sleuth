@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-RAG 评估数据集模块，覆盖事实题、多跳推理题、否定性查询、口语化查询四种题型。
+RAG 评估数据集模块，覆盖事实题、多跳推理题、否定性查询、口语化查询、不可回答查询五种题型。
 """
 import json
 import logging
-from dataclasses import dataclass, asdict, fields
+from dataclasses import dataclass, asdict, fields, field
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional
@@ -22,6 +22,7 @@ class QuestionType(Enum):
     MULTI_HOP = "multi_hop"
     NEGATIVE = "negative"
     COLLOQUIAL = "colloquial"
+    UNANSWERABLE = "unanswerable"
 
 
 class ReviewStatus(Enum):
@@ -55,7 +56,7 @@ class EvalSample:
     question_type: QuestionType
     difficulty: str
     topic: str
-    regulation_refs: List[RegulationRef] = ()
+    regulation_refs: List[RegulationRef] = field(default_factory=list)
     review_status: ReviewStatus = ReviewStatus.PENDING
     reviewer: str = ""
     reviewed_at: str = ""
@@ -80,14 +81,14 @@ class EvalSample:
         else:
             d['review_status'] = ReviewStatus.PENDING
         if 'regulation_refs' in d and d['regulation_refs']:
-            d['regulation_refs'] = tuple(RegulationRef.from_dict(r) for r in d['regulation_refs'])
+            d['regulation_refs'] = [RegulationRef.from_dict(r) for r in d['regulation_refs']]
         else:
-            d['regulation_refs'] = ()
+            d['regulation_refs'] = []
         return cls(**d)
 
 
 def load_eval_dataset(path: Optional[str] = None) -> List[EvalSample]:
-    """从 JSON 文件加载评估数据集。默认路径不存在时回退到内置数据集。"""
+    """从 JSON 文件加载评估数据集。默认路径不存在时回退到内置数据集并保存。"""
     if path is None:
         path = DEFAULT_DATASET_PATH
 
@@ -96,7 +97,9 @@ def load_eval_dataset(path: Optional[str] = None) -> List[EvalSample]:
             data = json.load(f)
     except FileNotFoundError:
         logger.info(f"评估数据集文件不存在: {path}，使用默认数据集")
-        return create_default_eval_dataset()
+        samples = create_default_eval_dataset()
+        save_eval_dataset(samples, path)
+        return samples
 
     if isinstance(data, list):
         items = data
@@ -127,11 +130,68 @@ def save_eval_dataset(samples: List[EvalSample], path: Optional[str] = None) -> 
 
 
 def create_default_eval_dataset() -> List[EvalSample]:
-    """创建默认评估数据集（150 条，覆盖四种题型）。"""
+    """创建默认评估数据集（覆盖五种题型，含 UNANSWERABLE）。"""
     samples = _create_base_eval_dataset()
     samples.extend(_create_extended_eval_dataset())
     samples.extend(_create_phase2_eval_dataset())
+    samples.extend(_create_unanswerable_dataset())
     return samples
+
+
+def _create_unanswerable_dataset() -> List[EvalSample]:
+    """UNANSWERABLE 评估数据集 — 知识库中无对应监管规定的查询。"""
+    return [
+        EvalSample(
+            id="u001",
+            question="保险公司可以在抖音上直播卖保险吗？",
+            ground_truth="知识库中无对应规定",
+            evidence_docs=[],
+            evidence_keywords=["直播", "销售"],
+            question_type=QuestionType.UNANSWERABLE,
+            difficulty="easy",
+            topic="互联网保险",
+        ),
+        EvalSample(
+            id="u002",
+            question="保险代理人的佣金比例有上限吗？",
+            ground_truth="知识库中无对应规定",
+            evidence_docs=[],
+            evidence_keywords=["佣金", "代理"],
+            question_type=QuestionType.UNANSWERABLE,
+            difficulty="easy",
+            topic="销售管理",
+        ),
+        EvalSample(
+            id="u003",
+            question="保险公司破产了保单怎么办？",
+            ground_truth="知识库中无对应规定",
+            evidence_docs=[],
+            evidence_keywords=["破产", "保单"],
+            question_type=QuestionType.UNANSWERABLE,
+            difficulty="easy",
+            topic="保险法",
+        ),
+        EvalSample(
+            id="u004",
+            question="保险公司可以投资股票吗？比例有限制吗？",
+            ground_truth="知识库中无对应规定",
+            evidence_docs=[],
+            evidence_keywords=["投资", "股票"],
+            question_type=QuestionType.UNANSWERABLE,
+            difficulty="medium",
+            topic="投资管理",
+        ),
+        EvalSample(
+            id="u005",
+            question="保险理赔最长多久必须赔？",
+            ground_truth="知识库中无对应规定",
+            evidence_docs=[],
+            evidence_keywords=["理赔", "时效"],
+            question_type=QuestionType.UNANSWERABLE,
+            difficulty="easy",
+            topic="理赔",
+        ),
+    ]
 
 
 def _create_base_eval_dataset() -> List[EvalSample]:

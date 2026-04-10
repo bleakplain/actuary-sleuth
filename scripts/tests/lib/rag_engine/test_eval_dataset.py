@@ -68,7 +68,7 @@ def test_eval_sample_backward_compatible():
     }
     sample = EvalSample.from_dict(old_data)
     assert sample.review_status == ReviewStatus.PENDING
-    assert sample.regulation_refs == ()
+    assert sample.regulation_refs == []
     assert sample.reviewer == ""
     assert sample.created_by == "human"
     assert sample.kb_version == ""
@@ -107,3 +107,43 @@ def test_eval_sample_frozen():
     import dataclasses
     assert dataclasses.is_dataclass(sample)
     assert sample.__dataclass_params__.frozen
+
+
+def test_unanswerable_type_serialization():
+    sample = EvalSample(
+        id="unanswerable_001",
+        question="保险公司可以在抖音上直播卖保险吗？",
+        ground_truth="知识库中无对应规定",
+        evidence_docs=[],
+        evidence_keywords=["直播", "销售"],
+        question_type=QuestionType.UNANSWERABLE,
+        difficulty="easy",
+        topic="互联网保险",
+    )
+    d = sample.to_dict()
+    assert d['question_type'] == 'unanswerable'
+    assert d['evidence_docs'] == []
+
+    restored = EvalSample.from_dict(d)
+    assert restored.question_type == QuestionType.UNANSWERABLE
+    assert restored == sample
+
+
+def test_default_dataset_includes_unanswerable():
+    from lib.rag_engine.eval_dataset import create_default_eval_dataset
+    dataset = create_default_eval_dataset()
+    unanswerable = [s for s in dataset if s.question_type == QuestionType.UNANSWERABLE]
+    assert len(unanswerable) >= 5
+
+
+def test_load_creates_json_on_first_call(tmp_path):
+    from lib.rag_engine.eval_dataset import load_eval_dataset, DEFAULT_DATASET_PATH
+    import os
+    test_path = str(tmp_path / "test_eval_dataset.json")
+    assert not os.path.exists(test_path)
+
+    loaded = load_eval_dataset(test_path)
+    assert os.path.exists(test_path)
+
+    loaded_again = load_eval_dataset(test_path)
+    assert len(loaded_again) == len(loaded)

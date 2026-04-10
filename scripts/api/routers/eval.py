@@ -12,6 +12,7 @@ from api.schemas.eval import (
     EvalSampleCreate, EvalSampleOut, ImportSamplesRequest,
     EvaluationRequest, EvalConfigCreate, CompareRequest, SnapshotCreate,
     HumanReviewCreate, ReviewSampleRequest, KbSearchRequest, KbSearchResult,
+    SynthesizeRequest,
 )
 from api.database import (
     eval_sample_count, import_eval_samples, get_eval_samples,
@@ -33,7 +34,7 @@ from lib.rag_engine.eval_dataset import EvalSample, ReviewStatus
 from lib.rag_engine.config import RAGConfig
 from lib.rag_engine.rag_engine import RAGEngine
 from lib.rag_engine import RetrievalEvaluator, GenerationEvaluator, load_eval_dataset
-from lib.rag_engine.eval_guide import generate_eval_summary
+from lib.rag_engine.eval_rating import generate_eval_summary
 from lib.rag_engine.dataset_validator import validate_dataset
 from lib.llm import LLMClientFactory
 
@@ -41,6 +42,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/eval", tags=["评估管理"])
 
 _eval_tasks: dict = {}
+_MAX_EVAL_TASKS = 100
+
+
+def _cleanup_completed_tasks():
+    completed = [
+        eid for eid, info in _eval_tasks.items()
+        if info.get('status') in ('completed', 'failed')
+    ]
+    for eid in completed[:20]:
+        _eval_tasks.pop(eid, None)
 
 
 # ── 数据集管理 ───────────────────────────────────────
@@ -183,6 +194,9 @@ async def create_evaluation(req: EvaluationRequest):
         config_version=config_version,
         dataset_version=dataset_version,
     )
+
+    if len(_eval_tasks) >= _MAX_EVAL_TASKS:
+        _cleanup_completed_tasks()
 
     _eval_tasks[evaluation_id] = {"status": "pending"}
 
@@ -534,3 +548,66 @@ async def search_knowledge_base(req: KbSearchRequest):
     except Exception as e:
         logger.error(f"KB 搜索失败: {e}")
         raise HTTPException(status_code=500, detail=f"知识库搜索失败: {str(e)}")
+
+
+@router.post("/dataset/synthesize")
+async def synthesize_samples(req: SynthesizeRequest = SynthesizeRequest()):
+    from lib.rag_engine.sample_synthesizer import SynthQA, SynthConfig
+    from lib.rag_engine.eval_dataset import load_eval_dataset, save_eval_dataset
+
+    synth = SynthQA(SynthConfig())
+    chunks = synth.load_chunks()
+    chunks = chunks[:req.max_chunks]
+
+    existing = load_eval_dataset()
+    result = synth.synthesize(chunks=chunks, existing_samples=existing)
+
+    if result.samples:
+        merged = existing + result.samples
+        save_eval_dataset(merged)
+
+    return result.to_dict()
+
+
+@router.get("/dataset/coverage")
+async def get_dataset_coverage():
+    from lib.rag_engine.dataset_coverage import compute_coverage, get_kb_doc_names
+    from lib.rag_engine.eval_dataset import EvalSample
+    from lib.rag_engine.kb_manager import KBManager
+
+    kb_mgr = KBManager()
+    paths = kb_mgr.get_active_paths()
+    if not paths:
+        raise HTTPException(status_code=404, detail="无活跃知识库版本")
+
+    kb_docs = get_kb_doc_names(paths["regulations_dir"])
+    samples_data = get_eval_samples()
+    samples = [EvalSample.from_dict(s) for s in samples_data]
+    report = compute_coverage(samples, kb_docs)
+    return report.to_dict()
+
+
+@router.get("/evaluations/{evaluation_id}/weakness")
+async def get_evaluation_weakness(evaluation_id: str):
+    from lib.rag_engine.weakness_analyzer import generate_weakness_report
+    from lib.rag_engine.dataset_coverage import compute_coverage, get_kb_doc_names
+    from lib.rag_engine.eval_dataset import EvalSample
+    from lib.rag_engine.kb_manager import KBManager
+
+    run = get_evaluation(evaluation_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="评估运行不存在")
+    if run["status"] != "completed":
+        raise HTTPException(status_code=400, detail="评估尚未完成")
+
+    results = get_sample_results(evaluation_id)
+
+    kb_mgr = KBManager()
+    paths = kb_mgr.get_active_paths()
+    kb_docs = get_kb_doc_names(paths["regulations_dir"]) if paths else []
+    samples_data = get_eval_samples()
+    samples = [EvalSample.from_dict(s) for s in samples_data]
+    coverage = compute_coverage(samples, kb_docs)
+
+    report = generate_weakness_report(results, coverage)
+    return report.to_dict()

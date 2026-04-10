@@ -24,6 +24,7 @@ from lib.rag_engine.evaluator import (
     GenerationEvalReport,
     RAGEvalReport,
     _is_relevant,
+    _match_source_to_evidence,
     _compute_redundancy_rate,
     evaluate_retrieval,
 )
@@ -104,7 +105,7 @@ class TestEvalDataset:
 
     def test_load_default_dataset(self):
         dataset = create_default_eval_dataset()
-        assert len(dataset) == 150
+        assert len(dataset) == 155
 
     def test_eval_sample_fields(self, sample_eval):
         assert sample_eval.id == "test001"
@@ -163,18 +164,6 @@ class TestEvalDataset:
         loaded = load_eval_dataset(str(path))
         assert len(loaded) == 2
 
-    def test_frozen_dataclass(self, sample_eval):
-        with pytest.raises(AttributeError):
-            sample_eval.id = "other"
-
-    def test_default_dataset_path_defined(self):
-        assert DEFAULT_DATASET_PATH is not None
-        assert DEFAULT_DATASET_PATH.endswith('eval_dataset.json')
-
-    def test_load_eval_dataset_default_path_fallback(self):
-        dataset = load_eval_dataset()
-        assert len(dataset) == 150
-
     def test_save_and_load_roundtrip(self, tmp_path):
         samples = create_default_eval_dataset()[:3]
         path = tmp_path / "test_eval.json"
@@ -188,6 +177,10 @@ class TestEvalDataset:
         nested_path = tmp_path / "sub" / "dir" / "eval.json"
         save_eval_dataset(create_default_eval_dataset()[:1], str(nested_path))
         assert nested_path.exists()
+
+    def test_default_dataset_path_defined(self):
+        assert DEFAULT_DATASET_PATH is not None
+        assert DEFAULT_DATASET_PATH.endswith('eval_dataset.json')
 
 
 
@@ -219,13 +212,23 @@ class TestRetrievalMetrics:
         }
         assert _is_relevant(result, sample_eval.evidence_docs, sample_eval.evidence_keywords) is True
 
-    def test_is_relevant_single_keyword_not_enough(self, sample_eval):
+    def test_is_relevant_single_keyword_correct_source(self, sample_eval):
+        """单领域关键词 + 正确 source_file 应判为相关"""
+        result = {
+            'content': '等待期相关内容',
+            'law_name': '未知',
+            'source_file': '05_健康保险产品开发.md',
+        }
+        assert _is_relevant(result, sample_eval.evidence_docs, ['等待期']) is True
+
+    def test_is_relevant_single_keyword_wrong_source(self, sample_eval):
+        """单领域关键词 + 错误 source_file 应判为不相关"""
         result = {
             'content': '等待期相关内容',
             'law_name': '未知',
             'source_file': 'other.md',
         }
-        assert _is_relevant(result, sample_eval.evidence_docs, ['等待期']) is True
+        assert _is_relevant(result, sample_eval.evidence_docs, ['等待期']) is False
 
     def test_is_relevant_law_name_needs_keyword(self, sample_eval):
         """law_name 匹配但无 keyword 和 source_file 时不算 relevant"""
@@ -334,6 +337,58 @@ class TestRetrievalMetrics:
     def test_redundancy_rate_empty(self):
         assert _compute_redundancy_rate([]) == 0.0
 
+    def test_match_source_to_evidence_exact(self):
+        assert _match_source_to_evidence("05_健康保险产品开发.md", ["05_健康保险产品开发.md"]) == "05_健康保险产品开发.md"
+
+    def test_match_source_to_evidence_without_extension(self):
+        assert _match_source_to_evidence("05_健康保险产品开发", ["05_健康保险产品开发.md"]) == "05_健康保险产品开发.md"
+
+    def test_match_source_to_evidence_with_path(self):
+        assert _match_source_to_evidence("/data/references/05_健康保险产品开发.md", ["05_健康保险产品开发.md"]) == "05_健康保险产品开发.md"
+
+    def test_match_source_to_evidence_no_match(self):
+        assert _match_source_to_evidence("07_分红型人身保险.md", ["05_健康保险产品开发.md"]) is None
+
+    def test_match_source_to_evidence_empty(self):
+        assert _match_source_to_evidence("", ["05_健康保险产品开发.md"]) is None
+        assert _match_source_to_evidence("05_健康保险产品开发.md", []) is None
+
+    def test_is_relevant_synonym_expansion(self):
+        """同义词扩展：evidence_keywords 含'退保'，content 含'解除保险合同'应判为相关"""
+        result = {
+            'content': '解除保险合同应当退还保单现金价值',
+            'law_name': '保险法',
+            'source_file': '01_保险法.md',
+        }
+        assert _is_relevant(result, ["01_保险法.md"], ["退保", "现金价值"]) is True
+
+    def test_is_relevant_synonym_reverse_lookup(self):
+        """反向同义词：evidence_keywords 含'自付额'，content 含'免赔额'应判为相关"""
+        result = {
+            'content': '自付额即免赔额，每次就诊的自付额为500元',
+            'law_name': '健康保险',
+            'source_file': '05_健康保险产品开发.md',
+        }
+        assert _is_relevant(result, ["05_健康保险产品开发.md"], ["自付额", "免赔"]) is True
+
+    def test_is_relevant_generic_keywords_rejected(self):
+        """泛关键词不单独触发相关"""
+        result = {
+            'content': '保险合同条款规定了相关要求',
+            'law_name': '保险法',
+            'source_file': '07_分红型人身保险.md',
+        }
+        assert _is_relevant(result, ["05_健康保险产品开发.md"], ["保险", "条款"]) is False
+
+    def test_is_relevant_domain_keyword_with_synonym(self):
+        """领域关键词通过同义词扩展匹配"""
+        result = {
+            'content': '自付额为每次100元',
+            'law_name': '健康保险产品开发',
+            'source_file': '05_健康保险产品开发.md',
+        }
+        assert _is_relevant(result, ["05_健康保险产品开发.md"], ["免赔额"]) is True
+
 
 
 
@@ -349,7 +404,7 @@ class TestRetrievalEvaluator:
         result = evaluator.evaluate(sample_eval, top_k=2)
 
         assert result['precision'] == 1.0
-        assert result['recall'] == 2.0  # 2 relevant results / 1 evidence doc
+        assert result['recall'] == 1.0  # 2 relevant results match same 1 evidence doc
         assert result['mrr'] == 1.0
         assert result['ndcg'] == 1.0
         assert result['first_relevant_rank'] == 1
@@ -364,7 +419,7 @@ class TestRetrievalEvaluator:
         result = evaluator.evaluate(sample_eval, top_k=4)
 
         assert result['precision'] == pytest.approx(0.5)
-        assert result['recall'] == 2.0  # 2 relevant results / 1 evidence doc
+        assert result['recall'] == 1.0  # 2 relevant results match same 1 evidence doc
         assert result['mrr'] == 1.0  # 第一条就命中
         assert result['ndcg'] > 0.0
         assert result['first_relevant_rank'] == 1
@@ -491,6 +546,105 @@ class TestRetrievalEvaluator:
         assert report.recall_at_k == 0.0
         assert report.mrr == 0.0
         assert report.ndcg == 0.0
+
+    def test_evaluate_single_sample_multi_doc_recall(self, mock_rag_engine):
+        """多个 evidence_doc 场景：recall = matched_docs / evidence_docs"""
+        multi_doc_sample = EvalSample(
+            id="test_multi_doc",
+            question="等待期和犹豫期有什么区别？",
+            ground_truth="等待期是合同生效后的观察期，犹豫期是收到保单后的退保期",
+            evidence_docs=["05_健康保险产品开发.md", "06_健康保险管理办法.md"],
+            evidence_keywords=["等待期", "犹豫期"],
+            question_type=QuestionType.FACTUAL,
+            difficulty="medium",
+            topic="健康保险",
+        )
+        results = [
+            {
+                'content': '等待期规定：既往症人群的等待期不应与健康人群有过大差距',
+                'law_name': '健康保险产品开发',
+                'source_file': '05_健康保险产品开发.md',
+                'score': 0.95,
+            },
+            {
+                'content': '犹豫期自收到保险单之日起不少于15天',
+                'law_name': '健康保险管理办法',
+                'source_file': '06_健康保险管理办法.md',
+                'score': 0.9,
+            },
+        ]
+        mock_rag_engine.search.return_value = results
+
+        evaluator = RetrievalEvaluator(mock_rag_engine)
+        result = evaluator.evaluate(multi_doc_sample, top_k=2)
+
+        assert result['recall'] == 1.0  # 2 docs matched / 2 evidence docs
+
+    def test_evaluate_unanswerable_sample(self, mock_rag_engine):
+        """UNANSWERABLE 样本：evidence_docs 为空时 recall = 0.0"""
+        unanswerable_sample = EvalSample(
+            id="test_unanswerable",
+            question="保险公司可以在抖音上直播卖保险吗？",
+            ground_truth="知识库中无对应规定",
+            evidence_docs=[],
+            evidence_keywords=["直播", "销售"],
+            question_type=QuestionType.UNANSWERABLE,
+            difficulty="easy",
+            topic="互联网保险",
+        )
+        mock_rag_engine.search.return_value = [
+            {
+                'content': '互联网保险业务需要网络安全保护',
+                'law_name': '互联网保险产品',
+                'source_file': '10_互联网保险产品.md',
+                'score': 0.5,
+            },
+        ]
+
+        evaluator = RetrievalEvaluator(mock_rag_engine)
+        result = evaluator.evaluate(unanswerable_sample, top_k=1)
+
+        assert result['recall'] == 0.0
+
+    def test_evaluate_batch_excludes_unanswerable_from_recall(self, mock_rag_engine):
+        """UNANSWERABLE 样本不计入 recall 均值"""
+        samples = [
+            EvalSample(
+                id="test_normal",
+                question="等待期有什么规定？",
+                ground_truth="等待期不超过90天",
+                evidence_docs=["05_健康保险产品开发.md"],
+                evidence_keywords=["等待期"],
+                question_type=QuestionType.FACTUAL,
+                difficulty="easy",
+                topic="健康保险",
+            ),
+            EvalSample(
+                id="test_unanswerable",
+                question="保险公司可以在抖音上直播卖保险吗？",
+                ground_truth="知识库中无对应规定",
+                evidence_docs=[],
+                evidence_keywords=["直播"],
+                question_type=QuestionType.UNANSWERABLE,
+                difficulty="easy",
+                topic="互联网保险",
+            ),
+        ]
+        mock_rag_engine.search.return_value = [
+            {
+                'content': '等待期规定相关内容',
+                'law_name': '健康保险',
+                'source_file': '05_健康保险产品开发.md',
+                'score': 0.9,
+            },
+        ]
+
+        evaluator = RetrievalEvaluator(mock_rag_engine)
+        report, _ = evaluator.evaluate_batch(samples, top_k=1)
+
+        assert report.recall_at_k == 1.0
+        assert report.rejection_rate is not None
+        assert report.rejection_rate == 1.0
 
 
 

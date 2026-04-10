@@ -189,3 +189,47 @@ class TestFaithfulness:
         from lib.rag_engine.evaluator import compute_faithfulness
         assert compute_faithfulness([], "答案") == 0.0
         assert compute_faithfulness(["上下文"], "") == 0.0
+
+    def test_semantic_faithfulness_different_numbers(self, monkeypatch):
+        """语义相似度可区分数字差异：上下文说180天，答案说360天应低分"""
+        def mock_get_embed():
+            return "mock_model"
+        def mock_similarity(text_a, text_b):
+            if "180" in text_a and "360" in text_b:
+                return 0.5
+            if text_a == text_b:
+                return 0.95
+            return 0.3
+        monkeypatch.setattr('lib.rag_engine.evaluator._get_embed_model', mock_get_embed)
+        monkeypatch.setattr('lib.rag_engine.evaluator._compute_embedding_similarity', mock_similarity)
+
+        from lib.rag_engine.evaluator import compute_faithfulness
+        contexts = ["健康保险产品的等待期不得超过180天"]
+        answer = "健康保险产品的等待期不得超过360天"
+        score = compute_faithfulness(contexts, answer)
+        assert score < 0.5
+
+    def test_semantic_faithfulness_fallback_to_bigram(self, monkeypatch):
+        """embedding 不可用时回退到 bigram 方式"""
+        def mock_get_embed():
+            return None
+        monkeypatch.setattr('lib.rag_engine.evaluator._get_embed_model', mock_get_embed)
+
+        from lib.rag_engine.evaluator import compute_faithfulness
+        contexts = ["健康保险产品的等待期不得超过90天"]
+        answer = "健康保险产品的等待期不得超过90天"
+        score = compute_faithfulness(contexts, answer)
+        assert score > 0.5
+
+    def test_empty_sentences_fallback_to_bigram(self, monkeypatch):
+        """所有句子太短被过滤时，回退到整体 bigram 重叠度"""
+        def mock_get_embed():
+            return None
+        monkeypatch.setattr('lib.rag_engine.evaluator._get_embed_model', mock_get_embed)
+
+        from lib.rag_engine.evaluator import compute_faithfulness
+        contexts = ["健康保险产品的等待期不得超过90天"]
+        answer = "嗯。啊。哦。"
+        score = compute_faithfulness(contexts, answer)
+        assert isinstance(score, float)
+        assert 0.0 <= score <= 1.0
