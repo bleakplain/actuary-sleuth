@@ -163,6 +163,9 @@ class SynthQA:
         self,
         chunks: Optional[List[Dict[str, Any]]] = None,
         existing_samples: Optional[List[EvalSample]] = None,
+        save_interval: int = 10,
+        save_fn=None,
+        progress_callback=None,
     ) -> SynthResult:
         if chunks is None:
             chunks = self.load_chunks()
@@ -170,12 +173,14 @@ class SynthQA:
         existing = existing_samples or []
         result = SynthResult(total_chunks=len(chunks))
 
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks):
             result.processed_chunks += 1
             items = self._generate_for_chunk(chunk)
 
             if not items:
                 result.failed_chunks += 1
+                if progress_callback:
+                    progress_callback(result, i + 1, len(chunks))
                 continue
 
             source_file = chunk.get("source_file", "")
@@ -216,6 +221,16 @@ class SynthQA:
 
             result.samples.extend(filtered)
             existing.extend(filtered)
+
+            if progress_callback:
+                progress_callback(result, i + 1, len(chunks))
+
+            if save_fn and (i + 1) % save_interval == 0:
+                saved_count = save_fn(result.samples)
+                logger.info(
+                    f"[{i + 1}/{len(chunks)}] 渐进保存 {saved_count} 条，"
+                    f"累计有效 {len(result.samples)}，失败 {result.failed_chunks}"
+                )
 
         logger.info(
             f"合成完成: {result.processed_chunks} chunks, "
