@@ -129,16 +129,8 @@ def test_unanswerable_type_serialization():
     assert restored == sample
 
 
-def test_default_dataset_includes_unanswerable():
-    from lib.rag_engine.eval_dataset import create_default_eval_dataset
-    dataset = create_default_eval_dataset()
-    unanswerable = [s for s in dataset if s.question_type == QuestionType.UNANSWERABLE]
-    assert len(unanswerable) >= 5
-
-
 def test_load_eval_dataset_from_db():
     from lib.rag_engine.eval_dataset import load_eval_dataset
-    # DB is empty in tests, so falls back to built-in default
+    # DB is empty in tests; load_eval_dataset returns [] when DB has no samples
     loaded = load_eval_dataset()
     assert isinstance(loaded, list)
-    assert len(loaded) > 0

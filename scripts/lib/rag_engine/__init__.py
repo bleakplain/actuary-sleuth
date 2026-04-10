@@ -77,7 +77,6 @@ __all__ = [
     'EvalSample',
     'QuestionType',
     'load_eval_dataset',
-    'create_default_eval_dataset',
     'save_eval_dataset',
     'detect_quality',
     'compute_retrieval_relevance',

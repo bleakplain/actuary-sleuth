@@ -12,7 +12,6 @@ import pytest
 from lib.rag_engine.eval_dataset import (
     EvalSample,
     QuestionType,
-    create_default_eval_dataset,
     load_eval_dataset,
     save_eval_dataset,
 )
@@ -102,10 +101,6 @@ def mixed_results(relevant_results, irrelevant_results):
 
 class TestEvalDataset:
 
-    def test_load_default_dataset(self):
-        dataset = create_default_eval_dataset()
-        assert len(dataset) == 155
-
     def test_eval_sample_fields(self, sample_eval):
         assert sample_eval.id == "test001"
         assert sample_eval.question_type == QuestionType.FACTUAL
@@ -113,26 +108,6 @@ class TestEvalDataset:
         assert sample_eval.topic == "健康保险"
         assert len(sample_eval.evidence_docs) >= 1
         assert len(sample_eval.evidence_keywords) >= 1
-
-    def test_question_type_coverage(self):
-        dataset = create_default_eval_dataset()
-        types = set(s.question_type for s in dataset)
-        assert QuestionType.FACTUAL in types
-        assert QuestionType.MULTI_HOP in types
-        assert QuestionType.NEGATIVE in types
-        assert QuestionType.COLLOQUIAL in types
-
-    def test_question_type_distribution(self):
-        dataset = create_default_eval_dataset()
-        type_counts = {}
-        for s in dataset:
-            t = s.question_type.value
-            type_counts[t] = type_counts.get(t, 0) + 1
-
-        assert type_counts['factual'] >= 40
-        assert type_counts['multi_hop'] >= 35
-        assert type_counts['negative'] >= 30
-        assert type_counts['colloquial'] >= 25
 
     def test_to_dict_roundtrip(self, sample_eval):
         d = sample_eval.to_dict()
@@ -143,26 +118,19 @@ class TestEvalDataset:
         restored = EvalSample.from_dict(d)
         assert restored == sample_eval
 
-    def test_save_eval_dataset_to_path(self, tmp_path):
-        samples = create_default_eval_dataset()[:3]
+    def test_save_eval_dataset_to_path(self, tmp_path, sample_eval):
         path = tmp_path / "test_eval.json"
-        save_eval_dataset(samples, str(path))
+        save_eval_dataset([sample_eval], str(path))
         assert path.exists()
 
     def test_load_eval_dataset_returns_list(self):
         dataset = load_eval_dataset()
         assert isinstance(dataset, list)
-        assert len(dataset) > 0
 
-    def test_save_creates_parent_dirs(self, tmp_path):
+    def test_save_creates_parent_dirs(self, tmp_path, sample_eval):
         nested_path = tmp_path / "sub" / "dir" / "eval.json"
-        save_eval_dataset(create_default_eval_dataset()[:1], str(nested_path))
+        save_eval_dataset([sample_eval], str(nested_path))
         assert nested_path.exists()
-
-    def test_load_eval_dataset_returns_list(self):
-        dataset = load_eval_dataset()
-        assert isinstance(dataset, list)
-        assert len(dataset) > 0
 
 
 
@@ -464,7 +432,24 @@ class TestRetrievalEvaluator:
         assert result['ndcg'] > 0.0
 
     def test_evaluate_batch(self, mock_rag_engine):
-        samples = create_default_eval_dataset()[:5]
+        samples = [
+            EvalSample(
+                id="batch_001", question="等待期规定？",
+                ground_truth="等待期不超过90天",
+                evidence_docs=["05_健康保险产品开发.md"],
+                evidence_keywords=["等待期"],
+                question_type=QuestionType.FACTUAL,
+                difficulty="easy", topic="健康保险",
+            ),
+            EvalSample(
+                id="batch_002", question="犹豫期多久？",
+                ground_truth="不少于15日",
+                evidence_docs=["06_健康保险管理办法.md"],
+                evidence_keywords=["犹豫期"],
+                question_type=QuestionType.FACTUAL,
+                difficulty="easy", topic="健康保险",
+            ),
+        ]
 
         mock_rag_engine.search.return_value = [
             {
@@ -495,7 +480,40 @@ class TestRetrievalEvaluator:
         assert len(report.by_type) > 0
 
     def test_by_type_breakdown(self, mock_rag_engine):
-        dataset = create_default_eval_dataset()
+        dataset = [
+            EvalSample(
+                id="t_factual", question="等待期？",
+                ground_truth="答案",
+                evidence_docs=["05_健康保险产品开发.md"],
+                evidence_keywords=["等待期"],
+                question_type=QuestionType.FACTUAL,
+                difficulty="easy", topic="健康保险",
+            ),
+            EvalSample(
+                id="t_multihop", question="等待期和犹豫期区别？",
+                ground_truth="答案",
+                evidence_docs=["05_健康保险产品开发.md"],
+                evidence_keywords=["等待期", "犹豫期"],
+                question_type=QuestionType.MULTI_HOP,
+                difficulty="medium", topic="健康保险",
+            ),
+            EvalSample(
+                id="t_negative", question="能不能单方面修改保额？",
+                ground_truth="不能",
+                evidence_docs=["01_保险法.md"],
+                evidence_keywords=["保额", "修改"],
+                question_type=QuestionType.NEGATIVE,
+                difficulty="easy", topic="保险法",
+            ),
+            EvalSample(
+                id="t_colloquial", question="买完保险想反悔咋整？",
+                ground_truth="可在犹豫期退保",
+                evidence_docs=["06_健康保险管理办法.md"],
+                evidence_keywords=["犹豫期", "退保"],
+                question_type=QuestionType.COLLOQUIAL,
+                difficulty="easy", topic="健康保险",
+            ),
+        ]
 
         mock_rag_engine.search.return_value = [
             {
@@ -767,7 +785,17 @@ class TestEvaluateRetrieval:
         mock_rag_engine.search.return_value = [
             {'content': '不相关内容', 'law_name': '其他', 'source_file': 'other.md', 'score': 0.5},
         ]
-        samples = create_default_eval_dataset()[:5]
+        samples = [
+            EvalSample(
+                id=f"fail_{i}", question=f"问题{i}",
+                ground_truth="答案",
+                evidence_docs=["05_健康保险产品开发.md"],
+                evidence_keywords=["等待期"],
+                question_type=QuestionType.FACTUAL,
+                difficulty="easy", topic="健康保险",
+            )
+            for i in range(5)
+        ]
         report, failed = evaluate_retrieval(mock_rag_engine, samples, top_k=1)
 
         assert report.precision_at_k == 0.0
