@@ -9,8 +9,7 @@ from typing import Any, Dict, List, Optional
 from lib.common.database import get_connection
 from lib.memory.base import MemoryBase, Mem0Memory
 from lib.memory.config import MemoryConfig
-
-logger = logging.getLogger(__name__)
+from lib.memory.prompts import PROFILE_EXTRACTION_PROMPT
 
 
 class MemoryService:
@@ -154,6 +153,55 @@ class MemoryService:
             "preference_tags": preference_tags,
             "summary": summary,
         }
+
+    def auto_update_profile(self, question: str, answer: str, user_id: str) -> None:
+        """从对话内容自动提取用户画像信息，不存在时自动创建。"""
+        try:
+            from lib.llm.factory import LLMClientFactory
+
+            llm = LLMClientFactory.create_qa_llm()
+            prompt = PROFILE_EXTRACTION_PROMPT.format(question=question, answer=answer)
+            raw = str(llm.chat([{"role": "user", "content": prompt}]))
+            text = raw.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+                text = text.rsplit("```", 1)[0] if "```" in text else text
+            extracted = json.loads(text)
+        except Exception:
+            logger.debug("用户画像自动提取失败，跳过", exc_info=True)
+            return
+
+        focus_areas = extracted.get("focus_areas", [])
+        preference_tags = extracted.get("preference_tags", [])
+        summary = extracted.get("summary", "")
+
+        if not focus_areas and not preference_tags and not summary:
+            return
+
+        try:
+            with get_connection() as conn:
+                existing = conn.execute(
+                    "SELECT focus_areas, preference_tags, summary FROM user_profiles WHERE user_id = ?",
+                    (user_id,),
+                ).fetchone()
+
+                if existing:
+                    old_areas = json.loads(existing[0])
+                    old_tags = json.loads(existing[1])
+                    areas = list({*old_areas, *focus_areas})
+                    tags = list({*old_tags, *preference_tags})
+                    conn.execute(
+                        "UPDATE user_profiles SET focus_areas = ?, preference_tags = ?, summary = ?, updated_at = datetime('now') "
+                        "WHERE user_id = ?",
+                        (json.dumps(areas), json.dumps(tags), summary, user_id),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO user_profiles (user_id, focus_areas, preference_tags, summary) VALUES (?, ?, ?, ?)",
+                        (user_id, json.dumps(focus_areas), json.dumps(preference_tags), summary),
+                    )
+        except Exception:
+            logger.debug("用户画像写入失败，跳过", exc_info=True)
 
     def _purge_memories(self, rows) -> int:
         count = 0

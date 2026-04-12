@@ -160,7 +160,7 @@ def extract_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
 def update_user_profile(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
     memory_svc = runtime.context.memory_service
     try:
-        memory_svc.update_profile(state["question"], state["answer"], state["user_id"])
+        memory_svc.auto_update_profile(state["question"], state["answer"], state["user_id"])
     except Exception:
         logger.debug("用户画像更新失败，跳过", exc_info=True)
     return {}

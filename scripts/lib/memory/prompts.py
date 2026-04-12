@@ -12,3 +12,16 @@ Output: {"facts": ["费率表使用过时生命表CL1-2010", "当前应使用CL1
 
 请以 JSON 格式输出。
 """
+
+PROFILE_EXTRACTION_PROMPT = """\
+根据用户提问和系统回答，提取用户画像信息。仅提取有明确依据的内容，不确定时留空。
+
+Output JSON 格式:
+{{"focus_areas": ["关注的保险类型，如重疾险、医疗险"], "preference_tags": ["用户偏好标签，如等待期、免责条款"], "summary": "一句话概括用户当前关注点"}}
+
+用户提问: {question}
+
+系统回答: {answer}
+
+请以 JSON 格式输出。
+"""
