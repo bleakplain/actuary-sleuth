@@ -400,19 +400,19 @@ def get_regulations_dir() -> str:
     return _get_config().get_regulations_dir()
 
 def get_kb_version_dir() -> str:
-    return get_config().get_kb_version_dir()
+    return _get_config().get_kb_version_dir()
 
 def get_eval_snapshots_dir() -> str:
-    return get_config().get_eval_snapshots_dir()
+    return _get_config().get_eval_snapshots_dir()
 
 def get_models_dir() -> str:
-    return get_config().get_models_dir()
+    return _get_config().get_models_dir()
 
 def get_tools_dir() -> str:
-    return get_config().get_tools_dir()
+    return _get_config().get_tools_dir()
 
 def get_llm_config() -> LLMConfig:
-    return get_config().llm
+    return _get_config().llm
 
 
 def get_qa_llm_config() -> SimpleNamespace:
@@ -434,4 +434,4 @@ def get_ocr_llm_config() -> SimpleNamespace:
     return get_llm_config().ocr
 
 def get_feishu_config() -> FeishuConfig:
-    return get_config().feishu
+    return _get_config().feishu
