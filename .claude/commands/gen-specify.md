@@ -41,7 +41,6 @@ arguments:
    ```
 4. **拷贝配置文件** — 从当前工作目录拷贝到新 worktree：
    ```bash
-   cp scripts/config/settings.json .claude/worktrees/<feature-name>/scripts/config/settings.json
    cp scripts/.env .claude/worktrees/<feature-name>/scripts/.env
    ```
 5. **创建产物目录**：

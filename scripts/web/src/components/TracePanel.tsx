@@ -328,6 +328,15 @@ function SpanDetails({ span, depth }: { span: TraceSpan; depth: number }) {
         <div style={{ fontSize: 11, color: 'var(--ant-color-text-secondary)', lineHeight: 1.6 }}>
           检索到 <span style={{ fontWeight: 'var(--ant-font-weight-strong, 600)', color: catStyle.color }}>{String(out.memory_count)}</span> 条记忆
           {out.has_profile ? '，含用户画像' : ''}
+          {out.memories && out.memories.length > 0 && (
+            <div style={{ marginTop: 6 }}>
+              {out.memories.map((m, i) => (
+                <div key={i} style={{ padding: '4px 0', borderBottom: '1px solid var(--ant-color-border-secondary)' }}>
+                  {String(m)}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
