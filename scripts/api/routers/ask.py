@@ -89,7 +89,7 @@ async def chat(req: ChatRequest):
 
     # debug: 前端显式传值时以请求为准，否则读取配置默认值
     if req.debug is None:
-        req.debug = get_config().get("debug", False)
+        req.debug = get_config().debug
 
     if req.mode == "search":
         try:

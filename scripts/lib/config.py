@@ -338,6 +338,10 @@ class Config:
     def version(self) -> str:
         return self._config.get('version', 'unknown')
 
+    @property
+    def debug(self) -> bool:
+        return self._config.get('debug', False)
+
     def _resolve_path(self, rel_path: str) -> str:
         p = Path(rel_path)
         if p.is_absolute():
