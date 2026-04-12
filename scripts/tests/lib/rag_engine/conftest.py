@@ -41,7 +41,7 @@ def embedding_model():
         pytest.skip("llama_index not installed")
 
     try:
-        return OllamaEmbedding(model_name="jinaai/jina-embeddings-v5-text-small")
+        return OllamaEmbedding(model_name="qllama/bge-m3:q4_k_m")
     except Exception:
         try:
             from llama_index.embeddings.openai import OpenAIEmbedding

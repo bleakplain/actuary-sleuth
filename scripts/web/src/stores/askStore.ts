@@ -19,6 +19,7 @@ interface AskState {
   selectSession: (id: string) => Promise<void>;
   sendMessage: (question: string, mode: 'qa' | 'search') => void;
   deleteSession: (id: string) => Promise<void>;
+  deleteMessage: (messageId: number) => Promise<void>;
   openTrace: (messageId: number) => void;
   closeTrace: () => void;
   toggleDebugMode: () => void;
@@ -146,6 +147,26 @@ export const useAskStore = create<AskState>((set, get) => ({
     if (currentSessionId === id) {
       set({ currentSessionId: null, messages: [], activeTraceMessageId: null, traceLoading: false });
     }
+    get().loadSessions();
+  },
+
+  deleteMessage: async (messageId: number) => {
+    const { messages } = get();
+    const msg = messages.find((m) => m.id === messageId);
+    if (!msg) return;
+    await askApi.deleteMessage(messageId);
+    const idsToRemove = new Set([messageId]);
+    if (msg.role === 'user') {
+      const idx = messages.indexOf(msg);
+      const next = messages[idx + 1];
+      if (next && next.role === 'assistant') {
+        idsToRemove.add(next.id);
+      }
+    }
+    set((s) => ({
+      messages: s.messages.filter((m) => !idsToRemove.has(m.id)),
+      activeTraceMessageId: idsToRemove.has(s.activeTraceMessageId ?? -1) ? null : s.activeTraceMessageId,
+    }));
     get().loadSessions();
   },
 

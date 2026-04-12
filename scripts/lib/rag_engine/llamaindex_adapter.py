@@ -18,9 +18,8 @@ _MODEL_LIMITS = {
     'glm-4-flash': {'context': 128000, 'output': 8192},
     'glm-4-plus': {'context': 128000, 'output': 8192},
     'glm-z1-air': {'context': 128000, 'output': 8192},
-    'nomic-embed-text': {'context': 8192, 'output': 512},
     'embedding-3': {'context': 8192, 'output': 2048},
-    'jinaai/jina-embeddings-v5-text-small': {'context': 8192, 'output': 1024},
+    'qllama/bge-m3:q4_k_m': {'context': 8192, 'output': 1024},
 }
 
 

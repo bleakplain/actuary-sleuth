@@ -12,7 +12,6 @@ from api.schemas.eval import (
     EvalSampleCreate, EvalSampleOut, ImportSamplesRequest,
     EvaluationRequest, EvalConfigCreate, CompareRequest, SnapshotCreate,
     HumanReviewCreate, ReviewSampleRequest, KbSearchRequest, KbSearchResult,
-    SynthesizeRequest,
 )
 from api.database import (
     eval_sample_count, import_eval_samples, get_eval_samples,
@@ -29,29 +28,18 @@ from api.database import (
     get_human_reviews, get_human_review_stats,
     batch_delete_evaluations,
     get_review_stats,
+    is_evaluation_cancelled, cancel_evaluation_run, add_evaluation_error,
 )
 from lib.rag_engine.eval_dataset import EvalSample, ReviewStatus
 from lib.rag_engine.config import RAGConfig
 from lib.rag_engine.rag_engine import RAGEngine
-from lib.rag_engine import RetrievalEvaluator, GenerationEvaluator
-from lib.rag_engine.eval_rating import generate_eval_summary
+from lib.rag_engine import RetrievalEvaluator, GenerationEvaluator, load_eval_dataset
+from lib.rag_engine.eval_guide import generate_eval_summary
 from lib.rag_engine.dataset_validator import validate_dataset
 from lib.llm import LLMClientFactory
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/eval", tags=["评估管理"])
-
-_eval_tasks: dict = {}
-_MAX_EVAL_TASKS = 100
-
-
-def _cleanup_completed_tasks():
-    completed = [
-        eid for eid, info in _eval_tasks.items()
-        if info.get('status') in ('completed', 'failed')
-    ]
-    for eid in completed[:20]:
-        _eval_tasks.pop(eid, None)
 
 
 # ── 数据集管理 ───────────────────────────────────────
@@ -195,15 +183,8 @@ async def create_evaluation(req: EvaluationRequest):
         dataset_version=dataset_version,
     )
 
-    if len(_eval_tasks) >= _MAX_EVAL_TASKS:
-        _cleanup_completed_tasks()
-
-    _eval_tasks[evaluation_id] = {"status": "pending"}
-
     async def _run_eval():
         try:
-            _eval_tasks[evaluation_id]["status"] = "running"
-
             filtered = samples_data
             if req.filters:
                 for key, val in req.filters.items():
@@ -232,12 +213,15 @@ async def create_evaluation(req: EvaluationRequest):
                 ret_report, ret_details = ret_eval.evaluate_batch(
                     samples, top_k=config.rerank.rerank_top_k,
                 )
-                for detail in ret_details:
+                for idx, detail in enumerate(ret_details):
+                    if is_evaluation_cancelled(evaluation_id):
+                        update_evaluation_status(evaluation_id, "cancelled")
+                        eval_engine.cleanup()
+                        return
                     sample_id = detail.get("sample_id", "")
-                    save_sample_result(evaluation_id, sample_id, retrieval_metrics=detail)
-                    current = _eval_tasks[evaluation_id].get("progress", 0) + 1
-                    _eval_tasks[evaluation_id]["progress"] = current
-                    update_evaluation_status(evaluation_id, "running", progress=current, total=total)
+                    retrieved_docs = detail.get("retrieved_docs", [])
+                    save_sample_result(evaluation_id, sample_id, retrieved_docs=retrieved_docs, retrieval_metrics=detail)
+                    update_evaluation_status(evaluation_id, "running", progress=idx + 1, total=total)
 
             gen_report = None
             if req.mode in ("generation", "full"):
@@ -246,7 +230,20 @@ async def create_evaluation(req: EvaluationRequest):
                     llm=LLMClientFactory.create_ragas_llm(),
                     embeddings=LLMClientFactory.create_ragas_embed_model(),
                 )
-                gen_report = gen_eval.evaluate_batch(samples, rag_engine=eval_engine)
+                gen_report, gen_details = gen_eval.evaluate_batch(samples, rag_engine=eval_engine)
+                for idx, detail in enumerate(gen_details):
+                    if is_evaluation_cancelled(evaluation_id):
+                        update_evaluation_status(evaluation_id, "cancelled")
+                        eval_engine.cleanup()
+                        return
+                    sample_id = detail.get("sample_id", "")
+                    save_sample_result(
+                        evaluation_id, sample_id,
+                        retrieved_docs=detail.get("retrieved_docs", []),
+                        generated_answer=detail.get("generated_answer", ""),
+                        generation_metrics=detail.get("metrics", {}),
+                    )
+                    update_evaluation_status(evaluation_id, "running", progress=idx + 1, total=total)
 
             report: Dict = {}
             if req.mode in ("retrieval", "full"):
@@ -258,14 +255,15 @@ async def create_evaluation(req: EvaluationRequest):
 
             save_evaluation_report(evaluation_id, report)
             update_evaluation_status(evaluation_id, "completed")
-            _eval_tasks[evaluation_id]["status"] = "completed"
             eval_engine.cleanup()
 
         except Exception as e:
             logger.error(f"Eval run {evaluation_id} failed: {e}")
             update_evaluation_status(evaluation_id, "failed")
-            _eval_tasks[evaluation_id]["status"] = "failed"
-            _eval_tasks[evaluation_id]["error"] = str(e)
+            try:
+                add_evaluation_error(evaluation_id, str(e))
+            except Exception:
+                logger.warning(f"Failed to persist error for {evaluation_id}: {e}")
 
     asyncio.create_task(_run_eval())
     return {"evaluation_id": evaluation_id, "status": "pending"}
@@ -296,6 +294,17 @@ async def get_evaluation_report(evaluation_id: str):
     if run["status"] != "completed":
         raise HTTPException(status_code=400, detail=f"评估尚未完成，当前状态: {run['status']}")
     return run.get("report", {})
+
+
+@router.post("/evaluations/{evaluation_id}/cancel")
+async def cancel_evaluation(evaluation_id: str):
+    run = get_evaluation(evaluation_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="评估运行不存在")
+    if run["status"] != "running":
+        raise HTTPException(status_code=400, detail=f"只能取消运行中的评估，当前状态: {run['status']}")
+    cancel_evaluation_run(evaluation_id)
+    return {"cancelled": True, "evaluation_id": evaluation_id}
 
 
 @router.get("/evaluations/{evaluation_id}/details")
@@ -354,11 +363,11 @@ async def compare_evaluations(req: CompareRequest):
         c = compare_report.get(key, {})
         if not b or not c:
             continue
-        for metric in ["precision_at_k", "recall_at_k", "mrr", "ndcg",
-                        "faithfulness", "answer_relevancy", "answer_correctness"]:
+        all_metrics = set(b.keys()) | set(c.keys())
+        for metric in all_metrics:
             b_val = b.get(metric)
             c_val = c.get(metric)
-            if b_val is None or c_val is None:
+            if not isinstance(b_val, (int, float)) or not isinstance(c_val, (int, float)):
                 continue
             delta = c_val - b_val
             pct = (delta / b_val * 100) if b_val != 0 else 0
@@ -548,62 +557,3 @@ async def search_knowledge_base(req: KbSearchRequest):
     except Exception as e:
         logger.error(f"KB 搜索失败: {e}")
         raise HTTPException(status_code=500, detail=f"知识库搜索失败: {str(e)}")
-
-
-@router.post("/dataset/synthesize")
-async def synthesize_samples(req: SynthesizeRequest = SynthesizeRequest()):
-    from lib.rag_engine.sample_synthesizer import SynthQA, SynthConfig
-    from lib.rag_engine.eval_dataset import load_eval_dataset
-
-    synth = SynthQA(SynthConfig())
-    chunks = synth.load_chunks()
-    chunks = chunks[:req.max_chunks]
-
-    existing = load_eval_dataset()
-    result = synth.synthesize(chunks=chunks, existing_samples=existing)
-
-    return result.to_dict()
-
-
-@router.get("/dataset/coverage")
-async def get_dataset_coverage():
-    from lib.rag_engine.dataset_coverage import compute_coverage, get_kb_doc_names
-    from lib.rag_engine.eval_dataset import EvalSample
-    from lib.rag_engine.kb_manager import KBManager
-
-    kb_mgr = KBManager()
-    paths = kb_mgr.get_active_paths()
-    if not paths:
-        raise HTTPException(status_code=404, detail="无活跃知识库版本")
-
-    kb_docs = get_kb_doc_names(paths["regulations_dir"])
-    samples_data = get_eval_samples()
-    samples = [EvalSample.from_dict(s) for s in samples_data]
-    report = compute_coverage(samples, kb_docs)
-    return report.to_dict()
-
-
-@router.get("/evaluations/{evaluation_id}/weakness")
-async def get_evaluation_weakness(evaluation_id: str):
-    from lib.rag_engine.weakness_analyzer import generate_weakness_report
-    from lib.rag_engine.dataset_coverage import compute_coverage, get_kb_doc_names
-    from lib.rag_engine.eval_dataset import EvalSample
-    from lib.rag_engine.kb_manager import KBManager
-
-    run = get_evaluation(evaluation_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="评估运行不存在")
-    if run["status"] != "completed":
-        raise HTTPException(status_code=400, detail="评估尚未完成")
-
-    results = get_sample_results(evaluation_id)
-
-    kb_mgr = KBManager()
-    paths = kb_mgr.get_active_paths()
-    kb_docs = get_kb_doc_names(paths["regulations_dir"]) if paths else []
-    samples_data = get_eval_samples()
-    samples = [EvalSample.from_dict(s) for s in samples_data]
-    coverage = compute_coverage(samples, kb_docs)
-
-    report = generate_weakness_report(results, coverage)
-    return report.to_dict()

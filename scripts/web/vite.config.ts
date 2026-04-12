@@ -18,7 +18,8 @@ export default defineConfig({
   plugins: [react()],
   cacheDir: '/tmp/vite_cache',
   server: {
-    port: 3000,
+    host: '0.0.0.0',
+    port: 8000,
     strictPort: true,
     proxy: {
       '/api': {

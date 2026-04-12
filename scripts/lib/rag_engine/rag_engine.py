@@ -28,6 +28,7 @@ from .exceptions import EngineInitializationError, RetrievalError
 from .attribution import parse_citations, AttributionResult
 from ._gguf_cli import GGUFReranker as GGUFCliReranker
 from .gguf_reranker_adapter import GGUFReranker, RerankerError
+from .cross_encoder_reranker import CrossEncoderReranker
 from lib.llm import BaseLLMClient, LLMClientFactory
 from lib.llm.trace import trace_span
 
@@ -166,6 +167,13 @@ class RAGEngine:
                 return GGUFReranker(gguf)
             except (FileNotFoundError, OSError, ValueError) as e:
                 logger.warning(f"GGUF reranker 不可用，回退到 LLM reranker: {e}")
+                return LLMReranker(self._llm_client, rerank_config)
+
+        if rc.reranker_type == "hf":
+            try:
+                return CrossEncoderReranker()
+            except Exception as e:
+                logger.warning(f"CrossEncoder reranker 不可用，回退到 LLM reranker: {e}")
                 return LLMReranker(self._llm_client, rerank_config)
 
         return None

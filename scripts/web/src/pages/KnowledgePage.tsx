@@ -31,6 +31,7 @@ export default function KnowledgePage() {
   const [loading, setLoading] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [taskStatus, setTaskStatus] = useState<string>('');
+  const [taskProgress, setTaskProgress] = useState<string>('');
 
   // 分块查看状态
   const [chunksOpen, setChunksOpen] = useState(false);
@@ -125,6 +126,7 @@ export default function KnowledgePage() {
       try {
         const task = await kbApi.fetchTaskStatus(taskId);
         setTaskStatus(task.status);
+        setTaskProgress(task.progress);
         if (task.status === 'completed' || task.status === 'failed') {
           clearInterval(timer);
           if (task.status === 'completed') {
@@ -146,6 +148,7 @@ export default function KnowledgePage() {
       const { task_id } = await kbApi.importDocuments('*.md');
       setTaskId(task_id);
       setTaskStatus('pending');
+      setTaskProgress('');
       message.info('开始导入...');
     } catch (err) {
       message.error(`导入失败: ${err}`);
@@ -157,6 +160,7 @@ export default function KnowledgePage() {
       const { task_id } = await kbApi.createVersion(versionDescription || undefined);
       setTaskId(task_id);
       setTaskStatus('pending');
+      setTaskProgress('');
       setCreateVersionModalOpen(false);
       setVersionDescription('');
       message.info('开始创建新版本...');
@@ -405,10 +409,22 @@ export default function KnowledgePage() {
 
       {(taskStatus === 'pending' || taskStatus === 'running') && (
         <Card size="small" style={{ marginBottom: 16 }}>
-          <Progress percent={taskStatus === 'pending' ? 0 : 50} status="active" />
-          <Text type="secondary">
-            {taskStatus === 'pending' ? '等待中...' : '处理中...'}
-          </Text>
+          {(() => {
+            const match = taskProgress.match(/(\d+)\s*\/\s*(\d+)/);
+            const percent = match ? Math.round((parseInt(match[1]) / parseInt(match[2])) * 100) : (taskStatus === 'pending' ? 0 : undefined);
+            return (
+              <>
+                <Progress
+                  percent={percent}
+                  status={percent === undefined ? 'active' : undefined}
+                  format={percent !== undefined ? undefined : () => taskProgress || '处理中...'}
+                />
+                <Text type="secondary">
+                  {taskStatus === 'pending' ? '等待中...' : taskProgress || '处理中...'}
+                </Text>
+              </>
+            );
+          })()}
         </Card>
       )}
 

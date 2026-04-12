@@ -12,8 +12,8 @@ import {
 } from '@ant-design/icons';
 import * as evalApi from '../api/eval';
 import * as kbApi from '../api/knowledge';
-import MetricsChart, { formatMetric, ComparisonChart, TrendChart } from '../components/MetricsChart';
-import type { EvalSample, EvalSnapshot, Evaluation, EvalConfig, SampleResult, MetricsDiff, RegulationRef } from '../types';
+import MetricsChart, { formatMetric, MultiComparisonChart, TrendChart } from '../components/MetricsChart';
+import type { EvalSample, EvalSnapshot, Evaluation, EvalConfig, SampleResult, RegulationRef } from '../types';
 import { resolveMetricMeta } from '../utils/evalMetrics';
 import { DRAWER_SM, DRAWER_LG, MODAL_MD, MODAL_LG } from '../constants/layout';
 
@@ -525,12 +525,7 @@ export default function EvalPage() {
   const [report, setReport] = useState<Record<string, Record<string, number>> | null>(null);
   const [details, setDetails] = useState<SampleResult[]>([]);
   const [compareModalOpen, setCompareModalOpen] = useState(false);
-  const [compareIds, setCompareIds] = useState<{ baseline: string; compare: string }>({ baseline: '', compare: '' });
-  const [compareResult, setCompareResult] = useState<{
-    metrics_diff: Record<string, MetricsDiff>;
-    improved: string[];
-    regressed: string[];
-  } | null>(null);
+  const [compareResult, setCompareResult] = useState<{ label: string; data: Record<string, number> }[] | null>(null);
   const [dimensionFilter, setDimensionFilter] = useState<string>('overall');
   const [trendMetric, setTrendMetric] = useState<string>('retrieval.precision_at_k');
   const [trendData, setTrendData] = useState<{ run_id: string; label: string; value: number; timestamp: string }[]>([]);
@@ -587,13 +582,6 @@ export default function EvalPage() {
     }
     return dims;
   }, [report]);
-
-  const completedEvaluationsOptions = useMemo(() =>
-    evaluations.filter((e) => e.status === 'completed').map((e) => ({
-      value: e.id, label: `${e.id} (${e.mode}, ${e.started_at?.slice(0, 10)})`,
-    })),
-    [evaluations]
-  );
 
   const [evalPage, setEvalPage] = useState(1);
   const EVAL_PAGE_SIZE = 20;
@@ -757,7 +745,6 @@ export default function EvalPage() {
       setEvaluations((prev) => {
         if (prev.length !== data.length || prev[0]?.id !== data[0]?.id) {
           setEvalPage(1);
-          setSelectedEvalIds([]);
         }
         return data;
       });
@@ -897,14 +884,37 @@ export default function EvalPage() {
     }
   };
 
-  const compare_eval_results = async () => {
-    if (!compareIds.baseline || !compareIds.compare) {
-      message.warning('请选择两个评测');
+  const run_eval_compare = async () => {
+    const completedIds = selectedEvalIds.filter((id) => {
+      const e = evaluations.find((ev) => ev.id === id);
+      return e && e.status === 'completed';
+    });
+    if (completedIds.length < 2) {
+      message.warning('请选择至少 2 个已完成的评测');
       return;
     }
     try {
-      const result = await evalApi.compareEvaluations(compareIds.baseline, compareIds.compare);
-      setCompareResult(result);
+      const reports = await Promise.all(
+        completedIds.map((id) => evalApi.fetchEvaluationReport(id)),
+      );
+      const series: { label: string; data: Record<string, number> }[] = [];
+      for (let i = 0; i < completedIds.length; i++) {
+        const e = evaluations.find((ev) => ev.id === completedIds[i]);
+        const rpt = reports[i];
+        const flat: Record<string, number> = {};
+        for (const [section, metrics] of Object.entries(rpt)) {
+          if (typeof metrics !== 'object' || metrics === null) continue;
+          for (const [key, val] of Object.entries(metrics)) {
+            if (key === 'by_type' || key === 'total_samples' || key === 'failed_samples') continue;
+            if (typeof val === 'number') flat[`${section}.${key}`] = val;
+          }
+        }
+        series.push({
+          label: completedIds[i],
+          data: flat,
+        });
+      }
+      setCompareResult(series);
     } catch (err) {
       message.error(`对比失败: ${err}`);
     }
@@ -1533,7 +1543,6 @@ export default function EvalPage() {
                     <Button icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('retrieval')}>检索评测</Button>
                     <Button icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('generation')}>生成评测</Button>
                     <Button type="primary" icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('full')}>完整评测</Button>
-                    <Button icon={<SwapOutlined />} onClick={() => setCompareModalOpen(true)}>版本对比</Button>
                   </Space>
                 </div>
 
@@ -1611,6 +1620,11 @@ export default function EvalPage() {
                               >
                                 <Button type="primary" danger size="small" icon={<DeleteOutlined />}>删除</Button>
                               </Popconfirm>
+                              {selectedEvalIds.filter((id) => evaluations.find((e) => e.id === id)?.status === 'completed').length >= 2 && (
+                                <Button size="small" icon={<SwapOutlined />} onClick={() => { run_eval_compare(); setCompareModalOpen(true); }}>
+                                  对比
+                                </Button>
+                              )}
                             </>
                           )}
                           {!hasSelection && <span>共 {evaluations.length} 条</span>}
@@ -1684,10 +1698,14 @@ export default function EvalPage() {
                                 expandable={{
                                   expandedRowRender: (record) => (
                                     <div style={{ padding: '8px 16px' }}>
-                                      <Text strong>生成回答：</Text>
-                                      <div style={{ marginTop: 4, padding: 8, background: token.colorFillTertiary, borderRadius: 4 }}>
-                                        {record.generated_answer || '-'}
-                                      </div>
+                                      {selectedEvaluation?.mode !== 'retrieval' && (
+                                        <>
+                                          <Text strong>生成回答：</Text>
+                                          <div style={{ marginTop: 4, padding: 8, background: token.colorFillTertiary, borderRadius: 4 }}>
+                                            {record.generated_answer || '-'}
+                                          </div>
+                                        </>
+                                      )}
                                       {record.retrieved_docs.length > 0 && (
                                         <>
                                           <Text strong style={{ marginTop: 8, display: 'block' }}>检索结果：</Text>
@@ -1806,53 +1824,16 @@ export default function EvalPage() {
         onCancel={() => { setCompareModalOpen(false); setCompareResult(null); }}
         width={MODAL_LG}
         footer={null}
+        styles={{ body: { maxHeight: 'calc(100vh - var(--header-height) - 136px)', overflowY: 'auto' } }}
       >
-        <Space style={{ marginBottom: 16 }}>
-          <Select
-            placeholder="基准版本" style={{ width: 200 }}
-            value={compareIds.baseline || undefined}
-            onChange={(v) => setCompareIds({ ...compareIds, baseline: v })}
-            options={completedEvaluationsOptions}
-          />
-          <span>vs</span>
-          <Select
-            placeholder="对比版本" style={{ width: 200 }}
-            value={compareIds.compare || undefined}
-            onChange={(v) => setCompareIds({ ...compareIds, compare: v })}
-            options={completedEvaluationsOptions}
-          />
-          <Button type="primary" onClick={compare_eval_results}>对比</Button>
-        </Space>
-
-        {compareResult && (() => {
-          const comparisonItems = Object.entries(compareResult.metrics_diff || {}).map(([key, val]) => ({
-            key,
-            metric: key,
-            ...val,
-            trend: val.delta > 0 ? '\u2191' : val.delta < 0 ? '\u2193' : '\u2192',
-          }));
-          return (
-            <>
-              <ComparisonChart data={comparisonItems} k={evalK} />
-              <Table dataSource={comparisonItems}
-              columns={[
-                { title: '指标', dataIndex: 'metric', key: 'metric', render: (v: string) => {
-                  const [, metric] = v.split('.');
-                  return resolveMetricMeta(metric).label;
-                }},
-                { title: '基准', dataIndex: 'baseline', key: 'baseline', render: (v: number) => (v * 100).toFixed(2) + '%' },
-                { title: '对比', dataIndex: 'compare', key: 'compare', render: (v: number) => (v * 100).toFixed(2) + '%' },
-                { title: '变化', dataIndex: 'pct_change', key: 'pct_change',
-                  render: (v: number) => <span style={{ color: v > 0 ? token.colorSuccess : v < 0 ? token.colorError : token.colorTextTertiary }}>{v > 0 ? '+' : ''}{v.toFixed(1)}%</span> },
-                { title: '趋势', dataIndex: 'trend', key: 'trend', width: 60,
-                  render: (v: string) => <span style={{ color: v === '\u2191' ? token.colorSuccess : v === '\u2193' ? token.colorError : token.colorTextTertiary, fontWeight: token.fontWeightStrong }}>{v}</span> },
-              ]}
-              size="small"
-              pagination={false}
-              />
-            </>
-          );
-        })()}
+        {!compareResult && (
+          <div style={{ padding: '20px 0', textAlign: 'center' }}>
+            <Text type="secondary">请在左侧勾选 2 个以上已完成的评测后点击底部「对比」按钮</Text>
+          </div>
+        )}
+        {compareResult && (
+          <MultiComparisonChart series={compareResult} k={evalK} />
+        )}
       </Modal>
 
       <Modal

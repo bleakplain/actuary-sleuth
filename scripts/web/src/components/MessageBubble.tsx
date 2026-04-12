@@ -1,5 +1,6 @@
-import { Typography, Button, theme } from 'antd';
-import { BugOutlined } from '@ant-design/icons';
+import { Typography, Button, Popconfirm, theme } from 'antd';
+import { BugOutlined, DeleteOutlined } from '@ant-design/icons';
+import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import CitationTag from './CitationTag';
@@ -11,9 +12,9 @@ const { Text } = Typography;
 
 function formatMsgTime(ts: string): string {
   if (!ts) return '';
-  const parts = ts.split(' ');
-  if (parts.length < 2) return ts;
-  return parts[1].slice(0, 5);
+  const date = new Date(ts.includes('T') ? ts : ts.replace(' ', 'T') + 'Z');
+  if (isNaN(date.getTime())) return ts;
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 interface Props {
@@ -24,7 +25,8 @@ interface Props {
 
 export default function MessageBubble({ message, streaming, onCitationClick }: Props) {
   const { token } = theme.useToken();
-  const { activeTraceMessageId, openTrace, debugMode } = useAskStore();
+  const { activeTraceMessageId, openTrace, debugMode, deleteMessage } = useAskStore();
+  const [hovered, setHovered] = useState(false);
 
   const handleCitationClick = (citation: Citation) => {
     const source = message.sources.find((_, i) => i === citation.source_idx);
@@ -35,12 +37,38 @@ export default function MessageBubble({ message, streaming, onCitationClick }: P
 
   if (message.role === 'user') {
     return (
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+      <div
+        style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16, position: 'relative' }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
+        {hovered && (
+          <Popconfirm
+            title="删除这条消息及其回答？"
+            onConfirm={() => deleteMessage(message.id)}
+            okText="删除"
+            cancelText="取消"
+          >
+            <Button
+              type="text"
+              size="small"
+              icon={<DeleteOutlined />}
+              style={{
+                position: 'absolute',
+                right: 0,
+                top: -20,
+                color: token.colorTextTertiary,
+                fontSize: 12,
+                zIndex: 1,
+              }}
+            />
+          </Popconfirm>
+        )}
         <div
           style={{
             maxWidth: '70%',
             background: token.colorPrimary,
-            color: token.colorTextInverse,
+            color: '#ffffff',
             padding: '8px 16px',
             borderRadius: 12,
             borderBottomRightRadius: 4,

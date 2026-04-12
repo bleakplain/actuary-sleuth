@@ -14,6 +14,7 @@ from api.database import (
     batch_delete_sessions,
     create_session,
     create_feedback,
+    delete_message,
     delete_session,
     get_sessions,
     get_messages,
@@ -265,3 +266,11 @@ async def get_message_trace(message_id: int):
     if trace is None:
         raise HTTPException(status_code=404, detail="Trace not found")
     return trace
+
+
+@router.delete("/messages/{message_id}")
+async def remove_message(message_id: int):
+    deleted = delete_message(message_id)
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="消息不存在")
+    return {"deleted_messages": deleted}
