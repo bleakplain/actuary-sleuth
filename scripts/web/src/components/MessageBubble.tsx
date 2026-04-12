@@ -1,6 +1,6 @@
 import { Typography, Button, Popconfirm, theme } from 'antd';
 import { BugOutlined, DeleteOutlined } from '@ant-design/icons';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import CitationTag from './CitationTag';

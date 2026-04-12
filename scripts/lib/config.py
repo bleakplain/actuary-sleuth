@@ -225,31 +225,78 @@ class Config:
         self._init_nested_configs()
 
     def _load(self) -> None:
-        if self._config_path.exists():
-            try:
-                with open(self._config_path, 'r', encoding='utf-8') as f:
-                    self._config = json.load(f)
-            except Exception as e:
-                print(f"Warning: Failed to load config from {self._config_path}: {e}", file=sys.stderr)
-                self._config = {}
-        else:
-            self._config = {}
-
-        self._apply_env_overrides()
-
-    def _apply_env_overrides(self) -> None:
-        _ENV_OVERRIDES = [
-            ('feishu', 'app_id', 'FEISHU_APP_ID'),
-            ('feishu', 'app_secret', 'FEISHU_APP_SECRET'),
-            ('feishu', 'target_group_id', 'FEISHU_TARGET_GROUP_ID'),
-            ('zhipu', 'api_key', 'ZHIPU_API_KEY'),
-            ('minmax', 'api_key', 'MinMax_API_KEY'),
-            ('openclaw', 'bin', 'OPENCLAW_BIN'),
-        ]
-        for section, key, env_var in _ENV_OVERRIDES:
-            env_val = os.getenv(env_var)
-            if env_val:
-                self._config.setdefault(section, {})[key] = env_val
+        # 优先从环境变量读取所有配置，不再依赖 JSON 配置文件
+        self._config = {
+            # data_paths
+            'data_paths': {
+                'sqlite_db': os.getenv('DATA_PATHS_SQLITE_DB', '/root/work/actuary-assets/db/actuary.db'),
+                'regulations_dir': os.getenv('DATA_PATHS_REGULATIONS_DIR', '/root/work/actuary-assets/kb/references'),
+                'kb_version_dir': os.getenv('DATA_PATHS_KB_VERSION_DIR', '/root/work/actuary-assets/kb'),
+                'eval_snapshots_dir': os.getenv('DATA_PATHS_EVAL_SNAPSHOTS_DIR', '/root/work/actuary-assets/eval/snapshots'),
+                'models_dir': os.getenv('DATA_PATHS_MODELS_DIR', '/root/work/actuary-assets/models/reranker'),
+                'tools_dir': os.getenv('DATA_PATHS_TOOLS_DIR', '/root/work/actuary-assets/tools/hanxiao-llama.cpp'),
+            },
+            # ollama
+            'ollama': {
+                'host': os.getenv('OLLAMA_HOST', 'http://localhost:11434'),
+                'timeout': int(os.getenv('OLLAMA_TIMEOUT', '120')),
+            },
+            # zhipu
+            'zhipu': {
+                'base_url': os.getenv('ZHIPU_BASE_URL', 'https://open.bigmodel.cn/api/paas/v4/'),
+                'timeout': int(os.getenv('ZHIPU_TIMEOUT', '60')),
+                'temperature': float(os.getenv('ZHIPU_TEMPERATURE', '0.1')),
+                'max_tokens': int(os.getenv('ZHIPU_MAX_TOKENS', '16384')),
+                'api_key': os.getenv('ZHIPU_API_KEY', ''),
+            },
+            # minmax
+            'minmax': {
+                'base_url': os.getenv('MINMAX_BASE_URL', 'https://api.minimaxi.com/v1'),
+                'timeout': int(os.getenv('MINMAX_TIMEOUT', '60')),
+                'temperature': float(os.getenv('MINMAX_TEMPERATURE', '0.1')),
+                'max_tokens': int(os.getenv('MINMAX_MAX_TOKENS', '16384')),
+                'api_key': os.getenv('MinMax_API_KEY', ''),
+            },
+            # llm
+            'llm': {
+                'embed': {
+                    'provider': os.getenv('LLM_EMBED_PROVIDER', 'ollama'),
+                    'model': os.getenv('LLM_EMBED_MODEL', 'qllama/bge-m3:q4_k_m'),
+                },
+                'eval': {
+                    'provider': os.getenv('LLM_EVAL_PROVIDER', 'zhipu'),
+                    'model': os.getenv('LLM_EVAL_MODEL', 'glm-4-flash'),
+                    'timeout': int(os.getenv('LLM_EVAL_TIMEOUT', '180')),
+                },
+                'audit': {
+                    'provider': os.getenv('LLM_AUDIT_PROVIDER', 'zhipu'),
+                    'model': os.getenv('LLM_AUDIT_MODEL', 'glm-4-flash'),
+                    'timeout': int(os.getenv('LLM_AUDIT_TIMEOUT', '120')),
+                },
+                'qa': {
+                    'provider': os.getenv('LLM_QA_PROVIDER', 'zhipu'),
+                    'model': os.getenv('LLM_QA_MODEL', 'glm-4-flash'),
+                },
+                'name_parser': {
+                    'provider': os.getenv('LLM_NAME_PARSER_PROVIDER', 'zhipu'),
+                    'model': os.getenv('LLM_NAME_PARSER_MODEL', 'glm-4-flash'),
+                    'timeout': int(os.getenv('LLM_NAME_PARSER_TIMEOUT', '120')),
+                },
+                'ocr': {
+                    'provider': os.getenv('LLM_OCR_PROVIDER', 'zhipu'),
+                    'model': os.getenv('LLM_OCR_MODEL', 'glm-4-flash'),
+                    'timeout': int(os.getenv('LLM_OCR_TIMEOUT', '120')),
+                },
+            },
+            # feishu
+            'feishu': {
+                'app_id': os.getenv('FEISHU_APP_ID', ''),
+                'app_secret': os.getenv('FEISHU_APP_SECRET', ''),
+                'target_group_id': os.getenv('FEISHU_TARGET_GROUP_ID', ''),
+            },
+            # debug
+            'debug': os.getenv('DEBUG', 'false').lower() == 'true',
+        }
 
     def _init_nested_configs(self) -> None:
         self._feishu = FeishuConfig(self._config)
@@ -291,6 +338,10 @@ class Config:
     def version(self) -> str:
         return self._config.get('version', 'unknown')
 
+    @property
+    def debug(self) -> bool:
+        return self._config.get('debug', False)
+
     def _resolve_path(self, rel_path: str) -> str:
         p = Path(rel_path)
         if p.is_absolute():
@@ -322,7 +373,7 @@ _global_config: Optional[Config] = None
 _config_lock = threading.Lock()
 
 
-def get_config(config_path: Optional[Path] = None) -> Config:
+def _get_config(config_path: Optional[Path] = None) -> Config:
     global _global_config
 
     if _global_config is None or (config_path is not None and config_path != _global_config._config_path):
@@ -339,26 +390,29 @@ def get_config(config_path: Optional[Path] = None) -> Config:
 
 # ===== 模块级快捷函数 =====
 
+def is_debug() -> bool:
+    return _get_config().debug
+
 def get_sqlite_db_path() -> str:
-    return get_config().get_sqlite_db_path()
+    return _get_config().get_sqlite_db_path()
 
 def get_regulations_dir() -> str:
-    return get_config().get_regulations_dir()
+    return _get_config().get_regulations_dir()
 
 def get_kb_version_dir() -> str:
-    return get_config().get_kb_version_dir()
+    return _get_config().get_kb_version_dir()
 
 def get_eval_snapshots_dir() -> str:
-    return get_config().get_eval_snapshots_dir()
+    return _get_config().get_eval_snapshots_dir()
 
 def get_models_dir() -> str:
-    return get_config().get_models_dir()
+    return _get_config().get_models_dir()
 
 def get_tools_dir() -> str:
-    return get_config().get_tools_dir()
+    return _get_config().get_tools_dir()
 
 def get_llm_config() -> LLMConfig:
-    return get_config().llm
+    return _get_config().llm
 
 
 def get_qa_llm_config() -> SimpleNamespace:
@@ -380,4 +434,4 @@ def get_ocr_llm_config() -> SimpleNamespace:
     return get_llm_config().ocr
 
 def get_feishu_config() -> FeishuConfig:
-    return get_config().feishu
+    return _get_config().feishu

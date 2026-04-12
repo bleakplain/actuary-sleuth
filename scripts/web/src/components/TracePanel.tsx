@@ -1,6 +1,6 @@
 // Uses CSS variables (var(--ant-*)) instead of theme.useToken() to avoid
 // threading token through many pure sub-components defined in this file.
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import {
   CheckCircleFilled,
   CloseCircleFilled,
