@@ -46,15 +46,11 @@ arguments:
 
 #### 前置检查（worktree 就绪后、执行任务前）
 
-1. **检查并拷贝 settings.json**: 确认 `scripts/config/settings.json` 存在，若不存在则从主仓库拷贝：
-   ```bash
-   cp <主仓库>/scripts/config/settings.json scripts/config/settings.json
-   ```
-2. **检查并拷贝 .env**: 确认 `scripts/.env` 存在，若不存在则从主仓库拷贝：
+1. **检查并拷贝 .env**: 确认 `scripts/.env` 存在，若不存在则从主仓库拷贝：
    ```bash
    cp <主仓库>/scripts/.env scripts/.env
    ```
-3. **检查数据路径可达**: 读取 settings.json 中 `data_paths` 的绝对路径，验证关键目录（db、kb、models、tools）的父目录存在，如果路径不存在则提示用户检查配置，不继续执行任务
+2. **检查数据路径可达**: 读取 .env 中 `DATA_PATHS_SQLITE_DB` 等路径，验证关键目录（db、kb）的父目录存在，如果路径不存在则提示用户检查配置，不继续执行任务
 
 ### 检测是否已在 worktree 中
 

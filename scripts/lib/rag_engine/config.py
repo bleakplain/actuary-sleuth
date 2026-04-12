@@ -29,7 +29,7 @@ class RetrievalConfig:
 class RerankConfig:
     """重排序配置"""
     enable_rerank: bool = True
-    reranker_type: str = "gguf"
+    reranker_type: str = "llm"
     rerank_top_k: int = 5
     rerank_min_score: float = 0.0
 
