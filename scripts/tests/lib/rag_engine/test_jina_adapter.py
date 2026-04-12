@@ -82,7 +82,7 @@ class TestJinaEmbeddingAdapter:
 
         config = {
             'provider': 'ollama',
-            'model': 'nomic-embed-text',
+            'model': 'qllama/bge-m3:q4_k_m',
             'host': 'http://localhost:11434',
         }
         model = get_embedding_model(config)

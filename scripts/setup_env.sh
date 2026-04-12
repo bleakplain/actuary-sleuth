@@ -20,7 +20,7 @@ else
     echo "  Ollama 已安装: $(ollama --version)"
 fi
 
-OLLAMA_MODEL="jinaai/jina-embeddings-v5-text-small"
+OLLAMA_MODEL="qllama/bge-m3:q4_k_m"
 if ollama list 2>/dev/null | grep -q "$OLLAMA_MODEL"; then
     echo "  $OLLAMA_MODEL 已存在"
 else
