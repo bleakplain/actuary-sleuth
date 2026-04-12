@@ -373,7 +373,7 @@ _global_config: Optional[Config] = None
 _config_lock = threading.Lock()
 
 
-def get_config(config_path: Optional[Path] = None) -> Config:
+def _get_config(config_path: Optional[Path] = None) -> Config:
     global _global_config
 
     if _global_config is None or (config_path is not None and config_path != _global_config._config_path):
@@ -390,11 +390,14 @@ def get_config(config_path: Optional[Path] = None) -> Config:
 
 # ===== 模块级快捷函数 =====
 
+def is_debug() -> bool:
+    return _get_config().debug
+
 def get_sqlite_db_path() -> str:
-    return get_config().get_sqlite_db_path()
+    return _get_config().get_sqlite_db_path()
 
 def get_regulations_dir() -> str:
-    return get_config().get_regulations_dir()
+    return _get_config().get_regulations_dir()
 
 def get_kb_version_dir() -> str:
     return get_config().get_kb_version_dir()

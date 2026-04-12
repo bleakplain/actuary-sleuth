@@ -26,7 +26,7 @@ from api.database import (
 )
 from api.dependencies import get_rag_engine, get_memory_service, get_ask_graph
 from api.schemas.ask import ChatRequest, SessionOut, MessageOut
-from lib.config import get_config
+from lib.config import is_debug
 from lib.llm.trace import cleanup_trace_counters, get_llm_call_count, reset_llm_call_count, trace_span
 from lib.rag_engine.graph import AskState, GraphContext
 from lib.rag_engine.quality_detector import detect_quality
@@ -89,7 +89,7 @@ async def chat(req: ChatRequest):
 
     # debug: 前端显式传值时以请求为准，否则读取配置默认值
     if req.debug is None:
-        req.debug = get_config().debug
+        req.debug = is_debug()
 
     if req.mode == "search":
         try:
