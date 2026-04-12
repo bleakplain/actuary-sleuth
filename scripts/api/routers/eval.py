@@ -219,7 +219,8 @@ async def create_evaluation(req: EvaluationRequest):
                         eval_engine.cleanup()
                         return
                     sample_id = detail.get("sample_id", "")
-                    save_sample_result(evaluation_id, sample_id, retrieval_metrics=detail)
+                    retrieved_docs = detail.get("retrieved_docs", [])
+                    save_sample_result(evaluation_id, sample_id, retrieved_docs=retrieved_docs, retrieval_metrics=detail)
                     update_evaluation_status(evaluation_id, "running", progress=idx + 1, total=total)
 
             gen_report = None
