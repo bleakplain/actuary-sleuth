@@ -219,7 +219,8 @@ async def create_evaluation(req: EvaluationRequest):
                 )
                 for detail in ret_details:
                     sample_id = detail.get("sample_id", "")
-                    save_sample_result(evaluation_id, sample_id, retrieval_metrics=detail)
+                    retrieved_docs = detail.pop("retrieved_docs", [])
+                    save_sample_result(evaluation_id, sample_id, retrieved_docs=retrieved_docs, retrieval_metrics=detail)
                     current = _eval_tasks[evaluation_id].get("progress", 0) + 1
                     _eval_tasks[evaluation_id]["progress"] = current
                     update_evaluation_status(evaluation_id, "running", progress=current, total=total)

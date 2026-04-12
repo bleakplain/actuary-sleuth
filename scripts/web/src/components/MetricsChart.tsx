@@ -173,6 +173,116 @@ export function ComparisonChart({ data, title = '指标对比', k }: ComparisonC
   );
 }
 
+// ── 多版本对比图表 ──────────────────────────────────────
+
+interface MultiComparisonSeries {
+  label: string;
+  data: Record<string, number>;
+}
+
+interface MultiComparisonChartProps {
+  series: MultiComparisonSeries[];
+  title?: string;
+  k?: number;
+}
+
+export function MultiComparisonChart({ series, title = '指标对比', k }: MultiComparisonChartProps) {
+  if (series.length === 0) return null;
+
+  const allKeys = new Set<string>();
+  for (const s of series) {
+    for (const key of Object.keys(s.data)) {
+      allKeys.add(key);
+    }
+  }
+
+  const comparisonItems = Array.from(allKeys).map((key) => ({
+    metric: key,
+    values: series.map((s) => s.data[key] ?? 0),
+  }));
+
+  const radarData = comparisonItems.slice(0, 12).map((item) => {
+    const entry: Record<string, string | number> = {
+      metric: metricDisplayName(item.metric, k),
+    };
+    for (let i = 0; i < series.length; i++) {
+      entry[`v${i}`] = Number((item.values[i] * 100).toFixed(1));
+    }
+    return entry;
+  });
+
+  const grouped = groupByCategory(
+    comparisonItems.map((item) => ({ name: item.metric, value: item.values[0] })),
+  );
+
+  const barData = comparisonItems.map((item) => {
+    const entry: Record<string, string | number> = {
+      metric: metricDisplayName(item.metric, k),
+    };
+    for (let i = 0; i < series.length; i++) {
+      entry[`v${i}`] = Number((item.values[i] * 100).toFixed(1));
+    }
+    return entry;
+  });
+
+  return (
+    <Card size="small">
+      {radarData.length > 2 && (
+        <ResponsiveContainer width="100%" height={300}>
+          <RadarChart data={radarData}>
+            <PolarGrid />
+            <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11 }} />
+            <PolarRadiusAxis domain={[0, 100]} />
+            {series.map((s, i) => (
+              <Radar
+                key={s.label}
+                name={s.label}
+                dataKey={`v${i}`}
+                stroke={CHART_COLORS.palette[i % CHART_COLORS.palette.length]}
+                fill={CHART_COLORS.palette[i % CHART_COLORS.palette.length]}
+                fillOpacity={0.15}
+              />
+            ))}
+            <Legend />
+            <RechartsTooltip />
+          </RadarChart>
+        </ResponsiveContainer>
+      )}
+
+      {Object.entries(grouped).map(([category]) => {
+        const categoryBarData = barData.filter((d) => {
+          const fullKey = `${category}.${d.metric}`;
+          return comparisonItems.some((item) => item.metric === fullKey);
+        });
+        if (categoryBarData.length === 0) return null;
+
+        return (
+          <div key={category} style={{ marginBottom: 24 }}>
+            <h4 style={{ marginBottom: 8 }}>{CATEGORY_LABELS[category] || category}</h4>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={categoryBarData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="metric" tick={{ fontSize: 11 }} />
+                <YAxis domain={[0, 100]} />
+                <RechartsTooltip formatter={(v) => `${Number(v)}%`} />
+                <Legend />
+                {series.map((s, i) => (
+                  <Bar
+                    key={s.label}
+                    dataKey={`v${i}`}
+                    fill={CHART_COLORS.palette[i % CHART_COLORS.palette.length]}
+                    name={s.label}
+                  />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        );
+      })}
+    </Card>
+  );
+}
+
 // ── 趋势图表 ────────────────────────────────────────────
 
 interface TrendPoint {
