@@ -1,12 +1,12 @@
 {
   "version": "3.0.0",
   "data_paths": {
-    "sqlite_db": "/mnt/d/work/actuary-assets/db/actuary.db",
-    "regulations_dir": "/mnt/d/work/actuary-assets/kb/references",
-    "kb_version_dir": "/mnt/d/work/actuary-assets/kb",
-    "eval_snapshots_dir": "/mnt/d/work/actuary-assets/eval/snapshots",
-    "models_dir": "/mnt/d/work/actuary-assets/models/reranker",
-    "tools_dir": "/mnt/d/work/actuary-assets/tools/hanxiao-llama.cpp"
+    "sqlite_db": "/root/work/actuary-assets/db/actuary.db",
+    "regulations_dir": "/root/work/actuary-assets/kb/references",
+    "kb_version_dir": "/root/work/actuary-assets/kb",
+    "eval_snapshots_dir": "/root/work/actuary-assets/eval/snapshots",
+    "models_dir": "/root/work/actuary-assets/models/reranker",
+    "tools_dir": "/root/work/actuary-assets/tools/hanxiao-llama.cpp"
   },
   "ollama": {
     "host": "http://localhost:11434",
@@ -25,7 +25,7 @@
     "max_tokens": 16384
   },
   "llm": {
-    "embed":       { "provider": "ollama", "model": "jinaai/jina-embeddings-v5-text-small" },
+    "embed":       { "provider": "ollama", "model": "qllama/bge-m3:q4_k_m" },
     "eval":        { "provider": "zhipu",  "model": "glm-4-flash", "timeout": 180 },
     "audit":       { "provider": "zhipu",  "model": "glm-4-flash", "timeout": 120 },
     "qa":          { "provider": "zhipu",  "model": "glm-4-flash" },
