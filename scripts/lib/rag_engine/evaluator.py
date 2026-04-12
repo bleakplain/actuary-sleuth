@@ -13,6 +13,11 @@ import logging
 from typing import List, Dict, Any, Optional, Set, Tuple
 from dataclasses import dataclass, field
 
+try:
+    import pandas as pd
+except ImportError:
+    pd = None  # type: ignore[assignment, misc]
+
 from .eval_dataset import EvalSample, QuestionType
 from .tokenizer import tokenize_chinese
 
@@ -33,9 +38,9 @@ def _get_embed_model():
     if _embed_model_cache is not None:
         return _embed_model_cache
     try:
-        from lib.rag_engine.llamaindex_adapter import get_embedding_model
+        from lib.rag_engine.llamaindex_adapter import _create_embedding_model
         from lib.config import get_embed_llm_config
-        _embed_model_cache = get_embedding_model(get_embed_llm_config())
+        _embed_model_cache = _create_embedding_model(get_embed_llm_config())
         return _embed_model_cache
     except Exception as e:
         logger.warning(f"Embedding 模型加载失败，将仅使用关键词匹配: {e}")
@@ -191,6 +196,7 @@ def _is_relevant(
     result: Dict[str, Any],
     evidence_docs: List[str],
     evidence_keywords: List[str],
+    original_query: str = "",
 ) -> bool:
     content = result.get('content', '')
     source_file = result.get('source_file', '')
@@ -198,10 +204,11 @@ def _is_relevant(
 
     if evidence_keywords:
         long_keywords = [kw for kw in evidence_keywords if len(kw) >= 2]
-        matched = sum(1 for kw in long_keywords if kw in content)
-        required = min(2, len(long_keywords))
-        if matched >= required:
-            return True
+        if long_keywords:
+            matched = sum(1 for kw in long_keywords if kw in content)
+            threshold = max(2, int(len(long_keywords) * 0.6))
+            if matched >= threshold:
+                return True
 
     doc_set = set(evidence_docs)
     if source_file and source_file in doc_set and evidence_keywords:
@@ -212,15 +219,12 @@ def _is_relevant(
         for doc in evidence_docs:
             doc_stem = doc.replace('.md', '').replace('_', '')
             if doc_stem and len(doc_stem) >= 4 and doc_stem in law_name:
-                if evidence_keywords:
-                    if _contains_keyword(content, evidence_keywords):
-                        return True
-                elif source_file and source_file in doc_set:
+                if evidence_keywords and _contains_keyword(content, evidence_keywords):
                     return True
 
-    if evidence_keywords:
-        query_text = ' '.join(evidence_keywords)
-        similarity = _compute_embedding_similarity(query_text, content)
+    query_for_embed = original_query if original_query else ' '.join(evidence_keywords)
+    if query_for_embed and len(query_for_embed) >= 4:
+        similarity = _compute_embedding_similarity(query_for_embed, content)
         if similarity >= _SEMANTIC_RELEVANCE_THRESHOLD:
             return True
 
@@ -359,7 +363,7 @@ class RetrievalEvaluator:
 
         # 判断每个结果是否相关
         relevance = [
-            1 if _is_relevant(r, sample.evidence_docs, sample.evidence_keywords) else 0
+            1 if _is_relevant(r, sample.evidence_docs, sample.evidence_keywords, sample.question) else 0
             for r in results
         ]
 
@@ -375,16 +379,15 @@ class RetrievalEvaluator:
                 first_relevant_rank = rank
                 break
 
-        # NDCG: 二值相关性下 DCG = IDCG，所以 NDCG = DCG / IDCG
+        # NDCG: 二值相关性下，IDCG 基于所有相关文档的最优排列，不受 K 限制
         dcg = sum(rel / math.log2(rank + 1) for rank, rel in enumerate(relevance, 1))
-        # Ideal DCG: 所有相关结果排在最前
-        n_relevant = min(sum(relevance), len(relevance))
-        ideal_relevance = [1] * n_relevant + [0] * (len(relevance) - n_relevant)
-        idcg = sum(
-            rel / math.log2(rank + 1)
-            for rank, rel in enumerate(ideal_relevance, 1)
-        )
-        ndcg = dcg / idcg if idcg > 0 else 0.0
+        total_relevant = sum(relevance)
+        if total_relevant == 0:
+            ndcg = 0.0
+        else:
+            ideal = [1.0] * total_relevant
+            idcg = sum(r / math.log2(rank + 1) for rank, r in enumerate(ideal, 1))
+            ndcg = dcg / idcg
 
         redundancy = _compute_redundancy_rate(results)
 
@@ -400,6 +403,7 @@ class RetrievalEvaluator:
             'context_relevance': context_relevance,
             'first_relevant_rank': first_relevant_rank,
             'num_results': len(results),
+            'retrieved_docs': results,
         }
 
     def evaluate_batch(
@@ -504,7 +508,7 @@ class GenerationEvaluator:
         self,
         samples: List[EvalSample],
         rag_engine=None,
-    ) -> GenerationEvalReport:
+    ) -> Tuple[GenerationEvalReport, List[Dict[str, Any]]]:
         """批量评估生成质量
 
         Args:
@@ -512,12 +516,12 @@ class GenerationEvaluator:
             rag_engine: 用于生成答案的 RAG 引擎
 
         Returns:
-            GenerationEvalReport: 汇总报告
+            (GenerationEvalReport, List[Dict]) — 汇总报告和每条样本的评估详情
         """
         engine = rag_engine or self.rag_engine
         if not engine:
             logger.warning("未提供 RAG 引擎，跳过生成评估")
-            return GenerationEvalReport()
+            return GenerationEvalReport(), []
 
         return self._ragas_evaluate_batch(engine, samples)
 
@@ -525,7 +529,7 @@ class GenerationEvaluator:
         self,
         engine,
         samples: List[EvalSample],
-    ) -> GenerationEvalReport:
+    ) -> Tuple[GenerationEvalReport, List[Dict[str, Any]]]:
         from datasets import Dataset
 
         questions = []
@@ -533,17 +537,22 @@ class GenerationEvaluator:
         answers = []
         ground_truths = []
         question_types = []
+        sample_ids = []
+        sources_list = []
 
         for sample in samples:
             result = engine.ask(sample.question, include_sources=True)
             answer = result.get('answer', '')
-            contexts = [s.get('content', '') for s in result.get('sources', [])]
+            sources = result.get('sources', [])
+            contexts = [s.get('content', '') for s in sources]
 
             questions.append(sample.question)
             contexts_list.append(contexts)
             answers.append(answer)
             ground_truths.append(sample.ground_truth)
             question_types.append(sample.question_type.value)
+            sample_ids.append(sample.id)
+            sources_list.append(sources)
 
         dataset = Dataset.from_dict({
             "user_input": questions,
@@ -580,7 +589,22 @@ class GenerationEvaluator:
             if type_metrics:
                 report.by_type[qtype] = type_metrics
 
-        return report
+        details = []
+        for i, sid in enumerate(sample_ids):
+            metrics = {}
+            for column in _RAGAS_METRICS:
+                if column in df.columns:
+                    val = df[column].iloc[i]
+                    if pd is not None and not pd.isna(val):
+                        metrics[column] = float(val)
+            details.append({
+                'sample_id': sid,
+                'generated_answer': answers[i],
+                'retrieved_docs': sources_list[i],
+                'metrics': metrics,
+            })
+
+        return report, details
 
 
 

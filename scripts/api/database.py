@@ -280,6 +280,8 @@ def _migrate_db():
             conn.execute("ALTER TABLE eval_runs ADD COLUMN config_version INTEGER")
         if 'dataset_version' not in run_cols:
             conn.execute("ALTER TABLE eval_runs ADD COLUMN dataset_version TEXT")
+        if 'cancelled' not in run_cols:
+            conn.execute("ALTER TABLE eval_runs ADD COLUMN cancelled INTEGER NOT NULL DEFAULT 0")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_runs_config_version ON eval_runs(config_version)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_runs_dataset_version ON eval_runs(dataset_version)")
 
@@ -825,12 +827,28 @@ def update_evaluation_status(
             sets.append("progress = ?")
             sets.append("total = ?")
             params.extend([progress, total])
-        elif status in ("completed", "failed"):
+        elif status in ("completed", "failed", "cancelled"):
             sets.append("finished_at = datetime('now')")
             sets.append("progress = total")
         params.append(run_id)
         conn.execute(
             f"UPDATE eval_runs SET {', '.join(sets)} WHERE id = ?", params
+        )
+
+
+def is_evaluation_cancelled(run_id: str) -> bool:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT cancelled FROM eval_runs WHERE id = ?", (run_id,)
+        ).fetchone()
+        return row["cancelled"] == 1 if row else False
+
+
+def cancel_evaluation_run(run_id: str) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE eval_runs SET cancelled = 1 WHERE id = ?",
+            (run_id,),
         )
 
 
@@ -848,6 +866,31 @@ def update_evaluation_config(run_id: str, config: Dict, total: int = 0) -> None:
             "UPDATE eval_runs SET config_json = ?, total = ? WHERE id = ?",
             (json.dumps(config, ensure_ascii=False), total, run_id),
         )
+
+
+def add_evaluation_error(run_id: str, error: str) -> None:
+    with get_connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT config_json FROM eval_runs WHERE id = ?", (run_id,)
+            ).fetchone()
+            if not row:
+                conn.execute("ROLLBACK")
+                return
+            cfg = json.loads(row[0]) if row[0] else {}
+            cfg["error"] = error[:500]
+            cur = conn.execute(
+                "UPDATE eval_runs SET config_json = ? WHERE id = ?",
+                (json.dumps(cfg, ensure_ascii=False), run_id),
+            )
+            if cur.rowcount == 0:
+                conn.execute("ROLLBACK")
+                return
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
 
 
 def save_sample_result(

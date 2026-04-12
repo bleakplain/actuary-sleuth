@@ -225,7 +225,7 @@ class TestRetrievalMetrics:
             'law_name': '未知',
             'source_file': 'other.md',
         }
-        assert _is_relevant(result, sample_eval.evidence_docs, ['等待期']) is True
+        assert _is_relevant(result, sample_eval.evidence_docs, ['等待期']) is False
 
     def test_is_relevant_law_name_needs_keyword(self, sample_eval):
         """law_name 匹配但无 keyword 和 source_file 时不算 relevant"""
