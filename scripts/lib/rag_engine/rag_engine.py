@@ -165,30 +165,20 @@ class RAGEngine:
             return LLMReranker(self._llm_client, rerank_config)
 
         if rc.reranker_type == "gguf":
-            try:
-                gguf = GGUFCliReranker()
-                self._active_reranker_type = "gguf"
-                return GGUFReranker(gguf)
-            except (FileNotFoundError, OSError, ValueError) as e:
-                logger.warning(f"GGUF reranker 不可用，回退到 LLM reranker: {e}")
-                self._active_reranker_type = "llm"
-                return LLMReranker(self._llm_client, rerank_config)
+            gguf = GGUFCliReranker()
+            self._active_reranker_type = "gguf"
+            return GGUFReranker(gguf)
 
         if rc.reranker_type == "hf":
-            try:
-                self._active_reranker_type = "cross_encoder"
-                return CrossEncoderReranker()
-            except Exception as e:
-                logger.warning(f"CrossEncoder reranker 不可用，回退到 LLM reranker: {e}")
-                self._active_reranker_type = "llm"
-                return LLMReranker(self._llm_client, rerank_config)
+            self._active_reranker_type = "cross_encoder"
+            return CrossEncoderReranker()
 
         self._active_reranker_type = "none"
         return None
 
     @property
     def active_reranker_type(self) -> str:
-        """返回实际使用的 reranker 类型（可能与配置不同，因为存在回退机制）。"""
+        """返回实际使用的 reranker 类型。"""
         return self._active_reranker_type or "none"
 
     def initialize(self, force_rebuild: bool = False) -> bool:
