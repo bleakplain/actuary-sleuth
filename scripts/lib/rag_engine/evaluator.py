@@ -351,6 +351,7 @@ class RetrievalEvaluator:
         if not results:
             return {
                 'sample_id': sample.id,
+                'retrieved_docs': [],
                 'precision': 0.0,
                 'recall': 0.0,
                 'mrr': 0.0,
@@ -395,6 +396,7 @@ class RetrievalEvaluator:
 
         return {
             'sample_id': sample.id,
+            'retrieved_docs': results,
             'precision': precision,
             'recall': recall,
             'mrr': mrr,
