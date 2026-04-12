@@ -9,7 +9,6 @@ const DARK_MENU_TOKENS = {
 };
 
 export const appTheme: ThemeConfig = {
-  cssVar: true,
   token: {
     colorPrimary: '#1e40af',
     colorSuccess: '#059669',

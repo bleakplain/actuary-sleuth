@@ -186,7 +186,7 @@ interface MultiComparisonChartProps {
   k?: number;
 }
 
-export function MultiComparisonChart({ series, title = '指标对比', k }: MultiComparisonChartProps) {
+export function MultiComparisonChart({ series, k }: MultiComparisonChartProps) {
   if (series.length === 0) return null;
 
   const allKeys = new Set<string>();
