@@ -75,7 +75,11 @@ def retrieve_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
         if len(context) > max_chars:
             context = context[:max_chars] + "..."
 
-        span.output = {"memory_count": len(memories), "has_profile": bool(profile)}
+        span.output = {
+            "memory_count": len(memories),
+            "has_profile": bool(profile),
+            "memories": [m.get("memory", "") for m in memories],
+        }
         return {"memory_context": context}
 
 

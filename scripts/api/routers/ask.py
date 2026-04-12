@@ -139,7 +139,7 @@ async def chat(req: ChatRequest):
                 root_span.metadata = {
                     "mode": req.mode,
                     "retrieval": "hybrid",
-                    "reranker": engine.config.rerank.reranker_type,
+                    "reranker": engine.active_reranker_type,
                 }
 
             answer = result.get("answer", "")
