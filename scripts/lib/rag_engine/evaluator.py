@@ -370,7 +370,19 @@ class RetrievalEvaluator:
 
         precision = sum(relevance) / len(relevance)
 
-        recall = sum(relevance) / len(sample.evidence_docs) if sample.evidence_docs else 0.0
+        # recall: 命中的不同证据文档数 / 总证据文档数
+        matched_docs: set[str] = set()
+        if sample.evidence_docs:
+            doc_set = set(sample.evidence_docs)
+            for r, rel in zip(results, relevance):
+                if not rel:
+                    continue
+                source = r.get('source_file', '') or r.get('law_name', '')
+                for doc in doc_set:
+                    if source and (source == doc or doc.replace('.md', '').replace('_', '') in source):
+                        matched_docs.add(doc)
+                        break
+        recall = len(matched_docs) / len(sample.evidence_docs) if sample.evidence_docs else 0.0
 
         mrr = 0.0
         first_relevant_rank = None
@@ -412,8 +424,12 @@ class RetrievalEvaluator:
         self,
         samples: List[EvalSample],
         top_k: int = 5,
+        on_progress=None,
     ) -> Tuple[RetrievalEvalReport, List[Dict[str, Any]]]:
         """批量评估检索质量
+
+        Args:
+            on_progress: 可选回调 on_progress(idx, total)，每处理一条样本后调用
 
         Returns:
             (RetrievalEvalReport, List[Dict]) — 汇总报告和每条样本的评估结果
@@ -421,12 +437,15 @@ class RetrievalEvaluator:
         all_results: List[Dict[str, Any]] = []
         by_type_results: Dict[str, List[Dict[str, Any]]] = {}
 
-        for sample in samples:
+        for idx, sample in enumerate(samples):
             result = self.evaluate(sample, top_k=top_k)
             all_results.append(result)
 
             qtype = sample.question_type.value
             by_type_results.setdefault(qtype, []).append(result)
+
+            if on_progress:
+                on_progress(idx + 1, len(samples))
 
         if not all_results:
             return RetrievalEvalReport(), []
@@ -510,12 +529,14 @@ class GenerationEvaluator:
         self,
         samples: List[EvalSample],
         rag_engine=None,
+        on_progress=None,
     ) -> Tuple[GenerationEvalReport, List[Dict[str, Any]]]:
         """批量评估生成质量
 
         Args:
             samples: 评估样本列表
             rag_engine: 用于生成答案的 RAG 引擎
+            on_progress: 可选回调 on_progress(idx, total, phase)，phase 为 "generation" 或 "ragas_evaluation"
 
         Returns:
             (GenerationEvalReport, List[Dict]) — 汇总报告和每条样本的评估详情
@@ -525,12 +546,13 @@ class GenerationEvaluator:
             logger.warning("未提供 RAG 引擎，跳过生成评估")
             return GenerationEvalReport(), []
 
-        return self._ragas_evaluate_batch(engine, samples)
+        return self._ragas_evaluate_batch(engine, samples, on_progress=on_progress)
 
     def _ragas_evaluate_batch(
         self,
         engine,
         samples: List[EvalSample],
+        on_progress=None,
     ) -> Tuple[GenerationEvalReport, List[Dict[str, Any]]]:
         from datasets import Dataset
 
@@ -542,7 +564,7 @@ class GenerationEvaluator:
         sample_ids = []
         sources_list = []
 
-        for sample in samples:
+        for idx, sample in enumerate(samples):
             result = engine.ask(sample.question, include_sources=True)
             answer = result.get('answer', '')
             sources = result.get('sources', [])
@@ -556,12 +578,18 @@ class GenerationEvaluator:
             sample_ids.append(sample.id)
             sources_list.append(sources)
 
+            if on_progress:
+                on_progress(idx + 1, len(samples), "generation")
+
         dataset = Dataset.from_dict({
             "user_input": questions,
             "retrieved_contexts": contexts_list,
             "response": answers,
             "reference": ground_truths,
         })
+
+        if on_progress:
+            on_progress(0, len(samples), "ragas_evaluation")
 
         result = self._ragas_evaluate(
             dataset,

@@ -184,6 +184,7 @@ async def create_evaluation(req: EvaluationRequest):
     )
 
     async def _run_eval():
+        """异步执行评测，通过 to_thread 运行同步评估，on_progress 回调实时更新 DB 进度。"""
         try:
             filtered = samples_data
             if req.filters:
@@ -208,54 +209,10 @@ async def create_evaluation(req: EvaluationRequest):
             if not eval_engine.initialize():
                 raise RuntimeError("评测引擎初始化失败")
 
-            if req.mode in ("retrieval", "full"):
-                ret_eval = RetrievalEvaluator(eval_engine)
-                ret_report, ret_details = ret_eval.evaluate_batch(
-                    samples, top_k=config.rerank.rerank_top_k,
-                )
-                for idx, detail in enumerate(ret_details):
-                    if is_evaluation_cancelled(evaluation_id):
-                        update_evaluation_status(evaluation_id, "cancelled")
-                        eval_engine.cleanup()
-                        return
-                    sample_id = detail.get("sample_id", "")
-                    retrieved_docs = detail.get("retrieved_docs", [])
-                    save_sample_result(evaluation_id, sample_id, retrieved_docs=retrieved_docs, retrieval_metrics=detail)
-                    update_evaluation_status(evaluation_id, "running", progress=idx + 1, total=total)
-
-            gen_report = None
-            if req.mode in ("generation", "full"):
-                gen_eval = GenerationEvaluator(
-                    rag_engine=eval_engine,
-                    llm=LLMClientFactory.create_ragas_llm(),
-                    embeddings=LLMClientFactory.create_ragas_embed_model(),
-                )
-                gen_report, gen_details = gen_eval.evaluate_batch(samples, rag_engine=eval_engine)
-                for idx, detail in enumerate(gen_details):
-                    if is_evaluation_cancelled(evaluation_id):
-                        update_evaluation_status(evaluation_id, "cancelled")
-                        eval_engine.cleanup()
-                        return
-                    sample_id = detail.get("sample_id", "")
-                    save_sample_result(
-                        evaluation_id, sample_id,
-                        retrieved_docs=detail.get("retrieved_docs", []),
-                        generated_answer=detail.get("generated_answer", ""),
-                        generation_metrics=detail.get("metrics", {}),
-                    )
-                    update_evaluation_status(evaluation_id, "running", progress=idx + 1, total=total)
-
-            report: Dict = {}
-            if req.mode in ("retrieval", "full"):
-                report["retrieval"] = ret_report.to_dict() if hasattr(ret_report, "to_dict") else vars(ret_report)
-            if gen_report is not None:
-                report["generation"] = gen_report.to_dict() if hasattr(gen_report, "to_dict") else vars(gen_report)
-            report["total_samples"] = total
-            report["failed_samples"] = []
-
-            save_evaluation_report(evaluation_id, report)
-            update_evaluation_status(evaluation_id, "completed")
-            eval_engine.cleanup()
+            await asyncio.to_thread(
+                _run_eval_sync,
+                evaluation_id, config, req, samples, eval_engine, total,
+            )
 
         except Exception as e:
             logger.error(f"Eval run {evaluation_id} failed: {e}")
@@ -269,6 +226,83 @@ async def create_evaluation(req: EvaluationRequest):
     return {"evaluation_id": evaluation_id, "status": "pending"}
 
 
+def _run_eval_sync(
+    evaluation_id: str, config, req, samples, eval_engine, total: int,
+):
+    """在线程中同步执行评测，通过 on_progress 回调更新 DB。"""
+    try:
+        def _make_progress_callback(phase: str):
+            def _on_progress(idx, tot, _phase=None):
+                update_evaluation_status(
+                    evaluation_id, "running",
+                    progress=idx, total=tot, phase=_phase or phase,
+                )
+            return _on_progress
+
+        ret_report = None
+        if req.mode in ("retrieval", "full"):
+            update_evaluation_status(evaluation_id, "running", progress=0, total=total, phase="retrieval")
+            ret_eval = RetrievalEvaluator(eval_engine)
+            ret_report, ret_details = ret_eval.evaluate_batch(
+                samples, top_k=config.rerank.rerank_top_k,
+                on_progress=_make_progress_callback("retrieval"),
+            )
+            for idx, detail in enumerate(ret_details):
+                if is_evaluation_cancelled(evaluation_id):
+                    update_evaluation_status(evaluation_id, "cancelled")
+                    eval_engine.cleanup()
+                    return
+                sample_id = detail.get("sample_id", "")
+                retrieved_docs = detail.get("retrieved_docs", [])
+                save_sample_result(evaluation_id, sample_id, retrieved_docs=retrieved_docs, retrieval_metrics=detail)
+                update_evaluation_status(evaluation_id, "running", progress=idx + 1, total=total, phase="retrieval")
+
+        gen_report = None
+        if req.mode in ("generation", "full"):
+            gen_eval = GenerationEvaluator(
+                rag_engine=eval_engine,
+                llm=LLMClientFactory.create_ragas_llm(),
+                embeddings=LLMClientFactory.create_ragas_embed_model(),
+            )
+            gen_report, gen_details = gen_eval.evaluate_batch(
+                samples, rag_engine=eval_engine,
+                on_progress=_make_progress_callback("generation"),
+            )
+            for idx, detail in enumerate(gen_details):
+                if is_evaluation_cancelled(evaluation_id):
+                    update_evaluation_status(evaluation_id, "cancelled")
+                    eval_engine.cleanup()
+                    return
+                sample_id = detail.get("sample_id", "")
+                save_sample_result(
+                    evaluation_id, sample_id,
+                    retrieved_docs=detail.get("retrieved_docs", []),
+                    generated_answer=detail.get("generated_answer", ""),
+                    generation_metrics=detail.get("metrics", {}),
+                )
+                update_evaluation_status(evaluation_id, "running", progress=idx + 1, total=total, phase="generation")
+
+        report: Dict = {}
+        if ret_report is not None:
+            report["retrieval"] = ret_report.to_dict() if hasattr(ret_report, "to_dict") else vars(ret_report)
+        if gen_report is not None:
+            report["generation"] = gen_report.to_dict() if hasattr(gen_report, "to_dict") else vars(gen_report)
+        report["total_samples"] = total
+        report["failed_samples"] = []
+
+        save_evaluation_report(evaluation_id, report)
+        update_evaluation_status(evaluation_id, "completed")
+        eval_engine.cleanup()
+
+    except Exception as e:
+        logger.error(f"Eval run {evaluation_id} failed: {e}")
+        update_evaluation_status(evaluation_id, "failed")
+        try:
+            add_evaluation_error(evaluation_id, str(e))
+        except Exception:
+            logger.warning(f"Failed to persist error for {evaluation_id}: {e}")
+
+
 @router.get("/evaluations/{evaluation_id}/status")
 async def get_evaluation_status(evaluation_id: str):
     run = get_evaluation(evaluation_id)
@@ -280,6 +314,7 @@ async def get_evaluation_status(evaluation_id: str):
         "status": run["status"],
         "progress": run["progress"],
         "total": run["total"],
+        "phase": run.get("phase", ""),
         "started_at": run["started_at"],
         "finished_at": run["finished_at"],
         "config": run.get("config"),

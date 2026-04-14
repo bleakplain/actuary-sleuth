@@ -22,7 +22,6 @@ from lib.rag_engine.evaluator import (
     GenerationEvalReport,
     RAGEvalReport,
     _is_relevant,
-    _match_source_to_evidence,
     _compute_redundancy_rate,
     evaluate_retrieval,
 )
@@ -286,22 +285,6 @@ class TestRetrievalMetrics:
 
     def test_redundancy_rate_empty(self):
         assert _compute_redundancy_rate([]) == 0.0
-
-    def test_match_source_to_evidence_exact(self):
-        assert _match_source_to_evidence("05_健康保险产品开发.md", ["05_健康保险产品开发.md"]) == "05_健康保险产品开发.md"
-
-    def test_match_source_to_evidence_without_extension(self):
-        assert _match_source_to_evidence("05_健康保险产品开发", ["05_健康保险产品开发.md"]) == "05_健康保险产品开发.md"
-
-    def test_match_source_to_evidence_with_path(self):
-        assert _match_source_to_evidence("/data/references/05_健康保险产品开发.md", ["05_健康保险产品开发.md"]) == "05_健康保险产品开发.md"
-
-    def test_match_source_to_evidence_no_match(self):
-        assert _match_source_to_evidence("07_分红型人身保险.md", ["05_健康保险产品开发.md"]) is None
-
-    def test_match_source_to_evidence_empty(self):
-        assert _match_source_to_evidence("", ["05_健康保险产品开发.md"]) is None
-        assert _match_source_to_evidence("05_健康保险产品开发.md", []) is None
 
     def test_is_relevant_synonym_expansion(self):
         """同义词扩展：evidence_keywords 含'退保'，content 含'解除保险合同'应判为相关"""

@@ -282,6 +282,8 @@ def _migrate_db():
             conn.execute("ALTER TABLE eval_runs ADD COLUMN dataset_version TEXT")
         if 'cancelled' not in run_cols:
             conn.execute("ALTER TABLE eval_runs ADD COLUMN cancelled INTEGER NOT NULL DEFAULT 0")
+        if 'phase' not in run_cols:
+            conn.execute("ALTER TABLE eval_runs ADD COLUMN phase TEXT NOT NULL DEFAULT ''")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_runs_config_version ON eval_runs(config_version)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_eval_runs_dataset_version ON eval_runs(dataset_version)")
 
@@ -818,7 +820,8 @@ def insert_evaluation(
 
 
 def update_evaluation_status(
-    run_id: str, status: str, progress: int = 0, total: int = 0
+    run_id: str, status: str, progress: int = 0, total: int = 0,
+    phase: str = "",
 ) -> None:
     with get_connection() as conn:
         sets = ["status = ?"]
@@ -827,6 +830,9 @@ def update_evaluation_status(
             sets.append("progress = ?")
             sets.append("total = ?")
             params.extend([progress, total])
+            if phase:
+                sets.append("phase = ?")
+                params.append(phase)
         elif status in ("completed", "failed", "cancelled"):
             sets.append("finished_at = datetime('now')")
             sets.append("progress = total")
