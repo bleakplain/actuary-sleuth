@@ -25,18 +25,25 @@ async function cleanAllConversations(page) {
   await page.waitForSelector('text=对话历史', { timeout: 10_000 });
   await page.waitForTimeout(1000);
 
-  // 逐个删除
+  // 逐个删除（对话列表在"对话历史"标题下方，每个条目含删除按钮）
+  const listContainer = page.locator('text=对话历史').locator('..').locator('..');
   for (let attempt = 0; attempt < 50; attempt++) {
-    const items = page.locator('.conversation-item');
-    const count = await items.count();
+    const deleteButtons = listContainer.locator('button.ant-btn-text');
+    const count = await deleteButtons.count();
     if (count === 0) return;
 
     // 点击最后一个对话的删除按钮
-    await items.last().locator('button.ant-btn-text').click();
+    await deleteButtons.last().click();
     await page.locator('.ant-popconfirm').waitFor({ state: 'visible', timeout: 5_000 });
     await page.locator('.ant-popconfirm .ant-btn-primary').click();
     await page.waitForTimeout(1000);
   }
+}
+
+/** 获取对话列表中的条目（精确选择器） */
+function getSessionItems(page) {
+  const listContainer = page.locator('text=对话历史').locator('..').locator('..');
+  return listContainer.locator('div[style*="cursor: pointer"]');
 }
 
 test.describe('法规问答 — 页面与 UI', () => {
@@ -99,11 +106,11 @@ test.describe('法规问答 — 页面与 UI', () => {
     await page.getByRole('button', { name: /send/ }).click();
 
     // 等待对话出现在侧边栏
-    await page.locator('.conversation-item').first().waitFor({ state: 'visible', timeout: 30_000 });
-    await expect(page.locator('.conversation-item')).toHaveCount(1);
+    await getSessionItems(page).first().waitFor({ state: 'visible', timeout: 30_000 });
+    await expect(getSessionItems(page)).toHaveCount(1);
 
     // 点击对话切换到该对话
-    await page.locator('.conversation-item').first().click();
+    await getSessionItems(page).first().click();
     await page.waitForTimeout(1000);
     await expect(page.locator('text=健康保险等待期').first()).toBeVisible();
   });
@@ -121,17 +128,17 @@ test.describe('法规问答 — 页面与 UI', () => {
     await input.click();
     await input.type('保险费率规定');
     await page.getByRole('button', { name: /send/ }).click();
-    await page.locator('.conversation-item').first().waitFor({ state: 'visible', timeout: 30_000 });
+    await getSessionItems(page).first().waitFor({ state: 'visible', timeout: 30_000 });
     await page.waitForTimeout(1000);
 
-    await expect(page.locator('.conversation-item')).toHaveCount(1);
+    await expect(getSessionItems(page)).toHaveCount(1);
 
-    await page.locator('.conversation-item').first().locator('button.ant-btn-text').click();
+    await getSessionItems(page).first().locator('button.ant-btn-text').click();
     await page.locator('.ant-popconfirm').waitFor({ state: 'visible', timeout: 5_000 });
     await page.locator('.ant-popconfirm .ant-btn-primary').click();
 
     await page.waitForTimeout(1000);
-    await expect(page.locator('.conversation-item')).toHaveCount(0, { timeout: 5_000 });
+    await expect(getSessionItems(page)).toHaveCount(0, { timeout: 5_000 });
   });
 
   test('多轮对话 — 切换对话加载不同消息', async ({ page }) => {
@@ -147,7 +154,7 @@ test.describe('法规问答 — 页面与 UI', () => {
     await input.click();
     await input.type('第一个问题');
     await page.getByRole('button', { name: /send/ }).click();
-    await page.locator('.conversation-item').first().waitFor({ state: 'visible', timeout: 30_000 });
+    await getSessionItems(page).first().waitFor({ state: 'visible', timeout: 30_000 });
     await page.waitForTimeout(1000);
 
     await page.getByPlaceholder('输入法规相关问题...').click();
@@ -155,13 +162,13 @@ test.describe('法规问答 — 页面与 UI', () => {
     await page.getByRole('button', { name: /send/ }).click();
     await page.waitForTimeout(3000);
 
-    await expect(page.locator('.conversation-item')).toHaveCount(2);
+    await expect(getSessionItems(page)).toHaveCount(2);
 
-    await page.locator('.conversation-item').first().click();
+    await getSessionItems(page).first().click();
     await page.waitForTimeout(1000);
     await expect(page.locator('text=第一个问题')).toBeVisible();
 
-    await page.locator('.conversation-item').nth(1).click();
+    await getSessionItems(page).nth(1).click();
     await page.waitForTimeout(1000);
     await expect(page.locator('text=第二个问题')).toBeVisible();
   });
@@ -179,19 +186,19 @@ test.describe('法规问答 — 页面与 UI', () => {
     await input.click();
     await input.type('取消删除测试');
     await page.getByRole('button', { name: /send/ }).click();
-    await page.locator('.conversation-item').first().waitFor({ state: 'visible', timeout: 30_000 });
+    await getSessionItems(page).first().waitFor({ state: 'visible', timeout: 30_000 });
     await page.waitForTimeout(1000);
 
-    await expect(page.locator('.conversation-item')).toHaveCount(1);
+    await expect(getSessionItems(page)).toHaveCount(1);
 
-    await page.locator('.conversation-item').first().locator('button.ant-btn-text').click();
+    await getSessionItems(page).first().locator('button.ant-btn-text').click();
     await expect(page.locator('.ant-popconfirm')).toBeVisible();
     await page.locator('.ant-popconfirm .ant-btn-default').click();
 
-    await expect(page.locator('.conversation-item')).toHaveCount(1);
+    await expect(getSessionItems(page)).toHaveCount(1);
 
     // 清理
-    await page.locator('.conversation-item').first().locator('button.ant-btn-text').click();
+    await getSessionItems(page).first().locator('button.ant-btn-text').click();
     await page.locator('.ant-popconfirm .ant-btn-primary').click();
     await page.waitForTimeout(1000);
   });

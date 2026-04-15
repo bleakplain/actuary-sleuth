@@ -15,11 +15,10 @@ test.describe('知识库管理', () => {
     await expect(page.locator('text=文档数量')).toBeVisible();
     await expect(page.locator('text=向量库文档')).toBeVisible();
     await expect(page.locator('text=BM25 状态')).toBeVisible();
-    await expect(page.locator('text=向量库状态')).toBeVisible();
+    await expect(page.locator('text=当前版本')).toBeVisible();
 
     // 操作按钮
     await expect(page.locator('button:has-text("导入文档")')).toBeVisible();
-    await expect(page.locator('button:has-text("重建索引")')).toBeVisible();
     await expect(page.locator('button:has-text("刷新")')).toBeVisible();
 
     // 表格存在
@@ -56,15 +55,15 @@ test.describe('知识库管理', () => {
     ]).catch(() => {});
   });
 
-  test('重建索引 — 确认弹窗', async ({ page }) => {
-    await page.click('button:has-text("重建索引")');
+  test('创建新版本 — 弹窗', async ({ page }) => {
+    await page.click('button:has-text("创建新版本")');
 
-    // Popconfirm 弹出
-    await expect(page.locator('.ant-popconfirm')).toBeVisible();
-    await expect(page.locator('.ant-popconfirm')).toContainText('确定重建索引');
+    // Modal 弹出
+    const modal = page.locator('.ant-modal');
+    await expect(modal).toBeVisible();
 
-    // 取消
-    await page.click('.ant-popconfirm .ant-btn-default');
-    await expect(page.locator('.ant-popconfirm')).not.toBeVisible();
+    // 关闭 Modal
+    await page.locator('.ant-modal-close').click();
+    await expect(modal).not.toBeVisible();
   });
 });
