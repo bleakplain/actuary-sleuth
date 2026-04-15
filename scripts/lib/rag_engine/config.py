@@ -12,7 +12,7 @@ class RetrievalConfig:
     keyword_top_k: int = 20
     rrf_k: int = 60
     max_chunks_per_article: int = 3
-    min_rrf_score: float = 0.0
+    min_rrf_score: float = 0.02
 
     def __post_init__(self):
         if self.vector_top_k < 1:

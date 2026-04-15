@@ -7,13 +7,17 @@ interface Props {
 }
 
 export default function CitationTag({ citation, onClick }: Props) {
+  const displayName = citation.law_name.length > 20
+    ? citation.law_name.slice(0, 20) + '…'
+    : citation.law_name;
+
   return (
     <Tag
       color="blue"
-      style={{ cursor: onClick ? 'pointer' : 'default' }}
+      style={{ cursor: onClick ? 'pointer' : 'default', maxWidth: 300 }}
       onClick={() => onClick?.(citation)}
     >
-      [{citation.law_name} {citation.article_number}]
+      [{displayName} {citation.article_number}]
     </Tag>
   );
 }

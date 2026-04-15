@@ -1,5 +1,5 @@
 import { Typography, Button, Popconfirm, theme } from 'antd';
-import { BugOutlined, DeleteOutlined } from '@ant-design/icons';
+import { BugOutlined, CloseOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -52,7 +52,8 @@ export default function MessageBubble({ message, streaming, onCitationClick }: P
             <Button
               type="text"
               size="small"
-              icon={<DeleteOutlined />}
+              icon={<CloseOutlined />}
+              onMouseDown={(e) => e.stopPropagation()}
               style={{
                 position: 'absolute',
                 right: 0,
@@ -87,6 +88,7 @@ export default function MessageBubble({ message, streaming, onCitationClick }: P
   const hasSources = message.sources && message.sources.length > 0;
   const isActive = activeTraceMessageId === message.id;
   const isThinking = streaming && !content;
+  const isSearchResult = content.startsWith('[') && hasSources;
 
   return (
     <div style={{ marginBottom: 16 }}>
@@ -99,12 +101,46 @@ export default function MessageBubble({ message, streaming, onCitationClick }: P
           borderBottomLeftRadius: 4,
         }}
       >
-        {content ? (
+        {isSearchResult ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {message.sources.map((s: Source, i: number) => (
+              <div
+                key={i}
+                onClick={() => onCitationClick?.(s, message.sources)}
+                style={{
+                  background: token.colorBgContainer,
+                  border: `1px solid ${token.colorBorderSecondary}`,
+                  borderRadius: 8,
+                  padding: '8px 12px',
+                  cursor: 'pointer',
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 500, color: token.colorText, marginBottom: 4 }}>
+                  {s.law_name}
+                  {s.article_number ? (
+                    <span style={{ color: token.colorTextSecondary, fontWeight: 400 }}> · {s.article_number}</span>
+                  ) : null}
+                </div>
+                <div style={{
+                  fontSize: 12,
+                  color: token.colorTextSecondary,
+                  lineHeight: 1.6,
+                  display: '-webkit-box',
+                  WebkitLineClamp: 3,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                }}>
+                  {s.content}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : content ? (
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
         ) : (
           <Text type="secondary">思考中...</Text>
         )}
-        {hasSources && (
+        {!isSearchResult && hasSources && (
           <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {message.sources.map((s: Source, i: number) => (
               <CitationTag
