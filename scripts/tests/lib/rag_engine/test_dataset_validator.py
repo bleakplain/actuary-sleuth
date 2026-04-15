@@ -99,3 +99,63 @@ class TestValidateDataset:
         assert report.total_samples == 0
         assert report.valid_samples == 0
         assert report.issues == []
+
+
+def test_validate_allows_empty_evidence_for_unanswerable():
+    sample = EvalSample(
+        id="u_test",
+        question="保险公司可以投资股票吗？",
+        ground_truth="知识库中无对应规定",
+        evidence_docs=[],
+        evidence_keywords=["投资", "股票"],
+        question_type=QuestionType.UNANSWERABLE,
+        difficulty="medium",
+        topic="投资管理",
+    )
+    report = validate_dataset([sample])
+    no_evidence_errors = [i for i in report.issues if i.issue_type == 'no_evidence']
+    assert len(no_evidence_errors) == 0
+
+
+def test_validate_detects_duplicates():
+    samples = [
+        EvalSample(
+            id="dup_001",
+            question="健康保险的等待期有什么规定？",
+            ground_truth="等待期不超过90天",
+            evidence_docs=["05_健康保险产品开发.md"],
+            evidence_keywords=["等待期"],
+            question_type=QuestionType.FACTUAL,
+            difficulty="easy",
+            topic="健康保险",
+        ),
+        EvalSample(
+            id="dup_002",
+            question="健康保险等待期有什么规定？",
+            ground_truth="等待期不超过90天",
+            evidence_docs=["05_健康保险产品开发.md"],
+            evidence_keywords=["等待期"],
+            question_type=QuestionType.FACTUAL,
+            difficulty="easy",
+            topic="健康保险",
+        ),
+    ]
+    report = validate_dataset(samples)
+    dup_issues = [i for i in report.issues if i.issue_type == 'duplicate_question']
+    assert len(dup_issues) >= 1
+
+
+def test_validate_detects_generic_keywords():
+    sample = EvalSample(
+        id="g_test",
+        question="保险合同有什么规定？",
+        ground_truth="保险合同应当包含基本条款",
+        evidence_docs=["01_保险法.md"],
+        evidence_keywords=["保险", "条款"],
+        question_type=QuestionType.FACTUAL,
+        difficulty="easy",
+        topic="保险法",
+    )
+    report = validate_dataset([sample])
+    generic_issues = [i for i in report.issues if i.issue_type == 'generic_keyword']
+    assert len(generic_issues) >= 1

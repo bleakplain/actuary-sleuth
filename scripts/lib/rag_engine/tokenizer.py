@@ -78,3 +78,20 @@ def tokenize_chinese(text: str) -> List[str]:
         result.append(t)
 
     return result
+
+
+def tokenize_to_set(text: str) -> Optional[Set[str]]:
+    """分词并返回 token 集合，空文本返回 None"""
+    if not text:
+        return None
+    tokens = set(tokenize_chinese(text))
+    return tokens if tokens else None
+
+
+def jaccard_similarity(set_a: Set[str], set_b: Set[str]) -> float:
+    """计算两个集合的 Jaccard 相似度"""
+    if not set_a or not set_b:
+        return 0.0
+    intersection = set_a & set_b
+    union = set_a | set_b
+    return len(intersection) / len(union)

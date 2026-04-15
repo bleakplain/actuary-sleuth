@@ -17,7 +17,7 @@ class EvalSampleCreate(BaseModel):
     ground_truth: str = ""
     evidence_docs: List[str] = []
     evidence_keywords: List[str] = []
-    question_type: str = Field("factual", pattern="^(factual|multi_hop|negative|colloquial)$")
+    question_type: str = Field("factual", pattern="^(factual|multi_hop|negative|colloquial|unanswerable)$")
     difficulty: str = Field("medium", pattern="^(easy|medium|hard)$")
     topic: str = ""
     regulation_refs: List[RegulationRefSchema] = []
@@ -105,3 +105,7 @@ class KbSearchResult(BaseModel):
     excerpt: str
     hierarchy_path: str = ""
     chunk_id: str = ""
+
+
+class SynthesizeRequest(BaseModel):
+    max_chunks: int = Field(50, ge=1, le=500, description="最大处理的 chunk 数量")

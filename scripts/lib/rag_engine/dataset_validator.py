@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """数据集自动校验工具"""
 from dataclasses import dataclass, field
 from typing import List, Dict
@@ -36,6 +34,42 @@ class QualityAuditReport:
         }
 
 
+def _check_duplicates(samples: List[EvalSample]) -> List[QualityIssue]:
+    from .tokenizer import tokenize_to_set, jaccard_similarity
+
+    token_sets = [tokenize_to_set(s.question) for s in samples]
+    issues: List[QualityIssue] = []
+    for i in range(len(samples)):
+        ts_i = token_sets[i]
+        if not ts_i:
+            continue
+        for j in range(i + 1, len(samples)):
+            ts_j = token_sets[j]
+            if not ts_j:
+                continue
+            sim = jaccard_similarity(ts_i, ts_j)
+            if sim > 0.8:
+                issues.append(QualityIssue(
+                    samples[j].id, 'duplicate_question', 'warning',
+                    f'与样本 {samples[i].id} 高度相似 (Jaccard={sim:.2f})',
+                ))
+    return issues
+
+
+def _check_generic_keywords(samples: List[EvalSample]) -> List[QualityIssue]:
+    from .evaluator import GENERIC_KEYWORDS
+
+    issues: List[QualityIssue] = []
+    for sample in samples:
+        generic = [kw for kw in sample.evidence_keywords if kw in GENERIC_KEYWORDS]
+        if generic:
+            issues.append(QualityIssue(
+                sample.id, 'generic_keyword', 'info',
+                f'泛化关键词: {generic}',
+            ))
+    return issues
+
+
 def validate_dataset(samples: List[EvalSample]) -> QualityAuditReport:
     issues: List[QualityIssue] = []
 
@@ -45,7 +79,8 @@ def validate_dataset(samples: List[EvalSample]) -> QualityAuditReport:
         if not sample.ground_truth.strip():
             issues.append(QualityIssue(sample.id, 'empty_field', 'warning', 'ground_truth 为空'))
         if not sample.evidence_docs:
-            issues.append(QualityIssue(sample.id, 'no_evidence', 'error', 'evidence_docs 为空'))
+            if sample.question_type != QuestionType.UNANSWERABLE:
+                issues.append(QualityIssue(sample.id, 'no_evidence', 'error', 'evidence_docs 为空'))
         if not sample.evidence_keywords:
             issues.append(QualityIssue(sample.id, 'no_evidence', 'warning', 'evidence_keywords 为空'))
 
@@ -58,6 +93,9 @@ def validate_dataset(samples: List[EvalSample]) -> QualityAuditReport:
 
         if not sample.topic.strip():
             issues.append(QualityIssue(sample.id, 'missing_field', 'warning', 'topic 为空'))
+
+    issues.extend(_check_duplicates(samples))
+    issues.extend(_check_generic_keywords(samples))
 
     type_dist: Dict[str, int] = {}
     diff_dist: Dict[str, int] = {}

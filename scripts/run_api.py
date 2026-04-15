@@ -101,12 +101,16 @@ if __name__ == "__main__":
     from uvicorn.config import Config
     from uvicorn.server import Server
 
+    # RAGAS 不兼容 uvloop，强制使用标准 asyncio 事件循环
+    os.environ.setdefault("UVICORN_LOOP", "asyncio")
+
     config = Config(
         "api.app:app",
         host="0.0.0.0",
         port=actual_port,
         reload=os.environ.get("DEBUG", "false").lower() == "true",
         log_level="info",
+        loop="asyncio",
     )
     server = Server(config=config)
 

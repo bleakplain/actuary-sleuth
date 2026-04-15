@@ -35,6 +35,9 @@ package-lock.json
 .env.local
 .env.*.local
 
+# Eval dataset (loaded from DB, not tracked)
+lib/rag_engine/data/eval_dataset.json
+
 # Runtime state (PID, port)
 .run
 

@@ -68,7 +68,7 @@ def test_eval_sample_backward_compatible():
     }
     sample = EvalSample.from_dict(old_data)
     assert sample.review_status == ReviewStatus.PENDING
-    assert sample.regulation_refs == ()
+    assert sample.regulation_refs == []
     assert sample.reviewer == ""
     assert sample.created_by == "human"
     assert sample.kb_version == ""
@@ -107,3 +107,30 @@ def test_eval_sample_frozen():
     import dataclasses
     assert dataclasses.is_dataclass(sample)
     assert sample.__dataclass_params__.frozen
+
+
+def test_unanswerable_type_serialization():
+    sample = EvalSample(
+        id="unanswerable_001",
+        question="保险公司可以在抖音上直播卖保险吗？",
+        ground_truth="知识库中无对应规定",
+        evidence_docs=[],
+        evidence_keywords=["直播", "销售"],
+        question_type=QuestionType.UNANSWERABLE,
+        difficulty="easy",
+        topic="互联网保险",
+    )
+    d = sample.to_dict()
+    assert d['question_type'] == 'unanswerable'
+    assert d['evidence_docs'] == []
+
+    restored = EvalSample.from_dict(d)
+    assert restored.question_type == QuestionType.UNANSWERABLE
+    assert restored == sample
+
+
+def test_load_eval_dataset_from_db():
+    from lib.rag_engine.eval_dataset import load_eval_dataset
+    # DB is empty in tests; load_eval_dataset returns [] when DB has no samples
+    loaded = load_eval_dataset()
+    assert isinstance(loaded, list)
