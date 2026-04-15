@@ -80,7 +80,7 @@ function SourceDrawer({
               borderRadius: 4,
               padding: '8px 12px',
               color: token.colorPrimaryText,
-              fontSize: token.fontSize,
+              fontSize: token.fontSize ?? 14,
             }}
           >
             {excerpt}
@@ -101,7 +101,7 @@ function SourceDrawer({
             maxHeight: 300,
             overflow: 'auto',
             whiteSpace: 'pre-wrap',
-            fontSize: token.fontSize,
+            fontSize: token.fontSize ?? 14,
           }}
         >
           {source.content}
@@ -112,6 +112,7 @@ function SourceDrawer({
 }
 
 export default function CompliancePage() {
+  const { token } = theme.useToken();
   const [activeTab, setActiveTab] = useState('product');
   const [productForm] = Form.useForm();
   const [docForm] = Form.useForm();
@@ -362,13 +363,13 @@ export default function CompliancePage() {
           </Descriptions>
 
           <Space size="large" style={{ marginBottom: 16 }}>
-            <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: token.fontSize, padding: '4px 12px' }}>
+            <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
               合规 {summary.compliant} 项
             </Tag>
-            <Tag color="error" icon={<CloseCircleOutlined />} style={{ fontSize: token.fontSize, padding: '4px 12px' }}>
+            <Tag color="error" icon={<CloseCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
               不合规 {summary.non_compliant} 项
             </Tag>
-            <Tag color="warning" icon={<ExclamationCircleOutlined />} style={{ fontSize: token.fontSize, padding: '4px 12px' }}>
+            <Tag color="warning" icon={<ExclamationCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
               需关注 {summary.attention} 项
             </Tag>
           </Space>
