@@ -1,7 +1,7 @@
 # RAG 检索质量改进 — 技术调研报告
 
 生成时间: 2026-04-07
-源规格: specs/003-rag-rerank-quality/spec.md
+源规格: .claude/specs/003-rag-rerank-quality/spec.md
 
 ## 执行摘要
 

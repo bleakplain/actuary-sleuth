@@ -30,7 +30,7 @@
 ### Documentation
 
 ```text
-specs/011-rag-perf-cache/
+.claude/specs/011-rag-perf-cache/
 ├── spec.md
 ├── research.md
 ├── plan.md          # 本文件

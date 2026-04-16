@@ -37,7 +37,7 @@ arguments:
 /fix-plan review claude    # 查看 CLAUDE.md
 ```
 
-读取并显示 `specs/<feature-name>/` 下对应的文档内容。
+读取并显示 `.claude/specs/<feature-name>/` 下对应的文档内容。
 
 ---
 
@@ -219,7 +219,7 @@ arguments:
 
 ```
 当前分支: 001-kb-search
-产物目录: specs/001-kb-search/
+产物目录: .claude/specs/001-kb-search/
   ├── spec.md
   ├── research.md
   ├── plan.md
@@ -230,8 +230,8 @@ arguments:
 
 ## 相关文件
 
-- `specs/<feature-name>/spec.md` — 需求规格
-- `specs/<feature-name>/plan.md` — 实现方案
-- `specs/<feature-name>/tasks.md` — 任务列表
-- `specs/<feature-name>/research.md` — 技术调研
+- `.claude/specs/<feature-name>/spec.md` — 需求规格
+- `.claude/specs/<feature-name>/plan.md` — 实现方案
+- `.claude/specs/<feature-name>/tasks.md` — 任务列表
+- `.claude/specs/<feature-name>/research.md` — 技术调研
 - `CLAUDE.md` — 项目编码规范和治理原则

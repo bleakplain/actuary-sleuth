@@ -1,7 +1,7 @@
 # RAG 性能优化 — 技术调研报告
 
 生成时间: 2026-04-15
-源规格: specs/011-rag-perf-cache/spec.md
+源规格: .claude/specs/011-rag-perf-cache/spec.md
 
 ## 执行摘要
 

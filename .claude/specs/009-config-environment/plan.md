@@ -29,7 +29,7 @@
 ### Documentation
 
 ```text
-specs/009-config-environment/
+.claude/specs/009-config-environment/
 ├── spec.md
 ├── plan.md          # 本文件
 └── tasks.md         # exec-plan 生成
@@ -219,7 +219,7 @@ def __init__(
    ```
 5. **创建产物目录**：
    ```bash
-   mkdir -p .claude/worktrees/<feature-name>/specs/<feature-name>
+   mkdir -p .claude/worktrees/<feature-name>/.claude/specs/<feature-name>
    ```
 ```
 

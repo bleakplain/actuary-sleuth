@@ -43,10 +43,6 @@ arguments:
    ```bash
    cp scripts/.env .claude/worktrees/<feature-name>/scripts/.env
    ```
-5. **创建产物目录**：
-   ```bash
-   mkdir -p .claude/worktrees/<feature-name>/specs/<feature-name>
-   ```
 
 ### 第二步：需求澄清
 
@@ -62,7 +58,7 @@ arguments:
 
 ### 第三步：生成 spec.md
 
-在 worktree 中生成 `specs/<feature-name>/spec.md`：
+在 worktree 中生成 `.claude/specs/<feature-name>/spec.md`：
 
 ```markdown
 # Feature Specification: [FEATURE NAME]
@@ -149,7 +145,7 @@ arguments:
 ```
 ✅ spec.md 已生成
 
-📁 产物位置: specs/<feature-name>/spec.md
+📁 产物位置: .claude/specs/<feature-name>/spec.md
 🌳 工作目录: .claude/worktrees/<feature-name>/
 🌿 分支: <feature-name> (基于 origin/master)
 
@@ -173,5 +169,5 @@ arguments:
 
 ## 相关文件
 
-- `specs/<feature-name>/spec.md` — 产物（输出）
+- `.claude/specs/<feature-name>/spec.md` — 产物（输出）
 - `CLAUDE.md` — 治理原则和产物规范（参考）

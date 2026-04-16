@@ -29,7 +29,7 @@
 ### Documentation
 
 ```text
-specs/008-eval-dataset-improvement/
+.claude/specs/008-eval-dataset-improvement/
 ├── spec.md
 ├── research.md
 ├── plan.md          # 本文件

@@ -34,7 +34,7 @@
 ## Project Structure
 
 ```
-specs/004-eval-dataset-curation/
+.claude/specs/004-eval-dataset-curation/
 ├── research.md
 └── plan.md                  # 本文件
 ```

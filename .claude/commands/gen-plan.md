@@ -5,7 +5,7 @@ arguments:
     description: 源文件路径（默认自动检测）
     required: false
   - name: output
-    description: 输出文件路径（默认 specs/<feature-name>/plan.md）
+    description: 输出文件路径（默认 .claude/specs/<feature-name>/plan.md）
     required: false
 ---
 
@@ -18,7 +18,7 @@ arguments:
 > **SDD 模式：spec.md + research.md → plan.md（含 Constitution Check、User Story 回溯）。**
 > **兼容模式：research.md → plan.md（问题修复方案，保持原有行为）。**
 >
-> **所有输出写入 `specs/<feature-name>/plan.md`，不写项目根目录。**
+> **所有输出写入 `.claude/specs/<feature-name>/plan.md`，不写项目根目录。**
 
 ## 命令格式
 
@@ -38,11 +38,11 @@ arguments:
 
 ## 模式检测
 
-从当前 git branch 名提取 feature-name，检查 `specs/<feature-name>/spec.md` 是否存在。
+从当前 git branch 名提取 feature-name，检查 `.claude/specs/<feature-name>/spec.md` 是否存在。
 
 | 模式 | 触发条件 | 输入 |
 |------|---------|------|
-| **SDD 模式** | `specs/<feature-name>/spec.md` 存在 | spec.md + research.md |
+| **SDD 模式** | `.claude/specs/<feature-name>/spec.md` 存在 | spec.md + research.md |
 | **兼容模式** | 无 spec.md | research.md |
 
 ---
@@ -51,8 +51,8 @@ arguments:
 
 ### 第一步：读取输入
 
-1. 读取 `specs/<feature-name>/spec.md` — User Stories, Requirements, Success Criteria
-2. 读取 `specs/<feature-name>/research.md` — 技术调研结果
+1. 读取 `.claude/specs/<feature-name>/spec.md` — User Stories, Requirements, Success Criteria
+2. 读取 `.claude/specs/<feature-name>/research.md` — 技术调研结果
 3. 从 git branch 名提取 feature-name
 
 ### 第二步：Constitution Check
@@ -78,7 +78,7 @@ arguments:
 
 ### 第四步：输出文档
 
-输出到 `specs/<feature-name>/plan.md`：
+输出到 `.claude/specs/<feature-name>/plan.md`：
 
 ```markdown
 # Implementation Plan: [FEATURE NAME]
@@ -113,7 +113,7 @@ arguments:
 ### Documentation
 
 ```text
-specs/<feature-name>/
+.claude/specs/<feature-name>/
 ├── spec.md
 ├── research.md
 ├── plan.md          # 本文件
@@ -215,7 +215,7 @@ specs/<feature-name>/
 
 ### 第四步：输出文档
 
-输出到 `specs/<feature-name>/plan.md`：
+输出到 `.claude/specs/<feature-name>/plan.md`：
 
 ```markdown
 # 项目名称 - 综合改进方案
@@ -280,13 +280,13 @@ specs/<feature-name>/
 2. **完整代码**: 代码变更必须是完整的、可直接运行的
 3. **权衡分析**: 每个问题至少提供 3 种可行方案
 4. **遵循规范**: 遵循 CLAUDE.md 编码规范
-5. **产物位置**: 输出到 `specs/<feature-name>/plan.md`
+5. **产物位置**: 输出到 `.claude/specs/<feature-name>/plan.md`
 
 ---
 
 ## 相关文件
 
-- `specs/<feature-name>/spec.md` — 需求规格（SDD 模式输入）
-- `specs/<feature-name>/research.md` — 技术调研（输入）
-- `specs/<feature-name>/plan.md` — 实现方案（输出）
+- `.claude/specs/<feature-name>/spec.md` — 需求规格（SDD 模式输入）
+- `.claude/specs/<feature-name>/research.md` — 技术调研（输入）
+- `.claude/specs/<feature-name>/plan.md` — 实现方案（输出）
 - `CLAUDE.md` — 项目编码规范和治理原则（参考）

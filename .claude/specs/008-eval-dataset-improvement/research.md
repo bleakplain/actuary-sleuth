@@ -1,7 +1,7 @@
 # 评测数据集系统性改进 - 技术调研报告
 
 生成时间: 2026-04-10
-源规格: specs/008-eval-dataset-improvement/spec.md
+源规格: .claude/specs/008-eval-dataset-improvement/spec.md
 
 ## 执行摘要
 

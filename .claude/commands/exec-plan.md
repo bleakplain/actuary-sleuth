@@ -2,7 +2,7 @@
 description: 基于plan.md拆分todolist，逐任务实现，持续类型检查，完成前不停
 arguments:
   - name: source
-    description: 方案文件路径（默认自动检测 specs/<feature-name>/plan.md）
+    description: 方案文件路径（默认自动检测 .claude/specs/<feature-name>/plan.md）
     required: false
 ---
 
@@ -60,7 +60,7 @@ arguments:
 
 ### 创建 Worktree
 
-1. **提取 feature-name** — 从 `specs/` 目录或 `plan.md` 路径中提取（如 `004-eval-dataset-curation`）
+1. **提取 feature-name** — 从 `.claude/specs/` 目录或 `plan.md` 路径中提取（如 `004-eval-dataset-curation`）
 2. **扫描编号** — 检查本地+远程分支中已有的 `NNN-*` 分支，取 max+1
 3. **检查分支是否已存在** — 如果 `<feature-name>` 分支已存在，直接切换到对应 worktree
 4. **创建 worktree** — 基于 `origin/master` 创建：
@@ -72,16 +72,12 @@ arguments:
    cp scripts/config/settings.json .claude/worktrees/<feature-name>/scripts/config/settings.json
    cp scripts/.env .claude/worktrees/<feature-name>/scripts/.env
    ```
-6. **将 plan.md 和相关产物复制到 worktree**：
-   ```bash
-   cp -r specs/<feature-name>/ .claude/worktrees/<feature-name>/specs/<feature-name>/
-   ```
-7. **切换工作目录到 worktree**：
+6. **切换工作目录到 worktree**：
    ```
    后续所有操作在 .claude/worktrees/<feature-name>/ 下执行
    ```
 
-### 如果 plan.md 在 master 上且无 specs 目录
+### 如果 plan.md 在 master 上且无 .claude/specs 目录
 
 说明是兼容模式且方案文件在项目根目录或其他位置，此时：
 1. 仍需创建 worktree 隔离开发环境
@@ -93,14 +89,14 @@ arguments:
 
 ### 第一步：读取并解析 plan.md
 
-1. 读取 `specs/<feature-name>/plan.md`
+1. 读取 `.claude/specs/<feature-name>/plan.md`
 2. 提取所有 Implementation Phases
 3. 识别每个 Phase 对应的 User Story
 4. 提取任务间的依赖关系
 
 ### 第二步：生成 tasks.md
 
-输出到 `specs/<feature-name>/tasks.md`：
+输出到 `.claude/specs/<feature-name>/tasks.md`：
 
 ```markdown
 # Tasks: [FEATURE NAME]
@@ -200,7 +196,7 @@ arguments:
 
 ### 第一步：读取并解析方案文件
 
-1. 读取方案文件（默认 `specs/<feature-name>/plan.md`）
+1. 读取方案文件（默认 `.claude/specs/<feature-name>/plan.md`）
 2. 解析所有章节和任务条目
 3. 识别任务间的依赖关系和执行顺序
 
@@ -270,7 +266,7 @@ arguments:
 ```
 📋 执行报告
 ═══════════════════════════════════
-方案文件: specs/<feature-name>/plan.md
+方案文件: .claude/specs/<feature-name>/plan.md
 完成时间: YYYY-MM-DD HH:MM
 
 ✅ 任务完成统计
@@ -291,7 +287,7 @@ arguments:
 
 ## 相关文件
 
-- `specs/<feature-name>/plan.md` — 实现方案（源）
-- `specs/<feature-name>/tasks.md` — 任务列表（SDD 模式生成）
-- `specs/<feature-name>/spec.md` — 需求规格（SDD 模式参考）
+- `.claude/specs/<feature-name>/plan.md` — 实现方案（源）
+- `.claude/specs/<feature-name>/tasks.md` — 任务列表（SDD 模式生成）
+- `.claude/specs/<feature-name>/spec.md` — 需求规格（SDD 模式参考）
 - `CLAUDE.md` — 项目编码规范（参考）

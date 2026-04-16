@@ -1,7 +1,7 @@
 # RAG 评估体系评估与改进 - 技术调研报告
 
 生成时间: 2026-04-05
-源规格: specs/002-rag-eval-assessment/spec.md
+源规格: .claude/specs/002-rag-eval-assessment/spec.md
 
 ## 执行摘要
 

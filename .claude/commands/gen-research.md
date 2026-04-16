@@ -33,11 +33,11 @@ arguments:
 
 ## 模式检测
 
-从当前 git branch 名提取 feature-name（如 `001-kb-search`），检查 `specs/<feature-name>/spec.md` 是否存在。
+从当前 git branch 名提取 feature-name（如 `001-kb-search`），检查 `.claude/specs/<feature-name>/spec.md` 是否存在。
 
 | 模式 | 触发条件 | 行为 |
 |------|---------|------|
-| **SDD 模式** | `specs/<feature-name>/spec.md` 存在 | 基于 spec.md 定向研究：分析现有代码如何支持需求实现、技术选型调研、依赖分析 |
+| **SDD 模式** | `.claude/specs/<feature-name>/spec.md` 存在 | 基于 spec.md 定向研究：分析现有代码如何支持需求实现、技术选型调研、依赖分析 |
 | **兼容模式** | 无 spec.md | 询问 feature-name → 基于 origin/master 创建 worktree → 保持原有行为：深度代码分析、问题识别 |
 
 ---
@@ -46,7 +46,7 @@ arguments:
 
 ### 第一步：读取 spec.md
 
-1. 读取 `specs/<feature-name>/spec.md`
+1. 读取 `.claude/specs/<feature-name>/spec.md`
 2. 提取所有 User Stories、Functional Requirements、Key Entities
 3. 识别需要研究的技术问题
 
@@ -72,13 +72,13 @@ arguments:
 
 ### 第五步：生成研究报告
 
-输出到 `specs/<feature-name>/research.md`，结构如下：
+输出到 `.claude/specs/<feature-name>/research.md`，结构如下：
 
 ```markdown
 # [Feature Name] - 技术调研报告
 
 生成时间: YYYY-MM-DD HH:MM:SS
-源规格: specs/<feature-name>/spec.md
+源规格: .claude/specs/<feature-name>/spec.md
 
 ## 执行摘要
 
@@ -215,7 +215,7 @@ class NewModel:
 
 ### 第四步：生成研究报告
 
-输出到 `specs/<feature-name>/research.md`，结构如下：
+输出到 `.claude/specs/<feature-name>/research.md`，结构如下：
 
 ```markdown
 # 项目名称 - 代码库深度研究报告
@@ -351,12 +351,12 @@ class NewModel:
 4. **代码示例**: 引用实际代码片段，支持结论
 5. **客观分析**: 区分问题和风格偏好
 6. **可操作建议**: 提出具体可执行的改进建议
-7. **产物位置**: 所有输出写入 `specs/<feature-name>/research.md`，不写项目根目录
+7. **产物位置**: 所有输出写入 `.claude/specs/<feature-name>/research.md`，不写项目根目录
 
 ---
 
 ## 相关文件
 
-- `specs/<feature-name>/research.md` — 研究报告（输出）
-- `specs/<feature-name>/spec.md` — 需求规格（SDD 模式输入）
+- `.claude/specs/<feature-name>/research.md` — 研究报告（输出）
+- `.claude/specs/<feature-name>/spec.md` — 需求规格（SDD 模式输入）
 - `CLAUDE.md` — 项目编码规范（参考）

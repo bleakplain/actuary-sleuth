@@ -1,7 +1,7 @@
 # RAG 记忆增强与 Agent 框架 - 技术调研报告
 
 生成时间: 2026-04-07
-源规格: specs/004-rag-memory-agent/spec.md
+源规格: .claude/specs/004-rag-memory-agent/spec.md
 
 ## 执行摘要
 
