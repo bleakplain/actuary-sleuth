@@ -116,6 +116,63 @@ async def chat(req: ChatRequest):
                 reset_llm_call_count(root_span.trace_id)
                 root_span.input = {"question": req.question, "mode": req.mode}
 
+            cache = engine.cache
+
+            if cache:
+                cached = cache.get("generation", req.question)
+                if cached is not None:
+                    answer = cached.get("answer", "")
+                    chunk_size = 4
+                    for i in range(0, len(answer), chunk_size):
+                        chunk = answer[i : i + chunk_size]
+                        yield {
+                            "event": "message",
+                            "data": json.dumps(
+                                {"type": "token", "data": chunk}, ensure_ascii=False
+                            ),
+                        }
+
+                    msg_id = add_message(
+                        session_id,
+                        "assistant",
+                        answer,
+                        citations=cached.get("citations", []),
+                        sources=cached.get("sources", []),
+                    )
+
+                    if root_span:
+                        root_span.output = {"answer_length": len(answer), "cached": True}
+                        root_span.metadata = {"mode": req.mode, "cache_hit": True}
+                        _span_ctx.__exit__(*exc_info)
+                        exc_info = (None, None, None)
+
+                    trace_summary = None
+                    if root_span:
+                        tid = root_span.trace_id
+                        trace_summary = _build_trace_payload(root_span, tid)
+                        _persist_trace(root_span, msg_id, session_id,
+                                       name=req.question, summary=trace_summary["summary"])
+                        cleanup_trace_counters(tid)
+
+                    response_meta: dict = {
+                        "session_id": session_id,
+                        "message_id": msg_id,
+                        "citations": cached.get("citations", []),
+                        "sources": cached.get("sources", []),
+                        "unverified_claims": cached.get("unverified_claims", []),
+                        "content_mismatches": cached.get("content_mismatches", []),
+                        "cached": True,
+                    }
+                    if trace_summary:
+                        response_meta["trace"] = trace_summary
+
+                    yield {
+                        "event": "message",
+                        "data": json.dumps({"type": "done", "data": response_meta}, ensure_ascii=False),
+                    }
+                    return
+
+            # 正常路径：graph.invoke
             memory_svc = get_memory_service()
             graph = get_ask_graph()
             state = AskState(
@@ -129,6 +186,9 @@ async def chat(req: ChatRequest):
                 memory_service=memory_svc,
             )
             result = await asyncio.to_thread(graph.invoke, state, context=context)
+
+            if cache:
+                cache.set("generation", req.question, result)
 
             if root_span:
                 root_span.output = {
@@ -152,7 +212,6 @@ async def chat(req: ChatRequest):
                         {"type": "token", "data": chunk}, ensure_ascii=False
                     ),
                 }
-                await asyncio.sleep(0.01)
 
             msg_id = add_message(
                 session_id,

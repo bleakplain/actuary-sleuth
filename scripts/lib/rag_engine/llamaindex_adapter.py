@@ -6,7 +6,7 @@ LlamaIndex 适配器
 """
 import asyncio
 import requests  # type: ignore[import-untyped]
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from llama_index.core.llms import LLM, CompletionResponse, ChatResponse, ChatMessage, LLMMetadata
 from llama_index.core.embeddings import BaseEmbedding
@@ -110,6 +110,7 @@ class ZhipuEmbeddingAdapter(BaseEmbedding):
     _base_url: str = PrivateAttr()
     _model: str = PrivateAttr()
     _session: requests.Session = PrivateAttr()
+    _cache_manager: Any = PrivateAttr(default=None)
 
     def __init__(
         self,
@@ -133,7 +134,27 @@ class ZhipuEmbeddingAdapter(BaseEmbedding):
         if not texts:
             return []
 
-        payload = {"model": self._model, "input": texts}
+        cached_results: Dict[int, List[float]] = {}
+        uncached_texts: List[str] = []
+        uncached_indices: List[int] = []
+
+        if self._cache_manager:
+            for i, text in enumerate(texts):
+                cache_key = f"{self._model}:{encoding_type}:{text}"
+                cached = self._cache_manager.get("embedding", cache_key)
+                if cached is not None:
+                    cached_results[i] = cached
+                else:
+                    uncached_texts.append(text)
+                    uncached_indices.append(i)
+
+            if not uncached_texts:
+                return [cached_results[i] for i in range(len(texts))]
+        else:
+            uncached_texts = texts
+            uncached_indices = list(range(len(texts)))
+
+        payload = {"model": self._model, "input": uncached_texts}
         if encoding_type:
             payload["encoding_type"] = encoding_type
 
@@ -147,12 +168,22 @@ class ZhipuEmbeddingAdapter(BaseEmbedding):
             timeout=120,
         )
         response.raise_for_status()
-        result = response.json()
+        new_embeddings = [item.get("embedding", []) for item in response.json().get("data", [])]
 
-        embeddings = []
-        for item in result.get("data", []):
-            embeddings.append(item.get("embedding", []))
-        return embeddings
+        if self._cache_manager:
+            for text, emb in zip(uncached_texts, new_embeddings):
+                cache_key = f"{self._model}:{encoding_type}:{text}"
+                self._cache_manager.set("embedding", cache_key, emb)
+
+        if cached_results:
+            all_embeddings: List[List[float]] = [[] for _ in range(len(texts))]
+            for i, emb in cached_results.items():
+                all_embeddings[i] = emb
+            for idx, emb in zip(uncached_indices, new_embeddings):
+                all_embeddings[idx] = emb
+            return all_embeddings
+
+        return new_embeddings
 
     def _get_embedding(self, text: str) -> List[float]:
         result = self._get_embeddings([text])
@@ -178,6 +209,9 @@ class ZhipuEmbeddingAdapter(BaseEmbedding):
         if hasattr(self, '_session') and self._session:
             self._session.close()
             self._session = None
+
+    def set_cache_manager(self, cache_manager: Any) -> None:
+        self._cache_manager = cache_manager
 
     def __del__(self):
         self.close()

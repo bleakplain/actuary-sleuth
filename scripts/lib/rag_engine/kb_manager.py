@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any, TYPE_CHECKING
 
 from lib.config import get_kb_version_dir
+from lib.common.cache import get_cache_manager
 
 if TYPE_CHECKING:
     from .config import RAGConfig
@@ -170,6 +171,13 @@ class KBManager:
                 "UPDATE kb_versions SET active = 1 WHERE version_id = ?",
                 (version_id,),
             )
+
+        cache = get_cache_manager(
+            db_path=str(self.base_dir.parent / "cache.db")
+        )
+        cache.evict_kb_version(version_id)
+        cache.set_kb_version(version_id)
+
         logger.info(f"切换到知识库版本 {version_id}")
         return True
 

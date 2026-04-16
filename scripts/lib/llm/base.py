@@ -4,7 +4,7 @@
 LLM 客户端抽象基类
 """
 from abc import ABC, abstractmethod
-from typing import List, Dict
+from typing import Dict, Iterator, List
 
 from lib.llm.trace import incr_llm_call_count
 
@@ -70,6 +70,16 @@ class BaseLLMClient(ABC):
     @abstractmethod
     def _do_chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         pass
+
+    def stream_chat(self, messages: List[Dict[str, str]], **kwargs) -> Iterator[str]:
+        self._validate_messages(messages)
+        incr_llm_call_count()
+        return self._do_chat_stream(messages, **kwargs)
+
+    def _do_chat_stream(self, messages: List[Dict[str, str]], **kwargs) -> Iterator[str]:
+        response = self._do_chat(messages, **kwargs)
+        for char in response:
+            yield char
 
     def ocr_table(self, image_base64: str) -> str:
         """OCR 识别表格为 Markdown（默认不支持，子类按需实现）。"""

@@ -296,6 +296,13 @@ class Config:
             },
             # debug
             'debug': os.getenv('DEBUG', 'false').lower() == 'true',
+            # cache
+            'enable_cache': os.getenv('CACHE_ENABLED', 'false').lower() == 'true',
+            'cache': {
+                'embedding_ttl': int(os.getenv('CACHE_EMBEDDING_TTL', '86400')),
+                'retrieval_ttl': int(os.getenv('CACHE_RETRIEVAL_TTL', '3600')),
+                'generation_ttl': int(os.getenv('CACHE_GENERATION_TTL', '3600')),
+            },
         }
 
     def _init_nested_configs(self) -> None:
@@ -341,6 +348,14 @@ class Config:
     @property
     def debug(self) -> bool:
         return self._config.get('debug', False)
+
+    @property
+    def enable_cache(self) -> bool:
+        return self._config.get('enable_cache', False)
+
+    @property
+    def cache(self) -> dict:
+        return self._config.get('cache', {})
 
     def _resolve_path(self, rel_path: str) -> str:
         p = Path(rel_path)

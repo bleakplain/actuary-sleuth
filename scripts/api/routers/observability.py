@@ -9,6 +9,7 @@ from api.database import (
     count_traces_for_cleanup,
     cleanup_traces,
 )
+from api.dependencies import get_rag_engine
 from api.schemas.observability import TraceListResponse, CleanupRequest
 
 router = APIRouter(prefix="/api/observability", tags=["可测性"])
@@ -60,3 +61,12 @@ async def cleanup_traces_endpoint(req: CleanupRequest):
         return {"count": count}
     deleted = cleanup_traces(req.start_date, req.end_date, req.status)
     return {"deleted": deleted}
+
+
+@router.get("/cache/stats")
+async def get_cache_stats():
+    engine = get_rag_engine()
+    cache = engine.cache
+    if cache is None:
+        return {"status": "not_initialized"}
+    return cache.get_stats()

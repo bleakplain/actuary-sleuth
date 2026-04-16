@@ -31,7 +31,7 @@ from .constants import (
     ViolationConstants,
     PreprocessingConstants,
 )
-from .cache import CacheManager, cached
+from .cache import CacheManager, get_cache_manager, reset_cache_manager
 from .logging_config import setup_logging, StructuredFormatter
 from .date_utils import get_current_timestamp
 from .middleware import Middleware, LoggingMiddleware, PerformanceMiddleware, MiddlewareChain
@@ -77,7 +77,8 @@ __all__ = [
     'PreprocessingConstants',
     # Cache
     'CacheManager',
-    'cached',
+    'get_cache_manager',
+    'reset_cache_manager',
     # Logging
     'setup_logging',
     'StructuredFormatter',

@@ -62,6 +62,7 @@ class VectorIndexManager:
         )
 
         logger.info("索引创建成功")
+        self._ensure_vector_index()
         return self.index
 
     def load_index(self) -> Optional[VectorStoreIndex]:
@@ -87,6 +88,7 @@ class VectorIndexManager:
             )
             index = VectorStoreIndex.from_vector_store(vector_store=vector_store)
             logger.info(f"从集合 '{self.config.collection_name}' 加载了已有索引")
+            self._ensure_vector_index()
             return index
         except Exception as e:
             logger.warning(f"加载已有索引失败: {e}")
@@ -146,3 +148,38 @@ class VectorIndexManager:
                 logger.info(f"已删除向量表 '{self.config.collection_name}'")
         except Exception as e:
             logger.warning(f"删除向量表失败: {e}")
+
+    def _ensure_vector_index(self) -> None:
+        """确保 LanceDB 向量索引已创建（IVF_HNSW_SQ）"""
+        try:
+            import lancedb
+            db = lancedb.connect(self.config.vector_db_path)
+
+            if self.config.collection_name not in db.table_names():
+                return
+
+            table = db.open_table(self.config.collection_name)
+
+            try:
+                existing = table.list_indices()
+                if existing:
+                    logger.debug(f"LanceDB 索引已存在: {existing}")
+                    return
+            except Exception:
+                pass
+
+            count = len(table)
+            if count < 256:
+                logger.info(f"数据量 ({count}) 不足，跳过索引创建（最低 256 条）")
+                return
+
+            num_partitions = max(1, count // 256)
+            table.create_index(
+                "vector",
+                index_type="IVF_HNSW_SQ",
+                metric="cosine",
+                num_partitions=num_partitions,
+            )
+            logger.info(f"LanceDB 索引已创建 (IVF_HNSW_SQ, partitions={num_partitions}, rows={count})")
+        except Exception as e:
+            logger.warning(f"LanceDB 索引创建失败（将使用全量扫描）: {e}")

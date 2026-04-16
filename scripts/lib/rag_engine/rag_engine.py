@@ -5,6 +5,7 @@ RAG 查询引擎（线程安全版本）
 统一的检索增强生成引擎，通过策略模式支持不同使用场景
 """
 import asyncio
+import json
 import logging
 import re
 import threading
@@ -31,6 +32,8 @@ from .gguf_reranker_adapter import GGUFReranker
 from .cross_encoder_reranker import CrossEncoderReranker
 from lib.llm import BaseLLMClient, LLMClientFactory
 from lib.llm.trace import trace_span
+from lib.common.cache import CacheManager, get_cache_manager
+from lib.config import _get_config
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +136,7 @@ class RAGEngine:
         self._reranker: Optional[BaseReranker] = None
         self._active_reranker_type: Optional[str] = None
         self._bm25_index: Optional[BM25Index] = None
+        self._cache: Optional[CacheManager] = None
         self._initialized = False
         self._init_lock = threading.Lock()
 
@@ -181,6 +185,10 @@ class RAGEngine:
         """返回实际使用的 reranker 类型。"""
         return self._active_reranker_type or "none"
 
+    @property
+    def cache(self) -> Optional[CacheManager]:
+        return self._cache
+
     def initialize(self, force_rebuild: bool = False) -> bool:
         """初始化查询引擎（线程安全版本）"""
         if Settings is None:
@@ -205,6 +213,16 @@ class RAGEngine:
 
                 if self.query_engine is None:
                     raise RuntimeError("查询引擎创建失败")
+
+                if _get_config().enable_cache and self._cache is None:
+                    cache_db = Path(self.config.vector_db_path).parent / "cache.db"
+                    self._cache = get_cache_manager(
+                        db_path=str(cache_db),
+                        namespace_ttl=_get_config().cache,
+                    )
+                    if hasattr(self._embed_model, 'set_cache_manager'):
+                        self._embed_model.set_cache_manager(self._cache)
+                    logger.info("缓存已启用")
 
                 self._initialized = True
                 logger.info("RAG 引擎初始化成功")
@@ -250,6 +268,12 @@ class RAGEngine:
         _thread_settings.apply()
 
         try:
+            if self._cache:
+                cached = self._cache.get("generation", question)
+                if cached is not None:
+                    logger.debug("答案缓存命中")
+                    return cached
+
             search_results = self._hybrid_search(question, top_k=self.config.top_k_results)
             if not search_results:
                 return {
@@ -297,6 +321,9 @@ class RAGEngine:
                 'unverified_claims': attribution.unverified_claims,
                 'content_mismatches': attribution.content_mismatches,
             }
+
+            if self._cache:
+                self._cache.set("generation", question, result)
 
             return result
 
@@ -382,6 +409,14 @@ class RAGEngine:
         filters: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """混合检索（向量 + BM25 关键词 + RRF 融合 + Rerank）"""
+        cache_key = None
+        if self._cache:
+            cache_key = json.dumps({"q": query_text, "f": filters or {}, "k": top_k}, sort_keys=True)
+            cached = self._cache.get("retrieval", cache_key)
+            if cached is not None:
+                logger.debug("检索缓存命中")
+                return cached
+
         rc = self.config.retrieval
         rk = self.config.rerank
         index = self.index_manager.get_index()
@@ -421,6 +456,9 @@ class RAGEngine:
                     f"(阈值={rk.rerank_min_score})"
                 )
             results = filtered
+
+        if cache_key and results:
+            self._cache.set("retrieval", cache_key, results)
 
         return results
 

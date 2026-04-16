@@ -6,7 +6,7 @@ import re
 import logging
 import requests  # type: ignore[import-untyped]
 import threading
-from typing import List, Dict, Optional
+from typing import Dict, Iterator, List, Optional
 
 from .base import BaseLLMClient
 from .metrics import _track_timing, _with_circuit_breaker, _retry_with_backoff
@@ -169,6 +169,48 @@ class ZhipuClient(BaseLLMClient):
     )
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         return super().chat(messages, **kwargs)
+
+    def _do_chat_stream(self, messages: List[Dict[str, str]], **kwargs) -> Iterator[str]:
+        url = f"{self.base_url}/chat/completions"
+        data = {
+            "model": kwargs.get('model', self.model),
+            "messages": messages,
+            "temperature": kwargs.get('temperature', 0.1),
+            "max_tokens": kwargs.get('max_tokens', 8192),
+            "top_p": kwargs.get('top_p', 0.7),
+            "stream": True,
+        }
+
+        session = self._get_session()
+        response = session.post(url, json=data, stream=True, timeout=self.timeout)
+
+        if response.status_code == 429:
+            raise requests.exceptions.RequestException(
+                f"429 Rate limit exceeded: {response.text[:200]}"
+            )
+        if response.status_code >= 500:
+            raise requests.exceptions.RequestException(
+                f"{response.status_code} Server error: {response.text[:200]}"
+            )
+        response.raise_for_status()
+
+        for line in response.iter_lines():
+            if not line:
+                continue
+            line_str = line.decode("utf-8")
+            if not line_str.startswith("data: "):
+                continue
+            data_str = line_str[6:]
+            if data_str.strip() == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data_str)
+                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                content = delta.get("content", "")
+                if content:
+                    yield content
+            except json.JSONDecodeError:
+                continue
 
     def health_check(self) -> bool:
         try:
