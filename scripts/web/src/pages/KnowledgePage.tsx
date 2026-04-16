@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Card, Table, Button, Space, Modal, Typography, message, Progress, Statistic, Row, Col, Popconfirm, Descriptions, Tag, Spin, Drawer, Input, Badge, Tree, theme } from 'antd';
+import { Card, Table, Button, Space, Modal, Typography, message, Progress, Statistic, Row, Col, Popconfirm, Descriptions, Tag, Spin, Drawer, Input, Badge, Tree, Tabs, theme, Grid } from 'antd';
 import { DatabaseOutlined, ReloadOutlined, ImportOutlined, PlusOutlined, UnorderedListOutlined, HistoryOutlined, DeleteOutlined, CheckCircleOutlined, FolderOutlined, FileOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -7,7 +7,7 @@ import rehypeRaw from 'rehype-raw';
 import * as kbApi from '../api/knowledge';
 import type { KBVersion } from '../api/knowledge';
 import type { Document, IndexStatus } from '../types';
-import { DRAWER_MD } from '../constants/layout';
+import { DRAWER_MD, MODAL_SM } from '../constants/layout';
 
 const { Title, Text } = Typography;
 
@@ -26,6 +26,8 @@ interface ChunkItem {
 
 export default function KnowledgePage() {
   const { token } = theme.useToken();
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md;
   const [documents, setDocuments] = useState<Document[]>([]);
   const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
   const [loading, setLoading] = useState(false);
@@ -350,40 +352,41 @@ export default function KnowledgePage() {
   ];
 
   return (
-    <div>
+    <div style={isMobile ? { overflowX: 'hidden' } : undefined}>
       <Title level={4} className="mb-16">知识库管理</Title>
 
-      <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}>
-          <Card>
+      <Row gutter={isMobile ? [8, 8] : [16, 16]} style={{ marginBottom: 16 }}>
+        <Col xs={12} sm={6}>
+          <Card size={isMobile ? 'small' : undefined}>
             <Statistic title="文档数量" value={documents.length} prefix={<DatabaseOutlined />} />
           </Card>
         </Col>
-        <Col span={6}>
-          <Card>
+        <Col xs={12} sm={6}>
+          <Card size={isMobile ? 'small' : undefined}>
             <Statistic title="向量库文档" value={indexStatus?.document_count || 0} />
           </Card>
         </Col>
-        <Col span={6}>
-          <Card>
+        <Col xs={12} sm={6}>
+          <Card size={isMobile ? 'small' : undefined}>
             <Statistic
               title="BM25 状态"
               value={indexStatus?.bm25?.loaded ? '已加载' : '未加载'}
             />
           </Card>
         </Col>
-        <Col span={6}>
-          <Card>
+        <Col xs={12} sm={6}>
+          <Card size={isMobile ? 'small' : undefined} style={isMobile ? { overflow: 'hidden' } : undefined}>
             <Statistic
               title="当前版本"
               value={activeVersion || '-'}
-              suffix={activeVersion && <Tag color="blue" style={{ marginLeft: 4 }}>{versions.find(v => v.version_id === activeVersion)?.description || '当前激活'}</Tag>}
+              valueStyle={isMobile ? { fontSize: 14 } : undefined}
+              suffix={activeVersion && <Tag color="blue" style={{ marginLeft: 4, fontSize: 11 }}>{versions.find(v => v.version_id === activeVersion)?.description || '当前激活'}</Tag>}
             />
           </Card>
         </Col>
       </Row>
 
-      <Space style={{ marginBottom: 16 }}>
+      <Space wrap style={{ marginBottom: 16 }}>
         <Button
           type="primary"
           icon={<ImportOutlined />}
@@ -429,68 +432,206 @@ export default function KnowledgePage() {
       )}
 
       <Card>
-        <Row style={{ minHeight: 400 }}>
-          {/* 左栏：目录树 */}
-          <Col
-            span={6}
-            style={{
-              borderRight: `1px solid ${token.colorBorderSecondary}`,
-              maxHeight: 'calc(100vh - var(--header-height) - 256px)',
-              overflow: 'auto',
-            }}
-          >
-            <div className="section-header" style={{ marginBottom: 8 }}>
-              法规分类
-            </div>
-            <Tree
-              showLine
-              treeData={treeData}
-              onSelect={handleTreeSelect}
-              selectedKeys={selectedDir ? [selectedDir] : []}
-              defaultExpandAll
-            />
-          </Col>
+        {isMobile ? (
+          <Tabs
+            size="small"
+            defaultActiveKey="docs"
+            items={[
+              {
+                key: 'tree',
+                label: '法规分类',
+                children: (
+                  <>
+                    <Tree
+                      showLine
+                      treeData={treeData}
+                      onSelect={handleTreeSelect}
+                      selectedKeys={selectedDir ? [selectedDir] : []}
+                      defaultExpandAll
+                    />
+                    {selectedDir && (
+                      <div style={{ padding: '8px 0' }}>
+                        <Button type="link" size="small" onClick={() => setSelectedDir(null)}>
+                          显示全部
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                ),
+              },
+              {
+                key: 'docs',
+                label: `文档 (${filteredDocuments.length})`,
+                children: (
+                  <Table
+                    dataSource={filteredDocuments}
+                    columns={columns}
+                    rowKey="name"
+                    loading={loading}
+                    pagination={{ pageSize: 20 }}
+                    size="small"
+                    scroll={{ x: 'max-content' }}
+                  />
+                ),
+              },
+            ]}
+          />
+        ) : (
+          <Row style={{ minHeight: 400 }}>
+            <Col
+              span={6}
+              style={{
+                borderRight: `1px solid ${token.colorBorderSecondary}`,
+                maxHeight: 'calc(100vh - var(--header-height) - 256px)',
+                overflow: 'auto',
+              }}
+            >
+              <div className="section-header" style={{ marginBottom: 8 }}>
+                法规分类
+              </div>
+              <Tree
+                showLine
+                treeData={treeData}
+                onSelect={handleTreeSelect}
+                selectedKeys={selectedDir ? [selectedDir] : []}
+                defaultExpandAll
+              />
+            </Col>
 
-          {/* 右栏：文档列表 */}
-          <Col span={18}>
-            <div className="section-header flex-between" style={{ marginBottom: 8 }}>
-              <span>
-                {selectedDir
-                  ? <><FileOutlined style={{ marginRight: 6 }} />{selectedDir.split('/').pop()}</>
-                  : <><DatabaseOutlined style={{ marginRight: 6 }} />全部文档 ({documents.length})</>}
-              </span>
-              {selectedDir && (
-                <Button type="link" size="small" onClick={() => setSelectedDir(null)}>
-                  显示全部
-                </Button>
-              )}
-            </div>
-            <Table
-              dataSource={filteredDocuments}
-              columns={columns}
-              rowKey="name"
-              loading={loading}
-              pagination={{ pageSize: 20 }}
-              size="small"
-            />
-          </Col>
-        </Row>
+            <Col span={18}>
+              <div className="section-header flex-between" style={{ marginBottom: 8 }}>
+                <span>
+                  {selectedDir
+                    ? <><FileOutlined style={{ marginRight: 6 }} />{selectedDir.split('/').pop()}</>
+                    : <><DatabaseOutlined style={{ marginRight: 6 }} />全部文档 ({documents.length})</>}
+                </span>
+                {selectedDir && (
+                  <Button type="link" size="small" onClick={() => setSelectedDir(null)}>
+                    显示全部
+                  </Button>
+                )}
+              </div>
+              <Table
+                dataSource={filteredDocuments}
+                columns={columns}
+                rowKey="name"
+                loading={loading}
+                pagination={{ pageSize: 20 }}
+                size="small"
+              />
+            </Col>
+          </Row>
+        )}
       </Card>
 
       <Modal
-        title={<span title={chunksDocName} style={{ display: 'inline-block', maxWidth: 'calc(95vw - var(--content-padding) * 6)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{`分块验证 — ${chunksDocName}`}</span>}
+        title={<span title={chunksDocName} style={{ display: 'inline-block', maxWidth: isMobile ? '60vw' : 'calc(95vw - var(--content-padding) * 6)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{`分块验证 — ${chunksDocName}`}</span>}
         open={chunksOpen}
-        onCancel={() => { setChunksOpen(false); setSelectedChunk(null); setEditing(false); }}
+        onCancel={() => { setChunksOpen(false); setSelectedChunk(null); setEditing(false); setHighlightLines(null); }}
         footer={null}
-        width="95vw"
-        style={{ top: 20, maxWidth: 1600 }}
-        styles={{ body: { padding: 0, height: 'calc(100vh - var(--header-height) - 56px)' } }}
+        width={isMobile ? '100%' : '95vw'}
+        style={isMobile ? { top: 0, maxWidth: '100vw', paddingBottom: 0 } : { top: 20, maxWidth: 1600 }}
+        styles={{ body: { padding: 0, height: isMobile ? '100vh' : 'calc(100vh - var(--header-height) - 56px)' } }}
       >
         {chunksLoading ? (
           <div className="empty-state"><Spin size="large" /></div>
+        ) : isMobile ? (
+          <Tabs
+            size="small"
+            defaultActiveKey="chunks"
+            items={[
+              {
+                key: 'source',
+                label: '原文',
+                children: (
+                  <div style={{ height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column' }}>
+                    <div className="section-header flex-between" style={{ flexShrink: 0, background: token.colorFillQuaternary, padding: '6px 12px' }}>
+                      <Text strong style={{ fontSize: token.fontSize }}>原文</Text>
+                      <Space size={4}>
+                        {editing ? (
+                          <>
+                            <Button size="small" type="primary" loading={saving} onClick={handleSaveEdit}>保存</Button>
+                            <Button size="small" onClick={handleCancelEdit}>取消</Button>
+                          </>
+                        ) : (
+                          <Button size="small" onClick={handleStartEdit}>编辑</Button>
+                        )}
+                      </Space>
+                    </div>
+                    <div style={{ flex: 1, overflow: 'auto', padding: '8px 12px' }}>
+                      {editing ? (
+                        <textarea
+                          value={editContent}
+                          onChange={(e) => setEditContent(e.target.value)}
+                          style={{
+                            width: '100%', height: '100%', border: 'none', padding: 8,
+                            fontSize: token.fontSizeSM, lineHeight: 1.6, fontFamily: 'inherit', resize: 'none', outline: 'none',
+                          }}
+                        />
+                      ) : (
+                        <div ref={sourceRef} className="markdown-body" style={{ margin: 0, fontSize: token.fontSizeSM, lineHeight: 1.6 }}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{sourceContent}</ReactMarkdown>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                key: 'chunks',
+                label: `条款 (${chunks.length})`,
+                children: (
+                  <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: '0 12px 12px' }}>
+                    {selectedChunk ? (
+                      <>
+                        <Button size="small" style={{ marginBottom: 12 }} onClick={() => { setSelectedChunk(null); setHighlightLines(null); }}>
+                          &larr; 返回列表
+                        </Button>
+                        <Descriptions size="small" bordered column={1} style={{ marginBottom: 12 }}>
+                          <Descriptions.Item label="法规名称">{selectedChunk.law_name}</Descriptions.Item>
+                          <Descriptions.Item label="条款号">{selectedChunk.article_number}</Descriptions.Item>
+                          <Descriptions.Item label="分类"><Tag>{selectedChunk.category}</Tag></Descriptions.Item>
+                          <Descriptions.Item label="层级路径">{selectedChunk.hierarchy_path}</Descriptions.Item>
+                          <Descriptions.Item label="来源文件">{selectedChunk.source_file}</Descriptions.Item>
+                          {selectedChunk.doc_number && <Descriptions.Item label="发文号">{selectedChunk.doc_number}</Descriptions.Item>}
+                          {selectedChunk.issuing_authority && <Descriptions.Item label="发文机关">{selectedChunk.issuing_authority}</Descriptions.Item>}
+                          {Object.entries(selectedChunk)
+                            .filter(([k]) => !['law_name', 'article_number', 'category', 'hierarchy_path', 'source_file', 'doc_number', 'issuing_authority', 'effective_date', 'text', 'text_length', '_node_content', '_node_type', 'doc_id', 'document_id', 'ref_doc_id'].includes(k))
+                            .map(([k, v]) => v && <Descriptions.Item key={k} label={k}><Tag color="blue">{String(v)}</Tag></Descriptions.Item>)
+                          }
+                          <Descriptions.Item label="字数">{selectedChunk.text_length}</Descriptions.Item>
+                        </Descriptions>
+                        <div className="markdown-body" style={{ background: token.colorFillQuaternary, padding: 12, borderRadius: 6, fontSize: token.fontSize, lineHeight: 1.8, overflow: 'auto' }}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{selectedChunk.text}</ReactMarkdown>
+                        </div>
+                      </>
+                    ) : (
+                      <Table
+                        dataSource={chunks}
+                        rowKey={(_, i) => String(i)}
+                        size="small"
+                        pagination={false}
+                        scroll={{ x: 'max-content' }}
+                        onRow={(record) => ({
+                          onClick: () => { setSelectedChunk(record); locateInSource(record.text); },
+                          style: { cursor: 'pointer' },
+                        })}
+                        columns={[
+                          { title: '#', key: 'idx', width: 40, render: (_: unknown, __: unknown, i: number) => i + 1 },
+                          { title: '条款号', dataIndex: 'article_number', key: 'article_number', width: 90, ellipsis: true, render: (v: string) => v === '未知' ? <Text type="secondary">{v}</Text> : v },
+                          { title: '分类', dataIndex: 'category', key: 'category', width: 80, ellipsis: true, render: (v: string) => <Tag>{v}</Tag> },
+                          { title: '字数', dataIndex: 'text_length', key: 'text_length', width: 60 },
+                          { title: '内容摘要', key: 'preview', render: (_: unknown, r: ChunkItem) => <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>{r.text.slice(0, 80)}...</Text> },
+                        ]}
+                      />
+                    )}
+                  </div>
+                ),
+              },
+            ]}
+          />
         ) : (
           <div style={{ display: 'flex', height: '100%' }}>
-            {/* 左栏：md 原文 */}
             <div style={{ width: '45%', height: '100%', borderRight: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column' }}>
               <div className="section-header flex-between" style={{ flexShrink: 0, background: token.colorFillQuaternary, padding: '6px 12px' }}>
                 <Text strong style={{ fontSize: token.fontSize }}>原文</Text>
@@ -511,15 +652,8 @@ export default function KnowledgePage() {
                     value={editContent}
                     onChange={(e) => setEditContent(e.target.value)}
                     style={{
-                      width: '100%',
-                      height: '100%',
-                      border: 'none',
-                      padding: 8,
-                      fontSize: token.fontSizeSM,
-                      lineHeight: 1.6,
-                      fontFamily: 'inherit',
-                      resize: 'none',
-                      outline: 'none',
+                      width: '100%', height: '100%', border: 'none', padding: 8,
+                      fontSize: token.fontSizeSM, lineHeight: 1.6, fontFamily: 'inherit', resize: 'none', outline: 'none',
                     }}
                   />
                 ) : (
@@ -530,52 +664,30 @@ export default function KnowledgePage() {
               </div>
             </div>
 
-            {/* 右栏：提取的条款列表 */}
             <div style={{ width: '55%', height: '100%', display: 'flex', flexDirection: 'column' }}>
               <div className="section-header" style={{ flexShrink: 0 }}>
                 提取条款 ({chunks.length})
               </div>
               {selectedChunk ? (
                 <div style={{ flex: 1, overflow: 'auto', padding: '12px 16px' }}>
-                  <Button
-                    size="small"
-                    style={{ marginBottom: 12 }}
-                    onClick={() => { setSelectedChunk(null); setHighlightLines(null); }}
-                  >
+                  <Button size="small" style={{ marginBottom: 12 }} onClick={() => { setSelectedChunk(null); setHighlightLines(null); }}>
                     &larr; 返回列表
                   </Button>
                   <Descriptions size="small" bordered column={1} style={{ marginBottom: 12 }}>
                     <Descriptions.Item label="法规名称">{selectedChunk.law_name}</Descriptions.Item>
                     <Descriptions.Item label="条款号">{selectedChunk.article_number}</Descriptions.Item>
-                    <Descriptions.Item label="分类">
-                      <Tag>{selectedChunk.category}</Tag>
-                    </Descriptions.Item>
+                    <Descriptions.Item label="分类"><Tag>{selectedChunk.category}</Tag></Descriptions.Item>
                     <Descriptions.Item label="层级路径">{selectedChunk.hierarchy_path}</Descriptions.Item>
                     <Descriptions.Item label="来源文件">{selectedChunk.source_file}</Descriptions.Item>
-                    {selectedChunk.doc_number && (
-                      <Descriptions.Item label="发文号">{selectedChunk.doc_number}</Descriptions.Item>
-                    )}
-                    {selectedChunk.issuing_authority && (
-                      <Descriptions.Item label="发文机关">{selectedChunk.issuing_authority}</Descriptions.Item>
-                    )}
+                    {selectedChunk.doc_number && <Descriptions.Item label="发文号">{selectedChunk.doc_number}</Descriptions.Item>}
+                    {selectedChunk.issuing_authority && <Descriptions.Item label="发文机关">{selectedChunk.issuing_authority}</Descriptions.Item>}
                     {Object.entries(selectedChunk)
                       .filter(([k]) => !['law_name', 'article_number', 'category', 'hierarchy_path', 'source_file', 'doc_number', 'issuing_authority', 'effective_date', 'text', 'text_length', '_node_content', '_node_type', 'doc_id', 'document_id', 'ref_doc_id'].includes(k))
                       .map(([k, v]) => v && <Descriptions.Item key={k} label={k}><Tag color="blue">{String(v)}</Tag></Descriptions.Item>)
                     }
                     <Descriptions.Item label="字数">{selectedChunk.text_length}</Descriptions.Item>
                   </Descriptions>
-                  <div
-                    className="markdown-body"
-                    style={{
-                      background: token.colorFillQuaternary,
-                      padding: 12,
-                      borderRadius: 6,
-                      fontSize: token.fontSize,
-                      lineHeight: 1.8,
-                      maxHeight: 'calc(100vh - var(--header-height) - 336px)',
-                      overflow: 'auto',
-                    }}
-                  >
+                  <div className="markdown-body" style={{ background: token.colorFillQuaternary, padding: 12, borderRadius: 6, fontSize: token.fontSize, lineHeight: 1.8, maxHeight: 'calc(100vh - var(--header-height) - 336px)', overflow: 'auto' }}>
                     <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{selectedChunk.text}</ReactMarkdown>
                   </div>
                 </div>
@@ -586,51 +698,17 @@ export default function KnowledgePage() {
                     rowKey={(_, i) => String(i)}
                     size="small"
                     pagination={false}
+                    scroll={{ x: 'max-content' }}
                     onRow={(record) => ({
-                      onClick: () => {
-                        setSelectedChunk(record);
-                        locateInSource(record.text);
-                      },
+                      onClick: () => { setSelectedChunk(record); locateInSource(record.text); },
                       style: { cursor: 'pointer' },
                     })}
                     columns={[
-                      {
-                        title: '#',
-                        key: 'idx',
-                        width: 40,
-                        render: (_: unknown, __: unknown, i: number) => i + 1,
-                      },
-                      {
-                        title: '条款号',
-                        dataIndex: 'article_number',
-                        key: 'article_number',
-                        width: 90,
-                        ellipsis: true,
-                        render: (v: string) => v === '未知' ? <Text type="secondary">{v}</Text> : v,
-                      },
-                      {
-                        title: '分类',
-                        dataIndex: 'category',
-                        key: 'category',
-                        width: 80,
-                        ellipsis: true,
-                        render: (v: string) => <Tag>{v}</Tag>,
-                      },
-                      {
-                        title: '字数',
-                        dataIndex: 'text_length',
-                        key: 'text_length',
-                        width: 60,
-                      },
-                      {
-                        title: '内容摘要',
-                        key: 'preview',
-                        render: (_: unknown, r: ChunkItem) => (
-                          <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
-                            {r.text.slice(0, 80)}...
-                          </Text>
-                        ),
-                      },
+                      { title: '#', key: 'idx', width: 40, render: (_: unknown, __: unknown, i: number) => i + 1 },
+                      { title: '条款号', dataIndex: 'article_number', key: 'article_number', width: 90, ellipsis: true, render: (v: string) => v === '未知' ? <Text type="secondary">{v}</Text> : v },
+                      { title: '分类', dataIndex: 'category', key: 'category', width: 80, ellipsis: true, render: (v: string) => <Tag>{v}</Tag> },
+                      { title: '字数', dataIndex: 'text_length', key: 'text_length', width: 60 },
+                      { title: '内容摘要', key: 'preview', render: (_: unknown, r: ChunkItem) => <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>{r.text.slice(0, 80)}...</Text> },
                     ]}
                   />
                 </div>
@@ -647,6 +725,8 @@ export default function KnowledgePage() {
         onCancel={() => { setCreateVersionModalOpen(false); setVersionDescription(''); }}
         okText="创建"
         cancelText="取消"
+        width={isMobile ? '100%' : MODAL_SM}
+        style={isMobile ? { top: 40, maxWidth: '100vw', margin: '0 12px' } : undefined}
       >
         <p style={{ color: token.colorTextSecondary, marginBottom: 12 }}>
           将从当前工作目录的源文件创建快照，并重建索引。创建完成后自动切换到新版本。
@@ -663,13 +743,14 @@ export default function KnowledgePage() {
         title="版本管理"
         open={versionDrawerOpen}
         onClose={() => setVersionDrawerOpen(false)}
-        width={DRAWER_MD}
+        size={isMobile ? '100%' : DRAWER_MD}
       >
         <Table
           dataSource={versions}
           rowKey="version_id"
           pagination={false}
           size="small"
+          scroll={{ x: 'max-content' }}
           rowClassName={record => record.active ? 'ant-table-row-active' : ''}
           columns={[
             {

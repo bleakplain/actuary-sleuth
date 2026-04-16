@@ -21,9 +21,10 @@ interface Props {
   message: Message;
   streaming?: boolean;
   onCitationClick?: (source: Source, messageSources: Source[]) => void;
+  isMobile?: boolean;
 }
 
-export default function MessageBubble({ message, streaming, onCitationClick }: Props) {
+export default function MessageBubble({ message, streaming, onCitationClick, isMobile }: Props) {
   const { token } = theme.useToken();
   const { activeTraceMessageId, openTrace, debugMode, deleteMessage } = useAskStore();
   const [hovered, setHovered] = useState(false);
@@ -36,13 +37,14 @@ export default function MessageBubble({ message, streaming, onCitationClick }: P
   };
 
   if (message.role === 'user') {
+    const showDelete = isMobile || hovered;
     return (
       <div
         style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16, position: 'relative' }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
-        {hovered && (
+        {showDelete && (
           <Popconfirm
             title="删除这条消息及其回答？"
             onConfirm={() => deleteMessage(message.id)}
@@ -61,13 +63,14 @@ export default function MessageBubble({ message, streaming, onCitationClick }: P
                 color: token.colorTextTertiary,
                 fontSize: 12,
                 zIndex: 1,
+                ...(isMobile ? { minWidth: 44, minHeight: 44, top: -4, display: 'flex' as const, alignItems: 'center', justifyContent: 'center' } : {}),
               }}
             />
           </Popconfirm>
         )}
         <div
           style={{
-            maxWidth: '70%',
+            maxWidth: isMobile ? '92%' : '70%',
             background: token.colorPrimary,
             color: '#ffffff',
             padding: '8px 16px',
@@ -94,11 +97,13 @@ export default function MessageBubble({ message, streaming, onCitationClick }: P
     <div style={{ marginBottom: 16 }}>
       <div
         style={{
-          maxWidth: '85%',
+          maxWidth: isMobile ? '95%' : '85%',
           background: token.colorFillTertiary,
           padding: '8px 16px',
           borderRadius: 12,
           borderBottomLeftRadius: 4,
+          overflowWrap: 'break-word',
+          wordBreak: 'break-word',
         }}
       >
         {isSearchResult ? (
@@ -111,8 +116,9 @@ export default function MessageBubble({ message, streaming, onCitationClick }: P
                   background: token.colorBgContainer,
                   border: `1px solid ${token.colorBorderSecondary}`,
                   borderRadius: 8,
-                  padding: '8px 12px',
+                  padding: isMobile ? '12px 16px' : '8px 12px',
                   cursor: 'pointer',
+                  minHeight: isMobile ? 48 : undefined,
                 }}
               >
                 <div style={{ fontSize: 13, fontWeight: 500, color: token.colorText, marginBottom: 4 }}>

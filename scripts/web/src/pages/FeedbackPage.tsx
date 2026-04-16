@@ -1,8 +1,8 @@
 import React, { useEffect } from 'react';
-import { Table, Tag, Select, Button, Space, message, Popconfirm, Modal, Descriptions, Card, Statistic, Row, Col, Tooltip, Typography, theme } from 'antd';
+import { Table, Tag, Select, Button, Space, message, Popconfirm, Modal, Descriptions, Card, Statistic, Row, Col, Tooltip, Typography, theme, Grid } from 'antd';
 import { ReloadOutlined, ThunderboltOutlined, DislikeOutlined, LikeOutlined, WarningOutlined } from '@ant-design/icons';
 import { useFeedbackStore } from '../stores/feedbackStore';
-import { DRAWER_LG } from '../constants/layout';
+import { MODAL_LG } from '../constants/layout';
 import { verifyBadcase, convertBadcase } from '../api/feedback';
 
 const TYPE_COLORS: Record<string, string> = {
@@ -21,6 +21,8 @@ const RISK_LABELS: Record<number, string> = { 0: '低', 1: '中', 2: '高' };
 export default function FeedbackPage() {
   const { badcases, stats, loading, loadBadcases, loadStats, classifyAll, updateBadcase } = useFeedbackStore();
   const { token } = theme.useToken();
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md;
   const [filterStatus, setFilterStatus] = React.useState<string | undefined>();
 
   useEffect(() => { loadBadcases({ status: filterStatus }); }, [filterStatus, loadBadcases]);
@@ -124,7 +126,7 @@ export default function FeedbackPage() {
               const result = await verifyBadcase(record.id);
               Modal.info({
                 title: '验证结果',
-                width: DRAWER_LG,
+                width: isMobile ? '100%' : MODAL_LG,
                 content: (
                   <div>
                     <Typography.Text strong>新回答：</Typography.Text>
@@ -184,24 +186,24 @@ export default function FeedbackPage() {
       {/* 统计概览 */}
       {stats && (
         <Row gutter={16} style={{ marginBottom: 24 }}>
-          <Col span={8}>
+          <Col xs={12} sm={8}>
             <Card size="small"><Statistic title="总反馈" value={stats.total} /></Card>
           </Col>
-          <Col span={8}>
+          <Col xs={12} sm={8}>
             <Card size="small"><Statistic title="好评" value={stats.up_count} valueStyle={{ color: token.colorSuccess }} /></Card>
           </Col>
-          <Col span={8}>
+          <Col xs={12} sm={8}>
             <Card size="small"><Statistic title="差评" value={stats.down_count} valueStyle={{ color: token.colorError }} /></Card>
           </Col>
-          <Col span={8}>
+          <Col xs={12} sm={8}>
             <Card size="small"><Statistic title="满意度" value={stats.satisfaction_rate * 100} suffix="%" precision={1} /></Card>
           </Col>
-          <Col span={8}>
+          <Col xs={12} sm={8}>
             <Tooltip title="待分类的反馈数量">
               <Card size="small"><Statistic title="待处理" value={pendingCount} valueStyle={{ color: pendingCount > 0 ? token.colorWarning : undefined }} /></Card>
             </Tooltip>
           </Col>
-          <Col span={8}>
+          <Col xs={12} sm={8}>
             <Tooltip title="合规风险为中/高的反馈数量">
               <Card size="small"><Statistic title="高风险" value={highRiskCount} prefix={<WarningOutlined />} valueStyle={{ color: highRiskCount > 0 ? token.colorError : undefined }} /></Card>
             </Tooltip>
@@ -210,12 +212,12 @@ export default function FeedbackPage() {
       )}
 
       {/* Badcase 列表 */}
-      <div className="flex-between" style={{ marginBottom: 16 }}>
+      <div className="flex-between" style={{ marginBottom: 16, flexWrap: 'wrap', gap: isMobile ? 8 : 0 }}>
         <span style={{ color: token.colorTextSecondary, fontSize: token.fontSize }}>
           共 {badcases.length} 条反馈，点击行展开查看详情
         </span>
-        <Space>
-          <Select placeholder="按状态筛选" allowClear style={{ width: 120 }}
+        <Space size={isMobile ? 4 : 8} wrap>
+          <Select placeholder="按状态筛选" allowClear style={{ width: isMobile ? 100 : 120 }}
             value={filterStatus} onChange={setFilterStatus}
             options={[
               { label: '待分类', value: 'pending' },
@@ -224,7 +226,7 @@ export default function FeedbackPage() {
               { label: '已修复', value: 'fixed' },
             ]}
           />
-          <Button icon={<ThunderboltOutlined />} onClick={handleClassify} loading={loading}>批量分类</Button>
+          <Button icon={<ThunderboltOutlined />} onClick={handleClassify} loading={loading}>{isMobile ? '分类' : '批量分类'}</Button>
           <Button icon={<ReloadOutlined />} onClick={() => { loadBadcases({ status: filterStatus }); loadStats(); }}>刷新</Button>
         </Space>
       </div>
@@ -234,6 +236,7 @@ export default function FeedbackPage() {
         rowKey="id"
         loading={loading}
         size="small"
+        scroll={{ x: 'max-content' }}
         expandable={{ expandedRowRender }}
         pagination={{ pageSize: 20 }}
       />

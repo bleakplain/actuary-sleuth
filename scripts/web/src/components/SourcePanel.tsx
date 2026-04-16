@@ -1,8 +1,9 @@
-import { Drawer, Typography, Empty, theme } from 'antd';
+import { Drawer, Typography, Empty, theme, Grid } from 'antd';
 import type { Source } from '../types';
 import { DRAWER_SM } from '../constants/layout';
 
 const { Text, Paragraph } = Typography;
+const { useBreakpoint } = Grid;
 
 interface Props {
   open: boolean;
@@ -14,12 +15,14 @@ interface Props {
 
 export default function SourcePanel({ open, sources, selectedSource, onSelect, onClose }: Props) {
   const { token } = theme.useToken();
+  const screens = useBreakpoint();
+  const isMobile = !screens.md;
 
   return (
     <Drawer
       title="法规来源"
       placement="right"
-      width={DRAWER_SM}
+      size={isMobile ? '100%' : DRAWER_SM}
       open={open}
       onClose={onClose}
     >

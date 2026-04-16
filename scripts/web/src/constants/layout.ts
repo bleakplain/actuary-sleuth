@@ -14,3 +14,7 @@ export const MODAL_LG = 800;
 export const HEADER_HEIGHT = 64;
 export const SIDEBAR_WIDTH = 200;
 export const CONTENT_PADDING = 16;
+
+/** Mobile navigation */
+export const MOBILE_NAV_HEIGHT = 50;
+export const MOBILE_BREAKPOINT = 768;

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Card, Form, Input, Button, Table, Tag, Typography, theme,
-  message, Tabs, Space, Descriptions, Popconfirm, Drawer,
+  message, Tabs, Space, Descriptions, Popconfirm, Drawer, Grid,
 } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined,
@@ -25,11 +25,13 @@ function SourceDrawer({
   source,
   excerpt,
   onClose,
+  isMobile,
 }: {
   visible: boolean;
   source: Source | undefined;
   excerpt?: string;
   onClose: () => void;
+  isMobile: boolean;
 }) {
   const { token } = theme.useToken();
 
@@ -39,7 +41,7 @@ function SourceDrawer({
     <Drawer
       title={<Space><BookOutlined />法规来源详情</Space>}
       placement="right"
-      width={DRAWER_MD}
+      size={isMobile ? '100%' : DRAWER_MD}
       open={visible}
       onClose={onClose}
     >
@@ -113,6 +115,8 @@ function SourceDrawer({
 
 export default function CompliancePage() {
   const { token } = theme.useToken();
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md;
   const [activeTab, setActiveTab] = useState('product');
   const [productForm] = Form.useForm();
   const [docForm] = Form.useForm();
@@ -324,6 +328,7 @@ export default function CompliancePage() {
                 rowKey="id"
                 size="small"
                 pagination={{ pageSize: 20 }}
+                scroll={{ x: 'max-content' }}
                 onRow={(record) => ({
                   onClick: () => handleSelectReport(record),
                   style: { cursor: 'pointer' },
@@ -355,14 +360,14 @@ export default function CompliancePage() {
       {result && summary && (
         <div ref={reportRef}>
         <Card title={`检查报告 - ${currentReport?.product_name || ''}`} className="mt-16">
-          <Descriptions size="small" style={{ marginBottom: 16 }}>
+          <Descriptions size="small" column={isMobile ? 1 : 2} style={{ marginBottom: 16 }}>
             <Descriptions.Item label="模式">
               {currentReport?.mode === 'product' ? '产品参数检查' : '条款文档审查'}
             </Descriptions.Item>
             <Descriptions.Item label="检查时间">{currentReport?.created_at}</Descriptions.Item>
           </Descriptions>
 
-          <Space size="large" style={{ marginBottom: 16 }}>
+          <Space size={isMobile ? 'small' : 'large'} wrap style={{ marginBottom: 16 }}>
             <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
               合规 {summary.compliant} 项
             </Tag>
@@ -379,6 +384,7 @@ export default function CompliancePage() {
             columns={itemColumns}
             rowKey={(r: ComplianceItem) => r.param}
             size="small"
+            scroll={{ x: 'max-content' }}
             pagination={false}
             rowClassName={(record: ComplianceItem) => {
               if (record.status === 'non_compliant') return 'ant-table-row-error';
@@ -394,6 +400,7 @@ export default function CompliancePage() {
         source={selectedSource}
         excerpt={selectedExcerpt}
         onClose={() => setSourceDrawerVisible(false)}
+        isMobile={isMobile}
       />
     </div>
   );

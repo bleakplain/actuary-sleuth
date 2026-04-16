@@ -61,7 +61,7 @@ export default function MetricsChart({ metrics, title = '评测指标', k }: Pro
         {items.slice(0, 6).map((item) => {
           const meta = resolveMetricMeta(stripCategoryPrefix(item.name), k);
           return (
-            <Col span={4} key={item.name}>
+            <Col xs={12} sm={8} md={4} key={item.name}>
               <Tooltip title={meta.tooltip}>
                 <Statistic
                   title={meta.label}
@@ -307,7 +307,7 @@ export function TrendChart({ data, metricName, title = '指标趋势' }: TrendCh
   if (chartData.length === 0) return null;
 
   return (
-    <Card title={title} size="small" bodyStyle={{ paddingTop: 0 }}>
+    <Card title={title} size="small" styles={{ body: { paddingTop: 0 } }}>
       <ResponsiveContainer width="100%" height={200}>
         <LineChart data={chartData}>
           <CartesianGrid strokeDasharray="3 3" />

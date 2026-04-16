@@ -1,18 +1,24 @@
 import { CloseOutlined } from '@ant-design/icons';
-import { theme } from 'antd';
+import { theme, Grid } from 'antd';
 import TracePanel from '../TracePanel';
 import { useObservabilityStore } from '../../stores/observabilityStore';
 
 export default function TraceDetail() {
   const { token } = theme.useToken();
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md;
   const { selectedTraceId, traceDetail, traceLoading } = useObservabilityStore();
 
   if (!selectedTraceId) return null;
 
   return (
     <div style={{
-      width: '55%', minWidth: 500, maxWidth: 800,
-      borderLeft: `1px solid ${token.colorBorderSecondary}`,
+      width: isMobile ? '100%' : '55%',
+      minWidth: isMobile ? 0 : 500,
+      maxWidth: isMobile ? '100%' : 800,
+      height: isMobile ? '50%' : undefined,
+      borderLeft: isMobile ? 'none' : `1px solid ${token.colorBorderSecondary}`,
+      borderTop: isMobile ? `1px solid ${token.colorBorderSecondary}` : 'none',
       display: 'flex', flexDirection: 'column', overflow: 'hidden',
       background: token.colorBgContainer,
     }}>
@@ -23,7 +29,7 @@ export default function TraceDetail() {
         <span style={{ fontSize: 14, fontWeight: token.fontWeightStrong, color: token.colorText }}>Trace 详情</span>
         <CloseOutlined
           onClick={() => useObservabilityStore.getState().closeDetail()}
-          style={{ fontSize: 14, color: token.colorTextQuaternary, cursor: 'pointer', padding: '2px 4px' }}
+          style={{ fontSize: 14, color: token.colorTextQuaternary, cursor: 'pointer', padding: '8px', minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           title="关闭"
         />
       </div>

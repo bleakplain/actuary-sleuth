@@ -1,6 +1,7 @@
 // Uses CSS variables (var(--ant-*)) instead of theme.useToken() to avoid
 // threading token through many pure sub-components defined in this file.
 import { useState, useMemo } from 'react';
+import { Grid } from 'antd';
 import {
   CheckCircleFilled,
   CloseCircleFilled,
@@ -11,6 +12,8 @@ import CopyBtn from './CopyBtn';
 import type { TraceSpan, TraceData } from '../types';
 
 import { TRACE_CATEGORY_COLORS } from '../constants/traceColors';
+
+const { useBreakpoint } = Grid;
 
 const CATEGORY_LABELS: Record<string, string> = {
   root: 'Root',
@@ -48,7 +51,7 @@ function formatTimestamp(ts: number): string {
 
 /* ── collapsible text block ── */
 
-function CollapsibleText({ label, text, bg }: { label: string; text: string; bg: string }) {
+function CollapsibleText({ text, label, bg }: { text: string; label: string; bg?: string }) {
   const [expanded, setExpanded] = useState(false);
   if (!text) return null;
 
@@ -209,7 +212,7 @@ function MetaTable({ entries }: { entries: [string, unknown][] }) {
 
 /* ── span detail panel ── */
 
-function SpanDetails({ span, depth }: { span: TraceSpan; depth: number }) {
+function SpanDetails({ span, depth, isMobile }: { span: TraceSpan; depth: number; isMobile: boolean }) {
   const catStyle = getCategoryStyle(span.category);
   const cat = span.category;
   const metaEntries = span.metadata && Object.keys(span.metadata).length > 0
@@ -218,7 +221,10 @@ function SpanDetails({ span, depth }: { span: TraceSpan; depth: number }) {
 
   return (
     <div style={{
-      marginLeft: depth * 16, paddingLeft: 44, paddingRight: 12, paddingBottom: 8,
+      marginLeft: isMobile ? Math.min(depth, 4) * 8 : Math.min(depth, 6) * 12,
+      paddingLeft: isMobile ? 24 : 44,
+      paddingRight: isMobile ? 8 : 12,
+      paddingBottom: 8,
       borderLeft: `3px solid ${catStyle.color}`,
       background: catStyle.bg,
     }}>
@@ -362,10 +368,10 @@ function SpanDetails({ span, depth }: { span: TraceSpan; depth: number }) {
 
 /* ── span row ── */
 
-function SpanRow({ span, depth, maxDuration }: {
-  span: TraceSpan; depth: number; maxDuration: number;
+function SpanRow({ span, depth, maxDuration, isMobile }: {
+  span: TraceSpan; depth: number; maxDuration: number; isMobile: boolean;
 }) {
-  const [expanded, setExpanded] = useState(depth === 0);
+  const [expanded, setExpanded] = useState(isMobile ? true : depth === 0);
   const cat = getCategoryStyle(span.category);
   const isError = span.status === 'error';
   const hasChildren = span.children && span.children.length > 0;
@@ -376,12 +382,14 @@ function SpanRow({ span, depth, maxDuration }: {
       <div
         onClick={() => setExpanded(!expanded)}
         style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '5px 12px', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', gap: isMobile ? 4 : 8,
+          padding: isMobile ? '8px 8px' : '5px 12px',
+          cursor: 'pointer',
           borderRadius: 6,
           background: expanded ? cat.bg : 'transparent',
           transition: 'background 0.15s',
-          marginLeft: depth * 16,
+          marginLeft: isMobile ? Math.min(depth, 4) * 8 : Math.min(depth, 6) * 12,
+          minHeight: isMobile ? 40 : undefined,
         }}
         onMouseEnter={(e) => { if (!expanded) e.currentTarget.style.background = 'var(--ant-color-fill-quaternary)'; }}
         onMouseLeave={(e) => { if (!expanded) e.currentTarget.style.background = 'transparent'; }}
@@ -394,30 +402,34 @@ function SpanRow({ span, depth, maxDuration }: {
         ) : (
           <CheckCircleFilled style={{ color: cat.color, fontSize: 14, flexShrink: 0 }} />
         )}
-        <span style={{ fontWeight: 'var(--ant-font-weight-strong, 600)', fontSize: 13, color: 'var(--ant-color-text)', flexShrink: 0 }}>
+        <span style={{ fontWeight: 'var(--ant-font-weight-strong, 600)', fontSize: isMobile ? 12 : 13, color: 'var(--ant-color-text)', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {span.name}
         </span>
+        {!isMobile && (
+          <span style={{
+            fontSize: 10, color: 'var(--ant-color-text-quaternary)', fontVariantNumeric: 'tabular-nums',
+            fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
+            flexShrink: 0,
+          }}>
+            {formatTimestamp(span.start_time)}
+          </span>
+        )}
+        {!isMobile && (
+          <span style={{
+            fontSize: 10, color: 'var(--ant-color-text-quaternary)',
+            fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
+            flexShrink: 0,
+          }}>
+            {span.span_id}<CopyBtn text={span.span_id} />
+          </span>
+        )}
         <span style={{
-          fontSize: 10, color: 'var(--ant-color-text-quaternary)', fontVariantNumeric: 'tabular-nums',
-          fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
-          flexShrink: 0,
-        }}>
-          {formatTimestamp(span.start_time)}
-        </span>
-        <span style={{
-          fontSize: 10, color: 'var(--ant-color-text-quaternary)',
-          fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
-          flexShrink: 0,
-        }}>
-          {span.span_id}<CopyBtn text={span.span_id} />
-        </span>
-        <span style={{
-          fontSize: 10, color: cat.color, background: cat.bg,
+          fontSize: isMobile ? 9 : 10, color: cat.color, background: cat.bg,
           padding: '0 6px', borderRadius: 4, lineHeight: '18px', flexShrink: 0,
         }}>
           {cat.label}
         </span>
-        <div style={{ flex: 1, minWidth: 40, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ flex: 1, minWidth: isMobile ? 20 : 40, display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{
             height: 4, borderRadius: 2,
             background: isError ? 'var(--ant-color-error-bg-hover)' : cat.color,
@@ -434,12 +446,12 @@ function SpanRow({ span, depth, maxDuration }: {
         </span>
       </div>
 
-      {expanded && <SpanDetails span={span} depth={depth} />}
+      {expanded && <SpanDetails span={span} depth={depth} isMobile={isMobile} />}
 
       {expanded && hasChildren && (
         <div>
           {span.children.map((child) => (
-            <SpanRow key={child.span_id} span={child} depth={depth + 1} maxDuration={maxDuration} />
+            <SpanRow key={child.span_id} span={child} depth={depth + 1} maxDuration={maxDuration} isMobile={isMobile} />
           ))}
         </div>
       )}
@@ -474,6 +486,16 @@ interface Props {
 }
 
 export default function TracePanel({ trace, loading }: Props) {
+  const screens = useBreakpoint();
+  const isMobile = !screens.md;
+
+  const tree = useMemo(() => trace ? buildSpanTree(trace.spans) : [], [trace?.spans]);
+  const maxDuration = useMemo(() => {
+    const findMax = (spans: TraceSpan[]): number =>
+      Math.max(...spans.map((s) => Math.max(s.duration_ms, findMax(s.children || []))));
+    return findMax(tree);
+  }, [tree]);
+
   if (loading) {
     return (
       <div className="empty-state">
@@ -494,50 +516,50 @@ export default function TracePanel({ trace, loading }: Props) {
     );
   }
 
-  const tree = useMemo(() => buildSpanTree(trace.spans), [trace.spans]);
-  const maxDuration = useMemo(() => {
-    const findMax = (spans: TraceSpan[]): number =>
-      Math.max(...spans.map((s) => Math.max(s.duration_ms, findMax(s.children || []))));
-    return findMax(tree);
-  }, [tree]);
-
   return (
-    <div style={{ padding: '8px 0' }}>
+    <div style={{ padding: isMobile ? '4px 0' : '8px 0' }}>
       {/* summary bar */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        padding: '8px 16px', borderBottom: '1px solid var(--ant-color-border)',
+        display: isMobile ? 'grid' : 'flex',
+        gridTemplateColumns: isMobile ? '1fr 1fr' : undefined,
+        alignItems: 'center', gap: isMobile ? 3 : 8,
+        padding: isMobile ? '4px 6px' : '8px 16px',
+        borderBottom: '1px solid var(--ant-color-border)',
         flexWrap: 'wrap',
+        fontSize: isMobile ? 10 : 11,
       }}>
         <span style={{
-          fontSize: 11, color: 'var(--ant-color-text-secondary)', background: 'var(--ant-color-fill-tertiary)',
-          padding: '2px 8px', borderRadius: 4,
+          fontSize: isMobile ? 10 : 11, color: 'var(--ant-color-text-secondary)', background: 'var(--ant-color-fill-tertiary)',
+          padding: isMobile ? '1px 6px' : '2px 8px', borderRadius: 4,
           fontFamily: "'SF Mono', 'Menlo', 'Consolas', monospace",
+          maxWidth: isMobile ? 120 : undefined,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          gridColumn: isMobile ? '1 / -1' : undefined,
         }}>
-          Trace ID:{' '}{trace.trace_id}<CopyBtn text={trace.trace_id} />
+          {trace.trace_id.slice(0, isMobile ? 8 : undefined)}<CopyBtn text={trace.trace_id} />
         </span>
         <span style={{
-          fontSize: 11, color: 'var(--ant-color-text-inverse)', background: 'var(--ant-color-bg-text-hover)',
-          padding: '2px 8px', borderRadius: 4,
+          fontSize: isMobile ? 10 : 11, color: 'var(--ant-color-text-inverse)', background: 'var(--ant-color-bg-text-hover)',
+          padding: isMobile ? '1px 6px' : '2px 8px', borderRadius: 4,
         }}>
           {trace.summary.span_count} 步骤
         </span>
         <span style={{
-          fontSize: 11, color: 'var(--ant-color-success)', background: 'var(--ant-color-success-bg)',
-          padding: '2px 8px', borderRadius: 4,
+          fontSize: isMobile ? 10 : 11, color: 'var(--ant-color-success)', background: 'var(--ant-color-success-bg)',
+          padding: isMobile ? '1px 6px' : '2px 8px', borderRadius: 4,
         }}>
-          {trace.summary.llm_call_count} 次 LLM
+          {trace.summary.llm_call_count} LLM
         </span>
         <span style={{
-          fontSize: 11, color: 'var(--ant-color-text-secondary)', background: 'var(--ant-color-fill-tertiary)',
-          padding: '2px 8px', borderRadius: 4,
+          fontSize: isMobile ? 10 : 11, color: 'var(--ant-color-text-secondary)', background: 'var(--ant-color-fill-tertiary)',
+          padding: isMobile ? '1px 6px' : '2px 8px', borderRadius: 4,
         }}>
-          耗时 {formatDuration(trace.summary.total_duration_ms)}
+          {formatDuration(trace.summary.total_duration_ms)}
         </span>
         {trace.summary.error_count > 0 && (
           <span style={{
-            fontSize: 11, color: 'var(--ant-color-text-inverse)', background: 'var(--ant-color-error)',
-            padding: '2px 8px', borderRadius: 4,
+            fontSize: isMobile ? 10 : 11, color: 'var(--ant-color-text-inverse)', background: 'var(--ant-color-error)',
+            padding: isMobile ? '1px 6px' : '2px 8px', borderRadius: 4,
           }}>
             {trace.summary.error_count} 错误
           </span>
@@ -545,9 +567,9 @@ export default function TracePanel({ trace, loading }: Props) {
       </div>
 
       {/* span tree */}
-      <div style={{ padding: '8px 0' }}>
+      <div style={{ padding: isMobile ? '4px 0' : '8px 0' }}>
         {tree.map((root) => (
-          <SpanRow key={root.span_id} span={root} depth={0} maxDuration={maxDuration} />
+          <SpanRow key={root.span_id} span={root} depth={0} maxDuration={maxDuration} isMobile={isMobile} />
         ))}
       </div>
     </div>

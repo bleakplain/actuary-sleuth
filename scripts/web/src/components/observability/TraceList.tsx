@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { Input, Button, Checkbox, Popconfirm, message, theme } from 'antd';
+import { Input, Button, Checkbox, Popconfirm, message, theme, Grid, Space } from 'antd';
 import { SearchOutlined, DeleteOutlined, ClearOutlined } from '@ant-design/icons';
 import { useObservabilityStore } from '../../stores/observabilityStore';
 import type { Dayjs } from 'dayjs';
@@ -36,6 +36,8 @@ function loadColumnWidths(): Record<string, number> {
 
 export default function TraceList() {
   const { token } = theme.useToken();
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md;
   const {
     traceList, traceTotal, tracePage,
     selectedTraceId, selectTrace,
@@ -194,7 +196,7 @@ export default function TraceList() {
       {/* Filter bar */}
       <div
         className="section-header"
-        style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}
+        style={{ padding: '10px 16px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: isMobile ? 6 : 8, flexShrink: 0 }}
       >
         <Input
           placeholder="Trace ID"
@@ -204,16 +206,18 @@ export default function TraceList() {
           onPressEnter={handleSearch}
           allowClear
           onClear={handleSearch}
-          style={{ width: 220 }}
+          style={{ width: isMobile ? '100%' : 220, flex: isMobile ? undefined : 'none' }}
         />
         <DatePicker.RangePicker
           size="small"
           value={dateRange}
           onChange={(dates) => setDateRange(dates as [Dayjs | null, Dayjs | null] | null)}
-          style={{ width: 220 }}
+          style={{ width: isMobile ? '100%' : 220, flex: isMobile ? undefined : 'none' }}
         />
-        <Button size="small" type="primary" icon={<SearchOutlined />} onClick={handleSearch}>搜索</Button>
-        <Button size="small" icon={<ClearOutlined />} onClick={handleClear}>重置</Button>
+        <Space size={isMobile ? 4 : 8}>
+          <Button size="small" type="primary" icon={<SearchOutlined />} onClick={handleSearch}>搜索</Button>
+          <Button size="small" icon={<ClearOutlined />} onClick={handleClear}>重置</Button>
+        </Space>
       </div>
 
       {/* Table header */}
@@ -223,20 +227,22 @@ export default function TraceList() {
           padding: '6px 16px', background: token.colorFillQuaternary,
           fontSize: 12, color: token.colorTextTertiary,
           display: 'flex', alignItems: 'center',
-          flexShrink: 0,
+          flexShrink: 0, overflowX: 'auto',
         }}
       >
         <span style={{ width: 28, flexShrink: 0 }} />
         {COLUMNS.map((col) => (
           <span key={col.key} data-col={col.key} style={{ ...colStyle(col), position: 'relative', overflow: 'visible' }}>
             {col.label}
-            <span
-              onMouseDown={(e) => handleResizeStart(col.key, e)}
-              style={{
-                position: 'absolute', right: -3, top: -2, bottom: -2, width: 6,
-                cursor: 'col-resize', zIndex: 1,
-              }}
-            />
+            {!isMobile && (
+              <span
+                onMouseDown={(e) => handleResizeStart(col.key, e)}
+                style={{
+                  position: 'absolute', right: -3, top: -2, bottom: -2, width: 6,
+                  cursor: 'col-resize', zIndex: 1,
+                }}
+              />
+            )}
           </span>
         ))}
       </div>
@@ -261,6 +267,7 @@ export default function TraceList() {
               alignItems: 'center',
               fontSize: 13,
               transition: 'background 0.15s',
+              minWidth: 'max-content',
             }}
             onMouseEnter={(e) => { if (selectedTraceId !== item.trace_id) e.currentTarget.style.background = token.colorFillQuaternary; }}
             onMouseLeave={(e) => { if (selectedTraceId !== item.trace_id) e.currentTarget.style.background = token.colorBgContainer; }}
@@ -286,20 +293,20 @@ export default function TraceList() {
       </div>
 
       {/* Bottom bar */}
-      <div className="table-footer">
+      <div className="table-footer" style={{ flexWrap: isMobile ? 'wrap' : undefined, gap: isMobile ? 4 : undefined }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Checkbox
             checked={allSelected}
             indeterminate={hasSelection && !allSelected}
             onChange={(e) => setSelectedIds(e.target.checked ? traceList.map((t) => t.trace_id) : [])}
           >
-            全选
+            {isMobile ? '' : '全选'}
           </Checkbox>
           {hasSelection && (
             <>
               <span style={{ color: token.colorPrimary }}>{selectedIds.length} 项</span>
               <Popconfirm title={`确定删除 ${selectedIds.length} 条 trace？`} onConfirm={handleBatchDelete}>
-                <Button type="primary" danger size="small" icon={<DeleteOutlined />}>删除</Button>
+                <Button type="primary" danger size="small" icon={<DeleteOutlined />}>{isMobile ? '' : '删除'}</Button>
               </Popconfirm>
             </>
           )}
