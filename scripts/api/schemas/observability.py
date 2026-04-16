@@ -24,3 +24,31 @@ class CleanupRequest(BaseModel):
     end_date: str = ""
     status: str = ""
     preview: bool = True
+
+
+class CacheEntry(BaseModel):
+    key: str
+    namespace: str
+    created_at: float
+    ttl: int
+    kb_version: str
+    size_bytes: int
+
+
+class CacheEntryListResponse(BaseModel):
+    items: List[CacheEntry] = []
+    total: int = 0
+
+
+class CacheTrendPoint(BaseModel):
+    timestamp: str
+    hits: int
+    misses: int
+    hit_rate: float
+    memory_size: int
+    evictions: int = 0
+    l2_size: int = 0
+
+
+class CacheTrendResponse(BaseModel):
+    points: List[CacheTrendPoint] = []

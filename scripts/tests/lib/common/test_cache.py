@@ -204,3 +204,48 @@ class TestSetKBVersion:
     def test_set_kb_version(self, cm):
         cm.set_kb_version("v2")
         assert cm._kb_version == "v2"
+
+
+class TestEvictionTracking:
+    def test_eviction_counter(self, cache_db):
+        cm = CacheManager(db_path=cache_db, max_memory_entries=3)
+        for i in range(5):
+            cm.set("generation", f"q{i}", f"v{i}")
+        stats = cm.get_stats()
+        assert stats["evictions"] >= 2
+
+
+class TestGetEntries:
+    def test_list_entries(self, cm):
+        cm.set("embedding", "t1", [0.1, 0.2])
+        cm.set("retrieval", "q1", [{"score": 0.9}])
+        items, total = cm.get_entries()
+        assert total >= 2
+
+    def test_filter_by_namespace(self, cm):
+        cm.set("embedding", "t1", [0.1])
+        cm.set("retrieval", "q1", [{}])
+        items, total = cm.get_entries(namespace="embedding")
+        assert all(item["namespace"] == "embedding" for item in items)
+
+    def test_pagination(self, cm):
+        for i in range(5):
+            cm.set("generation", f"q{i}", f"v{i}")
+        items1, total = cm.get_entries(page=1, size=2)
+        items2, _ = cm.get_entries(page=2, size=2)
+        assert len(items1) <= 2
+        assert total >= 5
+
+
+class TestCleanupExpired:
+    def test_cleanup_removes_expired(self, cache_db):
+        cm = CacheManager(db_path=cache_db)
+        cm.set("generation", "q1", "v1", ttl=1)
+        time.sleep(1.1)
+        count = cm.cleanup_expired()
+        assert count >= 1
+
+    def test_cleanup_keeps_valid(self, cm):
+        cm.set("generation", "q1", "v1", ttl=3600)
+        count = cm.cleanup_expired()
+        assert count == 0

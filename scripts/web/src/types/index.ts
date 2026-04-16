@@ -276,3 +276,45 @@ export interface CleanupResponse {
   count?: number;
   deleted?: number;
 }
+
+// ── Cache ──
+
+export interface CacheStats {
+  memory_size: number;
+  max_memory_entries: number;
+  hits: number;
+  misses: number;
+  hit_rate: number;
+  kb_version: string;
+  evictions: number;
+  l2_size: number;
+  by_namespace: Record<string, { hits: number; misses: number }>;
+}
+
+export interface CacheEntry {
+  key: string;
+  namespace: string;
+  created_at: number;
+  ttl: number;
+  kb_version: string;
+  size_bytes: number;
+}
+
+export interface CacheEntryListResponse {
+  items: CacheEntry[];
+  total: number;
+}
+
+export interface CacheTrendPoint {
+  timestamp: string;
+  hits: number;
+  misses: number;
+  hit_rate: number;
+  memory_size: number;
+  evictions: number;
+  l2_size: number;
+}
+
+export interface CacheTrendResponse {
+  points: CacheTrendPoint[];
+}

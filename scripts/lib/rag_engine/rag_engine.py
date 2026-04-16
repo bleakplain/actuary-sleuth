@@ -216,9 +216,15 @@ class RAGEngine:
 
                 if _get_config().enable_cache and self._cache is None:
                     cache_db = Path(self.config.vector_db_path).parent / "cache.db"
+                    cfg = _get_config()
+                    ttl = {
+                        "embedding": cfg.embedding_cache_ttl,
+                        "retrieval": cfg.retrieval_cache_ttl,
+                        "generation": cfg.generation_cache_ttl,
+                    }
                     self._cache = get_cache_manager(
                         db_path=str(cache_db),
-                        namespace_ttl=_get_config().cache,
+                        namespace_ttl=ttl,
                     )
                     if hasattr(self._embed_model, 'set_cache_manager'):
                         self._embed_model.set_cache_manager(self._cache)

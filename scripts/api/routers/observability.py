@@ -10,7 +10,7 @@ from api.database import (
     cleanup_traces,
 )
 from api.dependencies import get_rag_engine
-from api.schemas.observability import TraceListResponse, CleanupRequest
+from api.schemas.observability import TraceListResponse, CleanupRequest, CacheEntryListResponse, CacheTrendResponse
 
 router = APIRouter(prefix="/api/observability", tags=["可测性"])
 
@@ -65,8 +65,61 @@ async def cleanup_traces_endpoint(req: CleanupRequest):
 
 @router.get("/cache/stats")
 async def get_cache_stats():
-    engine = get_rag_engine()
-    cache = engine.cache
-    if cache is None:
-        return {"status": "not_initialized"}
-    return cache.get_stats()
+    try:
+        engine = get_rag_engine()
+        cache = engine.cache
+        if cache is None:
+            return {"status": "not_initialized"}
+        return cache.get_stats()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取缓存统计失败: {e}")
+
+
+@router.get("/cache/entries", response_model=CacheEntryListResponse)
+async def list_cache_entries(
+    namespace: str = Query("", description="命名空间筛选"),
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+):
+    try:
+        engine = get_rag_engine()
+        cache = engine.cache
+        if cache is None:
+            return CacheEntryListResponse(items=[], total=0)
+        ns = namespace if namespace else None
+        items, total = cache.get_entries(namespace=ns, page=page, size=size)
+        from api.schemas.observability import CacheEntry
+        return CacheEntryListResponse(
+            items=[CacheEntry(**item) for item in items],
+            total=total,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取缓存条目失败: {e}")
+
+
+@router.get("/cache/trend", response_model=CacheTrendResponse)
+async def get_cache_trend_data(
+    range_hours: int = Query(24, ge=1, le=168, description="时间范围（小时）"),
+):
+    try:
+        from lib.common.cache_metrics import get_cache_trend
+        from api.schemas.observability import CacheTrendPoint
+        points = get_cache_trend(range_hours)
+        return CacheTrendResponse(
+            points=[CacheTrendPoint(**p) for p in points]
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取缓存趋势失败: {e}")
+
+
+@router.post("/cache/cleanup")
+async def cleanup_cache():
+    try:
+        engine = get_rag_engine()
+        cache = engine.cache
+        if cache is None:
+            return {"deleted": 0}
+        count = cache.cleanup_expired()
+        return {"deleted": count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"清理缓存失败: {e}")

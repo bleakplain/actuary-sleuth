@@ -63,6 +63,7 @@ class CacheManager:
         self._misses = 0
         self._namespace_hits: Dict[str, int] = {}
         self._namespace_misses: Dict[str, int] = {}
+        self._evictions: int = 0  # LRU 驱逐计数
         self._db: Optional[sqlite3.Connection] = None
         self._db_lock = threading.Lock()
 
@@ -172,6 +173,7 @@ class CacheManager:
     def _evict_if_needed(self) -> None:
         while len(self._memory) > self._max_memory_entries:
             self._memory.popitem(last=False)
+            self._evictions += 1
 
     def evict_kb_version(self, kb_version: str) -> int:
         count = 0
@@ -198,6 +200,77 @@ class CacheManager:
         logger.info(f"缓存失效完成: {count} 条 (kb_version={kb_version})")
         return count
 
+    def get_entries(
+        self,
+        namespace: Optional[str] = None,
+        page: int = 1,
+        size: int = 20,
+    ) -> tuple[list[Dict[str, Any]], int]:
+        """查询缓存条目列表"""
+        offset = (page - 1) * size
+        where = "WHERE namespace = ?" if namespace else ""
+        params: list[Any] = [namespace] if namespace else []
+
+        try:
+            conn = self._get_db()
+            count_row = conn.execute(
+                f"SELECT COUNT(*) FROM cache_entries {where}", params
+            ).fetchone()
+            total = count_row[0] if count_row else 0
+
+            rows = conn.execute(
+                f"SELECT key, namespace, created_at, ttl, kb_version, LENGTH(value) as size_bytes "
+                f"FROM cache_entries {where} "
+                f"ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                params + [size, offset]
+            ).fetchall()
+
+            items = [
+                {
+                    "key": row[0],
+                    "namespace": row[1],
+                    "created_at": row[2],
+                    "ttl": row[3],
+                    "kb_version": row[4] or "",
+                    "size_bytes": row[5],
+                }
+                for row in rows
+            ]
+            return items, total
+        except Exception as e:
+            logger.warning(f"缓存条目查询失败: {e}")
+            return [], 0
+
+    def cleanup_expired(self) -> int:
+        """清理所有过期缓存条目，返回清理数量"""
+        now = time.time()
+        count = 0
+
+        # 先清理 SQLite（持久化层），确保数据一致性
+        try:
+            conn = self._get_db()
+            cursor = conn.execute(
+                "DELETE FROM cache_entries WHERE created_at + ttl < ?", (now,)
+            )
+            count = cursor.rowcount
+            conn.commit()
+        except Exception as e:
+            logger.warning(f"SQLite 过期清理失败: {e}")
+            return 0
+
+        # 再清理内存缓存
+        with self._lock:
+            keys_to_remove = []
+            for key, (_, meta, created_at) in self._memory.items():
+                ttl = meta.get("ttl", self._default_ttl)
+                if self._is_expired(created_at, ttl):
+                    keys_to_remove.append(key)
+            for key in keys_to_remove:
+                del self._memory[key]
+                count += 1
+
+        return count
+
     def invalidate_all(self) -> None:
         with self._lock:
             self._memory.clear()
@@ -214,6 +287,15 @@ class CacheManager:
 
     def get_stats(self) -> Dict[str, Any]:
         with self._lock:
+            # 获取 L2 条目数（在锁内保证一致性）
+            l2_size = 0
+            try:
+                conn = self._get_db()
+                row = conn.execute("SELECT COUNT(*) FROM cache_entries").fetchone()
+                l2_size = row[0] if row else 0
+            except Exception as e:
+                logger.warning(f"L2 条目数查询失败: {e}")
+
             total = self._hits + self._misses
             hit_rate = self._hits / total if total > 0 else 0
             return {
@@ -223,6 +305,8 @@ class CacheManager:
                 "misses": self._misses,
                 "hit_rate": round(hit_rate, 4),
                 "kb_version": self._kb_version,
+                "evictions": self._evictions,
+                "l2_size": l2_size,
                 "by_namespace": {
                     ns: {
                         "hits": self._namespace_hits.get(ns, 0),

@@ -354,6 +354,18 @@ class Config:
         return self._config.get('enable_cache', False)
 
     @property
+    def embedding_cache_ttl(self) -> int:
+        return self._config.get('cache', {}).get('embedding_ttl', 86400)
+
+    @property
+    def retrieval_cache_ttl(self) -> int:
+        return self._config.get('cache', {}).get('retrieval_ttl', 3600)
+
+    @property
+    def generation_cache_ttl(self) -> int:
+        return self._config.get('cache', {}).get('generation_ttl', 3600)
+
+    @property
     def cache(self) -> dict:
         return self._config.get('cache', {})
 
