@@ -106,7 +106,7 @@ class MemoryService:
 
         return cleaned
 
-    def get_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
+    def get_user_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
         """获取用户画像。"""
         try:
             with get_connection() as conn:
@@ -154,7 +154,7 @@ class MemoryService:
             "summary": summary,
         }
 
-    def auto_update_profile(self, question: str, answer: str, user_id: str) -> None:
+    def update_user_profile(self, question: str, answer: str, user_id: str) -> None:
         """从对话内容自动提取用户画像信息，不存在时自动创建。"""
         try:
             from lib.llm.factory import LLMClientFactory

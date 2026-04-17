@@ -10,7 +10,7 @@ def mock_context():
     memory_svc.search.return_value = [
         {"memory": "重疾产品等待期180天", "created_at": "2026-04-01T10:00:00"},
     ]
-    memory_svc.get_profile.return_value = None
+    memory_svc.get_user_profile.return_value = None
     engine = MagicMock()
     engine.search.return_value = [{"content": "等待期不得超过90天"}]
     engine.config.generation.max_context_chars = 12000
