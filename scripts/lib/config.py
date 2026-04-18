@@ -151,10 +151,6 @@ class DatabaseConfig:
     def models_dir(self) -> str:
         return self._config.get('models_dir', '')
 
-    @property
-    def tools_dir(self) -> str:
-        return self._config.get('tools_dir', '')
-
 
 # ===== 场景化 LLM 配置 =====
 
@@ -234,7 +230,6 @@ class Config:
                 'kb_version_dir': os.getenv('DATA_PATHS_KB_VERSION_DIR', '/root/work/actuary-assets/kb'),
                 'eval_snapshots_dir': os.getenv('DATA_PATHS_EVAL_SNAPSHOTS_DIR', '/root/work/actuary-assets/eval/snapshots'),
                 'models_dir': os.getenv('DATA_PATHS_MODELS_DIR', '/root/work/actuary-assets/models/reranker'),
-                'tools_dir': os.getenv('DATA_PATHS_TOOLS_DIR', '/root/work/actuary-assets/tools/hanxiao-llama.cpp'),
             },
             # ollama
             'ollama': {
@@ -378,9 +373,6 @@ class Config:
     def get_models_dir(self) -> str:
         return self._resolve_path(self._data_paths.models_dir)
 
-    def get_tools_dir(self) -> str:
-        return self._resolve_path(self._data_paths.tools_dir)
-
 
 # ===== 全局配置实例（单例模式）=====
 
@@ -422,9 +414,6 @@ def get_eval_snapshots_dir() -> str:
 
 def get_models_dir() -> str:
     return _get_config().get_models_dir()
-
-def get_tools_dir() -> str:
-    return _get_config().get_tools_dir()
 
 def get_llm_config() -> LLMConfig:
     return _get_config().llm
