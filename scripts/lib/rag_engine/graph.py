@@ -2,14 +2,22 @@
 from __future__ import annotations
 
 import logging
+import operator
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from typing_extensions import TypedDict
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.runtime import Runtime
 
+from lib.common.middleware import (
+    SessionContextMiddleware,
+    ClarificationMiddleware,
+    LoopDetectionMiddleware,
+    IterationLimitMiddleware,
+    MAX_ENTITIES,
+)
 from lib.llm.trace import trace_span
 from lib.memory.config import MemoryConfig
 from lib.rag_engine.attribution import parse_citations
@@ -18,6 +26,26 @@ from lib.rag_engine.rag_engine import _SYSTEM_PROMPT, RAGEngine
 logger = logging.getLogger(__name__)
 
 _memory_config = MemoryConfig()
+_clarification_mw = ClarificationMiddleware()
+_context_mw = SessionContextMiddleware()
+_loop_mw = LoopDetectionMiddleware()
+_limit_mw = IterationLimitMiddleware()
+
+
+def merge_session_context(left: Dict[str, Any], right: Dict[str, Any]) -> Dict[str, Any]:
+    """会话上下文合并 Reducer。"""
+    if not left:
+        return right
+    if not right:
+        return left
+    merged_entities = list(dict.fromkeys(
+        right.get("mentioned_entities", []) + left.get("mentioned_entities", [])
+    ))[:MAX_ENTITIES]
+    return {
+        **left,
+        **right,
+        "mentioned_entities": merged_entities,
+    }
 
 
 class AskState(TypedDict):
@@ -36,6 +64,15 @@ class AskState(TypedDict):
     content_mismatches: List[Dict[str, Any]]
     faithfulness_score: Optional[float]
     error: Optional[str]
+    messages: Annotated[List[Dict[str, str]], operator.add]
+    session_context: Annotated[Dict[str, Any], merge_session_context]
+    skip_clarify: bool
+    iteration_count: int
+    next_action: Literal["clarify", "search", "generate", "end"]
+    clarification_message: Optional[str]
+    clarification_options: Optional[List[str]]
+    loop_detected: Optional[bool]
+    loop_hint: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -45,6 +82,26 @@ class GraphContext:
     rag_engine: Any
     llm_client: Any
     memory_service: Any
+
+
+def load_context(state: AskState) -> dict:
+    """加载会话上下文和对话历史"""
+    result = _context_mw.before_invoke(state)
+    from api.database import get_messages
+    history = get_messages(state.get("session_id", ""))
+    messages = [{"role": m["role"], "content": m["content"]} for m in history]
+    return {"session_context": result.get("session_context", {}), "messages": messages}
+
+
+def clarify_check(state: AskState) -> dict:
+    """澄清检测"""
+    result = _clarification_mw.before_invoke(state)
+    return {
+        "next_action": result.get("next_action", "search"),
+        "clarification_message": result.get("clarification_message"),
+        "clarification_options": result.get("clarification_options"),
+        "session_context": result.get("session_context", {}),
+    }
 
 
 def retrieve_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
@@ -85,10 +142,15 @@ def retrieve_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
 
 def rag_search(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
     engine = runtime.context.rag_engine
+    question = state["question"]
+    ctx = state.get("session_context", {})
+    if ctx.get("product_type"):
+        question = f"{ctx['product_type']} {question}"
+
     with trace_span("graph_retrieve", "rag") as span:
-        span.input = {"question": state["question"]}
-        results = engine.search(state["question"])
-        span.output = {"result_count": len(results)}
+        span.input = {"question": question, "original": state["question"]}
+        results = engine.search(question)
+        span.output = {"result_count": len(results), "enhanced_query": question}
         return {"search_results": results}
 
 
@@ -127,7 +189,7 @@ def generate(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
         included_sources = state["search_results"][:included_count] if state["search_results"] else []
         attribution = parse_citations(answer_str, included_sources)
 
-        result = {
+        result: Dict[str, Any] = {
             "answer": answer_str,
             "sources": state["search_results"],
             "citations": [
@@ -138,7 +200,28 @@ def generate(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
             "content_mismatches": attribution.content_mismatches,
         }
         span.output = {"answer_length": len(answer_str), "citation_count": len(attribution.citations)}
-        return result
+
+    # Extract entities and topics from conversation
+    ctx_result = _context_mw.after_invoke(state)
+    merged_ctx = ctx_result.get("session_context", {})
+
+    # Apply loop detection (updates query_history)
+    loop_result = _loop_mw.after_invoke(
+        merged_ctx,
+        state["question"],
+    )
+    result["session_context"] = loop_result.get("session_context", merged_ctx)
+    if loop_result.get("loop_detected"):
+        result["loop_detected"] = loop_result["loop_detected"]
+        result["loop_hint"] = loop_result.get("loop_hint")
+
+    limit_result = _limit_mw.after_invoke(state.get("iteration_count", 0))
+    result["iteration_count"] = limit_result["iteration_count"]
+    if limit_result.get("error"):
+        result["error"] = limit_result["error"]
+        result["next_action"] = limit_result.get("next_action")
+
+    return result
 
 
 def extract_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
@@ -166,21 +249,58 @@ def update_user_profile(state: AskState, *, runtime: Runtime[GraphContext]) -> d
     return {}
 
 
+def save_context(state: AskState) -> dict:
+    """保存会话上下文"""
+    ctx = state.get("session_context", {})
+    session_id = state.get("session_id")
+    if session_id and ctx:
+        from api.database import save_session_context
+        try:
+            save_session_context(session_id, ctx)
+        except Exception:
+            logger.debug("保存会话上下文失败", exc_info=True)
+    return {}
+
+
+def route_by_action(state: AskState) -> str:
+    """根据 next_action 路由"""
+    action = state.get("next_action", "search")
+    if action == "clarify":
+        return "clarify"
+    return "search"
+
+
 def create_ask_graph():
-    """创建审核问答工作流图（并行双检索 + 线性后处理）。"""
+    """创建审核问答工作流图（多轮对话增强版）。"""
     graph = StateGraph(AskState, context_schema=GraphContext)
+    graph.add_node("load_context", load_context)
+    graph.add_node("clarify_check", clarify_check)
+    graph.add_node("parallel_retrieval_entry", lambda state: {})
     graph.add_node("retrieve_memory", retrieve_memory)
     graph.add_node("rag_search", rag_search)
     graph.add_node("generate", generate)
     graph.add_node("extract_memory", extract_memory)
     graph.add_node("update_profile", update_user_profile)
+    graph.add_node("save_context", save_context)
 
-    graph.add_edge(START, "retrieve_memory")
-    graph.add_edge(START, "rag_search")
+    graph.add_edge(START, "load_context")
+    graph.add_edge("load_context", "clarify_check")
+
+    graph.add_conditional_edges(
+        "clarify_check",
+        route_by_action,
+        {"clarify": END, "search": "parallel_retrieval_entry"}
+    )
+
+    graph.add_edge("parallel_retrieval_entry", "retrieve_memory")
+    graph.add_edge("parallel_retrieval_entry", "rag_search")
+
     graph.add_edge("retrieve_memory", "generate")
     graph.add_edge("rag_search", "generate")
+
     graph.add_edge("generate", "extract_memory")
     graph.add_edge("extract_memory", "update_profile")
-    graph.add_edge("update_profile", END)
+    graph.add_edge("update_profile", "save_context")
+    graph.add_edge("save_context", END)
 
     return graph.compile()

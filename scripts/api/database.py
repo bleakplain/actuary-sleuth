@@ -6,6 +6,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 import uuid
@@ -13,6 +14,8 @@ from datetime import datetime, timezone
 from typing import Any, Optional, List, Dict
 
 from lib.common.database import get_connection
+
+logger = logging.getLogger(__name__)
 
 
 _SCHEMA_SQL = """
@@ -317,6 +320,8 @@ def _migrate_db():
         session_cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
         if 'user_id' not in session_cols:
             conn.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT DEFAULT 'default'")
+        if 'context_json' not in session_cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN context_json TEXT DEFAULT '{}'")
 
 
 def create_session(session_id: str, title: str = "", user_id: str = "default") -> None:
@@ -1430,3 +1435,28 @@ def get_human_review_stats(evaluation_id: str) -> Dict:
             'correctness': round(row[1], 4) if row[1] is not None else None,
             'relevancy': round(row[2], 4) if row[2] is not None else None,
         }
+
+
+def get_session_context(session_id: str) -> Optional[Dict[str, Any]]:
+    """获取会话上下文"""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT context_json FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        if row and row["context_json"]:
+            return json.loads(row["context_json"])
+        return None
+
+
+def save_session_context(session_id: str, ctx: Dict[str, Any]) -> bool:
+    """保存会话上下文"""
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                "UPDATE sessions SET context_json = ? WHERE id = ?",
+                (json.dumps(ctx, ensure_ascii=False), session_id)
+            )
+        return True
+    except Exception as e:
+        logger.error(f"保存会话上下文失败: session_id={session_id}, error={e}")
+        return False

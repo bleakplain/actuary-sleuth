@@ -19,6 +19,8 @@ from api.database import (
     get_sessions,
     get_messages,
     get_trace_by_message_id,
+    get_session_context,
+    save_session_context,
     save_spans,
     save_trace,
     search_sessions,
@@ -180,12 +182,28 @@ async def chat(req: ChatRequest):
                 session_id=session_id, search_results=[], memory_context="",
                 answer="", sources=[], citations=[], unverified_claims=[],
                 content_mismatches=[], faithfulness_score=None, error=None,
+                messages=[], session_context={}, skip_clarify=req.skip_clarify,
+                iteration_count=0, next_action="search",
+                clarification_message=None, clarification_options=None,
+                loop_detected=None, loop_hint=None,
             )
             context = GraphContext(
                 rag_engine=engine, llm_client=engine._llm_client,
                 memory_service=memory_svc,
             )
             result = await asyncio.to_thread(graph.invoke, state, context=context)
+
+            # 检查是否需要澄清
+            if result.get("next_action") == "clarify":
+                yield {
+                    "event": "clarify",
+                    "data": json.dumps({
+                        "message": result.get("clarification_message", ""),
+                        "options": result.get("clarification_options", []),
+                        "session_context": result.get("session_context", {}),
+                    }, ensure_ascii=False)
+                }
+                return
 
             if cache:
                 cache.set("generation", req.question, result)
@@ -243,6 +261,9 @@ async def chat(req: ChatRequest):
                 "faithfulness_score": result.get("faithfulness_score"),
                 "unverified_claims": result.get("unverified_claims", []),
                 "content_mismatches": result.get("content_mismatches", []),
+                "session_context": result.get("session_context", {}),
+                "loop_detected": result.get("loop_detected"),
+                "loop_hint": result.get("loop_hint"),
             }
             if trace_summary:
                 response_meta["trace"] = trace_summary
@@ -333,3 +354,37 @@ async def remove_message(message_id: int):
     if deleted == 0:
         raise HTTPException(status_code=404, detail="消息不存在")
     return {"deleted_messages": deleted}
+
+
+@router.get("/sessions/{session_id}/context")
+async def get_session_context_endpoint(session_id: str):
+    """获取会话上下文"""
+    ctx = get_session_context(session_id)
+    if ctx is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return {"session_id": session_id, "context": ctx}
+
+
+ALLOWED_CONTEXT_KEYS = frozenset({
+    "product_type", "mentioned_entities", "current_topic",
+    "query_history", "user_preference", "focus_area",
+})
+
+
+@router.put("/sessions/{session_id}/context")
+async def update_session_context_endpoint(session_id: str, context: dict):
+    """更新会话上下文（澄清选择后调用）"""
+    # 输入验证：只允许白名单中的 key
+    invalid_keys = set(context.keys()) - ALLOWED_CONTEXT_KEYS
+    if invalid_keys:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不允许的上下文字段: {', '.join(invalid_keys)}"
+        )
+
+    existing = get_session_context(session_id) or {}
+    merged = {**existing, **context}
+    success = save_session_context(session_id, merged)
+    if not success:
+        raise HTTPException(status_code=500, detail="保存失败")
+    return {"session_id": session_id, "context": merged}
