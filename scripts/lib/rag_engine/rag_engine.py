@@ -27,8 +27,6 @@ from .llm_reranker import LLMReranker, RerankConfig
 from .query_preprocessor import QueryPreprocessor
 from .exceptions import EngineInitializationError, RetrievalError
 from .attribution import parse_citations, AttributionResult
-from ._gguf_cli import GGUFReranker as GGUFCliReranker
-from .gguf_reranker_adapter import GGUFReranker
 from .cross_encoder_reranker import CrossEncoderReranker
 from lib.llm import BaseLLMClient, LLMClientFactory
 from lib.llm.trace import trace_span
@@ -167,11 +165,6 @@ class RAGEngine:
         if rc.reranker_type == "llm":
             self._active_reranker_type = "llm"
             return LLMReranker(self._llm_client, rerank_config)
-
-        if rc.reranker_type == "gguf":
-            gguf = GGUFCliReranker()
-            self._active_reranker_type = "gguf"
-            return GGUFReranker(gguf)
 
         if rc.reranker_type == "hf":
             self._active_reranker_type = "cross_encoder"

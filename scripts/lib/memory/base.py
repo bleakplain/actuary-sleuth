@@ -67,8 +67,18 @@ class Mem0Memory(MemoryBase):
             embed_cfg = get_embed_llm_config()
             lancedb_path = str(Path("./data/lancedb").resolve())
 
-            config = {
-                "llm": {
+            llm_provider = qa_cfg.provider
+            if llm_provider == "ollama":
+                llm_config = {
+                    "provider": "ollama",
+                    "config": {
+                        "model": qa_cfg.model,
+                        "ollama_base_url": qa_cfg.base_url,
+                        "temperature": qa_cfg.temperature,
+                    }
+                }
+            elif llm_provider == "zhipu":
+                llm_config = {
                     "provider": "openai",
                     "config": {
                         "model": qa_cfg.model,
@@ -76,7 +86,12 @@ class Mem0Memory(MemoryBase):
                         "openai_base_url": qa_cfg.base_url,
                         "temperature": qa_cfg.temperature,
                     }
-                },
+                }
+            else:
+                raise ValueError(f"不支持的记忆LLM provider: {llm_provider}")
+
+            config = {
+                "llm": llm_config,
                 "embedder": {
                     "provider": "ollama",
                     "config": {
@@ -90,7 +105,7 @@ class Mem0Memory(MemoryBase):
             memory = Memory.from_config(config)
 
             from lib.memory.vector_store import LanceDBMemoryStore
-            memory.vector_store = LanceDBMemoryStore(lancedb_path, "memories")
+            memory.vector_store = LanceDBMemoryStore(lancedb_path, "memories", vector_size=1024)
 
             logger.info("Mem0 初始化成功")
             return cls(memory)
