@@ -10,3 +10,4 @@ class MemoryConfig:
 
     inactive_threshold_days: int = 60
     memory_context_max_chars: int = 2000
+    memory_search_limit: int = 3

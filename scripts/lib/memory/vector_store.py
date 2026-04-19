@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from typing import Any, Dict, List, Optional
 
 import lancedb
@@ -22,23 +23,26 @@ class OutputData(BaseModel):
     score: Optional[float] = None
     payload: Optional[Dict[str, Any]] = None
 
+
 logger = logging.getLogger(__name__)
 
 _FILTER_COLUMNS = ("user_id", "agent_id", "run_id")
-_VECTOR_SIZE = 1024
+_DEFAULT_VECTOR_SIZE = 1024
+
+_init_lock = threading.Lock()
 
 
 class LanceDBMemoryStore(VectorStoreBase):
 
-    def __init__(self, uri: str, table_name: str = "memories"):
+    def __init__(self, uri: str, table_name: str = "memories", vector_size: int = _DEFAULT_VECTOR_SIZE):
         self._db = lancedb.connect(uri)
         self._table_name = table_name
+        self._vector_size = vector_size
         self._tbl: Optional[lancedb.table.LanceTable] = None
 
-    @staticmethod
-    def _schema(vector_size: int = _VECTOR_SIZE) -> pa.Schema:
+    def _schema(self) -> pa.Schema:
         fields = [
-            pa.field("vector", pa.list_(pa.float32(), vector_size)),
+            pa.field("vector", pa.list_(pa.float32(), self._vector_size)),
             pa.field("id", pa.string()),
             pa.field("text", pa.string()),
             pa.field("metadata", pa.string()),
@@ -49,12 +53,14 @@ class LanceDBMemoryStore(VectorStoreBase):
 
     def _get_table(self) -> lancedb.table.LanceTable:
         if self._tbl is None:
-            if self._table_name in self._db.table_names():
-                self._tbl = self._db.open_table(self._table_name)
-            else:
-                self._tbl = self._db.create_table(
-                    self._table_name, schema=self._schema()
-                )
+            with _init_lock:
+                if self._tbl is None:
+                    if self._table_name in self._db.table_names():
+                        self._tbl = self._db.open_table(self._table_name)
+                    else:
+                        self._tbl = self._db.create_table(
+                            self._table_name, schema=self._schema()
+                        )
         return self._tbl
 
     @staticmethod
@@ -78,7 +84,7 @@ class LanceDBMemoryStore(VectorStoreBase):
                 parts.append(f"{k} = '{v}'")
         return " AND ".join(parts) if parts else None
 
-    def create_col(self, name: str, vector_size: int | None = None):
+    def create_col(self, name: str, vector_size: Optional[int] = None) -> None:
         pass
 
     def insert(self, vectors: List[List[float]], payloads: Optional[List[Dict]] = None, ids: Optional[List[str]] = None):

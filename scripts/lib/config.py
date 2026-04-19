@@ -8,10 +8,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Dict, Any, Optional
 
+from dotenv import load_dotenv
 
-# 路径常量
 SCRIPTS_DIR = Path(__file__).parent.parent
-CONFIG_PATH = SCRIPTS_DIR / 'config' / 'settings.json'
+load_dotenv(SCRIPTS_DIR / ".env")
 
 
 # ===== 嵌套配置类 =====
@@ -214,8 +214,7 @@ class LLMConfig:
 
 class Config:
 
-    def __init__(self, config_path: Optional[Path] = None):
-        self._config_path = config_path or CONFIG_PATH
+    def __init__(self):
         self._config: Dict[str, Any] = {}
         self._load()
         self._init_nested_configs()
@@ -380,17 +379,13 @@ _global_config: Optional[Config] = None
 _config_lock = threading.Lock()
 
 
-def _get_config(config_path: Optional[Path] = None) -> Config:
+def _get_config() -> Config:
     global _global_config
 
-    if _global_config is None or (config_path is not None and config_path != _global_config._config_path):
+    if _global_config is None:
         with _config_lock:
-            if _global_config is None or config_path is not None:
-                if config_path is not None and _global_config is not None:
-                    if config_path != _global_config._config_path:
-                        _global_config = Config(config_path)
-                else:
-                    _global_config = Config(config_path)
+            if _global_config is None:
+                _global_config = Config()
 
     return _global_config
 
