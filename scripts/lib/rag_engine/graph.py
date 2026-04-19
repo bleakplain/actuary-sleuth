@@ -84,7 +84,7 @@ class GraphContext:
     memory_service: Any
 
 
-def load_context(state: AskState) -> dict:
+def load_session_context(state: AskState) -> dict:
     """加载会话上下文和对话历史"""
     result = _context_mw.before_invoke(state)
     from api.database import get_messages
@@ -93,7 +93,7 @@ def load_context(state: AskState) -> dict:
     return {"session_context": result.get("session_context", {}), "messages": messages}
 
 
-def clarify_check(state: AskState) -> dict:
+def clarify_user_query(state: AskState) -> dict:
     """澄清检测"""
     result = _clarification_mw.before_invoke(state)
     return {
@@ -249,7 +249,7 @@ def update_user_profile(state: AskState, *, runtime: Runtime[GraphContext]) -> d
     return {}
 
 
-def save_context(state: AskState) -> dict:
+def save_session_context(state: AskState) -> dict:
     """保存会话上下文"""
     ctx = state.get("session_context", {})
     session_id = state.get("session_id")
@@ -273,21 +273,21 @@ def route_by_action(state: AskState) -> str:
 def create_ask_graph():
     """创建审核问答工作流图（多轮对话增强版）。"""
     graph = StateGraph(AskState, context_schema=GraphContext)
-    graph.add_node("load_context", load_context)
-    graph.add_node("clarify_check", clarify_check)
+    graph.add_node("load_session_context", load_session_context)
+    graph.add_node("clarify_user_query", clarify_user_query)
     graph.add_node("parallel_retrieval_entry", lambda state: {})
     graph.add_node("retrieve_memory", retrieve_memory)
     graph.add_node("rag_search", rag_search)
     graph.add_node("generate", generate)
     graph.add_node("extract_memory", extract_memory)
-    graph.add_node("update_profile", update_user_profile)
-    graph.add_node("save_context", save_context)
+    graph.add_node("update_user_profile", update_user_profile)
+    graph.add_node("save_session_context", save_session_context)
 
-    graph.add_edge(START, "load_context")
-    graph.add_edge("load_context", "clarify_check")
+    graph.add_edge(START, "load_session_context")
+    graph.add_edge("load_session_context", "clarify_user_query")
 
     graph.add_conditional_edges(
-        "clarify_check",
+        "clarify_user_query",
         route_by_action,
         {"clarify": END, "search": "parallel_retrieval_entry"}
     )
@@ -299,8 +299,8 @@ def create_ask_graph():
     graph.add_edge("rag_search", "generate")
 
     graph.add_edge("generate", "extract_memory")
-    graph.add_edge("extract_memory", "update_profile")
-    graph.add_edge("update_profile", "save_context")
-    graph.add_edge("save_context", END)
+    graph.add_edge("extract_memory", "update_user_profile")
+    graph.add_edge("update_user_profile", "save_session_context")
+    graph.add_edge("save_session_context", END)
 
     return graph.compile()

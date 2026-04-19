@@ -73,10 +73,10 @@ def test_graph_structure():
     graph = create_ask_graph()
     nodes = list(graph.nodes.keys())
 
-    assert "load_context" in nodes
-    assert "clarify_check" in nodes
+    assert "load_session_context" in nodes
+    assert "clarify_user_query" in nodes
     assert "parallel_retrieval_entry" in nodes
-    assert "save_context" in nodes
+    assert "save_session_context" in nodes
 
 
 if __name__ == "__main__":
