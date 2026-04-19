@@ -11,6 +11,8 @@ from lib.memory.base import MemoryBase, Mem0Memory
 from lib.memory.config import MemoryConfig
 from lib.memory.prompts import PROFILE_EXTRACTION_PROMPT
 
+logger = logging.getLogger(__name__)
+
 
 class MemoryService:
     """记忆服务层 — 面向抽象能力（记忆），不绑定具体实现。"""
