@@ -29,6 +29,8 @@ export interface Message {
   faithfulness_score?: number;
   unverified_claims?: string[];
   trace?: TraceData | null;
+  needsClarification?: boolean;
+  clarificationOptions?: string[];
 }
 
 export interface Session {

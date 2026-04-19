@@ -26,7 +26,7 @@ interface Props {
 
 export default function MessageBubble({ message, streaming, onCitationClick, isMobile }: Props) {
   const { token } = theme.useToken();
-  const { activeTraceMessageId, openTrace, debugMode, deleteMessage } = useAskStore();
+  const { activeTraceMessageId, openTrace, debugMode, deleteMessage, sendMessage } = useAskStore();
   const [hovered, setHovered] = useState(false);
 
   const handleCitationClick = (citation: Citation) => {
@@ -34,6 +34,10 @@ export default function MessageBubble({ message, streaming, onCitationClick, isM
     if (source && onCitationClick) {
       onCitationClick(source, message.sources);
     }
+  };
+
+  const handleClarifyOption = (option: string) => {
+    sendMessage(option, 'qa');
   };
 
   if (message.role === 'user') {
@@ -140,6 +144,24 @@ export default function MessageBubble({ message, streaming, onCitationClick, isM
                 </div>
               </div>
             ))}
+          </div>
+        ) : message.needsClarification ? (
+          <div>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            {message.clarificationOptions && message.clarificationOptions.length > 0 && (
+              <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {message.clarificationOptions.map((option, i) => (
+                  <Button
+                    key={i}
+                    size="small"
+                    onClick={() => handleClarifyOption(option)}
+                    style={{ borderRadius: 16 }}
+                  >
+                    {option}
+                  </Button>
+                ))}
+              </div>
+            )}
           </div>
         ) : content ? (
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>

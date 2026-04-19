@@ -137,6 +137,21 @@ export const useAskStore = create<AskState>((set, get) => ({
             streaming: false,
           }));
         },
+        onClarify: (clarifyData) => {
+          set((s) => ({
+            messages: s.messages.map((m) =>
+              m.id === assistantMsg.id
+                ? {
+                    ...m,
+                    content: clarifyData.message,
+                    clarificationOptions: clarifyData.options,
+                    needsClarification: true,
+                  }
+                : m,
+            ),
+            streaming: false,
+          }));
+        },
       },
     );
   },

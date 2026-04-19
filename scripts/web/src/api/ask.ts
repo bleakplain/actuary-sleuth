@@ -33,12 +33,19 @@ export async function batchDeleteSessions(ids: string[]): Promise<{ deleted: num
   return data;
 }
 
+interface ClarifyData {
+  message: string;
+  options: string[];
+  session_context: Record<string, unknown>;
+}
+
 export function chatSSE(
-  req: { question: string; session_id?: string; mode: 'qa' | 'search'; debug?: boolean },
+  req: { question: string; session_id?: string; mode: 'qa' | 'search'; debug?: boolean; skip_clarify?: boolean },
   callbacks: {
     onToken: (token: string) => void;
     onDone: (data: ChatDoneData) => void;
     onError: (err: string) => void;
+    onClarify?: (data: ClarifyData) => void;
   },
 ): AbortController {
   const controller = new AbortController();
@@ -53,6 +60,7 @@ export function chatSSE(
       if (!reader) throw new Error('No response body');
       const decoder = new TextDecoder();
       let buffer = '';
+      let currentEvent = 'message';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -63,12 +71,22 @@ export function chatSSE(
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (line.startsWith('data:')) {
+          if (line.startsWith('event:')) {
+            currentEvent = line.slice(6).trim();
+          } else if (line.startsWith('data:')) {
             try {
-              const event = JSON.parse(line.slice(5).trim());
-              if (event.type === 'token') callbacks.onToken(event.data);
-              else if (event.type === 'done') callbacks.onDone(event.data);
-              else if (event.type === 'error') callbacks.onError(event.data);
+              const data = JSON.parse(line.slice(5).trim());
+              if (currentEvent === 'clarify') {
+                callbacks.onClarify?.(data);
+                callbacks.onDone({ session_id: '', citations: [], sources: [] });
+              } else if (data.type === 'token') {
+                callbacks.onToken(data.data);
+              } else if (data.type === 'done') {
+                callbacks.onDone(data.data);
+              } else if (data.type === 'error') {
+                callbacks.onError(data.data);
+              }
+              currentEvent = 'message';
             } catch {
               // skip malformed lines
             }
