@@ -30,6 +30,10 @@ _ANSWER_SENTENCE_PATTERN = re.compile(r'[^。！？\n]+[。！？\n]?')
 _SEMANTIC_RELEVANCE_THRESHOLD = 0.65
 _SENTENCE_COVERAGE_THRESHOLD = 0.4
 
+GENERIC_KEYWORDS = frozenset({
+    "保险", "条款", "规定", "要求", "内容", "情况", "问题", "产品", "合同", "公司"
+})
+
 _embed_model: Optional[Any] = None
 
 
@@ -202,26 +206,27 @@ def _is_relevant(
     source_file = result.get('source_file', '')
     law_name = result.get('law_name', '')
 
-    if evidence_keywords:
-        long_keywords = [kw for kw in evidence_keywords if len(kw) >= 2]
-        if long_keywords:
-            matched = sum(1 for kw in long_keywords if kw in content)
-            threshold = max(2, int(len(long_keywords) * 0.6))
-            if matched >= threshold:
-                return True
+    # 过滤泛化关键词
+    specific_keywords = [kw for kw in evidence_keywords if kw not in GENERIC_KEYWORDS and len(kw) >= 2]
+    if specific_keywords:
+        matched = sum(1 for kw in specific_keywords if kw in content)
+        threshold = max(2, int(len(specific_keywords) * 0.6))
+        if matched >= threshold:
+            return True
 
     doc_set = set(evidence_docs)
-    if source_file and source_file in doc_set and evidence_keywords:
-        if _contains_keyword(content, evidence_keywords):
+    if source_file and source_file in doc_set and specific_keywords:
+        if _contains_keyword(content, specific_keywords):
             return True
 
     if law_name and evidence_docs:
         for doc in evidence_docs:
             doc_stem = doc.replace('.md', '').replace('_', '')
             if doc_stem and len(doc_stem) >= 4 and doc_stem in law_name:
-                if evidence_keywords and _contains_keyword(content, evidence_keywords):
+                if specific_keywords and _contains_keyword(content, specific_keywords):
                     return True
 
+    # Embedding 兜底使用原始关键词（不排除泛化词，让语义相似度决定）
     query_for_embed = original_query if original_query else ' '.join(evidence_keywords)
     if query_for_embed and len(query_for_embed) >= 4:
         similarity = _compute_embedding_similarity(query_for_embed, content)
