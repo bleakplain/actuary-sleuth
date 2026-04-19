@@ -116,7 +116,7 @@ def retrieve_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
             lines = [f"- {m['memory']} (记录于 {m['created_at'][:10]})" for m in memories]
             parts.append("\n".join(lines))
 
-        profile = memory_svc.get_profile(state["user_id"])
+        profile = memory_svc.get_user_profile(state["user_id"])
         if profile:
             profile_lines = []
             if profile.get("focus_areas"):
@@ -243,7 +243,7 @@ def extract_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
 def update_user_profile(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
     memory_svc = runtime.context.memory_service
     try:
-        memory_svc.auto_update_profile(state["question"], state["answer"], state["user_id"])
+        memory_svc.update_user_profile(state["question"], state["answer"], state["user_id"])
     except Exception:
         logger.debug("用户画像更新失败，跳过", exc_info=True)
     return {}
