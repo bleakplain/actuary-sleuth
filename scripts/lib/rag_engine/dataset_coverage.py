@@ -4,7 +4,17 @@ from typing import List, Dict
 from pathlib import Path
 
 from .eval_dataset import EvalSample
-from .evaluator import _normalize_doc_name
+
+
+def _normalize_doc_name(doc_name: str) -> str:
+    """规范化文档名称用于匹配。"""
+    if not doc_name:
+        return ""
+    name = doc_name.lower().strip()
+    for suffix in (".md", ".txt", ".pdf"):
+        if name.endswith(suffix):
+            name = name[:-len(suffix)]
+    return name
 
 
 @dataclass(frozen=True)
