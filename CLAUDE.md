@@ -146,6 +146,9 @@ Worktree 创建时自动拷贝 settings.json 和 .env，各 worktree 配置独�
 15. Layered validation: use fast deterministic checks first (structure markers, rules), fall back to expensive probabilistic checks (embedding similarity) only when no structural signal exists
 16. Dead code cleanup: remove unused code paths when default strategy makes them unreachable; delete deprecated modules directly rather than marking deprecated
 17. Eval dataset scope: evaluation samples focus on insurance product audit (clauses, pricing, exclusions, waiting periods, product design), not company operations (capital changes, actuary hiring, claims process, sales management)
+18. Code compactness: minimize unnecessary blank lines in code; keep related statements together for readability
+19. Document design decisions: in docstrings, explain "why" not just "what" — especially for non-obvious choices like separate registries, domain-specific parsers, or extension points
+20. Test data strategy: use fixtures for unit tests (fast, isolated); use real files from `/mnt/d/work/actuary-assets/products/` and `<data_root>/kb/references/` for integration tests
 
 ## Development Workflow (SDD)
 

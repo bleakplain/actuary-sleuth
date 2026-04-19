@@ -5,12 +5,13 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Optional
 
-from llama_index.core import Settings
+from llama_index.core import Settings, Document
 from llama_index.core.schema import TextNode
 
 from .index_manager import VectorIndexManager
 from .config import RAGConfig
 from lib.llm import LLMClientFactory
+from lib.doc_parser.kb.md_parser import MdParser
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +23,12 @@ class KnowledgeBuilder:
     1. 向量数据库 (LanceDB) - 用于语义检索
     2. BM25 索引 - 用于关键词检索
 
-    使用 RegulationChunker 按 ## 第N项 分块，提取 frontmatter 和 blockquote 元数据。
+    使用 MdParser 按 ## 第N项 分块，提取 frontmatter 和 blockquote 元数据。
     """
 
     def __init__(self, config: Optional[RAGConfig] = None):
         self.config = config or RAGConfig()
-        from .chunker import ChecklistChunker
-        self.chunker = ChecklistChunker()
+        self.chunker = MdParser()
         self.index_manager = VectorIndexManager(self.config)
         self._embedding_setup_done = False
 
@@ -37,25 +37,39 @@ class KnowledgeBuilder:
             Settings.embed_model = LLMClientFactory.create_embed_model()
             self._embedding_setup_done = True
 
-    def parse(self, file_pattern: str = "**/*.md") -> List:
+    def parse(self, file_pattern: str = "**/*.md") -> List[Document]:
         regulations_dir = Path(self.config.regulations_dir)
         if not regulations_dir.exists():
             logger.error(f"目录不存在: {regulations_dir}")
             return []
 
-        from llama_index.core.readers import SimpleDirectoryReader
         md_files = sorted(regulations_dir.glob(file_pattern))
         if not md_files:
             logger.error(f"未找到匹配 {file_pattern} 的文件")
             return []
 
-        reader = SimpleDirectoryReader(input_files=[str(f) for f in md_files])
-        documents = reader.load_data()
+        documents: List[Document] = []
+        for md_file in md_files:
+            try:
+                with open(md_file, 'r', encoding='utf-8') as f:
+                    text = f.read()
+            except UnicodeDecodeError:
+                with open(md_file, 'r', encoding='gbk') as f:
+                    text = f.read()
+
+            if text.strip():
+                doc = Document(text=text, metadata={'file_name': md_file.name})
+                documents.append(doc)
+
         logger.info(f"从 {regulations_dir} 加载了 {len(documents)} 个文档")
         return documents
 
-    def chunk(self, documents: List) -> List[TextNode]:
-        return self.chunker.chunk(documents)
+    def chunk(self, documents: List[Document]) -> List[TextNode]:
+        all_nodes: List[TextNode] = []
+        for doc in documents:
+            nodes = self.chunker.parse_document(doc)
+            all_nodes.extend(nodes)
+        return all_nodes
 
     def build(
         self,

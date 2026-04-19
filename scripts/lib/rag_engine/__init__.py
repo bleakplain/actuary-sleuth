@@ -37,7 +37,6 @@ from .builder import KnowledgeBuilder
 from .retrieval import hybrid_search, vector_search
 from .fusion import reciprocal_rank_fusion
 from .bm25_index import BM25Index
-from .chunker import ChecklistChunker
 from .evaluator import RetrievalEvaluator, GenerationEvaluator, RAGEvalReport
 from .eval_dataset import EvalSample, QuestionType, load_eval_dataset, save_eval_dataset
 from .dataset_validator import validate_dataset, QualityAuditReport
@@ -72,7 +71,6 @@ __all__ = [
     'vector_search',
     'reciprocal_rank_fusion',
     'BM25Index',
-    'ChecklistChunker',
     'RetrievalEvaluator',
     'GenerationEvaluator',
     'RAGEvalReport',
