@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 """PDF 解析器测试"""
 import pytest
+
+pytest.importorskip("pdfplumber")
+
 from lib.doc_parser import parse_product_document
 from lib.doc_parser.pd.pdf_parser import PdfParser
 
@@ -19,6 +22,8 @@ class TestPdfParser:
         assert len(doc.clauses) >= 1
 
     def test_pdf_output_matches_docx(self, tmp_path, sample_docx_with_clauses, sample_pdf_with_clauses):
+        pytest.importorskip("docx")
+
         docx_file = tmp_path / "test.docx"
         pdf_file = tmp_path / "test.pdf"
 

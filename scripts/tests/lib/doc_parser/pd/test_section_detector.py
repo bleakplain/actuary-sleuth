@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 """内容类型检测器测试"""
 import pytest
+
+pytest.importorskip("docx")
+
 from lib.doc_parser.pd.section_detector import SectionDetector
 from lib.doc_parser.models import SectionType
 

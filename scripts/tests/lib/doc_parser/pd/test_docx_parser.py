@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 """Word 解析器测试"""
 import pytest
+
+pytest.importorskip("docx")
+
 from lib.doc_parser import parse_product_document
 from lib.doc_parser.pd.docx_parser import DocxParser
 
