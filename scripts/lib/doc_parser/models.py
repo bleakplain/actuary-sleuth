@@ -19,7 +19,7 @@ class SectionType(str, Enum):
     RIDER = "rider"
 
 
-@dataclass
+@dataclass(frozen=True)
 class DocumentMeta:
     """文档级元数据（内部结构化表示）
 
@@ -90,7 +90,7 @@ class Clause:
     section_type: str = "clause"
 
 
-@dataclass
+@dataclass(frozen=True)
 class PremiumTable:
     """费率表"""
     raw_text: str              # 原始文本
@@ -99,7 +99,7 @@ class PremiumTable:
     section_type: str = "premium_table"
 
 
-@dataclass
+@dataclass(frozen=True)
 class DocumentSection:
     """通用文档章节"""
     title: str        # 章节标题
@@ -107,7 +107,7 @@ class DocumentSection:
     section_type: str # 内容类型：notice, health_disclosure, exclusion, rider
 
 
-@dataclass
+@dataclass(frozen=True)
 class AuditDocument:
     """保险产品审核文档"""
     file_name: str
