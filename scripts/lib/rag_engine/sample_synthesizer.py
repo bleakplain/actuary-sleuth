@@ -123,9 +123,9 @@ class SynthQA:
             return []
 
     def _parse_response(self, response: str) -> List[Dict]:
-        from .preprocessor import _extract_json_array
+        from lib.doc_parser.kb.converter.excel_to_md import extract_json_array
 
-        json_str = _extract_json_array(response)
+        json_str = extract_json_array(response)
         if json_str is None:
             logger.warning("LLM 返回中未找到 JSON 数组，跳过")
             return []

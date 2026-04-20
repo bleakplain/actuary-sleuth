@@ -5,12 +5,13 @@ import pytest
 from pathlib import Path
 from typing import List, Tuple
 
-from docx import Document
-
 
 @pytest.fixture
 def sample_docx_with_clauses(tmp_path: Path):
     """创建包含条款的 Word 文档 fixture"""
+    pytest.importorskip("docx")
+    from docx import Document
+
     def _create(docx_path: Path, clauses: List[Tuple[str, str, str]]) -> None:
         doc = Document()
         table = doc.add_table(rows=len(clauses) + 1, cols=2)
@@ -26,6 +27,9 @@ def sample_docx_with_clauses(tmp_path: Path):
 @pytest.fixture
 def sample_docx_with_premium(tmp_path: Path):
     """创建包含费率表的 Word 文档 fixture"""
+    pytest.importorskip("docx")
+    from docx import Document
+
     def _create(docx_path: Path) -> None:
         doc = Document()
         table = doc.add_table(rows=4, cols=3)
@@ -47,6 +51,9 @@ def sample_docx_with_premium(tmp_path: Path):
 @pytest.fixture
 def sample_docx_with_company_info(tmp_path: Path):
     """创建包含公司信息表格的 Word 文档 fixture"""
+    pytest.importorskip("docx")
+    from docx import Document
+
     def _create(docx_path: Path) -> None:
         doc = Document()
         table = doc.add_table(rows=3, cols=2)

@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """错误处理测试"""
 import pytest
-from lib.doc_parser import parse_knowledge_base, parse_product_document, DocumentParseError
+from lib.doc_parser import parse_knowledge_base, DocumentParseError
+from lib.doc_parser.models import DocumentParseError as DPE
 
 
 class TestErrorHandling:
@@ -21,6 +22,10 @@ class TestErrorHandling:
         assert "不支持" in str(exc.value)
 
     def test_doc_format_error(self, tmp_path):
+        """测试 .doc 格式不支持"""
+        pytest.importorskip("docx")
+        from lib.doc_parser import parse_product_document
+
         doc_file = tmp_path / "test.doc"
         doc_file.write_bytes(b"fake doc content")
 
@@ -29,6 +34,10 @@ class TestErrorHandling:
         assert "不支持" in str(exc.value)
 
     def test_corrupted_docx(self, tmp_path):
+        """测试损坏的 docx 文件"""
+        pytest.importorskip("docx")
+        from lib.doc_parser import parse_product_document
+
         docx_file = tmp_path / "corrupt.docx"
         docx_file.write_bytes(b"not a valid docx")
 

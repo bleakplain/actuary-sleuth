@@ -33,7 +33,7 @@ class TestSheetStructureParser:
     def test_list_content_sheets(self):
         """Should return only content sheets (skip '分工' and '相关法规')."""
         pytest.importorskip("openpyxl")
-        from lib.rag_engine.preprocessor import _list_content_sheets
+        from lib.doc_parser.kb.converter.excel_to_md import _list_content_sheets
 
         sheets = _list_content_sheets(str(EXCEL_PATH))
         names = [s["name"] for s in sheets]
@@ -44,7 +44,7 @@ class TestSheetStructureParser:
 
     def test_detect_regulation_boundaries_standard(self, excel_workbook):
         """Standard sheets (00, 02-05) have title in row 1, headers in row 2, regulation in row 3."""
-        from lib.rag_engine.preprocessor import parse_sheet_structure
+        from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure
 
         sheet = _find_sheet(excel_workbook, "00")
         assert sheet is not None
@@ -56,7 +56,7 @@ class TestSheetStructureParser:
 
     def test_detect_regulation_boundaries_with_owner(self, excel_workbook):
         """Sheets with '产品开发责任人' row (01, 06-08) have headers in row 3, data in row 5."""
-        from lib.rag_engine.preprocessor import parse_sheet_structure
+        from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure
 
         sheet = _find_sheet(excel_workbook, "01")
         assert sheet is not None
@@ -67,7 +67,7 @@ class TestSheetStructureParser:
 
     def test_detect_sub_regulations_in_sheet_10(self, excel_workbook):
         """Sheet 10 has multiple regulation boundaries detected by non-numeric column A."""
-        from lib.rag_engine.preprocessor import parse_sheet_structure
+        from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure
 
         sheet = _find_sheet(excel_workbook, "10")
         assert sheet is not None
@@ -78,7 +78,7 @@ class TestSheetStructureParser:
 
     def test_extract_metadata_columns(self, excel_workbook):
         """Should correctly identify metadata column indices (B-G)."""
-        from lib.rag_engine.preprocessor import parse_sheet_structure
+        from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure
 
         sheet = _find_sheet(excel_workbook, "00")
         assert sheet is not None
@@ -93,7 +93,7 @@ class TestClauseExtraction:
 
     def test_extract_clauses_returns_entries(self, excel_workbook):
         """Should extract non-empty clause entries with sequence numbers."""
-        from lib.rag_engine.preprocessor import parse_sheet_structure, extract_clauses
+        from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure, extract_clauses
 
         sheet = _find_sheet(excel_workbook, "00")
         assert sheet is not None
@@ -107,7 +107,7 @@ class TestClauseExtraction:
 
     def test_extract_clauses_includes_metadata(self, excel_workbook):
         """Should extract metadata columns when present."""
-        from lib.rag_engine.preprocessor import parse_sheet_structure, extract_clauses
+        from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure, extract_clauses
 
         sheet = _find_sheet(excel_workbook, "00")
         assert sheet is not None
@@ -119,7 +119,7 @@ class TestClauseExtraction:
 
     def test_sheet_10_sub_regulation_filtering(self, excel_workbook):
         """Sheet 10 sub-regulations should produce separate clause groups."""
-        from lib.rag_engine.preprocessor import (
+        from lib.doc_parser.kb.converter.excel_to_md import (
             parse_sheet_structure, extract_clauses, _filter_clauses_for_sub_reg,
         )
 
@@ -142,7 +142,7 @@ class TestMarkdownGeneration:
 
     def test_generate_frontmatter_yaml(self):
         """Should produce valid YAML frontmatter block."""
-        from lib.rag_engine.preprocessor import generate_frontmatter
+        from lib.doc_parser.kb.converter.excel_to_md import generate_frontmatter
 
         fm = generate_frontmatter(
             collection="00_保险法",
@@ -156,7 +156,7 @@ class TestMarkdownGeneration:
 
     def test_clauses_to_markdown_structure(self):
         """Generated Markdown should have frontmatter, H1 title, and H2 clauses."""
-        from lib.rag_engine.preprocessor import clauses_to_markdown, ClauseEntry, generate_frontmatter
+        from lib.doc_parser.kb.converter.excel_to_md import clauses_to_markdown, ClauseEntry, generate_frontmatter
 
         fm = generate_frontmatter("01_负面清单检查", "负面清单", [])
         clauses = [
@@ -174,7 +174,7 @@ class TestMarkdownGeneration:
 
     def test_clauses_to_markdown_no_metadata_no_blockquote(self):
         """Clauses without metadata should not produce blockquote lines."""
-        from lib.rag_engine.preprocessor import clauses_to_markdown, ClauseEntry, generate_frontmatter
+        from lib.doc_parser.kb.converter.excel_to_md import clauses_to_markdown, ClauseEntry, generate_frontmatter
 
         fm = generate_frontmatter("00_保险法", "保险法", [])
         clauses = [ClauseEntry(sequence=1, content="无标签条款")]
@@ -184,27 +184,27 @@ class TestMarkdownGeneration:
 
     def test_format_metadata_block(self):
         """Metadata block should use pipe separator."""
-        from lib.rag_engine.preprocessor import format_metadata_block
+        from lib.doc_parser.kb.converter.excel_to_md import format_metadata_block
 
         result = format_metadata_block({"险种大类": "人身保险", "险种类型": "寿险"})
         assert "险种大类=人身保险 | 险种类型=寿险" in result
 
     def test_format_metadata_block_empty(self):
         """Empty metadata should return empty string."""
-        from lib.rag_engine.preprocessor import format_metadata_block
+        from lib.doc_parser.kb.converter.excel_to_md import format_metadata_block
 
         assert format_metadata_block({}) == ""
 
     def test_safe_filename(self):
         """Should remove unsafe characters and replace spaces."""
-        from lib.rag_engine.preprocessor import _safe_filename
+        from lib.doc_parser.kb.converter.excel_to_md import _safe_filename
 
         assert _safe_filename('关于"分红险"的规定（2025年）') == "关于分红险的规定2025年"
         assert _safe_filename("  extra  spaces  ") == "extra_spaces"
 
     def test_simplify_regulation_name_strips_agency_and_doc_number(self):
         """Should remove 发文机关 and 文号 from regulation names."""
-        from lib.rag_engine.preprocessor import _simplify_regulation_name
+        from lib.doc_parser.kb.converter.excel_to_md import _simplify_regulation_name
 
         # Full name with agency and doc number
         result = _simplify_regulation_name(
@@ -214,7 +214,7 @@ class TestMarkdownGeneration:
 
     def test_simplify_regulation_name_preserves_topic(self):
         """Should not modify names that have no agency or doc number."""
-        from lib.rag_engine.preprocessor import _simplify_regulation_name
+        from lib.doc_parser.kb.converter.excel_to_md import _simplify_regulation_name
 
         assert _simplify_regulation_name("关于规范短期健康保险业务有关问题的通知") == \
             "关于规范短期健康保险业务有关问题的通知"
@@ -225,7 +225,7 @@ class TestMarkdownGeneration:
 
     def test_simplify_regulation_name_bracketed_doc_number(self):
         """Should remove bracketed doc numbers like （银保监办发〔2021〕7号）."""
-        from lib.rag_engine.preprocessor import _simplify_regulation_name
+        from lib.doc_parser.kb.converter.excel_to_md import _simplify_regulation_name
 
         result = _simplify_regulation_name(
             "中国银保监会办公厅关于规范短期健康保险业务有关问题的通知（银保监办发〔2021〕7号）"
@@ -236,7 +236,7 @@ class TestMarkdownGeneration:
 
     def test_simplify_negative_list_name_with_version(self):
         """Should strip 负面清单 prefix and version, extract version to extra."""
-        from lib.rag_engine.preprocessor import _simplify_negative_list_name
+        from lib.doc_parser.kb.converter.excel_to_md import _simplify_negative_list_name
 
         name, extra = _simplify_negative_list_name("\u201c负面清单\u201d2025版产品报送管理")
         assert name == "产品报送管理"
@@ -244,7 +244,7 @@ class TestMarkdownGeneration:
 
     def test_simplify_negative_list_name_with_parens(self):
         """Should handle （2025版）： format."""
-        from lib.rag_engine.preprocessor import _simplify_negative_list_name
+        from lib.doc_parser.kb.converter.excel_to_md import _simplify_negative_list_name
 
         name, extra = _simplify_negative_list_name(
             "\u201c负面清单\u201d\uff082025版\uff09\uff1a产品条款表述"
@@ -254,7 +254,7 @@ class TestMarkdownGeneration:
 
     def test_simplify_negative_list_name_preserves_topic(self):
         """Should not strip 负面清单 when it is part of the topic."""
-        from lib.rag_engine.preprocessor import _simplify_negative_list_name
+        from lib.doc_parser.kb.converter.excel_to_md import _simplify_negative_list_name
 
         name, extra = _simplify_negative_list_name("负面清单未提及的银保监系统通报问题")
         assert name == "负面清单未提及的银保监系统通报问题"
@@ -266,7 +266,7 @@ class TestRegulationNameParser:
 
     def test_parse_regulation_names_single(self):
         """Should parse single regulation with agency and doc number."""
-        from lib.rag_engine.preprocessor import parse_regulation_names
+        from lib.doc_parser.kb.converter.excel_to_md import parse_regulation_names
         from unittest.mock import patch
 
         mock_response = [
@@ -295,7 +295,7 @@ class TestRegulationNameParser:
 
     def test_parse_regulation_names_multi_regulation(self):
         """Should handle multiple regulations merged with & separator."""
-        from lib.rag_engine.preprocessor import parse_regulation_names
+        from lib.doc_parser.kb.converter.excel_to_md import parse_regulation_names
         from unittest.mock import patch
 
         mock_response = [
@@ -323,7 +323,7 @@ class TestRegulationNameParser:
 
     def test_parse_regulation_names_no_doc_number(self):
         """Should handle regulations without doc numbers."""
-        from lib.rag_engine.preprocessor import parse_regulation_names
+        from lib.doc_parser.kb.converter.excel_to_md import parse_regulation_names
         from unittest.mock import patch
 
         mock_response = [
@@ -348,14 +348,14 @@ class TestRegulationNameParser:
 
     def test_parse_regulation_names_empty_input(self):
         """Should return empty dict for empty input."""
-        from lib.rag_engine.preprocessor import parse_regulation_names
+        from lib.doc_parser.kb.converter.excel_to_md import parse_regulation_names
 
         result = parse_regulation_names([])
         assert result == {}
 
     def test_parse_regulation_names_llm_failure(self):
         """Should return empty dict when LLM returns invalid JSON."""
-        from lib.rag_engine.preprocessor import parse_regulation_names
+        from lib.doc_parser.kb.converter.excel_to_md import parse_regulation_names
         from unittest.mock import patch
 
         with patch("lib.llm.factory.LLMClientFactory.create_name_parser_llm") as mock_factory:
@@ -373,7 +373,7 @@ class TestFrontmatterWithMetadata:
 
     def test_frontmatter_with_agencies_and_doc_numbers(self):
         """Should include 发文机关 and 文号 in frontmatter when parsed info provided."""
-        from lib.rag_engine.preprocessor import generate_frontmatter
+        from lib.doc_parser.kb.converter.excel_to_md import generate_frontmatter
 
         parsed_info = {
             "short_name": "规范短期健康保险业务有关问题的通知",
@@ -395,7 +395,7 @@ class TestFrontmatterWithMetadata:
 
     def test_frontmatter_without_parsed_info(self):
         """Should omit 发文机关 and 文号 when no parsed info."""
-        from lib.rag_engine.preprocessor import generate_frontmatter
+        from lib.doc_parser.kb.converter.excel_to_md import generate_frontmatter
 
         fm = generate_frontmatter(
             collection="01_负面清单检查",

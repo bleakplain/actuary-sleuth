@@ -160,11 +160,11 @@ def parse_sheet_structure(sheet, sheet_name: str) -> SheetStructure:
                 continue
             if current_sub["name"] and current_sub["start_row"] != row_idx:
                 sub_regulations.append(dict(current_sub))
-            # 清理子法规名称：去掉换行后的括号注释（如 "\n（适用于互联网产品）"）
             clean_name = re.sub(r'\n[（(][^）)]*[）)]', '', cell_a_str)
             current_sub = {
                 "name": clean_name,
-                "start_row": row_idx + 1,            }
+                "start_row": row_idx + 1,
+            }
     if current_sub["name"]:
         sub_regulations.append(dict(current_sub))
 
@@ -231,7 +231,7 @@ def generate_frontmatter(
     parsed_info: Optional[dict] = None,
 ) -> str:
     """生成 YAML frontmatter。"""
-    import yaml  # type: ignore[import-untyped]
+    import yaml
 
     insurance_type = ""
     if collection and collection not in _NON_INSURANCE_TYPE_DIRS and "_" in collection:
@@ -332,7 +332,6 @@ def ocr_image(image_data: bytes) -> str:
         llm.close()
 
 
-
 def _simplify_regulation_name(name: str) -> str:
     """从法规名称中移除发文机关和文号，保留主题名称。
 
@@ -370,7 +369,6 @@ def _simplify_negative_list_name(name: str) -> tuple:
 
     Returns:
         (simplified_name, extra_info_or_None)
-        如 ('"负面清单"2025版产品报送管理', '2025版') → ('产品报送管理', '2025版')
     """
     extra = None
     ver_match = re.search(r'(\d{4})版', name)
@@ -384,7 +382,7 @@ def _simplify_negative_list_name(name: str) -> tuple:
     return (clean, extra)
 
 
-def _extract_json_array(text: str) -> Optional[str]:
+def extract_json_array(text: str) -> Optional[str]:
     """从 LLM 返回文本中提取 JSON 数组，处理 thinking 文本和 code block。"""
     start = text.find('[')
     if start == -1:
@@ -458,7 +456,7 @@ def parse_regulation_names(
     llm = LLMClientFactory.create_name_parser_llm()
     try:
         result = llm.generate(prompt, temperature=0.0, max_tokens=8192)
-        json_str = _extract_json_array(result)
+        json_str = extract_json_array(result)
         if not json_str:
             logger.error("LLM 返回内容中未找到有效 JSON 数组")
             logger.debug(f"LLM response (first 500 chars): {result[:500]}")
@@ -486,7 +484,16 @@ def convert_excel_to_markdown(
     output_dir: str,
     skip_ocr: bool = False,
 ) -> Path:
-    """主转换函数：Excel → Markdown 知识库。"""
+    """主转换函数：Excel → Markdown 知识库。
+
+    Args:
+        excel_path: Excel 检查清单文件路径
+        output_dir: 输出目录路径
+        skip_ocr: 是否跳过 OCR 图片处理
+
+    Returns:
+        Path: 输出目录路径
+    """
     import openpyxl
 
     output_path = Path(output_dir)
@@ -513,7 +520,6 @@ def convert_excel_to_markdown(
         else:
             all_regulations.append((structure.regulation_name, sheet_name, dir_name, structure))
 
-    # 批量解析法规名称
     regulation_names = [r[0] for r in all_regulations if r[0]]
     parsed_map = {}
     if regulation_names:
@@ -536,13 +542,11 @@ def convert_excel_to_markdown(
         tags = [reg_name] if reg_name else []
         parsed_info = parsed_map.get(reg_name)
 
-        # 文件名：优先使用 LLM 解析的 short_name
         if parsed_info and parsed_info.get("short_name"):
             safe_name = parsed_info["short_name"]
         else:
             safe_name = reg_name
 
-        # 负面清单检查目录：去掉"负面清单"前缀和引号，提取版本号到 extra_info
         if dir_name == "01_负面清单检查":
             safe_name, extra = _simplify_negative_list_name(safe_name)
             if extra and parsed_info:
@@ -652,7 +656,7 @@ def main():
 
     output = args.output
     if not output:
-        repo_root = Path(__file__).parent.parent.parent.parent
+        repo_root = Path(__file__).parent.parent.parent.parent.parent
         output = str(repo_root / "references")
 
     logging.basicConfig(
