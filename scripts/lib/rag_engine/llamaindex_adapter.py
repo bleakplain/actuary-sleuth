@@ -230,51 +230,6 @@ class ZhipuEmbeddingAdapter(BaseEmbedding):
         return self._model
 
 
-class JinaEmbeddingAdapter(BaseEmbedding):
-    """Jina v5 嵌入适配器（通过 Ollama 调用，自动添加 task-specific 前缀）"""
-
-    _PREFIX_QUERY = "search_query: "
-    _PREFIX_PASSAGE = "passage: "
-
-    def __init__(
-        self,
-        model_name: str = "jinaai/jina-embeddings-v5-text-small",
-        base_url: str = "http://localhost:11434",
-        embed_batch_size: int = 50,
-    ):
-        from llama_index.embeddings.ollama import OllamaEmbedding
-        super().__init__(
-            model_name=model_name,
-            embed_batch_size=embed_batch_size,
-        )
-        self._ollama_embed = OllamaEmbedding(
-            model_name=model_name,
-            base_url=base_url,
-            embed_batch_size=embed_batch_size,
-        )
-
-    def _get_query_embedding(self, query: str) -> List[float]:
-        prefixed = self._PREFIX_QUERY + query
-        return self._ollama_embed.get_text_embedding(prefixed)
-
-    def _get_text_embedding(self, text: str) -> List[float]:
-        prefixed = self._PREFIX_PASSAGE + text
-        return self._ollama_embed.get_text_embedding(prefixed)
-
-    def _get_text_embeddings(self, texts: List[str]) -> List[List[float]]:
-        prefixed = [self._PREFIX_PASSAGE + t for t in texts]
-        return self._ollama_embed._get_text_embeddings(prefixed)  # type: ignore[attr-defined]
-
-    async def _aget_query_embedding(self, query: str) -> List[float]:
-        return await asyncio.to_thread(self._get_query_embedding, query)
-
-    async def aget_text_embedding(self, text: str) -> List[float]:
-        return await asyncio.to_thread(self.get_text_embedding, text)
-
-    async def aget_text_embeddings(self, texts: List[str]) -> List[List[float]]:
-        return await asyncio.to_thread(self._get_text_embeddings, texts)
-
-
 def _create_embedding_model(cfg):
     provider = cfg.provider
     model = cfg.model
@@ -291,12 +246,6 @@ def _create_embedding_model(cfg):
             embed_batch_size=50,
         )
     elif provider == 'ollama':
-        if 'jina' in model:
-            return JinaEmbeddingAdapter(
-                model_name=model,
-                base_url=base_url,
-                embed_batch_size=50,
-            )
         return OllamaEmbedding(
             model_name=model,
             base_url=base_url,
@@ -304,3 +253,25 @@ def _create_embedding_model(cfg):
         )
     else:
         raise ValueError(f"Unsupported embedding provider: {provider}")
+
+
+def get_embedding_model(config: Dict[str, Any]):
+    """Create embedding model from config dict.
+
+    Args:
+        config: Dict with keys 'provider', 'model', 'host'/'base_url'
+
+    Returns:
+        Embedding model instance
+    """
+    from llama_index.embeddings.ollama import OllamaEmbedding
+
+    provider = config.get('provider', 'ollama')
+    model = config.get('model', '')
+    base_url = config.get('host') or config.get('base_url', 'http://localhost:11434')
+
+    return OllamaEmbedding(
+        model_name=model,
+        base_url=base_url,
+        embed_batch_size=50,
+    )

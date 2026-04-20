@@ -30,7 +30,28 @@ _ANSWER_SENTENCE_PATTERN = re.compile(r'[^。！？\n]+[。！？\n]?')
 _SEMANTIC_RELEVANCE_THRESHOLD = 0.65
 _SENTENCE_COVERAGE_THRESHOLD = 0.4
 
+# 泛化关键词：过于通用的词汇，不适合作为证据关键词
+GENERIC_KEYWORDS = frozenset([
+    '保险', '规定', '条款', '要求', '情况', '内容', '范围', '方式',
+    '条件', '标准', '原则', '办法', '措施', '制度', '程序', '责任',
+    '义务', '权利', '期限', '金额', '比例', '比例', '费用', '金额',
+])
+
 _embed_model: Optional[Any] = None
+
+
+def _normalize_doc_name(doc_name: str) -> str:
+    """规范化文档名称，用于匹配比较。
+
+    移除 .md 后缀、下划线、目录前缀等，返回小写的标准化名称。
+    """
+    if not doc_name:
+        return ""
+    name = doc_name.replace('.md', '').replace('.txt', '')
+    name = name.replace('_', '')
+    if '/' in name:
+        name = name.split('/')[-1]
+    return name.lower().strip()
 
 
 def _get_embed_model():
@@ -74,6 +95,7 @@ class RetrievalEvalReport:
     ndcg: float = 0.0
     redundancy_rate: float = 0.0
     context_relevance: float = 0.0
+    rejection_rate: Optional[float] = None
     by_type: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -84,6 +106,7 @@ class RetrievalEvalReport:
             'ndcg': self.ndcg,
             'redundancy_rate': self.redundancy_rate,
             'context_relevance': self.context_relevance,
+            'rejection_rate': self.rejection_rate,
             'by_type': self.by_type,
         }
 
@@ -188,6 +211,41 @@ class RAGEvalReport:
         print("=" * 70 + "\n")
 
 
+def _load_eval_synonyms() -> Dict[str, List[str]]:
+    """加载评估用的同义词表"""
+    try:
+        from pathlib import Path
+        syn_file = Path(__file__).parent / 'data' / 'synonyms.json'
+        if syn_file.exists():
+            import json
+            with open(syn_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+_EVAL_SYNONYMS: Dict[str, List[str]] = _load_eval_synonyms()
+
+
+def _expand_keywords_with_synonyms(keywords: List[str]) -> List[str]:
+    """扩展关键词，包含同义词"""
+    expanded = list(keywords)
+    for kw in keywords:
+        if kw in _EVAL_SYNONYMS:
+            expanded.extend(_EVAL_SYNONYMS[kw])
+        for standard, variants in _EVAL_SYNONYMS.items():
+            if kw in variants or kw == standard:
+                expanded.append(standard)
+                expanded.extend(variants)
+    return list(set(expanded))
+
+
+def _filter_generic_keywords(keywords: List[str]) -> List[str]:
+    """过滤掉过于通用的关键词"""
+    return [kw for kw in keywords if kw not in GENERIC_KEYWORDS]
+
+
 def _contains_keyword(content: str, keywords: List[str]) -> bool:
     return any(kw in content for kw in keywords if len(kw) >= 2)
 
@@ -202,8 +260,11 @@ def _is_relevant(
     source_file = result.get('source_file', '')
     law_name = result.get('law_name', '')
 
-    if evidence_keywords:
-        long_keywords = [kw for kw in evidence_keywords if len(kw) >= 2]
+    filtered_keywords = _filter_generic_keywords(evidence_keywords)
+    expanded_keywords = _expand_keywords_with_synonyms(filtered_keywords)
+
+    if filtered_keywords:
+        long_keywords = [kw for kw in filtered_keywords if len(kw) >= 2]
         if long_keywords:
             matched = sum(1 for kw in long_keywords if kw in content)
             threshold = max(2, int(len(long_keywords) * 0.6))
@@ -212,17 +273,17 @@ def _is_relevant(
 
     doc_set = set(evidence_docs)
     if source_file and source_file in doc_set and evidence_keywords:
-        if _contains_keyword(content, evidence_keywords):
+        if _contains_keyword(content, expanded_keywords):
             return True
 
     if law_name and evidence_docs:
         for doc in evidence_docs:
             doc_stem = doc.replace('.md', '').replace('_', '')
             if doc_stem and len(doc_stem) >= 4 and doc_stem in law_name:
-                if evidence_keywords and _contains_keyword(content, evidence_keywords):
+                if evidence_keywords and _contains_keyword(content, expanded_keywords):
                     return True
 
-    query_for_embed = original_query if original_query else ' '.join(evidence_keywords)
+    query_for_embed = original_query if original_query else ' '.join(filtered_keywords)
     if query_for_embed and len(query_for_embed) >= 4:
         similarity = _compute_embedding_similarity(query_for_embed, content)
         if similarity >= _SEMANTIC_RELEVANCE_THRESHOLD:
@@ -436,6 +497,7 @@ class RetrievalEvaluator:
         """
         all_results: List[Dict[str, Any]] = []
         by_type_results: Dict[str, List[Dict[str, Any]]] = {}
+        samples_for_recall: List[Dict[str, Any]] = []
 
         for idx, sample in enumerate(samples):
             result = self.evaluate(sample, top_k=top_k)
@@ -444,6 +506,9 @@ class RetrievalEvaluator:
             qtype = sample.question_type.value
             by_type_results.setdefault(qtype, []).append(result)
 
+            if sample.question_type != QuestionType.UNANSWERABLE:
+                samples_for_recall.append(result)
+
             if on_progress:
                 on_progress(idx + 1, len(samples))
 
@@ -451,13 +516,20 @@ class RetrievalEvaluator:
             return RetrievalEvalReport(), []
 
         n = len(all_results)
+        n_recall = len(samples_for_recall) if samples_for_recall else 1
+        unanswerable_results = by_type_results.get(QuestionType.UNANSWERABLE.value, [])
+        n_unanswerable = len(unanswerable_results)
+        n_rejected = sum(1 for r in unanswerable_results if r['num_results'] > 0)
+        rejection_rate = n_rejected / n_unanswerable if n_unanswerable > 0 else 0.0
+
         report = RetrievalEvalReport(
             precision_at_k=sum(r['precision'] for r in all_results) / n,
-            recall_at_k=sum(r['recall'] for r in all_results) / n,
+            recall_at_k=sum(r['recall'] for r in samples_for_recall) / n_recall,
             mrr=sum(r['mrr'] for r in all_results) / n,
             ndcg=sum(r['ndcg'] for r in all_results) / n,
             redundancy_rate=sum(r['redundancy_rate'] for r in all_results) / n,
             context_relevance=sum(r['context_relevance'] for r in all_results) / n,
+            rejection_rate=rejection_rate,
         )
 
         for qtype, type_results in by_type_results.items():
