@@ -30,6 +30,7 @@ from lib.config import is_debug
 from lib.llm.trace import cleanup_trace_counters, get_llm_call_count, reset_llm_call_count, trace_span
 from lib.rag_engine.graph import AskState, GraphContext
 from lib.rag_engine.quality_detector import detect_quality
+from lib.common.cache import get_cache_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ask", tags=["法规问答"])
@@ -116,7 +117,7 @@ async def chat(req: ChatRequest):
                 reset_llm_call_count(root_span.trace_id)
                 root_span.input = {"question": req.question, "mode": req.mode}
 
-            cache = engine.cache
+            cache = get_cache_manager()
 
             if cache:
                 cached = cache.get("generation", req.question)

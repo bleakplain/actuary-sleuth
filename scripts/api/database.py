@@ -171,6 +171,19 @@ CREATE TABLE IF NOT EXISTS spans (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_spans_trace_span ON spans(trace_id, span_id);
 CREATE INDEX IF NOT EXISTS idx_spans_trace_id ON spans(trace_id);
 CREATE INDEX IF NOT EXISTS idx_spans_parent ON spans(parent_span_id);
+
+CREATE TABLE IF NOT EXISTS cache_metrics_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    hits INTEGER NOT NULL,
+    misses INTEGER NOT NULL,
+    hit_rate REAL NOT NULL,
+    memory_size INTEGER NOT NULL,
+    evictions INTEGER NOT NULL DEFAULT 0,
+    l2_size INTEGER NOT NULL DEFAULT 0,
+    namespace_metrics_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cache_metrics_ts ON cache_metrics_history(timestamp);
 """
 
 
