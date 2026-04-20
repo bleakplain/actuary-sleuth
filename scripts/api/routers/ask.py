@@ -124,6 +124,28 @@ async def chat(req: ChatRequest):
             if cache:
                 cached = cache.get("generation", req.question)
                 if cached is not None:
+                    # 缓存命中时仍需处理 session context 和 loop detection
+                    from lib.common.middleware import LoopDetectionMiddleware, SessionContextMiddleware
+
+                    old_ctx = get_session_context(session_id) or {}
+
+                    # Loop detection
+                    loop_mw = LoopDetectionMiddleware()
+                    loop_result = loop_mw.after_invoke(old_ctx, req.question)
+                    loop_detected = loop_result.get("loop_detected")
+                    loop_hint = loop_result.get("loop_hint")
+                    updated_ctx = loop_result.get("session_context", old_ctx)
+
+                    # Session context 更新
+                    ctx_mw = SessionContextMiddleware()
+                    temp_state = {
+                        "question": req.question,
+                        "answer": cached.get("answer", ""),
+                        "session_context": updated_ctx,
+                    }
+                    temp_state = ctx_mw.after_invoke(temp_state)
+                    save_session_context(session_id, temp_state["session_context"])
+
                     answer = cached.get("answer", "")
                     chunk_size = 4
                     for i in range(0, len(answer), chunk_size):
@@ -164,6 +186,9 @@ async def chat(req: ChatRequest):
                         "sources": cached.get("sources", []),
                         "unverified_claims": cached.get("unverified_claims", []),
                         "content_mismatches": cached.get("content_mismatches", []),
+                        "session_context": temp_state["session_context"],
+                        "loop_detected": loop_detected,
+                        "loop_hint": loop_hint,
                         "cached": True,
                     }
                     if trace_summary:
