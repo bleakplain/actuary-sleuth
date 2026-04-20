@@ -155,11 +155,11 @@ class SessionContextMiddleware:
 
     def _extract_entities(self, question: str, answer: str) -> List[str]:
         """提取实体"""
-        from lib.common.product import _KEYWORDS
+        from lib.common.product import PRODUCT_CATEGORIES
         text = question + answer
         entities = []
 
-        for keywords in _KEYWORDS.values():
+        for keywords in PRODUCT_CATEGORIES.values():
             for kw in keywords:
                 if kw in text:
                     entities.append(kw)
@@ -217,12 +217,8 @@ class ClarificationMiddleware:
 
     def _extract_product_type(self, question: str) -> str | None:
         """从问题中提取险种类型"""
-        from lib.common.product import _KEYWORDS
-        for keywords in _KEYWORDS.values():
-            for kw in keywords:
-                if kw in question:
-                    return kw
-        return None
+        from lib.common.product import extract_product_type
+        return extract_product_type(question)
 
 
 class LoopDetectionMiddleware:
