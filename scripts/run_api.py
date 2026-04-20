@@ -77,6 +77,7 @@ def _write_run_file(backend_pid: int, backend_port: int) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="启动 API 服务")
+    # 主仓库固定 8000，worktree 随机分配
     parser.add_argument("--port", type=int, default=0, help="端口号（0=自动分配）")
     args = parser.parse_args()
 
