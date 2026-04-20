@@ -33,7 +33,7 @@ class ChunkConfig:
 
     @classmethod
     def from_legacy(cls, max_chars: int = 3000) -> 'ChunkConfig':
-        """从旧配置迁移，保持向后兼容（无重叠）"""
+        """从旧配置创建（无重叠）"""
         return cls(max_chunk_chars=max_chars, chunk_overlap_chars=0)
 
 

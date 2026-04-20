@@ -255,7 +255,7 @@ class MdParser:
 
             section_path = heading.section_path
 
-            # 提取 blockquote 元数据（向后兼容）
+            # 提取 blockquote 元数据
             chunk_meta: Dict[str, str] = {}
             meta_match = _BLOCKQUOTE_META.search(section_text)
             if meta_match:
@@ -489,16 +489,10 @@ class MdParser:
         source_file: str,
         section_path: str,
     ) -> Dict[str, Any]:
-        """构建chunk元数据
-
-        保持向后兼容：
-        - article_number: 用于测试兼容（从 section_path 提取）
-        - section_path: 新增的完整路径
-        """
+        """构建chunk元数据"""
         metadata = doc_meta.to_chunk_metadata(section_path, source_file)
         metadata['section_path'] = section_path
         metadata['content_type'] = 'text'
-        # 向后兼容：article_number 与 section_path 相同
         metadata['article_number'] = section_path
         return metadata
 
