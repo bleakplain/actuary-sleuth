@@ -61,7 +61,7 @@
 ## Phase 5: Integration ✅
 
 - [x] T020 修改 KnowledgeBuilder 使用 MdParser in scripts/lib/rag_engine/builder.py
-- [x] T021 删除旧 chunker.py 及更新导出
+- [x] T021 删除旧 chunker.py 及 preprocessor.py，更新测试引用
 - [x] T022 运行完整测试验证向后兼容
 
 **Checkpoint**: ✅ 知识库构建流程正常，输出与原实现一致

@@ -2,8 +2,9 @@
 
 **Feature Branch**: `015-document-parser`
 **Created**: 2026-04-17
-**Status**: Draft
-**Input**: 创建独立的文档解析 package，将知识库文档解析和保险产品文档解析统一抽象，与评测系统解耦
+**Updated**: 2026-04-19
+**Status**: In Progress
+**Input**: 创建独立的文档解析 package，统一知识库文档处理流程
 
 ## Background
 
@@ -13,29 +14,77 @@
 
 | 模块 | 职责 | 问题 |
 |------|------|------|
-| `rag_engine/chunker.py` | Markdown 分块 | 知识库专用，输出 TextNode |
-| `common/document_fetcher.py` | 飞书文档获取 | 仅支持飞书 URL，将被删除 |
-| `eval/clause_parser.py`（计划中）| Word/PDF 条款解析 | 审核专用，输出 Clause |
+| `rag_engine/preprocessor.py` | Excel → Markdown | 属于知识库预处理，但放在 rag_engine |
+| `rag_engine/chunker.py` | Markdown → TextNode | 属于知识库解析，但放在 rag_engine |
+| `common/document_fetcher.py` | 飞书文档获取 | 废弃代码，应删除 |
 
 **问题**：
-1. 没有统一的文档解析抽象层，无法复用
-2. 知识库文档和保险产品文档解析逻辑分散，维护成本高
-3. 不同格式（Markdown、Word、PDF）缺乏统一接口
-4. 飞书文档同步代码不再需要，应删除
-
-**注意**：`rag_engine/preprocessor.py` 负责 Excel→Markdown 转换，属于知识库预处理，不在本模块范围内。
+1. 知识库文档处理流程 (Excel → Markdown → TextNode) 职责分散
+2. preprocessor 放在 rag_engine 下，但实际是文档格式转换，与检索无关
+3. 没有统一的文档解析抽象层
 
 ### 目标
 
-创建独立的 `lib/doc_parser` package，统一处理：
-- **知识库文档**：Markdown 文件解析为 TextNode（供 RAG 检索）
-- **保险产品文档**：Word/PDF 解析为结构化审核数据（供审核评测）
+创建独立的 `lib/doc_parser` package，按职责清晰划分：
+
+```
+doc_parser/
+├── __init__.py           # 公共接口 (只导出 parse_xxx 函数)
+├── models.py             # 数据模型定义
+├── kb/                   # 知识库文档处理
+│   ├── __init__.py       # 导出 parse_knowledge_base
+│   ├── parser.py         # 编排器 (内部)
+│   ├── md_parser.py      # Markdown 解析器 (内部)
+│   └── converter/        # Excel → Markdown 转换 (已迁移)
+│       ├── __init__.py
+│       └── excel_to_md.py
+└── pd/                   # 产品文档解析
+    ├── __init__.py       # 导出 parse_product_document
+    ├── parser.py         # 编排器 (内部)
+    ├── docx_parser.py    # Word 解析 (内部)
+    ├── pdf_parser.py     # PDF 解析 (内部)
+    ├── section_detector.py  # 内容类型检测 (内部)
+    ├── utils.py          # 共享工具函数 (内部)
+    └── data/
+        └── keywords.json # 关键词配置
+```
+
+**设计原则**：
+- 公共接口最小化，只暴露 `parse_knowledge_base` 和 `parse_product_document`
+- 内部实现可通过完整路径导入，但不推荐外部使用
+- 数据模型 (models.py) 对外暴露，供外部模块使用
+
+**职责边界**：
+- `doc_parser/kb/` — 知识库文档处理，输出 `List[TextNode]` 给 `rag_engine`
+- `doc_parser/pd/` — 产品文档解析，输出 `AuditDocument` 给审核评测
+- `rag_engine/` — 仅负责检索：索引构建、查询、重排序
 
 ---
 
 ## User Scenarios & Testing
 
-### User Story 1 - 知识库文档解析 (Priority: P1)
+### User Story 1 - 知识库文档转换 (Priority: P1)
+
+**角色**: RAG 开发者
+
+**用户旅程**: 作为 RAG 开发者，我需要将 Excel 格式的产品开发检查清单转换为结构化 Markdown 文件，以便后续解析和索引。
+
+**Why this priority**: Excel→Markdown 是知识库处理的第一步。
+
+**Independent Test**:
+- 输入 Excel 文件，输出 Markdown 文件目录
+- 验证 frontmatter 元数据提取、条款分块、元数据标签
+
+**Acceptance Scenarios**:
+
+1. **Given** Excel 检查清单文件, **When** 执行转换, **Then** 按 sheet 拆分为多个 Markdown 文件
+2. **Given** 包含法规名称的 Excel, **When** 执行转换, **Then** 调用 LLM 提取发文机关、文号等元数据
+3. **Given** 包含险种分类列的 Excel, **When** 执行转换, **Then** 提取为 blockquote 元数据标签
+4. **Given** Excel 中嵌入的表格图片, **When** 执行转换, **Then** OCR 识别并嵌入 Markdown
+
+---
+
+### User Story 2 - 知识库文档解析 (Priority: P1)
 
 **角色**: RAG 开发者
 
@@ -57,7 +106,7 @@
 
 ---
 
-### User Story 2 - 保险产品条款解析 (Priority: P1)
+### User Story 3 - 保险产品条款解析 (Priority: P1)
 
 **角色**: 精算审核人员
 
@@ -80,7 +129,7 @@
 
 ---
 
-### User Story 3 - 多内容类型解析 (Priority: P1)
+### User Story 4 - 多内容类型解析 (Priority: P1)
 
 **角色**: 精算审核人员
 
@@ -103,7 +152,7 @@
 
 ---
 
-### User Story 4 - 飞书文档同步代码删除 (Priority: P2)
+### User Story 5 - 飞书文档同步代码删除 (Priority: P2)
 
 **角色**: RAG 开发者
 
@@ -124,7 +173,7 @@
 
 ---
 
-### User Story 5 - 解析错误处理 (Priority: P2)
+### User Story 6 - 解析错误处理 (Priority: P2)
 
 **角色**: RAG 开发者
 
@@ -282,42 +331,31 @@ class DocumentParseError(Exception):
 ```python
 # lib/doc_parser/__init__.py
 
-# 数据模型（供外部模块使用）
+# 数据模型
 from .models import (
-    Clause,
-    PremiumTable,
-    DocumentSection,
-    AuditDocument,
-    DocumentParseError,
-    SectionType,
+    Clause, PremiumTable, DocumentSection, AuditDocument,
+    DocumentParseError, SectionType, DocumentMeta,
 )
 
-# 基类 (供扩展新解析器使用)
-from .parser import KnowledgeBaseParser, ProductDocumentParser
+# kb 场景接口
+from .kb import parse_knowledge_base  # Markdown → List[TextNode]
 
-# 解析器类 (供高级用户直接使用)
-from .md_parser import MdParser              # Markdown 解析器
-from .docx_parser import DocxParser          # Word 解析器
-from .pdf_parser import PdfParser            # PDF 解析器
-
-# 便捷接口 (推荐使用，自动路由)
-from .parser import (
-    parse_knowledge_base,    # 知识库文档 → List[TextNode]
-    parse_product_document,  # 产品文档 → AuditDocument
-)
+# pd 场景接口
+from .pd import parse_product_document  # Word/PDF → AuditDocument
 
 __all__ = [
     # 数据模型
     'Clause', 'PremiumTable', 'DocumentSection', 'AuditDocument',
-    'DocumentParseError', 'SectionType',
-    # 基类
-    'KnowledgeBaseParser', 'ProductDocumentParser',
-    # 解析器类
-    'MdParser', 'DocxParser', 'PdfParser',
-    # 便捷接口
-    'parse_knowledge_base', 'parse_product_document',
+    'DocumentParseError', 'SectionType', 'DocumentMeta',
+    # kb 接口
+    'parse_knowledge_base',
+    # pd 接口
+    'parse_product_document',
 ]
-\n```\n
+```
+
+**注意**：`MdParser` 是内部实现，不对外暴露。`convert_excel_to_markdown` 在 `kb` 子模块公开，顶层不导出，外部模块可按需导入。
+
 ---
 
 ## Assumptions
