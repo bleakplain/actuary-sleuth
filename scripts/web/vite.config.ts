@@ -5,13 +5,16 @@ import path from 'path'
 
 function getApiPort(): number {
   const runFile = path.resolve(__dirname, '../.run')
-  const content = fs.readFileSync(runFile, 'utf-8')
-  const match = content.match(/^backend_port=(\d+)/m)
-  if (!match) {
-    console.error('Error: backend_port not found in .run file. Start backend first.')
-    process.exit(1)
+  try {
+    const content = fs.readFileSync(runFile, 'utf-8')
+    const match = content.match(/^backend_port=(\d+)/m)
+    if (match) {
+      return parseInt(match[1], 10)
+    }
+  } catch {
+    // .run file not found, use default
   }
-  return parseInt(match[1], 10)
+  return 8000
 }
 
 export default defineConfig({
@@ -19,8 +22,6 @@ export default defineConfig({
   cacheDir: '/tmp/vite_cache',
   server: {
     host: '0.0.0.0',
-    port: 8000,
-    strictPort: true,
     proxy: {
       '/api': {
         target: `http://localhost:${getApiPort()}`,

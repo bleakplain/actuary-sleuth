@@ -413,6 +413,18 @@ def get_models_dir() -> str:
 def get_llm_config() -> LLMConfig:
     return _get_config().llm
 
+def is_cache_enabled() -> bool:
+    return _get_config().enable_cache
+
+def get_embedding_cache_ttl() -> int:
+    return _get_config().cache.get("embedding_ttl", 86400)
+
+def get_retrieval_cache_ttl() -> int:
+    return _get_config().cache.get("retrieval_ttl", 3600)
+
+def get_generation_cache_ttl() -> int:
+    return _get_config().cache.get("generation_ttl", 3600)
+
 
 def get_qa_llm_config() -> SimpleNamespace:
     return get_llm_config().qa

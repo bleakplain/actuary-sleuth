@@ -41,7 +41,7 @@ class TestBasicGetSet:
     def test_get_miss_returns_none(self, cm):
         assert cm.get("generation", "nonexistent") is None
 
-    def test_namespace_isolation(self, cm):
+    def test_scope_isolation(self, cm):
         cm.set("embedding", "text1", [0.1, 0.2])
         cm.set("retrieval", "text1", [{"score": 0.9}])
         assert cm.get("embedding", "text1") == [0.1, 0.2]
@@ -60,7 +60,7 @@ class TestTTL:
         time.sleep(1.1)
         assert cm.get("generation", "q1") is None
 
-    def test_default_ttl_per_namespace(self, cache_db):
+    def test_default_ttl_per_scope(self, cache_db):
         cm = CacheManager(db_path=cache_db, max_memory_entries=10)
         cm.set("embedding", "text1", [0.1, 0.2])
         assert cm.get("embedding", "text1") is not None
@@ -73,7 +73,7 @@ class TestLRU:
             cm.set("generation", f"q{i}", f"answer_{i}")
         assert len(cm._memory) <= 5
         stats = cm.get_stats()
-        assert stats["memory_size"] <= 5
+        assert stats.memory_size <= 5
 
     def test_lru_update_on_access(self, cache_db):
         cm = CacheManager(db_path=cache_db, max_memory_entries=5)
@@ -167,27 +167,27 @@ class TestKBVersionEviction:
 class TestStats:
     def test_initial_stats(self, cm):
         stats = cm.get_stats()
-        assert stats["hits"] == 0
-        assert stats["misses"] == 0
-        assert stats["hit_rate"] == 0
-        assert stats["memory_size"] == 0
+        assert stats.hits == 0
+        assert stats.misses == 0
+        assert stats.hit_rate == 0
+        assert stats.memory_size == 0
 
     def test_hit_miss_tracking(self, cm):
         cm.get("generation", "miss")
         cm.set("generation", "hit", "value")
         cm.get("generation", "hit")
         stats = cm.get_stats()
-        assert stats["hits"] == 1
-        assert stats["misses"] == 1
-        assert stats["hit_rate"] == 0.5
+        assert stats.hits == 1
+        assert stats.misses == 1
+        assert stats.hit_rate == 0.5
 
-    def test_namespace_stats(self, cm):
+    def test_scope_stats(self, cm):
         cm.get("embedding", "miss")
         cm.set("generation", "hit", "value")
         cm.get("generation", "hit")
         stats = cm.get_stats()
-        assert stats["by_namespace"]["embedding"]["misses"] == 1
-        assert stats["by_namespace"]["generation"]["hits"] == 1
+        assert stats.by_scope["embedding"].misses == 1
+        assert stats.by_scope["generation"].hits == 1
 
 
 class TestInvalidateAll:
@@ -197,10 +197,80 @@ class TestInvalidateAll:
         cm.invalidate_all()
         assert cm.get("generation", "q1") is None
         assert cm.get("retrieval", "q1") is None
-        assert cm.get_stats()["hits"] == 0
+        assert cm.get_stats().hits == 0
 
 
 class TestSetKBVersion:
     def test_set_kb_version(self, cm):
         cm.set_kb_version("v2")
         assert cm._kb_version == "v2"
+
+
+class TestEvictionTracking:
+    def test_eviction_counter(self, cache_db):
+        """测试驱逐计数器。"""
+        cm = CacheManager(db_path=cache_db, max_memory_entries=3)
+        for i in range(5):
+            cm.set("generation", f"q{i}", f"v{i}")
+        stats = cm.get_stats()
+        assert stats.evictions >= 2  # 至少驱逐 2 个
+
+    def test_eviction_increments_on_lru(self, cache_db):
+        """测试 LRU 驱逐增加计数。"""
+        cm = CacheManager(db_path=cache_db, max_memory_entries=2)
+        cm.set("generation", "q1", "v1")
+        cm.set("generation", "q2", "v2")
+        cm.set("generation", "q3", "v3")  # 触发驱逐
+        stats = cm.get_stats()
+        assert stats.evictions == 1
+
+
+class TestGetEntries:
+    def test_list_entries(self, cm):
+        """测试列出缓存条目。"""
+        cm.set("embedding", "t1", [0.1, 0.2])
+        cm.set("retrieval", "q1", [{"score": 0.9}])
+        items, total = cm.get_entries()
+        assert total >= 2
+
+    def test_filter_by_scope(self, cm):
+        """测试按作用域筛选。"""
+        cm.set("embedding", "t1", [0.1])
+        cm.set("retrieval", "q1", [{}])
+        items, total = cm.get_entries(scope="embedding")
+        assert all(item.scope == "embedding" for item in items)
+
+    def test_pagination(self, cm):
+        """测试分页。"""
+        for i in range(10):
+            cm.set("generation", f"q{i}", f"v{i}")
+        items, total = cm.get_entries(page=1, size=5)
+        assert len(items) <= 5
+        assert total >= 10
+
+
+class TestCleanupExpired:
+    def test_cleanup_removes_expired(self, cache_db):
+        """测试清理过期条目。"""
+        cm = CacheManager(db_path=cache_db)
+        cm.set("generation", "q1", "v1", ttl=1)
+        time.sleep(1.1)
+        count = cm.cleanup_expired()
+        assert count >= 1
+
+    def test_cleanup_keeps_valid(self, cache_db):
+        """测试清理保留有效条目。"""
+        cm = CacheManager(db_path=cache_db)
+        cm.set("generation", "q1", "v1", ttl=3600)
+        count = cm.cleanup_expired()
+        assert count == 0
+        assert cm.get("generation", "q1") == "v1"
+
+
+class TestL2Size:
+    def test_l2_size_in_stats(self, cm):
+        """测试 L2 条目数统计。"""
+        cm.set("generation", "q1", "v1")
+        cm.set("embedding", "t1", [0.1])
+        stats = cm.get_stats()
+        assert stats.l2_size >= 2
