@@ -183,6 +183,10 @@ class ClarificationMiddleware:
         question = state.get("question", "")
         ctx = state.get("session_context", {})
 
+        # 检测是否是澄清选项回复，生成澄清后的问题
+        question = self._clarified_question(question, ctx)
+        state["question"] = question
+
         clarification = self._check(question, ctx)
         if clarification:
             state["next_action"] = "clarify"
@@ -192,6 +196,24 @@ class ClarificationMiddleware:
             state["next_action"] = "search"
 
         return state
+
+    def _clarified_question(self, question: str, ctx: dict) -> str:
+        """根据上下文生成澄清后的问题
+
+        当用户选择澄清选项时，结合上下文中的 topic 生成完整问题。
+        例如：用户选择"重疾险" + 上下文 topic "犹豫期" → "重疾险的犹豫期"
+        """
+        from lib.common.product import get_product_category_options
+
+        is_clarification_option = question in get_product_category_options()
+        has_topic = _extract_topic(question) is not None
+
+        if is_clarification_option and not has_topic:
+            previous_topic = ctx.get("current_topic")
+            if previous_topic:
+                return f"{question}的{previous_topic}"
+
+        return question
 
     def _check(self, question: str, ctx: dict) -> dict | None:
         """返回澄清问题，None 表示无需澄清"""

@@ -121,13 +121,23 @@ async def chat(req: ChatRequest):
 
             cache = get_cache_manager()
 
+            # 检查是否是澄清选项，生成澄清后的问题
+            from lib.common.middleware import ClarificationMiddleware
+            old_ctx = get_session_context(session_id) or {}
+            clarify_mw = ClarificationMiddleware()
+            effective_question = clarify_mw._clarified_question(req.question, old_ctx)
+
             if cache:
-                cached = cache.get("generation", req.question)
+                # 优先使用澄清后的问题查询缓存
+                cache_question = effective_question if effective_question != req.question else req.question
+                cached = cache.get("generation", cache_question)
+
                 if cached is not None:
                     # 缓存命中时仍需处理 session context 和 loop detection
-                    from lib.common.middleware import LoopDetectionMiddleware, SessionContextMiddleware
-
-                    old_ctx = get_session_context(session_id) or {}
+                    from lib.common.middleware import (
+                        LoopDetectionMiddleware,
+                        SessionContextMiddleware,
+                    )
 
                     # Loop detection
                     loop_mw = LoopDetectionMiddleware()
@@ -139,7 +149,7 @@ async def chat(req: ChatRequest):
                     # Session context 更新
                     ctx_mw = SessionContextMiddleware()
                     temp_state = {
-                        "question": req.question,
+                        "question": effective_question,
                         "answer": cached.get("answer", ""),
                         "session_context": updated_ctx,
                     }
@@ -204,11 +214,11 @@ async def chat(req: ChatRequest):
             memory_svc = get_memory_service()
             graph = get_ask_graph()
             state = AskState(
-                question=req.question, mode=req.mode, user_id=req.user_id,
+                question=effective_question, mode=req.mode, user_id=req.user_id,
                 session_id=session_id, search_results=[], memory_context="",
                 answer="", sources=[], citations=[], unverified_claims=[],
                 content_mismatches=[], faithfulness_score=None, error=None,
-                messages=[], session_context={}, skip_clarify=req.skip_clarify,
+                messages=[], session_context=old_ctx, skip_clarify=req.skip_clarify,
                 iteration_count=0, next_action="search",
                 clarification_message=None, clarification_options=None,
                 loop_detected=None, loop_hint=None,
@@ -221,12 +231,17 @@ async def chat(req: ChatRequest):
 
             # 检查是否需要澄清
             if result.get("next_action") == "clarify":
+                # 保存上下文，以便用户选择澄清选项后可以恢复
+                ctx = result.get("session_context", {})
+                if ctx:
+                    save_session_context(session_id, ctx)
+
                 yield {
                     "event": "clarify",
                     "data": json.dumps({
                         "message": result.get("clarification_message", ""),
                         "options": result.get("clarification_options", []),
-                        "session_context": result.get("session_context", {}),
+                        "session_context": ctx,
                         "original_question": req.question,  # 返回原始问题，便于前端重试
                     }, ensure_ascii=False)
                 }

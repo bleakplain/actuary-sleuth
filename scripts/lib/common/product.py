@@ -130,11 +130,11 @@ def extract_product_type(text: str) -> str | None:
 def get_product_category_options() -> List[str]:
     """获取产品类型选项列表（用于澄清选项）。
 
-    返回各 ProductCategory 的首选关键词。
+    返回各 ProductCategory 的通俗名称，带"险"后缀更符合用户习惯。
     """
     return [
-        PRODUCT_CATEGORIES[ProductCategory.CRITICAL_ILLNESS][0],  # 重大疾病
-        PRODUCT_CATEGORIES[ProductCategory.MEDICAL_INSURANCE][0],  # 医疗
-        PRODUCT_CATEGORIES[ProductCategory.ACCIDENT][0],  # 意外
-        PRODUCT_CATEGORIES[ProductCategory.LIFE_INSURANCE][0],  # 人寿
+        "重疾险",
+        "医疗险",
+        "意外险",
+        "人寿险",
     ]

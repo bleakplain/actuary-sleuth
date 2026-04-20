@@ -110,11 +110,19 @@ def clarify_user_query(state: AskState) -> dict:
 
     # 正常澄清检测
     result = _clarification_mw.before_invoke(state)
+
+    # 提取 topic 并保存到 session_context（用于后续恢复）
+    from lib.common.middleware import _extract_topic
+    topic = _extract_topic(state["question"])
+    updated_ctx = result.get("session_context", {})
+    if topic:
+        updated_ctx["current_topic"] = topic
+
     return {
         "next_action": result.get("next_action", "search"),
         "clarification_message": result.get("clarification_message"),
         "clarification_options": result.get("clarification_options"),
-        "session_context": result.get("session_context", {}),
+        "session_context": updated_ctx,
     }
 
 
