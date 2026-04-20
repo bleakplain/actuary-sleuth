@@ -3,7 +3,6 @@
 """错误处理测试"""
 import pytest
 from lib.doc_parser import parse_knowledge_base, DocumentParseError
-from lib.doc_parser.models import DocumentParseError as DPE
 
 
 class TestErrorHandling:

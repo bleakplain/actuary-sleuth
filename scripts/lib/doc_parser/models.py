@@ -55,7 +55,7 @@ class DocumentMeta:
     def to_chunk_metadata(self, article_number: str, source_file: str) -> Dict[str, Any]:
         """转换为 TextNode.metadata 格式
 
-        输出字段与现有 ChecklistChunker 完全一致，保证向量存储和检索兼容。
+        输出字段保持稳定，保证向量存储和检索兼容。
         """
         metadata: Dict[str, Any] = {
             'law_name': self.law_name,

@@ -4,7 +4,7 @@
 import math
 import pytest
 
-from scripts.lib.rag_engine.evaluator import (
+from lib.rag_engine.evaluator import (
     _is_relevant,
     _compute_redundancy_rate,
     compute_faithfulness,
