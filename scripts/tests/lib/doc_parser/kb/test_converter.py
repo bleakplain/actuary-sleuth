@@ -7,6 +7,11 @@ from pathlib import Path
 
 EXCEL_PATH = Path(__file__).parent.parent.parent.parent.parent / "references" / "1.产品开发检查清单2025年.xlsx"
 
+requires_excel_data = pytest.mark.skipif(
+    not EXCEL_PATH.exists(),
+    reason=f"Integration test requires Excel data file: {EXCEL_PATH}"
+)
+
 
 @pytest.fixture(scope="session")
 def excel_workbook():
@@ -30,6 +35,7 @@ def _find_sheet(wb, name_fragment):
 class TestSheetStructureParser:
     """Tests for parsing sheet structure from Excel."""
 
+    @requires_excel_data
     def test_list_content_sheets(self):
         """Should return only content sheets (skip '分工' and '相关法规')."""
         pytest.importorskip("openpyxl")
@@ -42,6 +48,7 @@ class TestSheetStructureParser:
         assert len(sheets) == 11
         assert any("00" in n for n in names)
 
+    @requires_excel_data
     def test_detect_regulation_boundaries_standard(self, excel_workbook):
         """Standard sheets (00, 02-05) have title in row 1, headers in row 2, regulation in row 3."""
         from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure
@@ -54,6 +61,7 @@ class TestSheetStructureParser:
         assert structure.data_start_row == 4
         assert structure.regulation_name != ""
 
+    @requires_excel_data
     def test_detect_regulation_boundaries_with_owner(self, excel_workbook):
         """Sheets with '产品开发责任人' row (01, 06-08) have headers in row 3, data in row 5."""
         from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure
@@ -65,6 +73,7 @@ class TestSheetStructureParser:
         assert structure.header_row == 3
         assert structure.data_start_row == 5
 
+    @requires_excel_data
     def test_detect_sub_regulations_in_sheet_10(self, excel_workbook):
         """Sheet 10 has multiple regulation boundaries detected by non-numeric column A."""
         from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure
@@ -76,6 +85,7 @@ class TestSheetStructureParser:
         # Sheet 10 should have multiple sub-regulations
         assert len(structure.sub_regulations) >= 5
 
+    @requires_excel_data
     def test_extract_metadata_columns(self, excel_workbook):
         """Should correctly identify metadata column indices (B-G)."""
         from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure
@@ -91,6 +101,7 @@ class TestSheetStructureParser:
 class TestClauseExtraction:
     """Tests for clause extraction and sub-regulation filtering."""
 
+    @requires_excel_data
     def test_extract_clauses_returns_entries(self, excel_workbook):
         """Should extract non-empty clause entries with sequence numbers."""
         from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure, extract_clauses
@@ -105,6 +116,7 @@ class TestClauseExtraction:
         assert all(c.content for c in clauses)
         assert all(c.row > 0 for c in clauses)
 
+    @requires_excel_data
     def test_extract_clauses_includes_metadata(self, excel_workbook):
         """Should extract metadata columns when present."""
         from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure, extract_clauses
@@ -117,6 +129,7 @@ class TestClauseExtraction:
         clauses_with_meta = [c for c in clauses if c.metadata]
         assert len(clauses_with_meta) > 0
 
+    @requires_excel_data
     def test_sheet_10_sub_regulation_filtering(self, excel_workbook):
         """Sheet 10 sub-regulations should produce separate clause groups."""
         from lib.doc_parser.kb.converter.excel_to_md import (
