@@ -172,11 +172,10 @@ class KBManager:
                 (version_id,),
             )
 
-        cache = get_cache_manager(
-            db_path=str(self.base_dir.parent / "cache.db")
-        )
-        cache.evict_kb_version(version_id)
-        cache.set_kb_version(version_id)
+        cache = get_cache_manager()
+        if cache:
+            cache.evict_kb_version(version_id)
+            cache.set_kb_version(version_id)
 
         logger.info(f"切换到知识库版本 {version_id}")
         return True

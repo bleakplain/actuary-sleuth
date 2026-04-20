@@ -8,10 +8,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Dict, Any, Optional
 
+from dotenv import load_dotenv
 
-# 路径常量
 SCRIPTS_DIR = Path(__file__).parent.parent
-CONFIG_PATH = SCRIPTS_DIR / 'config' / 'settings.json'
+load_dotenv(SCRIPTS_DIR / ".env")
 
 
 # ===== 嵌套配置类 =====
@@ -151,10 +151,6 @@ class DatabaseConfig:
     def models_dir(self) -> str:
         return self._config.get('models_dir', '')
 
-    @property
-    def tools_dir(self) -> str:
-        return self._config.get('tools_dir', '')
-
 
 # ===== 场景化 LLM 配置 =====
 
@@ -218,8 +214,7 @@ class LLMConfig:
 
 class Config:
 
-    def __init__(self, config_path: Optional[Path] = None):
-        self._config_path = config_path or CONFIG_PATH
+    def __init__(self):
         self._config: Dict[str, Any] = {}
         self._load()
         self._init_nested_configs()
@@ -234,7 +229,6 @@ class Config:
                 'kb_version_dir': os.getenv('DATA_PATHS_KB_VERSION_DIR', '/root/work/actuary-assets/kb'),
                 'eval_snapshots_dir': os.getenv('DATA_PATHS_EVAL_SNAPSHOTS_DIR', '/root/work/actuary-assets/eval/snapshots'),
                 'models_dir': os.getenv('DATA_PATHS_MODELS_DIR', '/root/work/actuary-assets/models/reranker'),
-                'tools_dir': os.getenv('DATA_PATHS_TOOLS_DIR', '/root/work/actuary-assets/tools/hanxiao-llama.cpp'),
             },
             # ollama
             'ollama': {
@@ -354,18 +348,6 @@ class Config:
         return self._config.get('enable_cache', False)
 
     @property
-    def embedding_cache_ttl(self) -> int:
-        return self._config.get('cache', {}).get('embedding_ttl', 86400)
-
-    @property
-    def retrieval_cache_ttl(self) -> int:
-        return self._config.get('cache', {}).get('retrieval_ttl', 3600)
-
-    @property
-    def generation_cache_ttl(self) -> int:
-        return self._config.get('cache', {}).get('generation_ttl', 3600)
-
-    @property
     def cache(self) -> dict:
         return self._config.get('cache', {})
 
@@ -390,9 +372,6 @@ class Config:
     def get_models_dir(self) -> str:
         return self._resolve_path(self._data_paths.models_dir)
 
-    def get_tools_dir(self) -> str:
-        return self._resolve_path(self._data_paths.tools_dir)
-
 
 # ===== 全局配置实例（单例模式）=====
 
@@ -400,17 +379,13 @@ _global_config: Optional[Config] = None
 _config_lock = threading.Lock()
 
 
-def _get_config(config_path: Optional[Path] = None) -> Config:
+def _get_config() -> Config:
     global _global_config
 
-    if _global_config is None or (config_path is not None and config_path != _global_config._config_path):
+    if _global_config is None:
         with _config_lock:
-            if _global_config is None or config_path is not None:
-                if config_path is not None and _global_config is not None:
-                    if config_path != _global_config._config_path:
-                        _global_config = Config(config_path)
-                else:
-                    _global_config = Config(config_path)
+            if _global_config is None:
+                _global_config = Config()
 
     return _global_config
 
@@ -435,11 +410,20 @@ def get_eval_snapshots_dir() -> str:
 def get_models_dir() -> str:
     return _get_config().get_models_dir()
 
-def get_tools_dir() -> str:
-    return _get_config().get_tools_dir()
-
 def get_llm_config() -> LLMConfig:
     return _get_config().llm
+
+def is_cache_enabled() -> bool:
+    return _get_config().enable_cache
+
+def get_embedding_cache_ttl() -> int:
+    return _get_config().cache.get("embedding_ttl", 86400)
+
+def get_retrieval_cache_ttl() -> int:
+    return _get_config().cache.get("retrieval_ttl", 3600)
+
+def get_generation_cache_ttl() -> int:
+    return _get_config().cache.get("generation_ttl", 3600)
 
 
 def get_qa_llm_config() -> SimpleNamespace:

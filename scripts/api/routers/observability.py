@@ -1,5 +1,7 @@
 """可测性路由 — Trace 查看与清理。"""
 
+from dataclasses import asdict
+
 from fastapi import APIRouter, HTTPException, Query
 
 from api.database import (
@@ -9,8 +11,16 @@ from api.database import (
     count_traces_for_cleanup,
     cleanup_traces,
 )
-from api.dependencies import get_rag_engine
-from api.schemas.observability import TraceListResponse, CleanupRequest, CacheEntryListResponse, CacheTrendResponse
+from api.schemas.observability import (
+    TraceListResponse,
+    CleanupRequest,
+    CacheEntryListResponse,
+    CacheTrendResponse,
+    CacheEntryResponse,
+    CacheTrendPointResponse,
+)
+from lib.common.cache import get_cache_manager
+from lib.common.cache_metrics import get_cache_trend
 
 router = APIRouter(prefix="/api/observability", tags=["可测性"])
 
@@ -65,61 +75,60 @@ async def cleanup_traces_endpoint(req: CleanupRequest):
 
 @router.get("/cache/stats")
 async def get_cache_stats():
-    try:
-        engine = get_rag_engine()
-        cache = engine.cache
-        if cache is None:
-            return {"status": "not_initialized"}
-        return cache.get_stats()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取缓存统计失败: {e}")
+    cache = get_cache_manager()
+    if cache is None:
+        return {"status": "not_initialized"}
+    stats = cache.get_stats()
+    return {
+        "memory_size": stats.memory_size,
+        "max_memory_entries": stats.max_memory_entries,
+        "hits": stats.hits,
+        "misses": stats.misses,
+        "hit_rate": stats.hit_rate,
+        "kb_version": stats.kb_version,
+        "evictions": stats.evictions,
+        "l2_size": stats.l2_size,
+        "by_scope": {
+            s: {"hits": s_stats.hits, "misses": s_stats.misses}
+            for s, s_stats in stats.by_scope.items()
+        },
+    }
 
 
 @router.get("/cache/entries", response_model=CacheEntryListResponse)
 async def list_cache_entries(
-    namespace: str = Query("", description="命名空间筛选"),
+    scope: str = Query("", description="作用域筛选"),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
 ):
-    try:
-        engine = get_rag_engine()
-        cache = engine.cache
-        if cache is None:
-            return CacheEntryListResponse(items=[], total=0)
-        ns = namespace if namespace else None
-        items, total = cache.get_entries(namespace=ns, page=page, size=size)
-        from api.schemas.observability import CacheEntry
-        return CacheEntryListResponse(
-            items=[CacheEntry(**item) for item in items],
-            total=total,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取缓存条目失败: {e}")
+    """获取缓存条目列表。"""
+    cache = get_cache_manager()
+    if cache is None:
+        return CacheEntryListResponse(items=[], total=0)
+    s = scope if scope else None
+    items, total = cache.get_entries(scope=s, page=page, size=size)
+    return CacheEntryListResponse(
+        items=[CacheEntryResponse(**asdict(item)) for item in items],
+        total=total,
+    )
 
 
 @router.get("/cache/trend", response_model=CacheTrendResponse)
 async def get_cache_trend_data(
     range_hours: int = Query(24, ge=1, le=168, description="时间范围（小时）"),
 ):
-    try:
-        from lib.common.cache_metrics import get_cache_trend
-        from api.schemas.observability import CacheTrendPoint
-        points = get_cache_trend(range_hours)
-        return CacheTrendResponse(
-            points=[CacheTrendPoint(**p) for p in points]
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取缓存趋势失败: {e}")
+    """获取缓存历史趋势数据。"""
+    points = get_cache_trend(range_hours)
+    return CacheTrendResponse(
+        points=[CacheTrendPointResponse(**asdict(p)) for p in points]
+    )
 
 
 @router.post("/cache/cleanup")
 async def cleanup_cache():
-    try:
-        engine = get_rag_engine()
-        cache = engine.cache
-        if cache is None:
-            return {"deleted": 0}
-        count = cache.cleanup_expired()
-        return {"deleted": count}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"清理缓存失败: {e}")
+    """清理过期缓存条目。"""
+    cache = get_cache_manager()
+    if cache is None:
+        return {"deleted": 0}
+    count = cache.cleanup_expired()
+    return {"deleted": count}

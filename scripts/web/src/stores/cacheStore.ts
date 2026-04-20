@@ -11,12 +11,12 @@ interface CacheState {
   entries: CacheEntry[];
   entriesTotal: number;
   entriesPage: number;
-  entriesNamespace: string;
+  entriesScope: string;
   entriesLoading: boolean;
 
   loadStats: () => Promise<void>;
   loadTrend: (rangeHours?: number) => Promise<void>;
-  loadEntries: (namespace?: string, page?: number) => Promise<void>;
+  loadEntries: (scope?: string, page?: number) => Promise<void>;
   cleanup: () => Promise<number>;
 }
 
@@ -29,7 +29,7 @@ export const useCacheStore = create<CacheState>((set, get) => ({
   entries: [],
   entriesTotal: 0,
   entriesPage: 1,
-  entriesNamespace: '',
+  entriesScope: '',
   entriesLoading: false,
 
   loadStats: async () => {
@@ -57,13 +57,13 @@ export const useCacheStore = create<CacheState>((set, get) => ({
     }
   },
 
-  loadEntries: async (namespace?: string, page?: number) => {
-    const ns = namespace ?? get().entriesNamespace;
+  loadEntries: async (scope?: string, page?: number) => {
+    const s = scope ?? get().entriesScope;
     const p = page ?? get().entriesPage;
-    set({ entriesLoading: true, entriesNamespace: ns, entriesPage: p });
+    set({ entriesLoading: true, entriesScope: s, entriesPage: p });
     try {
       const data = await api.fetchCacheEntries({
-        namespace: ns || undefined,
+        scope: s || undefined,
         page: p,
         size: 20,
       });

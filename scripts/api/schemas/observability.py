@@ -26,9 +26,12 @@ class CleanupRequest(BaseModel):
     preview: bool = True
 
 
-class CacheEntry(BaseModel):
+# ── Cache Schemas ──
+
+
+class CacheEntryResponse(BaseModel):
     key: str
-    namespace: str
+    scope: str
     created_at: float
     ttl: int
     kb_version: str
@@ -36,11 +39,11 @@ class CacheEntry(BaseModel):
 
 
 class CacheEntryListResponse(BaseModel):
-    items: List[CacheEntry] = []
+    items: List[CacheEntryResponse] = []
     total: int = 0
 
 
-class CacheTrendPoint(BaseModel):
+class CacheTrendPointResponse(BaseModel):
     timestamp: str
     hits: int
     misses: int
@@ -51,4 +54,4 @@ class CacheTrendPoint(BaseModel):
 
 
 class CacheTrendResponse(BaseModel):
-    points: List[CacheTrendPoint] = []
+    points: List[CacheTrendPointResponse] = []

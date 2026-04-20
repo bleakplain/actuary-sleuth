@@ -79,8 +79,13 @@ async def lifespan(app: FastAPI):
             logger.info("RAG 引擎初始化完成")
             from api.dependencies import init_ask_graph
             init_ask_graph()
-            from lib.common.cache_metrics import start_metrics_collector
-            start_metrics_collector(lambda: rag_engine.cache)
+            # 启动缓存指标采集器
+            from lib.common.cache import get_cache_manager
+            cache = get_cache_manager()
+            if cache:
+                from lib.common.cache_metrics import start_metrics_collector
+                start_metrics_collector(get_cache_manager)
+                logger.info("缓存指标采集器已启动")
         else:
             logger.warning("RAG 引擎初始化失败（问答功能不可用）")
     except Exception as e:
@@ -93,12 +98,18 @@ async def lifespan(app: FastAPI):
 
     memory_cleanup_task.cancel()
 
+    # 停止缓存指标采集器并关闭缓存连接
+    from lib.common.cache_metrics import stop_metrics_collector
+    stop_metrics_collector()
+    from lib.common.cache import get_cache_manager, reset_cache_manager
+    cache = get_cache_manager()
+    if cache:
+        cache.close()
+    reset_cache_manager()
+
     if rag_engine is not None:
         rag_engine.cleanup()
         logger.info("RAG 引擎已清理")
-
-    from lib.common.cache_metrics import stop_metrics_collector
-    stop_metrics_collector()
 
     from api.dependencies import on_shutdown
     on_shutdown()
