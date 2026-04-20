@@ -28,7 +28,7 @@ class KnowledgeBuilder:
 
     def __init__(self, config: Optional[RAGConfig] = None):
         self.config = config or RAGConfig()
-        self.chunker = MdParser()
+        self.chunker = MdParser(chunk_config=self.config.chunking)
         self.index_manager = VectorIndexManager(self.config)
         self._embedding_setup_done = False
 

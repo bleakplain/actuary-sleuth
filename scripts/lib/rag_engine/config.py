@@ -5,7 +5,39 @@ from typing import Optional
 from dataclasses import dataclass, field
 
 
-@dataclass
+@dataclass(frozen=True)
+class ChunkConfig:
+    """分块配置"""
+    max_chunk_chars: int = 3000
+    chunk_overlap_chars: int = 150  # 5% 重叠
+    min_chunk_chars: int = 20
+    split_by_sentence: bool = True
+
+    def __post_init__(self):
+        if self.max_chunk_chars < 500:
+            raise ValueError(f"max_chunk_chars must be >= 500, got {self.max_chunk_chars}")
+        if self.chunk_overlap_chars < 0:
+            raise ValueError(f"chunk_overlap_chars must be >= 0, got {self.chunk_overlap_chars}")
+        if self.chunk_overlap_chars >= self.max_chunk_chars:
+            raise ValueError(
+                f"chunk_overlap_chars ({self.chunk_overlap_chars}) must be < "
+                f"max_chunk_chars ({self.max_chunk_chars})"
+            )
+        if self.min_chunk_chars < 0:
+            raise ValueError(f"min_chunk_chars must be >= 0, got {self.min_chunk_chars}")
+        if self.min_chunk_chars > self.max_chunk_chars:
+            raise ValueError(
+                f"min_chunk_chars ({self.min_chunk_chars}) must be <= "
+                f"max_chunk_chars ({self.max_chunk_chars})"
+            )
+
+    @classmethod
+    def from_legacy(cls, max_chars: int = 3000) -> 'ChunkConfig':
+        """从旧配置迁移，保持向后兼容（无重叠）"""
+        return cls(max_chunk_chars=max_chars, chunk_overlap_chars=0)
+
+
+@dataclass(frozen=True)
 class RetrievalConfig:
     """检索配置（召回 + 融合 + 结果截断）"""
     vector_top_k: int = 20
@@ -23,9 +55,11 @@ class RetrievalConfig:
             raise ValueError(f"rrf_k must be >= 1, got {self.rrf_k}")
         if self.max_chunks_per_article < 1:
             raise ValueError(f"max_chunks_per_article must be >= 1, got {self.max_chunks_per_article}")
+        if not 0.0 <= self.min_rrf_score <= 1.0:
+            raise ValueError(f"min_rrf_score must be between 0.0 and 1.0, got {self.min_rrf_score}")
 
 
-@dataclass
+@dataclass(frozen=True)
 class RerankConfig:
     """重排序配置"""
     enable_rerank: bool = True
@@ -50,7 +84,7 @@ class RerankConfig:
             )
 
 
-@dataclass
+@dataclass(frozen=True)
 class GenerationConfig:
     """生成配置"""
     max_context_chars: int = 12000
@@ -61,15 +95,16 @@ class GenerationConfig:
 
 
 def config_to_dict(retrieval: RetrievalConfig, rerank: RerankConfig,
-                   generation: GenerationConfig) -> dict:
+                   generation: GenerationConfig, chunking: ChunkConfig) -> dict:
     return {
         "retrieval": vars(retrieval),
         "rerank": vars(rerank),
         "generation": vars(generation),
+        "chunking": vars(chunking),
     }
 
 
-@dataclass
+@dataclass(frozen=True)
 class RAGConfig:
     """法规 RAG 引擎配置"""
 
@@ -80,30 +115,39 @@ class RAGConfig:
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     rerank: RerankConfig = field(default_factory=RerankConfig)
     generation: GenerationConfig = field(default_factory=GenerationConfig)
+    chunking: ChunkConfig = field(default_factory=ChunkConfig)
     collection_name: str = "regulations_vectors"
 
-    def __post_init__(self):
-        from lib.config import get_regulations_dir
-
-        if not self.regulations_dir:
-            self.regulations_dir = get_regulations_dir()
-
     def to_dict(self) -> dict:
-        return config_to_dict(self.retrieval, self.rerank, self.generation)
+        return config_to_dict(self.retrieval, self.rerank, self.generation, self.chunking)
 
     @classmethod
     def from_dict(cls, data: dict) -> 'RAGConfig':
+        from lib.config import get_regulations_dir
+        regulations_dir = data.get("regulations_dir", "")
+        if not regulations_dir:
+            regulations_dir = get_regulations_dir()
         return cls(
+            regulations_dir=regulations_dir,
+            vector_db_path=data.get("vector_db_path"),
+            top_k_results=data.get("top_k_results", 5),
+            enable_streaming=data.get("enable_streaming", False),
             retrieval=RetrievalConfig(**data.get("retrieval", {})),
             rerank=RerankConfig(**data.get("rerank", {})),
             generation=GenerationConfig(**data.get("generation", {})),
+            chunking=ChunkConfig(**data.get("chunking", {})),
+            collection_name=data.get("collection_name", "regulations_vectors"),
         )
+
+    @classmethod
+    def create(cls, **kwargs) -> 'RAGConfig':
+        """创建配置实例，自动填充默认值。"""
+        from lib.config import get_regulations_dir
+        if 'regulations_dir' not in kwargs or not kwargs['regulations_dir']:
+            kwargs['regulations_dir'] = get_regulations_dir()
+        return cls(**kwargs)
 
 
 def get_config(**kwargs) -> RAGConfig:
     """获取配置实例，kwargs 覆盖默认值。"""
-    config = RAGConfig()
-    for key, value in kwargs.items():
-        if hasattr(config, key):
-            setattr(config, key, value)
-    return config
+    return RAGConfig.create(**kwargs)

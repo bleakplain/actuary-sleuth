@@ -69,7 +69,7 @@ class DocxParser:
                 continue
 
             for row in table.rows:
-                cells = [cell.text.strip() for cell in row.cells]
+                cells = [(cell.text or '').strip() for cell in row.cells]
                 if not cells or not cells[0]:
                     continue
 
@@ -87,7 +87,7 @@ class DocxParser:
             if not table.rows:
                 continue
 
-            rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
+            rows = [[(cell.text or '').strip() for cell in row.cells] for row in table.rows]
             if self.detector.is_premium_table(rows[0]):
                 raw_text = '\n'.join('\t'.join(row) for row in rows)
                 premium_tables.append(PremiumTable(raw_text=raw_text, data=rows))

@@ -88,10 +88,10 @@ class PdfParser:
                 if not row or not row[0]:
                     continue
 
-                first_cell = str(row[0]).strip() if row[0] else ''
+                first_cell = str(row[0] or '').strip()
                 if self.detector.is_clause_table(first_cell):
                     number = first_cell
-                    content = str(row[1]).strip() if len(row) > 1 and row[1] else ''
+                    content = str(row[1] or '').strip() if len(row) > 1 else ''
                     title, text = separate_title_and_text(content)
                     clauses.append(Clause(number=number, title=title, text=text))
 
@@ -105,10 +105,10 @@ class PdfParser:
             if not rows:
                 continue
 
-            header = [str(cell).strip() for cell in rows[0]] if rows else []
+            header = [str(cell or '').strip() for cell in rows[0]] if rows else []
             if self.detector.is_premium_table(header):
-                raw_text = '\n'.join('\t'.join(str(cell) for cell in row) for row in rows)
-                data = [[str(cell) for cell in row] for row in rows]
+                raw_text = '\n'.join('\t'.join(str(cell or '') for cell in row) for row in rows)
+                data = [[str(cell or '') for cell in row] for row in rows]
                 premium_tables.append(PremiumTable(raw_text=raw_text, data=data))
 
         return premium_tables
