@@ -19,9 +19,11 @@ class ScoringType:
     DEFAULT = 'default'
 
 
-# ========== 产品类别映射 ==========
+# ========== 产品类别关键词映射 ==========
 
-_KEYWORDS: Dict[ProductCategory, List[str]] = {
+# 产品类别 -> 关键词列表
+# 用于从文本中识别产品类型
+PRODUCT_CATEGORIES: Dict[ProductCategory, List[str]] = {
     ProductCategory.CRITICAL_ILLNESS: ['重大疾病', '重疾', '重大疾病保险', '重疾险'],
     ProductCategory.MEDICAL_INSURANCE: ['医疗', '医疗保险'],
     ProductCategory.LIFE_INSURANCE: ['人寿', '寿险', '终身', '人寿保险', '终身寿险', '定期寿险'],
@@ -84,7 +86,7 @@ def get_category(product_name: str) -> ProductCategory:
     if not product_name:
         return ProductCategory.OTHER
 
-    for category, keywords in _KEYWORDS.items():
+    for category, keywords in PRODUCT_CATEGORIES.items():
         for keyword in keywords:
             if keyword in product_name:
                 return category
@@ -104,3 +106,35 @@ def from_code(code: str) -> ProductCategory:
 def map_to_scoring_type(category: ProductCategory) -> str:
     """将 ProductCategory 映射到 scoring 模块的类型"""
     return CATEGORY_TO_SCORING.get(category, ScoringType.DEFAULT)
+
+
+def extract_product_type(text: str) -> str | None:
+    """从文本中提取产品类型关键词。
+
+    返回匹配到的第一个关键词（按 PRODUCT_CATEGORIES 顺序）。
+    用于会话上下文的险种识别。
+
+    Args:
+        text: 待识别的文本（问题或回答）
+
+    Returns:
+        匹配的关键词，如 "重疾险"、"医疗"，或 None
+    """
+    for keywords in PRODUCT_CATEGORIES.values():
+        for kw in keywords:
+            if kw in text:
+                return kw
+    return None
+
+
+def get_product_category_options() -> List[str]:
+    """获取产品类型选项列表（用于澄清选项）。
+
+    返回各 ProductCategory 的首选关键词。
+    """
+    return [
+        PRODUCT_CATEGORIES[ProductCategory.CRITICAL_ILLNESS][0],  # 重大疾病
+        PRODUCT_CATEGORIES[ProductCategory.MEDICAL_INSURANCE][0],  # 医疗
+        PRODUCT_CATEGORIES[ProductCategory.ACCIDENT][0],  # 意外
+        PRODUCT_CATEGORIES[ProductCategory.LIFE_INSURANCE][0],  # 人寿
+    ]

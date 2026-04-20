@@ -94,7 +94,21 @@ def load_session_context(state: AskState) -> dict:
 
 
 def clarify_user_query(state: AskState) -> dict:
-    """澄清检测"""
+    """澄清检测 + 循环检测"""
+    # 先检测循环（在处理之前检测）
+    ctx = state.get("session_context", {})
+    loop_result = _loop_mw.after_invoke(ctx, state["question"])
+
+    # 如果检测到循环，直接返回 search 并附带提示
+    if loop_result.get("loop_detected"):
+        return {
+            "next_action": "search",
+            "loop_detected": True,
+            "loop_hint": loop_result.get("loop_hint"),
+            "session_context": loop_result.get("session_context", ctx),
+        }
+
+    # 正常澄清检测
     result = _clarification_mw.before_invoke(state)
     return {
         "next_action": result.get("next_action", "search"),
@@ -205,15 +219,8 @@ def generate(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
     ctx_result = _context_mw.after_invoke(state)
     merged_ctx = ctx_result.get("session_context", {})
 
-    # Apply loop detection (updates query_history)
-    loop_result = _loop_mw.after_invoke(
-        merged_ctx,
-        state["question"],
-    )
-    result["session_context"] = loop_result.get("session_context", merged_ctx)
-    if loop_result.get("loop_detected"):
-        result["loop_detected"] = loop_result["loop_detected"]
-        result["loop_hint"] = loop_result.get("loop_hint")
+    # Update session_context (loop detection already done in clarify_user_query)
+    result["session_context"] = merged_ctx
 
     limit_result = _limit_mw.after_invoke(state.get("iteration_count", 0))
     result["iteration_count"] = limit_result["iteration_count"]
@@ -236,7 +243,7 @@ def extract_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
             metadata={"session_id": state["session_id"]},
         )
     except Exception:
-        logger.debug("记忆提取失败，跳过", exc_info=True)
+        logger.warning("记忆提取失败，跳过", exc_info=True)
     return {}
 
 
@@ -245,7 +252,7 @@ def update_user_profile(state: AskState, *, runtime: Runtime[GraphContext]) -> d
     try:
         memory_svc.update_user_profile(state["question"], state["answer"], state["user_id"])
     except Exception:
-        logger.debug("用户画像更新失败，跳过", exc_info=True)
+        logger.warning("用户画像更新失败，跳过", exc_info=True)
     return {}
 
 
@@ -258,7 +265,7 @@ def save_session_context(state: AskState) -> dict:
         try:
             save_session_context(session_id, ctx)
         except Exception:
-            logger.debug("保存会话上下文失败", exc_info=True)
+            logger.warning("保存会话上下文失败", exc_info=True)
     return {}
 
 

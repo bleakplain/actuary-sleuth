@@ -79,6 +79,56 @@ def test_graph_structure():
     assert "save_session_context" in nodes
 
 
+def test_loop_detection_in_clarify():
+    """验证循环检测在 clarify 节点执行"""
+    from lib.rag_engine.graph import clarify_user_query
+    import hashlib
+
+    # 计算 "测试问题" 的 hash
+    normalized = "测试问题".strip().lower()
+    question_hash = hashlib.md5(normalized.encode()).hexdigest()[:8]
+
+    # 模拟循环状态：最近 3 条都是相同问题
+    state = {
+        "question": "测试问题",
+        "session_context": {
+            "query_history": [question_hash, question_hash, question_hash]
+        },
+        "mode": "qa",
+        "user_id": "test",
+        "session_id": "test_session",
+    }
+
+    result = clarify_user_query(state)
+
+    # 应该检测到循环
+    assert result.get("loop_detected") is True
+    assert "loop_hint" in result
+    # 循环时应该继续搜索而不是阻塞
+    assert result.get("next_action") == "search"
+
+
+def test_no_loop_normal_flow():
+    """验证正常流程不触发循环检测"""
+    from lib.rag_engine.graph import clarify_user_query
+
+    state = {
+        "question": "新问题",
+        "session_context": {
+            "query_history": ["a", "b", "c"]  # 不同的历史
+        },
+        "mode": "qa",
+        "user_id": "test",
+        "session_id": "test_session",
+        "skip_clarify": True,
+    }
+
+    result = clarify_user_query(state)
+
+    # 不应该检测到循环
+    assert result.get("loop_detected") is None
+
+
 if __name__ == "__main__":
     test_route_by_action()
     print("test_route_by_action passed")
@@ -88,6 +138,12 @@ if __name__ == "__main__":
 
     test_graph_structure()
     print("test_graph_structure passed")
+
+    test_loop_detection_in_clarify()
+    print("test_loop_detection_in_clarify passed")
+
+    test_no_loop_normal_flow()
+    print("test_no_loop_normal_flow passed")
 
     print("")
     print("All workflow tests passed!")

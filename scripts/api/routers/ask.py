@@ -201,6 +201,7 @@ async def chat(req: ChatRequest):
                         "message": result.get("clarification_message", ""),
                         "options": result.get("clarification_options", []),
                         "session_context": result.get("session_context", {}),
+                        "original_question": req.question,  # 返回原始问题，便于前端重试
                     }, ensure_ascii=False)
                 }
                 return

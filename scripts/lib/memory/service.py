@@ -182,26 +182,21 @@ class MemoryService:
 
         try:
             with get_connection() as conn:
+                # 使用 INSERT OR REPLACE 避免 Read-Modify-Write 竞态
                 existing = conn.execute(
-                    "SELECT focus_areas, preference_tags, summary FROM user_profiles WHERE user_id = ?",
+                    "SELECT focus_areas, preference_tags FROM user_profiles WHERE user_id = ?",
                     (user_id,),
                 ).fetchone()
 
-                if existing:
-                    old_areas = json.loads(existing[0])
-                    old_tags = json.loads(existing[1])
-                    areas = list({*old_areas, *focus_areas})
-                    tags = list({*old_tags, *preference_tags})
-                    conn.execute(
-                        "UPDATE user_profiles SET focus_areas = ?, preference_tags = ?, summary = ?, updated_at = datetime('now') "
-                        "WHERE user_id = ?",
-                        (json.dumps(areas), json.dumps(tags), summary, user_id),
-                    )
-                else:
-                    conn.execute(
-                        "INSERT INTO user_profiles (user_id, focus_areas, preference_tags, summary) VALUES (?, ?, ?, ?)",
-                        (user_id, json.dumps(focus_areas), json.dumps(preference_tags), summary),
-                    )
+                # 合并现有数据
+                merged_areas = list({*json.loads(existing[0]), *focus_areas}) if existing else focus_areas
+                merged_tags = list({*json.loads(existing[1]), *preference_tags}) if existing else preference_tags
+
+                conn.execute(
+                    "INSERT OR REPLACE INTO user_profiles (user_id, focus_areas, preference_tags, summary, updated_at) "
+                    "VALUES (?, ?, ?, ?, datetime('now'))",
+                    (user_id, json.dumps(merged_areas), json.dumps(merged_tags), summary),
+                )
         except Exception:
             logger.debug("用户画像写入失败，跳过", exc_info=True)
 

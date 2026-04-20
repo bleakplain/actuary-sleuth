@@ -84,10 +84,14 @@ PRONOUN_KEYWORDS = frozenset({
     "它", "这个产品", "该产品", "那个产品"
 })
 
-PRODUCT_TYPE_OPTIONS = ["重疾险", "医疗险", "意外险", "寿险"]
-
 MAX_ENTITIES = 10
 COMPANY_KEYWORDS = frozenset({"泰康", "平安", "国寿", "太保", "新华", "人保"})
+
+
+def _get_product_type_options():
+    """获取产品类型选项（延迟加载避免循环导入）"""
+    from lib.common.product import get_product_category_options
+    return get_product_category_options()
 
 
 def _extract_topic(question: str) -> str | None:
@@ -146,12 +150,8 @@ class SessionContextMiddleware:
 
     def _extract_product_type(self, question: str) -> str | None:
         """提取险种类型"""
-        from lib.common.product import _KEYWORDS
-        for keywords in _KEYWORDS.values():
-            for kw in keywords:
-                if kw in question:
-                    return kw
-        return None
+        from lib.common.product import extract_product_type
+        return extract_product_type(question)
 
     def _extract_entities(self, question: str, answer: str) -> List[str]:
         """提取实体"""
@@ -203,7 +203,7 @@ class ClarificationMiddleware:
         if topic and not has_product_type:
             return {
                 "message": f"请问您咨询的是哪种险种的{topic}？",
-                "options": PRODUCT_TYPE_OPTIONS
+                "options": _get_product_type_options()
             }
 
         if any(p in question for p in PRONOUN_KEYWORDS):
