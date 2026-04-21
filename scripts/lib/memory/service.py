@@ -4,16 +4,23 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Protocol
 
 from lib.common.database import get_connection
 from lib.memory.base import MemoryBase, Mem0Memory
 from lib.memory.config import MemoryConfig
 from lib.memory.prompts import PROFILE_EXTRACTION_PROMPT
 
+logger = logging.getLogger(__name__)
+
+
+class UserProfileUpdateRequest(Protocol):
+    focus_areas: Optional[List[str]]
+    preference_tags: Optional[List[str]]
+    summary: Optional[str]
+
 
 class MemoryService:
-    """记忆服务层 — 面向抽象能力（记忆），不绑定具体实现。"""
 
     def __init__(self, backend: Optional[MemoryBase] = None):
         self._backend = backend
@@ -22,7 +29,6 @@ class MemoryService:
 
     @classmethod
     def create(cls) -> "MemoryService":
-        """创建记忆服务，后端初始化失败时降级为无记忆模式。"""
         backend = Mem0Memory.create()
         return cls(backend)
 
@@ -30,10 +36,11 @@ class MemoryService:
     def available(self) -> bool:
         return self._available
 
-    def search(self, query: str, user_id: str, limit: int = 3) -> List[Dict]:
-        """检索与查询相关的用户记忆。"""
+    def search(self, query: str, user_id: str, limit: Optional[int] = None) -> List[Dict]:
         if not self._available:
             return []
+        if limit is None:
+            limit = self._config.memory_search_limit if self._config else 3
         try:
             memories = self._backend.search(query, user_id, limit)
             self._update_access_stats([m["id"] for m in memories if "id" in m])
@@ -43,7 +50,6 @@ class MemoryService:
             return []
 
     def add(self, messages: List[Dict], user_id: str, metadata: Optional[Dict] = None) -> List[str]:
-        """写入记忆。"""
         if not self._available:
             return []
         try:
@@ -57,7 +63,6 @@ class MemoryService:
             return []
 
     def delete(self, memory_id: str) -> bool:
-        """删除记忆。"""
         if not self._available:
             return False
         try:
@@ -65,19 +70,19 @@ class MemoryService:
             self._soft_delete_metadata(memory_id)
             return True
         except Exception:
+            logger.debug(f"记忆删除失败: {memory_id}", exc_info=True)
             return False
 
     def get_all(self, user_id: str) -> List[Dict]:
-        """获取用户全部记忆。"""
         if not self._available:
             return []
         try:
             return self._backend.get_all(user_id)
         except Exception:
+            logger.debug("获取全部记忆失败", exc_info=True)
             return []
 
     def cleanup_expired(self) -> int:
-        """清理过期记忆 + 活跃度衰减清理。"""
         if not self._available or not self._config:
             return 0
         cfg = self._config
@@ -100,14 +105,12 @@ class MemoryService:
                     (threshold,),
                 ).fetchall()
                 cleaned += self._purge_memories(inactive)
-
         except Exception:
             logger.debug("记忆清理失败", exc_info=True)
 
         return cleaned
 
-    def get_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """获取用户画像。"""
+    def get_user_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
         try:
             with get_connection() as conn:
                 row = conn.execute(
@@ -124,10 +127,10 @@ class MemoryService:
                     "summary": row[3],
                 }
         except Exception:
+            logger.debug(f"获取用户画像失败: {user_id}", exc_info=True)
             return None
 
-    def update_profile(self, req, user_id: str) -> Dict[str, Any]:
-        """增量更新用户画像。"""
+    def patch_user_profile(self, req: UserProfileUpdateRequest, user_id: str) -> Dict[str, Any]:
         with get_connection() as conn:
             existing = conn.execute(
                 "SELECT focus_areas, preference_tags, summary FROM user_profiles WHERE user_id = ?",
@@ -154,8 +157,7 @@ class MemoryService:
             "summary": summary,
         }
 
-    def auto_update_profile(self, question: str, answer: str, user_id: str) -> None:
-        """从对话内容自动提取用户画像信息，不存在时自动创建。"""
+    def update_user_profile(self, question: str, answer: str, user_id: str) -> None:
         try:
             from lib.llm.factory import LLMClientFactory
 
@@ -180,30 +182,25 @@ class MemoryService:
 
         try:
             with get_connection() as conn:
+                # 使用 INSERT OR REPLACE 避免 Read-Modify-Write 竞态
                 existing = conn.execute(
-                    "SELECT focus_areas, preference_tags, summary FROM user_profiles WHERE user_id = ?",
+                    "SELECT focus_areas, preference_tags FROM user_profiles WHERE user_id = ?",
                     (user_id,),
                 ).fetchone()
 
-                if existing:
-                    old_areas = json.loads(existing[0])
-                    old_tags = json.loads(existing[1])
-                    areas = list({*old_areas, *focus_areas})
-                    tags = list({*old_tags, *preference_tags})
-                    conn.execute(
-                        "UPDATE user_profiles SET focus_areas = ?, preference_tags = ?, summary = ?, updated_at = datetime('now') "
-                        "WHERE user_id = ?",
-                        (json.dumps(areas), json.dumps(tags), summary, user_id),
-                    )
-                else:
-                    conn.execute(
-                        "INSERT INTO user_profiles (user_id, focus_areas, preference_tags, summary) VALUES (?, ?, ?, ?)",
-                        (user_id, json.dumps(focus_areas), json.dumps(preference_tags), summary),
-                    )
+                # 合并现有数据
+                merged_areas = list({*json.loads(existing[0]), *focus_areas}) if existing else focus_areas
+                merged_tags = list({*json.loads(existing[1]), *preference_tags}) if existing else preference_tags
+
+                conn.execute(
+                    "INSERT OR REPLACE INTO user_profiles (user_id, focus_areas, preference_tags, summary, updated_at) "
+                    "VALUES (?, ?, ?, ?, datetime('now'))",
+                    (user_id, json.dumps(merged_areas), json.dumps(merged_tags), summary),
+                )
         except Exception:
             logger.debug("用户画像写入失败，跳过", exc_info=True)
 
-    def _purge_memories(self, rows) -> int:
+    def _purge_memories(self, rows: List[tuple]) -> int:
         count = 0
         for (mem_id,) in rows:
             try:
@@ -211,23 +208,19 @@ class MemoryService:
                 self._soft_delete_metadata(mem_id)
                 count += 1
             except Exception:
-                pass
+                logger.debug(f"清理记忆失败: {mem_id}", exc_info=True)
         return count
 
     def _update_access_stats(self, memory_ids: List[str]) -> None:
         if not memory_ids:
             return
         try:
+            placeholders = ",".join("?" * len(memory_ids))
+            sql = f"UPDATE memory_metadata SET last_accessed_at = datetime('now'), access_count = access_count + 1 WHERE mem0_id IN ({placeholders})"
             with get_connection() as conn:
-                conn.execute(
-                    "UPDATE memory_metadata SET last_accessed_at = datetime('now'), "
-                    "access_count = access_count + 1 WHERE mem0_id IN ({})".format(
-                        ",".join("?" for _ in memory_ids)
-                    ),
-                    memory_ids,
-                )
+                conn.execute(sql, memory_ids)
         except Exception:
-            pass
+            logger.debug("更新访问统计失败", exc_info=True)
 
     def _insert_metadata(self, mem0_id: str, user_id: str, metadata: Optional[Dict]) -> None:
         if not self._config:
@@ -253,7 +246,7 @@ class MemoryService:
                     (mem0_id, user_id, (metadata or {}).get("session_id"), category, expires_at),
                 )
         except Exception:
-            pass
+            logger.debug(f"插入记忆元数据失败: {mem0_id}", exc_info=True)
 
     def _soft_delete_metadata(self, mem0_id: str) -> None:
         try:
@@ -262,4 +255,4 @@ class MemoryService:
                     "UPDATE memory_metadata SET is_deleted = 1 WHERE mem0_id = ?", (mem0_id,)
                 )
         except Exception:
-            pass
+            logger.debug(f"软删除记忆元数据失败: {mem0_id}", exc_info=True)

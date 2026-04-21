@@ -29,6 +29,8 @@ export interface Message {
   faithfulness_score?: number;
   unverified_claims?: string[];
   trace?: TraceData | null;
+  needsClarification?: boolean;
+  clarificationOptions?: string[];
 }
 
 export interface Session {
@@ -288,12 +290,12 @@ export interface CacheStats {
   kb_version: string;
   evictions: number;
   l2_size: number;
-  by_namespace: Record<string, { hits: number; misses: number }>;
+  by_scope: Record<string, { hits: number; misses: number }>;
 }
 
 export interface CacheEntry {
   key: string;
-  namespace: string;
+  scope: string;
   created_at: number;
   ttl: number;
   kb_version: string;

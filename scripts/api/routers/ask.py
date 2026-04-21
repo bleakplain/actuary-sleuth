@@ -19,6 +19,8 @@ from api.database import (
     get_sessions,
     get_messages,
     get_trace_by_message_id,
+    get_session_context,
+    save_session_context,
     save_spans,
     save_trace,
     search_sessions,
@@ -30,6 +32,7 @@ from lib.config import is_debug
 from lib.llm.trace import cleanup_trace_counters, get_llm_call_count, reset_llm_call_count, trace_span
 from lib.rag_engine.graph import AskState, GraphContext
 from lib.rag_engine.quality_detector import detect_quality
+from lib.common.cache import get_cache_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ask", tags=["法规问答"])
@@ -116,11 +119,43 @@ async def chat(req: ChatRequest):
                 reset_llm_call_count(root_span.trace_id)
                 root_span.input = {"question": req.question, "mode": req.mode}
 
-            cache = engine.cache
+            cache = get_cache_manager()
+
+            # 检查是否是澄清选项，生成澄清后的问题
+            from lib.common.middleware import ClarificationMiddleware
+            old_ctx = get_session_context(session_id) or {}
+            clarify_mw = ClarificationMiddleware()
+            effective_question = clarify_mw._build_clarified_question(req.question, old_ctx)
 
             if cache:
-                cached = cache.get("generation", req.question)
+                # 优先使用澄清后的问题查询缓存
+                cache_question = effective_question if effective_question != req.question else req.question
+                cached = cache.get("generation", cache_question)
+
                 if cached is not None:
+                    # 缓存命中时仍需处理 session context 和 loop detection
+                    from lib.common.middleware import (
+                        LoopDetectionMiddleware,
+                        SessionContextMiddleware,
+                    )
+
+                    # Loop detection
+                    loop_mw = LoopDetectionMiddleware()
+                    loop_result = loop_mw.after_invoke(old_ctx, req.question)
+                    loop_detected = loop_result.get("loop_detected")
+                    loop_hint = loop_result.get("loop_hint")
+                    updated_ctx = loop_result.get("session_context", old_ctx)
+
+                    # Session context 更新
+                    ctx_mw = SessionContextMiddleware()
+                    temp_state = {
+                        "question": effective_question,
+                        "answer": cached.get("answer", ""),
+                        "session_context": updated_ctx,
+                    }
+                    temp_state = ctx_mw.after_invoke(temp_state)
+                    save_session_context(session_id, temp_state["session_context"])
+
                     answer = cached.get("answer", "")
                     chunk_size = 4
                     for i in range(0, len(answer), chunk_size):
@@ -161,6 +196,9 @@ async def chat(req: ChatRequest):
                         "sources": cached.get("sources", []),
                         "unverified_claims": cached.get("unverified_claims", []),
                         "content_mismatches": cached.get("content_mismatches", []),
+                        "session_context": temp_state["session_context"],
+                        "loop_detected": loop_detected,
+                        "loop_hint": loop_hint,
                         "cached": True,
                     }
                     if trace_summary:
@@ -176,16 +214,42 @@ async def chat(req: ChatRequest):
             memory_svc = get_memory_service()
             graph = get_ask_graph()
             state = AskState(
-                question=req.question, mode=req.mode, user_id=req.user_id,
+                question=effective_question, mode=req.mode, user_id=req.user_id,
                 session_id=session_id, search_results=[], memory_context="",
                 answer="", sources=[], citations=[], unverified_claims=[],
                 content_mismatches=[], faithfulness_score=None, error=None,
+                messages=[], session_context=old_ctx, skip_clarify=req.skip_clarify,
+                iteration_count=0, next_action="search",
+                clarification_message=None, clarification_options=None,
+                loop_detected=None, loop_hint=None,
             )
             context = GraphContext(
                 rag_engine=engine, llm_client=engine._llm_client,
                 memory_service=memory_svc,
             )
             result = await asyncio.to_thread(graph.invoke, state, context=context)
+
+            # 检查是否需要澄清
+            if result.get("next_action") == "clarify":
+                # 保存上下文，以便用户选择澄清选项后可以恢复
+                ctx = result.get("session_context", {})
+                options = result.get("clarification_options", [])
+                if options:
+                    ctx["clarification_options"] = options
+                if ctx:
+                    save_session_context(session_id, ctx)
+
+                yield {
+                    "event": "clarify",
+                    "data": json.dumps({
+                        "session_id": session_id,
+                        "message": result.get("clarification_message", ""),
+                        "options": result.get("clarification_options", []),
+                        "session_context": ctx,
+                        "original_question": req.question,
+                    }, ensure_ascii=False)
+                }
+                return
 
             if cache:
                 cache.set("generation", req.question, result)
@@ -243,6 +307,9 @@ async def chat(req: ChatRequest):
                 "faithfulness_score": result.get("faithfulness_score"),
                 "unverified_claims": result.get("unverified_claims", []),
                 "content_mismatches": result.get("content_mismatches", []),
+                "session_context": result.get("session_context", {}),
+                "loop_detected": result.get("loop_detected"),
+                "loop_hint": result.get("loop_hint"),
             }
             if trace_summary:
                 response_meta["trace"] = trace_summary
@@ -333,3 +400,37 @@ async def remove_message(message_id: int):
     if deleted == 0:
         raise HTTPException(status_code=404, detail="消息不存在")
     return {"deleted_messages": deleted}
+
+
+@router.get("/sessions/{session_id}/context")
+async def get_session_context_endpoint(session_id: str):
+    """获取会话上下文"""
+    ctx = get_session_context(session_id)
+    if ctx is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return {"session_id": session_id, "context": ctx}
+
+
+ALLOWED_CONTEXT_KEYS = frozenset({
+    "product_type", "mentioned_entities", "current_topic",
+    "query_history", "user_preference", "focus_area",
+})
+
+
+@router.put("/sessions/{session_id}/context")
+async def update_session_context_endpoint(session_id: str, context: dict):
+    """更新会话上下文（澄清选择后调用）"""
+    # 输入验证：只允许白名单中的 key
+    invalid_keys = set(context.keys()) - ALLOWED_CONTEXT_KEYS
+    if invalid_keys:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不允许的上下文字段: {', '.join(invalid_keys)}"
+        )
+
+    existing = get_session_context(session_id) or {}
+    merged = {**existing, **context}
+    success = save_session_context(session_id, merged)
+    if not success:
+        raise HTTPException(status_code=500, detail="保存失败")
+    return {"session_id": session_id, "context": merged}

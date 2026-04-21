@@ -35,6 +35,7 @@ GENERIC_KEYWORDS = frozenset([
     '保险', '规定', '条款', '要求', '情况', '内容', '范围', '方式',
     '条件', '标准', '原则', '办法', '措施', '制度', '程序', '责任',
     '义务', '权利', '期限', '金额', '比例', '比例', '费用', '金额',
+    '问题', '产品', '合同', '公司',
 ])
 
 _embed_model: Optional[Any] = None
@@ -283,7 +284,8 @@ def _is_relevant(
                 if evidence_keywords and _contains_keyword(content, expanded_keywords):
                     return True
 
-    query_for_embed = original_query if original_query else ' '.join(filtered_keywords)
+    # Embedding 兜底使用原始关键词（不排除泛化词，让语义相似度决定）
+    query_for_embed = original_query if original_query else ' '.join(evidence_keywords)
     if query_for_embed and len(query_for_embed) >= 4:
         similarity = _compute_embedding_similarity(query_for_embed, content)
         if similarity >= _SEMANTIC_RELEVANCE_THRESHOLD:

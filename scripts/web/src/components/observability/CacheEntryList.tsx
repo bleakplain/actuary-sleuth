@@ -4,7 +4,7 @@ import { DeleteOutlined } from '@ant-design/icons';
 import { useCacheStore } from '../../stores/cacheStore';
 import type { CacheEntry } from '../../types';
 
-const NAMESPACES = ['', 'embedding', 'retrieval', 'generation'];
+const SCOPES = ['', 'embedding', 'retrieval', 'generation'];
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -21,7 +21,7 @@ function formatTTL(ttl: number): string {
 export default function CacheEntryList() {
   const { token } = theme.useToken();
   const {
-    entries, entriesTotal, entriesPage, entriesNamespace, entriesLoading,
+    entries, entriesTotal, entriesPage, entriesScope, entriesLoading,
     loadEntries, cleanup,
   } = useCacheStore();
 
@@ -53,9 +53,9 @@ export default function CacheEntryList() {
       ),
     },
     {
-      title: '命名空间',
-      dataIndex: 'namespace',
-      key: 'namespace',
+      title: '作用域',
+      dataIndex: 'scope',
+      key: 'scope',
       width: 100,
     },
     {
@@ -89,11 +89,11 @@ export default function CacheEntryList() {
           <Select
             size="small"
             style={{ width: 120 }}
-            value={entriesNamespace}
+            value={entriesScope}
             onChange={(v) => loadEntries(v, 1)}
-            options={NAMESPACES.map((ns) => ({
-              label: ns || '全部',
-              value: ns,
+            options={SCOPES.map((s) => ({
+              label: s || '全部',
+              value: s,
             }))}
           />
           <Popconfirm
@@ -117,7 +117,7 @@ export default function CacheEntryList() {
           current: entriesPage,
           pageSize: 20,
           total: entriesTotal,
-          onChange: (p) => loadEntries(entriesNamespace, p),
+          onChange: (p) => loadEntries(entriesScope, p),
           showSizeChanger: false,
         }}
       />

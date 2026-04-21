@@ -86,7 +86,7 @@ def get_profile(user_id: str = "default"):
     svc = get_memory_service()
     if not svc:
         return None
-    profile = svc.get_profile(user_id)
+    profile = svc.get_user_profile(user_id)
     if not profile:
         return None
     return UserProfile(**profile)
@@ -97,8 +97,8 @@ def update_profile(req: ProfileUpdateRequest, user_id: str = "default"):
     svc = get_memory_service()
     if not svc:
         raise HTTPException(status_code=503, detail="记忆服务不可用")
-    existing = svc.get_profile(user_id)
+    existing = svc.get_user_profile(user_id)
     if not existing:
         raise HTTPException(status_code=404, detail="用户画像不存在")
-    profile = svc.update_profile(req, user_id)
+    profile = svc.patch_user_profile(req, user_id)
     return profile

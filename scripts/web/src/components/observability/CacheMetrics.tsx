@@ -4,7 +4,7 @@ import type { CacheStats } from '../../types';
 
 function NamespaceMetrics({ stats }: { stats: CacheStats }) {
   const { token } = theme.useToken();
-  const namespaces = Object.entries(stats.by_namespace);
+  const namespaces = Object.entries(stats.by_scope || {});
 
   return (
     <div style={{ marginTop: 16 }}>

@@ -40,7 +40,57 @@ arguments:
 
 ---
 
-## 第零步：Worktree 检查与创建
+## 第零步：Specs 文档提交状态检查
+
+**在任何执行前，必须确保当前 feature 的 specs 文档已提交并推送。**
+
+### 检测步骤
+
+1. **提取 feature-name** — 从当前 git branch 或 `.claude/specs/` 目录名提取（如 `014-multi-turn-session`）
+2. **检查 specs 目录** — 确认 `.claude/specs/<feature-name>/` 存在且包含必要文件：
+   - `spec.md` ✅
+   - `research.md` ✅
+   - `plan.md` ✅
+3. **检查 git 追踪状态**：
+   ```bash
+   git status .claude/specs/<feature-name>/
+   ```
+   - 如果显示 "Untracked files" → **停止并提示用户提交**
+   - 如果显示 "Changes not staged for commit" → **停止并提示用户提交**
+4. **检查远程推送状态**：
+   ```bash
+   git log origin/$(git branch --show-current)..HEAD --oneline -- .claude/specs/<feature-name>/
+   ```
+   - 如果有输出 → **停止并提示用户推送**
+
+### 提示模板
+
+如果检测失败，输出：
+
+```
+⚠️ Specs 文档未提交/未推送
+
+当前 feature: <feature-name>
+检测到的文件: spec.md, research.md, plan.md
+
+请先执行以下步骤：
+
+1. git add .claude/specs/<feature-name>/
+2. git commit -m "docs: add <feature-name> specs (spec, research, plan)"
+3. git push origin $(git branch --show-current)
+
+完成后重新执行 /exec-plan
+```
+
+### 为什么必须提交
+
+- Specs 文档是 SDD 流程的核心产物，需要版本追踪
+- Worktree 创建时从 git 继承文件，未提交的文件不会被继承
+- 团队协作需要同步最新的规格文档
+
+---
+
+## 第一步：Worktree 检查与创建
 
 **执行任何代码变更前，必须确保在 worktree 中工作。**
 

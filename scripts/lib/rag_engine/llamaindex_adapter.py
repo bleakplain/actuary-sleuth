@@ -13,6 +13,8 @@ from llama_index.core.embeddings import BaseEmbedding
 from llama_index.core.bridge.pydantic import PrivateAttr
 from llama_index.core.callbacks import CallbackManager
 
+from lib.common.cache import get_cache_manager, SCOPE_EMBEDDING
+
 # 模型上下文窗口和输出限制
 _MODEL_LIMITS = {
     'glm-4-flash': {'context': 128000, 'output': 8192},
@@ -110,7 +112,6 @@ class ZhipuEmbeddingAdapter(BaseEmbedding):
     _base_url: str = PrivateAttr()
     _model: str = PrivateAttr()
     _session: requests.Session = PrivateAttr()
-    _cache_manager: Any = PrivateAttr(default=None)
 
     def __init__(
         self,
@@ -134,14 +135,15 @@ class ZhipuEmbeddingAdapter(BaseEmbedding):
         if not texts:
             return []
 
+        cache = get_cache_manager()
         cached_results: Dict[int, List[float]] = {}
         uncached_texts: List[str] = []
         uncached_indices: List[int] = []
 
-        if self._cache_manager:
+        if cache:
             for i, text in enumerate(texts):
                 cache_key = f"{self._model}:{encoding_type}:{text}"
-                cached = self._cache_manager.get("embedding", cache_key)
+                cached = cache.get(SCOPE_EMBEDDING, cache_key)
                 if cached is not None:
                     cached_results[i] = cached
                 else:
@@ -170,10 +172,10 @@ class ZhipuEmbeddingAdapter(BaseEmbedding):
         response.raise_for_status()
         new_embeddings = [item.get("embedding", []) for item in response.json().get("data", [])]
 
-        if self._cache_manager:
+        if cache:
             for text, emb in zip(uncached_texts, new_embeddings):
                 cache_key = f"{self._model}:{encoding_type}:{text}"
-                self._cache_manager.set("embedding", cache_key, emb)
+                cache.set(SCOPE_EMBEDDING, cache_key, emb)
 
         if cached_results:
             all_embeddings: List[List[float]] = [[] for _ in range(len(texts))]
@@ -209,9 +211,6 @@ class ZhipuEmbeddingAdapter(BaseEmbedding):
         if hasattr(self, '_session') and self._session:
             self._session.close()
             self._session = None
-
-    def set_cache_manager(self, cache_manager: Any) -> None:
-        self._cache_manager = cache_manager
 
     def __del__(self):
         self.close()

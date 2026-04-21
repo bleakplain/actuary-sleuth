@@ -40,7 +40,7 @@ export async function fetchCacheStats(): Promise<CacheStats | { status: string }
 }
 
 export async function fetchCacheEntries(params: {
-  namespace?: string;
+  scope?: string;
   page?: number;
   size?: number;
 } = {}): Promise<CacheEntryListResponse> {

@@ -175,9 +175,9 @@ class VectorIndexManager:
 
             num_partitions = max(1, count // 256)
             table.create_index(
-                "vector",
-                index_type="IVF_HNSW_SQ",
                 metric="cosine",
+                vector_column_name="vector",
+                index_type="IVF_HNSW_SQ",
                 num_partitions=num_partitions,
             )
             logger.info(f"LanceDB 索引已创建 (IVF_HNSW_SQ, partitions={num_partitions}, rows={count})")

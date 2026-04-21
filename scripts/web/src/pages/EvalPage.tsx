@@ -953,7 +953,7 @@ export default function EvalPage() {
     retrieval_max_chunks_per_article: 3,
     retrieval_min_rrf_score: 0,
     rerank_enable_rerank: true,
-    rerank_reranker_type: 'gguf',
+    rerank_reranker_type: 'llm',
     rerank_rerank_top_k: 5,
     rerank_min_score: 0,
     generation_max_context_chars: 12000,
@@ -1490,7 +1490,6 @@ export default function EvalPage() {
                             <Col xs={24} sm={12}>
                               <Form.Item name="rerank_reranker_type" label="重排序器">
                                 <Select disabled={!rerankEnabled} options={[
-                                  { value: 'gguf', label: 'GGUF' },
                                   { value: 'llm', label: 'LLM' },
                                   { value: 'none', label: 'None' },
                                 ]} />

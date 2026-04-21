@@ -34,7 +34,16 @@ from .constants import (
 from .cache import CacheManager, get_cache_manager, reset_cache_manager
 from .logging_config import setup_logging, StructuredFormatter
 from .date_utils import get_current_timestamp
-from .middleware import Middleware, LoggingMiddleware, PerformanceMiddleware, MiddlewareChain
+from .middleware import (
+    Middleware,
+    LoggingMiddleware,
+    PerformanceMiddleware,
+    MiddlewareChain,
+    SessionContextMiddleware,
+    ClarificationMiddleware,
+    LoopDetectionMiddleware,
+    IterationLimitMiddleware,
+)
 
 __all__ = [
     # Models
@@ -89,4 +98,8 @@ __all__ = [
     'LoggingMiddleware',
     'PerformanceMiddleware',
     'MiddlewareChain',
+    'SessionContextMiddleware',
+    'ClarificationMiddleware',
+    'LoopDetectionMiddleware',
+    'IterationLimitMiddleware',
 ]
