@@ -40,24 +40,21 @@ class SectionDetector:
         re.compile(r'^\s*[（\(]([' + _CN_NUM_CHARS + r'\d]+)[）\)]\s*$'),  # 括号格式: （一）、(1)
     ]
 
-    # 保留旧模式以兼容（指向第一个模式）
-    CLAUSE_NUMBER_PATTERN = CLAUSE_NUMBER_PATTERNS[0]
-
     def __init__(self, keywords_path: Optional[str] = None):
         if keywords_path:
             config_path = Path(keywords_path)
         else:
             config_path = Path(__file__).parent / 'data' / 'keywords.json'
 
-        # 加载关键词配置，带错误处理
+        # 加载关键词配置
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
         except FileNotFoundError:
-            logger.warning(f"关键词配置文件不存在: {config_path}，使用空配置")
+            logger.error(f"关键词配置文件不存在: {config_path}，section 检测功能将不可用")
             config = {}
         except json.JSONDecodeError as e:
-            logger.warning(f"关键词配置文件 JSON 解析失败: {config_path}, {e}，使用空配置")
+            logger.error(f"关键词配置文件 JSON 解析失败: {config_path}, {e}，section 检测功能将不可用")
             config = {}
 
         self.section_keywords: dict = config.get('section_keywords', {})

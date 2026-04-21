@@ -29,6 +29,9 @@ MAX_DOCUMENT_CHARS = 10_000_000
 MAX_CHUNKS = 10_000
 FORCE_SPLIT_THRESHOLD = 10_000
 
+# 分块策略常量
+MERGE_OVERSIZE_FACTOR = 1.5  # 允许合并后适度超过 max_chunk_chars
+
 # 句子边界
 SENTENCE_ENDS = '。；！？.!?'
 
@@ -74,6 +77,9 @@ class Chunk:
     chunk_id: int = 0
     prev_chunk_id: Optional[int] = None
     next_chunk_id: Optional[int] = None
+    parent_chunk_id: Optional[int] = None
+    level: int = 1
+    heading_text: str = ""
 
 
 class MdParser:
@@ -106,12 +112,22 @@ class MdParser:
     def supported_extensions() -> List[str]:
         return ['.md', '.markdown']
 
+    def chunk(self, docs: List[Document]) -> List[TextNode]:
+        """批量解析 Document 列表，返回分块后的 TextNode 列表。
+
+        兼容 ChecklistChunker 接口。
+        """
+        all_nodes: List[TextNode] = []
+        for doc in docs:
+            nodes = self.parse_document(doc)
+            all_nodes.extend(nodes)
+        return all_nodes
+
     def parse_document(self, doc: Document) -> List[TextNode]:
         """解析 Document 对象，返回分块后的 TextNode 列表。"""
         source_file = doc.metadata.get('file_name', '')
         text = doc.text
 
-        # 内存安全检查
         if len(text) > MAX_DOCUMENT_CHARS:
             logger.warning(
                 f"文档过大 ({len(text)} chars)，截断至 {MAX_DOCUMENT_CHARS} chars: {source_file}"
@@ -121,25 +137,26 @@ class MdParser:
         frontmatter, body = self._extract_frontmatter(text)
         doc_meta = DocumentMeta.from_frontmatter(frontmatter)
 
+        # law_name 回退策略: regulation → H1 标题 → collection → "未知"
         if not doc_meta.law_name:
             law_name = self._extract_law_name(body)
             if law_name:
                 doc_meta = replace(doc_meta, law_name=law_name)
+            elif doc_meta.collection:
+                doc_meta = replace(doc_meta, law_name=doc_meta.collection)
+            else:
+                doc_meta = replace(doc_meta, law_name='未知')
 
-        # V3: 识别层级结构
         headings = self._identify_headings(body)
 
-        # V3: 递归切分
-        chunks = self._recursive_chunk(body, headings, doc_meta, source_file)
+        chunks, _ = self._recursive_chunk(body, headings, doc_meta, source_file)
 
-        # 限制最大chunk数
         if len(chunks) > MAX_CHUNKS:
             logger.warning(
                 f"分块数过多 ({len(chunks)})，仅保留前 {MAX_CHUNKS} 个: {source_file}"
             )
             chunks = chunks[:MAX_CHUNKS]
 
-        # 设置chunk链
         self._link_chunks(chunks)
 
         return self._chunks_to_nodes(chunks)
@@ -229,7 +246,11 @@ class MdParser:
         headings: List[Heading],
         doc_meta: DocumentMeta,
         source_file: str,
-    ) -> List[Chunk]:
+        parent_path: str = "",
+        parent_chunk_id: Optional[int] = None,
+        level: int = 1,
+        chunk_id_counter: Optional[List[int]] = None,
+    ) -> Tuple[List[Chunk], List[int]]:
         """递归切分文档
 
         策略:
@@ -237,14 +258,32 @@ class MdParser:
         2. 如果超过，检查是否有子标题，递归处理
         3. 如果没有子标题，按段落累积
         4. 如果单段落超长，按句子边界切分
+
+        Args:
+            body: 文档正文
+            headings: 标题列表
+            doc_meta: 文档元数据
+            source_file: 源文件名
+            parent_path: 父级路径（如 "第一章 > 第一条"）
+            parent_chunk_id: 父 chunk ID
+            level: 当前层级深度
+            chunk_id_counter: chunk ID 计数器 [current_id]
+
+        Returns:
+            (chunks, child_chunk_ids): chunk 列表和子 chunk ID 列表
         """
+        if chunk_id_counter is None:
+            chunk_id_counter = [0]
+
         chunks: List[Chunk] = []
+        current_level_chunk_ids: List[int] = []
 
         if not headings:
-            # 无标题结构，按段落切分
-            return self._chunk_by_paragraph(body, doc_meta, source_file, "")
+            para_chunks = self._chunk_by_paragraph(body, doc_meta, source_file, parent_path, level, parent_chunk_id, chunk_id_counter)
+            chunks.extend(para_chunks)
+            current_level_chunk_ids.extend([c.chunk_id for c in para_chunks])
+            return chunks, current_level_chunk_ids
 
-        # 按顶级标题切分
         for i, heading in enumerate(headings):
             start = heading.end
             end = headings[i + 1].start if i + 1 < len(headings) else len(body)
@@ -253,9 +292,9 @@ class MdParser:
             if not section_text:
                 continue
 
-            section_path = heading.section_path
+            full_path = f"{parent_path} > {heading.text.strip()}" if parent_path else heading.text.strip()
+            heading_text = heading.text.strip()
 
-            # 提取 blockquote 元数据
             chunk_meta: Dict[str, str] = {}
             meta_match = _BLOCKQUOTE_META.search(section_text)
             if meta_match:
@@ -265,39 +304,62 @@ class MdParser:
                 section_text = _BLOCKQUOTE_META.sub('', section_text).strip()
 
             if len(section_text) <= self.max_chunk_chars:
-                # 整个章节作为一个chunk
+                chunk_id = chunk_id_counter[0]
+                chunk_id_counter[0] += 1
+                current_level_chunk_ids.append(chunk_id)
+
                 chunk = Chunk(
                     content=section_text,
-                    section_path=section_path,
-                    metadata=self._build_metadata(doc_meta, source_file, section_path),
+                    section_path=full_path,
+                    metadata=self._build_metadata(doc_meta, source_file, full_path, level, heading_text),
+                    chunk_id=chunk_id,
+                    parent_chunk_id=parent_chunk_id,
+                    level=level,
+                    heading_text=heading_text,
                 )
-                # 合并 blockquote 元数据
                 chunk.metadata.update(chunk_meta)
                 chunks.append(chunk)
             else:
-                # 检查子标题
                 sub_headings = [
                     h for h in headings
                     if h.start > heading.start and h.end <= end and h.level > heading.level
                 ]
 
                 if sub_headings:
-                    # 递归处理子章节
-                    sub_chunks = self._recursive_chunk(
-                        body[start:end], sub_headings, doc_meta, source_file
+                    parent_id_for_sub = chunk_id_counter[0]
+                    chunk_id_counter[0] += 1
+
+                    parent_chunk = Chunk(
+                        content=section_text[:500],
+                        section_path=full_path,
+                        metadata=self._build_metadata(doc_meta, source_file, full_path, level, heading_text),
+                        chunk_id=parent_id_for_sub,
+                        parent_chunk_id=parent_chunk_id,
+                        level=level,
+                        heading_text=heading_text,
+                    )
+                    parent_chunk.metadata.update(chunk_meta)
+                    chunks.append(parent_chunk)
+                    current_level_chunk_ids.append(parent_id_for_sub)
+
+                    sub_chunks, sub_ids = self._recursive_chunk(
+                        body[start:end], sub_headings, doc_meta, source_file,
+                        parent_path=full_path,
+                        parent_chunk_id=parent_id_for_sub,
+                        level=level + 1,
+                        chunk_id_counter=chunk_id_counter,
                     )
                     chunks.extend(sub_chunks)
                 else:
-                    # 按段落切分
                     para_chunks = self._chunk_by_paragraph(
-                        section_text, doc_meta, source_file, section_path
+                        section_text, doc_meta, source_file, full_path, level, parent_chunk_id, chunk_id_counter
                     )
-                    # 合并 blockquote 元数据到所有子chunk
                     for c in para_chunks:
                         c.metadata.update(chunk_meta)
                     chunks.extend(para_chunks)
+                    current_level_chunk_ids.extend([c.chunk_id for c in para_chunks])
 
-        return chunks
+        return chunks, current_level_chunk_ids
 
     def _chunk_by_paragraph(
         self,
@@ -305,11 +367,17 @@ class MdParser:
         doc_meta: DocumentMeta,
         source_file: str,
         section_path: str,
+        level: int = 1,
+        parent_chunk_id: Optional[int] = None,
+        chunk_id_counter: Optional[List[int]] = None,
     ) -> List[Chunk]:
         """按段落累积切分
 
         段落逐个加入，直到接近 max_chunk_chars 就封一个chunk。
         """
+        if chunk_id_counter is None:
+            chunk_id_counter = [0]
+
         paragraphs = re.split(r'\n{2,}', text)
         chunks: List[Chunk] = []
         current = ''
@@ -323,28 +391,36 @@ class MdParser:
                 current = current + '\n\n' + para if current else para
             else:
                 if current:
+                    chunk_id = chunk_id_counter[0]
+                    chunk_id_counter[0] += 1
                     chunks.append(Chunk(
                         content=current,
                         section_path=section_path,
-                        metadata=self._build_metadata(doc_meta, source_file, section_path),
+                        metadata=self._build_metadata(doc_meta, source_file, section_path, level, ""),
+                        chunk_id=chunk_id,
+                        parent_chunk_id=parent_chunk_id,
+                        level=level,
                     ))
 
                 if len(para) > self.max_chunk_chars:
-                    # 单段落超长，按句子切分
-                    sent_chunks = self._chunk_by_sentence(para, doc_meta, source_file, section_path)
+                    sent_chunks = self._chunk_by_sentence(para, doc_meta, source_file, section_path, level, parent_chunk_id, chunk_id_counter)
                     chunks.extend(sent_chunks)
                     current = ''
                 else:
                     current = para
 
         if current:
+            chunk_id = chunk_id_counter[0]
+            chunk_id_counter[0] += 1
             chunks.append(Chunk(
                 content=current,
                 section_path=section_path,
-                metadata=self._build_metadata(doc_meta, source_file, section_path),
+                metadata=self._build_metadata(doc_meta, source_file, section_path, level, ""),
+                chunk_id=chunk_id,
+                parent_chunk_id=parent_chunk_id,
+                level=level,
             ))
 
-        # 语义完整性检查与合并
         chunks = self._check_and_merge(chunks)
 
         return chunks
@@ -355,11 +431,16 @@ class MdParser:
         doc_meta: DocumentMeta,
         source_file: str,
         section_path: str,
+        level: int = 1,
+        parent_chunk_id: Optional[int] = None,
+        chunk_id_counter: Optional[List[int]] = None,
     ) -> List[Chunk]:
         """按句子边界切分（支持智能overlap）"""
-        # 超长文本强制分割
+        if chunk_id_counter is None:
+            chunk_id_counter = [0]
+
         if len(text) > FORCE_SPLIT_THRESHOLD:
-            return self._force_split(text, doc_meta, source_file, section_path)
+            return self._force_split(text, doc_meta, source_file, section_path, level, parent_chunk_id, chunk_id_counter)
 
         sentences = self._split_sentences(text)
         chunks: List[Chunk] = []
@@ -370,18 +451,28 @@ class MdParser:
                 current += sent
             else:
                 if current:
+                    chunk_id = chunk_id_counter[0]
+                    chunk_id_counter[0] += 1
                     chunks.append(Chunk(
                         content=current.strip(),
                         section_path=section_path,
-                        metadata=self._build_metadata(doc_meta, source_file, section_path),
+                        metadata=self._build_metadata(doc_meta, source_file, section_path, level, ""),
+                        chunk_id=chunk_id,
+                        parent_chunk_id=parent_chunk_id,
+                        level=level,
                     ))
                 current = sent
 
         if current.strip():
+            chunk_id = chunk_id_counter[0]
+            chunk_id_counter[0] += 1
             chunks.append(Chunk(
                 content=current.strip(),
                 section_path=section_path,
-                metadata=self._build_metadata(doc_meta, source_file, section_path),
+                metadata=self._build_metadata(doc_meta, source_file, section_path, level, ""),
+                chunk_id=chunk_id,
+                parent_chunk_id=parent_chunk_id,
+                level=level,
             ))
 
         return chunks
@@ -404,17 +495,28 @@ class MdParser:
         doc_meta: DocumentMeta,
         source_file: str,
         section_path: str,
+        level: int = 1,
+        parent_chunk_id: Optional[int] = None,
+        chunk_id_counter: Optional[List[int]] = None,
     ) -> List[Chunk]:
         """强制分割超长文本"""
+        if chunk_id_counter is None:
+            chunk_id_counter = [0]
+
         chunks: List[Chunk] = []
         step = self.max_chunk_chars - self.chunk_overlap_chars
         for i in range(0, len(text), step):
             chunk_text = text[i:i + self.max_chunk_chars]
             if len(chunk_text) >= self.min_chunk_chars:
+                chunk_id = chunk_id_counter[0]
+                chunk_id_counter[0] += 1
                 chunks.append(Chunk(
                     content=chunk_text,
                     section_path=section_path,
-                    metadata=self._build_metadata(doc_meta, source_file, section_path),
+                    metadata=self._build_metadata(doc_meta, source_file, section_path, level, ""),
+                    chunk_id=chunk_id,
+                    parent_chunk_id=parent_chunk_id,
+                    level=level,
                 ))
         return chunks
 
@@ -441,7 +543,7 @@ class MdParser:
                 if self._should_merge(current.content, next_chunk.content):
                     # 合并
                     combined = current.content + '\n\n' + next_chunk.content
-                    if len(combined) <= self.max_chunk_chars * 1.5:  # 允许适度超长
+                    if len(combined) <= self.max_chunk_chars * MERGE_OVERSIZE_FACTOR:
                         current = Chunk(
                             content=combined,
                             section_path=current.section_path,
@@ -488,20 +590,24 @@ class MdParser:
         doc_meta: DocumentMeta,
         source_file: str,
         section_path: str,
+        level: int = 1,
+        heading_text: str = "",
     ) -> Dict[str, Any]:
         """构建chunk元数据"""
         metadata = doc_meta.to_chunk_metadata(section_path, source_file)
         metadata['section_path'] = section_path
         metadata['content_type'] = 'text'
         metadata['article_number'] = section_path
+        metadata['level'] = level
+        if heading_text:
+            metadata['heading_text'] = heading_text
         return metadata
 
     def _link_chunks(self, chunks: List[Chunk]) -> None:
-        """设置chunk链（prev/next）"""
+        """设置chunk线性链（prev/next），保持已分配的chunk_id"""
         for i, chunk in enumerate(chunks):
-            chunk.chunk_id = i
-            chunk.prev_chunk_id = i - 1 if i > 0 else None
-            chunk.next_chunk_id = i + 1 if i + 1 < len(chunks) else None
+            chunk.prev_chunk_id = chunks[i - 1].chunk_id if i > 0 else None
+            chunk.next_chunk_id = chunks[i + 1].chunk_id if i + 1 < len(chunks) else None
 
     def _chunks_to_nodes(self, chunks: List[Chunk]) -> List[TextNode]:
         """转换为TextNode，添加智能overlap"""
@@ -510,7 +616,6 @@ class MdParser:
         for i, chunk in enumerate(chunks):
             content = chunk.content
 
-            # 添加智能overlap（从上一个chunk末尾）
             if i > 0 and self.chunk_overlap_chars > 0:
                 overlap = self._get_smart_overlap(chunks[i - 1].content)
                 if overlap and len(content) + len(overlap) <= self.max_chunk_chars:
@@ -520,6 +625,8 @@ class MdParser:
             metadata['chunk_id'] = chunk.chunk_id
             metadata['prev_chunk_id'] = chunk.prev_chunk_id
             metadata['next_chunk_id'] = chunk.next_chunk_id
+            metadata['parent_chunk_id'] = chunk.parent_chunk_id
+            metadata['level'] = chunk.level
 
             nodes.append(TextNode(text=content.strip(), metadata=metadata))
 
