@@ -34,9 +34,11 @@ export async function batchDeleteSessions(ids: string[]): Promise<{ deleted: num
 }
 
 interface ClarifyData {
+  session_id: string;
   message: string;
   options: string[];
   session_context: Record<string, unknown>;
+  original_question: string;
 }
 
 export function chatSSE(
@@ -78,7 +80,7 @@ export function chatSSE(
               const data = JSON.parse(line.slice(5).trim());
               if (currentEvent === 'clarify') {
                 callbacks.onClarify?.(data);
-                callbacks.onDone({ session_id: '', citations: [], sources: [] });
+                callbacks.onDone({ session_id: data.session_id, citations: [], sources: [] });
               } else if (data.type === 'token') {
                 callbacks.onToken(data.data);
               } else if (data.type === 'done') {

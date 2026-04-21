@@ -80,18 +80,8 @@ TOPIC_KEYWORDS = frozenset({
     "免责", "理赔", "保单", "续保"
 })
 
-PRONOUN_KEYWORDS = frozenset({
-    "它", "这个产品", "该产品", "那个产品"
-})
-
 MAX_ENTITIES = 10
 COMPANY_KEYWORDS = frozenset({"泰康", "平安", "国寿", "太保", "新华", "人保"})
-
-
-def _get_product_type_options():
-    """获取产品类型选项（延迟加载避免循环导入）"""
-    from lib.common.product import get_product_category_options
-    return get_product_category_options()
 
 
 def _extract_topic(question: str) -> str | None:
@@ -175,6 +165,10 @@ class SessionContextMiddleware:
 class ClarificationMiddleware:
     """检测模糊问题，触发澄清式追问"""
 
+    def __init__(self):
+        from lib.llm.factory import LLMClientFactory
+        self._llm = LLMClientFactory.create_qa_llm()
+
     def before_invoke(self, state: "AskState") -> "AskState":
         if state.get("skip_clarify", False):
             state["next_action"] = "search"
@@ -183,64 +177,66 @@ class ClarificationMiddleware:
         question = state.get("question", "")
         ctx = state.get("session_context", {})
 
-        # 检测是否是澄清选项回复，生成澄清后的问题
-        question = self._clarified_question(question, ctx)
+        question = self._build_clarified_question(question, ctx)
         state["question"] = question
 
-        clarification = self._check(question, ctx)
-        if clarification:
+        result = self._llm_based_clarification(question, ctx)
+        if result:
             state["next_action"] = "clarify"
-            state["clarification_message"] = clarification["message"]
-            state["clarification_options"] = clarification.get("options", [])
+            state["clarification_message"] = result["message"]
+            state["clarification_options"] = result.get("options", [])
         else:
             state["next_action"] = "search"
 
         return state
 
-    def _clarified_question(self, question: str, ctx: dict) -> str:
-        """根据上下文生成澄清后的问题
+    def _llm_based_clarification(self, question: str, ctx: dict) -> dict | None:
+        from lib.common.prompts import CLARIFICATION_PROMPT
 
-        当用户选择澄清选项时，结合上下文中的 topic 生成完整问题。
-        例如：用户选择"重疾险" + 上下文 topic "犹豫期" → "重疾险的犹豫期"
-        """
-        from lib.common.product import get_product_category_options
+        prompt = CLARIFICATION_PROMPT.format(
+            product_type=ctx.get("product_type", "未知"),
+            mentioned_entities=ctx.get("mentioned_entities", []),
+            current_topic=ctx.get("current_topic", "未知"),
+            question=question,
+        )
+        response = self._llm.chat([{"role": "user", "content": prompt}])
+        return self._parse_response(str(response))
 
-        is_clarification_option = question in get_product_category_options()
-        has_topic = _extract_topic(question) is not None
+    def _parse_response(self, response: str) -> dict | None:
+        import json
+        import re
 
-        if is_clarification_option and not has_topic:
-            previous_topic = ctx.get("current_topic")
-            if previous_topic:
-                return f"{question}的{previous_topic}"
+        text = response.strip()
+        # 移除 markdown 代码块
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            text = text.rsplit("```", 1)[0] if "```" in text else text
 
-        return question
+        # 提取 JSON 部分
+        json_match = re.search(r'\{[^{}]*"need_clarify"[^{}]*\}', text, re.DOTALL)
+        if json_match:
+            text = json_match.group()
 
-    def _check(self, question: str, ctx: dict) -> dict | None:
-        """返回澄清问题，None 表示无需澄清"""
-
-        topic = _extract_topic(question)
-        product_type = self._extract_product_type(question)
-        has_product_type = product_type or ctx.get("product_type")
-
-        if topic and not has_product_type:
-            return {
-                "message": f"请问您咨询的是哪种险种的{topic}？",
-                "options": _get_product_type_options()
-            }
-
-        if any(p in question for p in PRONOUN_KEYWORDS):
-            if not ctx.get("mentioned_entities"):
+        try:
+            result = json.loads(text)
+            if result.get("need_clarify"):
                 return {
-                    "message": "请问您指的是哪个产品或险种？",
-                    "options": []
+                    "message": result.get("message", ""),
+                    "options": result.get("options", []),
                 }
-
+        except json.JSONDecodeError:
+            logging.getLogger(__name__).warning(f"LLM 响应解析失败: {text[:100]}")
         return None
 
-    def _extract_product_type(self, question: str) -> str | None:
-        """从问题中提取险种类型"""
-        from lib.common.product import extract_product_type
-        return extract_product_type(question)
+    def _build_clarified_question(self, question: str, ctx: dict) -> str:
+        options = ctx.get("clarification_options", [])
+        if question not in options:
+            return question
+
+        previous_topic = ctx.get("current_topic")
+        if previous_topic and not _extract_topic(question):
+            return f"{question}的{previous_topic}"
+        return question
 
 
 class LoopDetectionMiddleware:

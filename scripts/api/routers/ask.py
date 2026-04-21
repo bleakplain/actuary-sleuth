@@ -125,7 +125,7 @@ async def chat(req: ChatRequest):
             from lib.common.middleware import ClarificationMiddleware
             old_ctx = get_session_context(session_id) or {}
             clarify_mw = ClarificationMiddleware()
-            effective_question = clarify_mw._clarified_question(req.question, old_ctx)
+            effective_question = clarify_mw._build_clarified_question(req.question, old_ctx)
 
             if cache:
                 # 优先使用澄清后的问题查询缓存
@@ -233,16 +233,20 @@ async def chat(req: ChatRequest):
             if result.get("next_action") == "clarify":
                 # 保存上下文，以便用户选择澄清选项后可以恢复
                 ctx = result.get("session_context", {})
+                options = result.get("clarification_options", [])
+                if options:
+                    ctx["clarification_options"] = options
                 if ctx:
                     save_session_context(session_id, ctx)
 
                 yield {
                     "event": "clarify",
                     "data": json.dumps({
+                        "session_id": session_id,
                         "message": result.get("clarification_message", ""),
                         "options": result.get("clarification_options", []),
                         "session_context": ctx,
-                        "original_question": req.question,  # 返回原始问题，便于前端重试
+                        "original_question": req.question,
                     }, ensure_ascii=False)
                 }
                 return
