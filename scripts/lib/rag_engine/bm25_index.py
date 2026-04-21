@@ -154,3 +154,51 @@ class BM25Index:
     @property
     def doc_count(self) -> int:
         return len(self._nodes)
+
+    def add_nodes(self, nodes: List, index_path: Path) -> None:
+        """增量添加节点到 BM25 索引。
+
+        注意：BM25 不支持真正的增量添加，需要重建索引。
+
+        Args:
+            nodes: 要添加的节点列表
+            index_path: 索引文件路径（用于保存）
+        """
+        if not nodes:
+            return
+
+        self._nodes.extend(nodes)
+        self._rebuild_index()
+        self._save(self, index_path)
+        logger.info(f"BM25 增量添加 {len(nodes)} 个节点，总数 {len(self._nodes)}")
+
+    def remove_nodes(self, source_files: List[str], index_path: Path) -> None:
+        """按 source_file 删除节点。
+
+        Args:
+            source_files: 要删除的源文件名列表
+            index_path: 索引文件路径（用于保存）
+        """
+        if not source_files:
+            return
+
+        original_count = len(self._nodes)
+        self._nodes = [
+            n for n in self._nodes
+            if n.metadata.get('source_file') not in source_files
+        ]
+        removed_count = original_count - len(self._nodes)
+
+        if removed_count > 0:
+            self._rebuild_index()
+            self._save(self, index_path)
+            logger.info(f"BM25 删除 {removed_count} 个节点，剩余 {len(self._nodes)}")
+
+    def _rebuild_index(self) -> None:
+        """重建 BM25 索引。"""
+        if not self._nodes:
+            self._bm25 = None
+            return
+
+        tokenized_corpus = [tokenize_chinese(node.text) for node in self._nodes]
+        self._bm25 = BM25Okapi(tokenized_corpus)

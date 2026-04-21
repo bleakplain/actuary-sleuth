@@ -183,3 +183,65 @@ class VectorIndexManager:
             logger.info(f"LanceDB 索引已创建 (IVF_HNSW_SQ, partitions={num_partitions}, rows={count})")
         except Exception as e:
             logger.warning(f"LanceDB 索引创建失败（将使用全量扫描）: {e}")
+
+    def add_nodes(self, nodes: List[TextNode]) -> bool:
+        """增量添加节点到现有索引。
+
+        Args:
+            nodes: 要添加的节点列表
+
+        Returns:
+            是否添加成功
+        """
+        if not nodes:
+            return True
+
+        try:
+            if self.index is None:
+                loaded = self._load_existing_index()
+                if loaded is None:
+                    logger.warning("索引不存在，无法增量添加，请先创建索引")
+                    return False
+                self.index = loaded
+
+            # 使用 VectorStoreIndex 的 insert 方法
+            for node in nodes:
+                self.index.insert(node)
+
+            logger.info(f"增量添加 {len(nodes)} 个节点成功")
+            return True
+        except Exception as e:
+            logger.error(f"增量添加节点失败: {e}")
+            return False
+
+    def remove_nodes(self, source_files: List[str]) -> bool:
+        """按 source_file 删除节点。
+
+        Args:
+            source_files: 要删除的源文件名列表
+
+        Returns:
+            是否删除成功
+        """
+        if not source_files:
+            return True
+
+        try:
+            import lancedb
+            db = lancedb.connect(self.config.vector_db_path)
+
+            if self.config.collection_name not in db.table_names():
+                logger.warning("向量表不存在，无法删除")
+                return False
+
+            table = db.open_table(self.config.collection_name)
+
+            for source_file in source_files:
+                # LanceDB delete 语法
+                table.delete(f"source_file = '{source_file}'")
+
+            logger.info(f"删除 {len(source_files)} 个文件的节点成功")
+            return True
+        except Exception as e:
+            logger.error(f"删除节点失败: {e}")
+            return False

@@ -42,6 +42,7 @@ from .dataset_validator import validate_dataset, QualityAuditReport
 from .eval_rating import interpret_metric, generate_eval_summary
 from .quality_detector import detect_quality, compute_retrieval_relevance, compute_info_completeness
 from .badcase_classifier import classify_badcase, assess_compliance_risk
+from .quality_checker import QualityChecker, QualityReport, QualityIssue
 
 __all__ = [
     'RAGConfig',
@@ -85,6 +86,9 @@ __all__ = [
     'QualityAuditReport',
     'interpret_metric',
     'generate_eval_summary',
+    'QualityChecker',
+    'QualityReport',
+    'QualityIssue',
 ]
 
 __version__ = '0.1.0'
