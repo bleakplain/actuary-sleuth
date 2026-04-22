@@ -77,6 +77,7 @@ def test_search_with_custom_limit(mock_backend):
 
 
 def test_add_forwards_session_id(mock_backend):
+    mock_backend.search.return_value = []
     svc = MemoryService(backend=mock_backend)
     svc.add([{"role": "user", "content": "hello"}], "user1", metadata={"session_id": "sess_1"})
     mock_backend.add.assert_called_once_with(
@@ -196,3 +197,84 @@ def test_delete_exception_returns_false(service_with_backend):
     service_with_backend._backend.delete.side_effect = Exception("DB error")
     result = service_with_backend.delete("mem_1")
     assert result is False
+
+
+def test_add_skips_duplicate_memory():
+    """测试去重：相似度 > 阈值时跳过写入。"""
+    mock_backend = MagicMock()
+    mock_backend.search.return_value = [{"id": "m1", "memory": "等待期180天", "score": 0.95}]
+    mock_backend.add.return_value = ["m2"]
+
+    svc = MemoryService(backend=mock_backend)
+    result = svc.add([{"role": "user", "content": "等待期是180天"}], "user1")
+
+    assert result == []
+    mock_backend.add.assert_not_called()
+
+
+def test_add_writes_when_below_threshold():
+    """测试相似度低于阈值时正常写入。"""
+    mock_backend = MagicMock()
+    mock_backend.search.return_value = [{"id": "m1", "memory": "等待期180天", "score": 0.5}]
+    mock_backend.add.return_value = ["m2"]
+
+    svc = MemoryService(backend=mock_backend)
+    result = svc.add([{"role": "user", "content": "等待期是180天"}], "user1")
+
+    assert result == ["m2"]
+
+
+def test_update_user_profile_skips_low_confidence():
+    """测试低置信度画像更新被跳过。"""
+    mock_backend = MagicMock()
+    mock_backend.search.return_value = []
+    svc = MemoryService(backend=mock_backend)
+
+    with patch("lib.llm.factory.LLMClientFactory") as mock_factory:
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = '{"focus_areas": ["重疾险"], "confidence": 0.3}'
+        mock_factory.create_qa_llm.return_value = mock_llm
+
+        with patch("lib.memory.service.get_connection") as mock_conn:
+            conn = MagicMock()
+            mock_conn.return_value.__enter__ = lambda self: conn
+            mock_conn.return_value.__exit__ = lambda self, *args: None
+
+            svc.update_user_profile("问题", "回答", "user1")
+
+            conn.execute.assert_not_called()
+
+
+def test_update_user_profile_accepts_high_confidence():
+    """测试高置信度画像更新正常写入。"""
+    mock_backend = MagicMock()
+    mock_backend.search.return_value = []
+    svc = MemoryService(backend=mock_backend)
+
+    with patch("lib.llm.factory.LLMClientFactory") as mock_factory:
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = '{"focus_areas": ["重疾险"], "preference_tags": [], "summary": "测试", "confidence": 0.8}'
+        mock_factory.create_qa_llm.return_value = mock_llm
+
+        with patch("lib.memory.service.get_connection") as mock_conn:
+            conn = MagicMock()
+            conn.execute.return_value.fetchone.return_value = None
+            mock_conn.return_value.__enter__ = lambda self: conn
+            mock_conn.return_value.__exit__ = lambda self, *args: None
+
+            svc.update_user_profile("问题", "回答", "user1")
+
+            conn.execute.assert_called()
+
+
+def test_add_writes_when_no_similar_memory():
+    """测试无相似记忆时正常写入。"""
+    mock_backend = MagicMock()
+    mock_backend.search.return_value = []
+    mock_backend.add.return_value = ["m1"]
+
+    svc = MemoryService(backend=mock_backend)
+    result = svc.add([{"role": "user", "content": "新的问题"}], "user1")
+
+    assert result == ["m1"]
+    mock_backend.add.assert_called_once()

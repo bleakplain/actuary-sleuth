@@ -181,3 +181,50 @@ def test_graph_parallel_retrieval(mock_context, base_state):
 
     mock_context.memory_service.search.assert_called()
     mock_context.rag_engine.search.assert_called()
+
+
+def test_retrieve_memory_triggered_by_topic_keyword(mock_engine, mock_llm, mock_memory_service):
+    """测试话题关键词触发记忆检索。"""
+    state = AskState(**_make_base_state(question="等待期是多少天？"))
+    context = GraphContext(
+        rag_engine=mock_engine,
+        llm_client=mock_llm,
+        memory_service=mock_memory_service
+    )
+
+    from langgraph.runtime import Runtime
+    result = retrieve_memory(state, runtime=Runtime(context=context))
+
+    mock_memory_service.search.assert_called()
+    assert "重疾产品等待期180天" in result["memory_context"]
+
+
+def test_retrieve_memory_triggered_by_company_keyword(mock_engine, mock_llm, mock_memory_service):
+    """测试公司关键词触发记忆检索。"""
+    state = AskState(**_make_base_state(question="平安的产品怎么样？"))
+    context = GraphContext(
+        rag_engine=mock_engine,
+        llm_client=mock_llm,
+        memory_service=mock_memory_service
+    )
+
+    from langgraph.runtime import Runtime
+    result = retrieve_memory(state, runtime=Runtime(context=context))
+
+    mock_memory_service.search.assert_called()
+
+
+def test_retrieve_memory_skips_when_no_trigger(mock_engine, mock_llm, mock_memory_service):
+    """测试无触发词时跳过记忆检索。"""
+    state = AskState(**_make_base_state(question="你好"))
+    context = GraphContext(
+        rag_engine=mock_engine,
+        llm_client=mock_llm,
+        memory_service=mock_memory_service
+    )
+
+    from langgraph.runtime import Runtime
+    result = retrieve_memory(state, runtime=Runtime(context=context))
+
+    mock_memory_service.search.assert_not_called()
+    assert result["memory_context"] == ""

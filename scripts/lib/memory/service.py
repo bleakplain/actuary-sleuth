@@ -53,6 +53,15 @@ class MemoryService:
         if not self._available:
             return []
         try:
+            query = messages[-1].get("content", "") if messages else ""
+            if query and self._config:
+                similar = self._backend.search(query, user_id, limit=1)
+                if similar:
+                    score = similar[0].get("score")
+                    if score is not None and score > self._config.dedup_similarity_threshold:
+                        logger.debug(f"跳过重复记忆: {query[:50]}")
+                        return []
+
             session_id = (metadata or {}).get("session_id")
             ids = self._backend.add(messages, user_id, metadata=metadata or {}, run_id=session_id)
             for mid in ids:
@@ -173,6 +182,11 @@ class MemoryService:
             logger.debug("用户画像自动提取失败，跳过", exc_info=True)
             return
 
+        confidence = extracted.get("confidence", 0.5)
+        if self._config and confidence < self._config.profile_confidence_threshold:
+            logger.debug(f"跳过低置信度画像更新: confidence={confidence}")
+            return
+
         focus_areas = extracted.get("focus_areas", [])
         preference_tags = extracted.get("preference_tags", [])
         summary = extracted.get("summary", "")
@@ -227,13 +241,7 @@ class MemoryService:
             return
         category = (metadata or {}).get("category", "fact")
 
-        cfg = self._config
-        ttl_map = {
-            "fact": cfg.ttl_fact,
-            "preference": cfg.ttl_preference,
-            "audit_conclusion": cfg.ttl_audit_conclusion,
-        }
-        ttl_days = ttl_map.get(category, cfg.ttl_fact)
+        ttl_days = self._config.get_ttl(category)
         expires_at = None
         if ttl_days > 0:
             expires_at = (datetime.now() + timedelta(days=ttl_days)).isoformat()

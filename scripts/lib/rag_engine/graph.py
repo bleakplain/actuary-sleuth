@@ -20,6 +20,8 @@ from lib.common.middleware import (
 )
 from lib.llm.trace import trace_span
 from lib.memory.config import MemoryConfig
+from lib.memory.triggers import should_retrieve_memory
+from lib.memory.compression import compress_memory_context
 from lib.rag_engine.attribution import parse_citations
 from lib.rag_engine.rag_engine import _SYSTEM_PROMPT, RAGEngine
 
@@ -129,14 +131,20 @@ def clarify_user_query(state: AskState) -> dict:
 def retrieve_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
     memory_svc = runtime.context.memory_service
     max_chars = _memory_config.memory_context_max_chars
+
+    trigger = should_retrieve_memory(state["question"])
+    if not trigger.should_retrieve:
+        return {"memory_context": ""}
+
     with trace_span("memory_retrieve", "memory") as span:
-        span.input = {"question": state["question"], "user_id": state["user_id"]}
+        span.input = {"question": state["question"], "user_id": state["user_id"], "trigger_type": trigger.trigger_type}
         parts = []
 
         memories = memory_svc.search(state["question"], state["user_id"])
         if memories:
-            lines = [f"- {m['memory']} (记录于 {m['created_at'][:10]})" for m in memories]
-            parts.append("\n".join(lines))
+            memory_context = compress_memory_context(memories, max_chars=max_chars - 500)
+            if memory_context:
+                parts.append(memory_context)
 
         profile = memory_svc.get_user_profile(state["user_id"])
         if profile:
@@ -158,6 +166,7 @@ def retrieve_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
             "memory_count": len(memories),
             "has_profile": bool(profile),
             "memories": [m.get("memory", "") for m in memories],
+            "trigger_type": trigger.trigger_type,
         }
         return {"memory_context": context}
 
