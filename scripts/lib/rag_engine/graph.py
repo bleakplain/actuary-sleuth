@@ -19,7 +19,6 @@ from lib.common.middleware import (
     MAX_ENTITIES,
 )
 from lib.llm.trace import trace_span
-from lib.memory.config import MemoryConfig
 from lib.memory.triggers import should_retrieve_memory
 from lib.memory.compression import compress_memory_context
 from lib.rag_engine.attribution import parse_citations
@@ -27,7 +26,6 @@ from lib.rag_engine.rag_engine import _SYSTEM_PROMPT, RAGEngine
 
 logger = logging.getLogger(__name__)
 
-_memory_config = MemoryConfig()
 _clarification_mw = ClarificationMiddleware()
 _context_mw = SessionContextMiddleware()
 _loop_mw = LoopDetectionMiddleware()
@@ -130,7 +128,6 @@ def clarify_user_query(state: AskState) -> dict:
 
 def retrieve_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
     memory_svc = runtime.context.memory_service
-    max_chars = _memory_config.memory_context_max_chars
     ctx = state.get("session_context", {})
 
     last_retrieve = ctx.get("_last_memory_retrieve", 0.0)
@@ -138,7 +135,7 @@ def retrieve_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
         state["question"],
         session_context=ctx,
         last_retrieve_time=last_retrieve,
-        interval_seconds=_memory_config.retrieve_interval_seconds,
+        interval_seconds=60,
     )
     if not trigger.should_retrieve:
         return {"memory_context": ""}
@@ -152,7 +149,7 @@ def retrieve_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
 
         memories = memory_svc.search(state["question"], state["user_id"])
         if memories:
-            memory_context = compress_memory_context(memories, max_chars=max_chars - 500)
+            memory_context = compress_memory_context(memories, max_chars=1500)
             if memory_context:
                 parts.append(memory_context)
 
@@ -169,8 +166,8 @@ def retrieve_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
                 parts.append("【用户画像】\n" + "\n".join(profile_lines))
 
         context = "\n\n".join(parts)
-        if len(context) > max_chars:
-            context = context[:max_chars] + "..."
+        if len(context) > 2000:
+            context = context[:2000] + "..."
 
         span.output = {
             "memory_count": len(memories),

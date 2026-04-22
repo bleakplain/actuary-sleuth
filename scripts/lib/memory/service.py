@@ -40,7 +40,7 @@ class MemoryService:
         if not self._available:
             return []
         if limit is None:
-            limit = self._config.memory_search_limit if self._config else 3
+            limit = 3
         try:
             memories = self._backend.search(query, user_id, limit)
             self._update_access_stats([m["id"] for m in memories if "id" in m])
@@ -54,11 +54,11 @@ class MemoryService:
             return []
         try:
             query = messages[-1].get("content", "") if messages else ""
-            if query and self._config:
+            if query:
                 similar = self._backend.search(query, user_id, limit=1)
                 if similar:
                     score = similar[0].get("score")
-                    if score is not None and score > self._config.dedup_similarity_threshold:
+                    if score is not None and score > 0.9:
                         logger.debug(f"跳过重复记忆: {query[:50]}")
                         return []
 
@@ -94,7 +94,6 @@ class MemoryService:
     def cleanup_expired(self) -> int:
         if not self._available or not self._config:
             return 0
-        cfg = self._config
         cleaned = 0
 
         try:
@@ -107,7 +106,7 @@ class MemoryService:
                 ).fetchall()
                 cleaned += self._purge_memories(expired)
 
-                threshold = (datetime.now() - timedelta(days=cfg.inactive_threshold_days)).isoformat()
+                threshold = (datetime.now() - timedelta(days=60)).isoformat()
                 inactive = conn.execute(
                     "SELECT mem0_id FROM memory_metadata "
                     "WHERE last_accessed_at < ? AND access_count = 0 AND is_deleted = 0",
@@ -183,7 +182,7 @@ class MemoryService:
             return
 
         confidence = extracted.get("confidence", 0.5)
-        if self._config and confidence < self._config.profile_confidence_threshold:
+        if confidence < 0.6:
             logger.debug(f"跳过低置信度画像更新: confidence={confidence}")
             return
 
