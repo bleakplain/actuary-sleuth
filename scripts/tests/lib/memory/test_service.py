@@ -77,6 +77,7 @@ def test_search_with_custom_limit(mock_backend):
 
 
 def test_add_forwards_session_id(mock_backend):
+    mock_backend.search.return_value = []
     svc = MemoryService(backend=mock_backend)
     svc.add([{"role": "user", "content": "hello"}], "user1", metadata={"session_id": "sess_1"})
     mock_backend.add.assert_called_once_with(
@@ -196,3 +197,42 @@ def test_delete_exception_returns_false(service_with_backend):
     service_with_backend._backend.delete.side_effect = Exception("DB error")
     result = service_with_backend.delete("mem_1")
     assert result is False
+
+
+def test_add_skips_duplicate_memory():
+    """测试去重：相似度 > 阈值时跳过写入。"""
+    mock_backend = MagicMock()
+    mock_backend.search.return_value = [{"id": "m1", "memory": "等待期180天", "score": 0.95}]
+    mock_backend.add.return_value = ["m2"]
+
+    svc = MemoryService(backend=mock_backend)
+    result = svc.add([{"role": "user", "content": "等待期是180天"}], "user1")
+
+    assert result == []
+    mock_backend.add.assert_not_called()
+
+
+def test_add_writes_when_below_threshold():
+    """测试相似度低于阈值时正常写入。"""
+    mock_backend = MagicMock()
+    mock_backend.search.return_value = [{"id": "m1", "memory": "等待期180天", "score": 0.5}]
+    mock_backend.add.return_value = ["m2"]
+
+    svc = MemoryService(backend=mock_backend)
+    result = svc.add([{"role": "user", "content": "等待期是180天"}], "user1")
+
+    assert result == ["m2"]
+    mock_backend.add.assert_called_once()
+
+
+def test_add_writes_when_no_similar_memory():
+    """测试无相似记忆时正常写入。"""
+    mock_backend = MagicMock()
+    mock_backend.search.return_value = []
+    mock_backend.add.return_value = ["m1"]
+
+    svc = MemoryService(backend=mock_backend)
+    result = svc.add([{"role": "user", "content": "新的问题"}], "user1")
+
+    assert result == ["m1"]
+    mock_backend.add.assert_called_once()

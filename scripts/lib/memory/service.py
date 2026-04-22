@@ -53,6 +53,15 @@ class MemoryService:
         if not self._available:
             return []
         try:
+            query = messages[-1].get("content", "") if messages else ""
+            if query and self._config:
+                similar = self._backend.search(query, user_id, limit=1)
+                if similar:
+                    score = similar[0].get("score")
+                    if score is not None and score > self._config.dedup_similarity_threshold:
+                        logger.debug(f"跳过重复记忆: {query[:50]}")
+                        return []
+
             session_id = (metadata or {}).get("session_id")
             ids = self._backend.add(messages, user_id, metadata=metadata or {}, run_id=session_id)
             for mid in ids:
