@@ -21,6 +21,7 @@ from lib.common.middleware import (
 from lib.llm.trace import trace_span
 from lib.memory.config import MemoryConfig
 from lib.memory.triggers import should_retrieve_memory
+from lib.memory.compression import compress_memory_context
 from lib.rag_engine.attribution import parse_citations
 from lib.rag_engine.rag_engine import _SYSTEM_PROMPT, RAGEngine
 
@@ -141,8 +142,9 @@ def retrieve_memory(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
 
         memories = memory_svc.search(state["question"], state["user_id"])
         if memories:
-            lines = [f"- {m['memory']} (记录于 {m['created_at'][:10]})" for m in memories]
-            parts.append("\n".join(lines))
+            memory_context = compress_memory_context(memories, max_chars=max_chars - 500)
+            if memory_context:
+                parts.append(memory_context)
 
         profile = memory_svc.get_user_profile(state["user_id"])
         if profile:

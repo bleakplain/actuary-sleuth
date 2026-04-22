@@ -236,13 +236,7 @@ class MemoryService:
             return
         category = (metadata or {}).get("category", "fact")
 
-        cfg = self._config
-        ttl_map = {
-            "fact": cfg.ttl_fact,
-            "preference": cfg.ttl_preference,
-            "audit_conclusion": cfg.ttl_audit_conclusion,
-        }
-        ttl_days = ttl_map.get(category, cfg.ttl_fact)
+        ttl_days = self._config.get_ttl(category)
         expires_at = None
         if ttl_days > 0:
             expires_at = (datetime.now() + timedelta(days=ttl_days)).isoformat()
