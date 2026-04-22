@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from lib.common.middleware import TOPIC_KEYWORDS, COMPANY_KEYWORDS
 
@@ -25,20 +25,7 @@ def should_retrieve_memory(
 ) -> TriggerResult:
     """判断是否需要触发记忆检索。
 
-    触发策略（优先级从高到低）：
-    1. 关键词触发 - 保险术语、公司名
-    2. 实体关联 - 问题涉及会话中提到的实体
-    3. 话题延续 - 问题包含当前话题
-    4. 时间间隔 - 距上次检索超过 interval_seconds
-
-    Args:
-        question: 用户问题
-        session_context: 会话上下文，包含 mentioned_entities、current_topic 等
-        last_retrieve_time: 上次检索时间戳
-        interval_seconds: 检索间隔秒数
-
-    Returns:
-        TriggerResult: 触发判断结果
+    触发优先级：关键词 > 实体关联 > 话题延续 > 时间间隔
     """
     session_context = session_context or {}
 

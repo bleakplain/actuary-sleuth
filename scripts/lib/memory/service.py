@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Protocol
 
 from lib.common.database import get_connection
 from lib.memory.base import MemoryBase, Mem0Memory
-from lib.memory.config import MemoryConfig
+from lib.memory.config import MEMORY_TTL_DAYS
 from lib.memory.prompts import PROFILE_EXTRACTION_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,6 @@ class MemoryService:
     def __init__(self, backend: Optional[MemoryBase] = None):
         self._backend = backend
         self._available = backend is not None
-        self._config = MemoryConfig() if self._available else None
 
     @classmethod
     def create(cls) -> "MemoryService":
@@ -92,7 +91,7 @@ class MemoryService:
             return []
 
     def cleanup_expired(self) -> int:
-        if not self._available or not self._config:
+        if not self._available:
             return 0
         cleaned = 0
 
@@ -236,12 +235,9 @@ class MemoryService:
             logger.debug("更新访问统计失败", exc_info=True)
 
     def _insert_metadata(self, mem0_id: str, user_id: str, metadata: Optional[Dict]) -> None:
-        if not self._config:
-            return
-
         expires_at = None
-        if self._config.ttl_days > 0:
-            expires_at = (datetime.now() + timedelta(days=self._config.ttl_days)).isoformat()
+        if MEMORY_TTL_DAYS > 0:
+            expires_at = (datetime.now() + timedelta(days=MEMORY_TTL_DAYS)).isoformat()
 
         try:
             with get_connection() as conn:
