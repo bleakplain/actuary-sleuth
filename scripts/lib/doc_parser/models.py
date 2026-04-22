@@ -95,8 +95,19 @@ class PremiumTable:
     """费率表"""
     raw_text: str              # 原始文本
     data: List[List[str]]      # 结构化数据（二维表格）
+    header: List[str] = field(default_factory=list)  # 表头行
     remark: str = ""           # 备注
     section_type: str = "premium_table"
+
+
+@dataclass(frozen=True)
+class MarkdownTable:
+    """Markdown 表格结构"""
+    header: List[str]           # 表头
+    rows: List[List[str]]       # 数据行
+    raw_text: str               # 原始文本
+    start_pos: int              # 文档中起始位置
+    end_pos: int                # 文档中结束位置
 
 
 @dataclass(frozen=True)

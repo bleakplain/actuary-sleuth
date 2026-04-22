@@ -13,14 +13,14 @@ from __future__ import annotations
 import re
 import logging
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Callable
 
 import yaml
 from llama_index.core import Document
 from llama_index.core.schema import TextNode
 from dataclasses import replace
 
-from ..models import DocumentMeta
+from ..models import DocumentMeta, MarkdownTable
 
 logger = logging.getLogger(__name__)
 
@@ -147,9 +147,17 @@ class MdParser:
             else:
                 doc_meta = replace(doc_meta, law_name='未知')
 
+        # 识别表格
+        from .table_utils import find_tables, is_within_table
+        tables = find_tables(body)
+        logger.debug(f"识别到 {len(tables)} 个表格: {source_file}")
+
         headings = self._identify_headings(body)
 
-        chunks, _ = self._recursive_chunk(body, headings, doc_meta, source_file)
+        chunks, _ = self._recursive_chunk(
+            body, headings, doc_meta, source_file,
+            tables=tables, is_within_table_func=is_within_table
+        )
 
         if len(chunks) > MAX_CHUNKS:
             logger.warning(
@@ -250,14 +258,17 @@ class MdParser:
         parent_chunk_id: Optional[int] = None,
         level: int = 1,
         chunk_id_counter: Optional[List[int]] = None,
+        tables: Optional[List[MarkdownTable]] = None,
+        is_within_table_func: Optional[Callable[[int, List[MarkdownTable]], bool]] = None,
     ) -> Tuple[List[Chunk], List[int]]:
         """递归切分文档
 
         策略:
-        1. 如果章节 ≤ max_chunk_chars，整体作为一个chunk
-        2. 如果超过，检查是否有子标题，递归处理
-        3. 如果没有子标题，按段落累积
-        4. 如果单段落超长，按句子边界切分
+        1. 先处理表格，作为独立chunk
+        2. 如果章节 ≤ max_chunk_chars，整体作为一个chunk
+        3. 如果超过，检查是否有子标题，递归处理
+        4. 如果没有子标题，按段落累积
+        5. 如果单段落超长，按句子边界切分
 
         Args:
             body: 文档正文
@@ -268,26 +279,65 @@ class MdParser:
             parent_chunk_id: 父 chunk ID
             level: 当前层级深度
             chunk_id_counter: chunk ID 计数器 [current_id]
+            tables: 识别到的表格列表
+            is_within_table_func: 判断位置是否在表格内的函数
 
         Returns:
             (chunks, child_chunk_ids): chunk 列表和子 chunk ID 列表
         """
         if chunk_id_counter is None:
             chunk_id_counter = [0]
+        if tables is None:
+            tables = []
 
         chunks: List[Chunk] = []
         current_level_chunk_ids: List[int] = []
 
+        # 先处理表格作为独立chunk
+        for table in tables:
+            table_chunk = self._chunk_table(table, doc_meta, source_file, parent_path, level, parent_chunk_id, chunk_id_counter)
+            chunks.extend(table_chunk)
+            current_level_chunk_ids.extend([c.chunk_id for c in table_chunk])
+
+        # 过滤掉表格内的标题
+        if is_within_table_func and tables:
+            headings = [h for h in headings if not is_within_table_func(h.start, tables)]
+
         if not headings:
-            para_chunks = self._chunk_by_paragraph(body, doc_meta, source_file, parent_path, level, parent_chunk_id, chunk_id_counter)
-            chunks.extend(para_chunks)
-            current_level_chunk_ids.extend([c.chunk_id for c in para_chunks])
+            # 过滤掉表格内的段落
+            filtered_body = self._filter_table_regions(body, tables, is_within_table_func)
+            if filtered_body.strip():
+                para_chunks = self._chunk_by_paragraph(filtered_body, doc_meta, source_file, parent_path, level, parent_chunk_id, chunk_id_counter)
+                chunks.extend(para_chunks)
+                current_level_chunk_ids.extend([c.chunk_id for c in para_chunks])
             return chunks, current_level_chunk_ids
 
         for i, heading in enumerate(headings):
             start = heading.end
             end = headings[i + 1].start if i + 1 < len(headings) else len(body)
+
+            # 检查该区域内是否有表格（表格已作为独立chunk处理）
+            section_has_table = False
+            if tables and is_within_table_func:
+                for t in tables:
+                    if t.start_pos >= start and t.end_pos <= end:
+                        section_has_table = True
+                        break
+
+            # 提取非表格文本
             section_text = body[start:end].strip()
+            if section_has_table:
+                # 使用绝对位置过滤
+                non_table_parts: List[str] = []
+                last_pos = start
+                for t in sorted(tables, key=lambda x: x.start_pos):
+                    if t.start_pos >= start and t.end_pos <= end:
+                        if last_pos < t.start_pos:
+                            non_table_parts.append(body[last_pos:t.start_pos])
+                        last_pos = t.end_pos
+                if last_pos < end:
+                    non_table_parts.append(body[last_pos:end])
+                section_text = '\n\n'.join(p.strip() for p in non_table_parts if p.strip())
 
             if not section_text:
                 continue
@@ -585,6 +635,114 @@ class MdParser:
 
         return False
 
+    def _chunk_table(
+        self,
+        table: MarkdownTable,
+        doc_meta: DocumentMeta,
+        source_file: str,
+        section_path: str,
+        level: int = 1,
+        parent_chunk_id: Optional[int] = None,
+        chunk_id_counter: Optional[List[int]] = None,
+    ) -> List[Chunk]:
+        """将表格作为chunk处理
+
+        大表格按行切分，保持表头。
+        """
+        if chunk_id_counter is None:
+            chunk_id_counter = [0]
+
+        chunks: List[Chunk] = []
+        header_line = '|' + '|'.join(table.header) + '|'
+
+        if len(table.raw_text) <= self.max_chunk_chars:
+            chunk_id = chunk_id_counter[0]
+            chunk_id_counter[0] += 1
+            metadata = self._build_metadata(doc_meta, source_file, section_path, level, "")
+            metadata['content_type'] = 'table'
+            metadata['table_rows'] = len(table.rows)
+            metadata['table_cols'] = len(table.header)
+            chunks.append(Chunk(
+                content=table.raw_text,
+                section_path=section_path,
+                metadata=metadata,
+                chunk_id=chunk_id,
+                parent_chunk_id=parent_chunk_id,
+                level=level,
+            ))
+        else:
+            # 大表格按行切分
+            current_rows: List[str] = []
+            current_len = len(header_line) + 1
+
+            for row in table.rows:
+                row_line = '|' + '|'.join(row) + '|'
+                if current_len + len(row_line) + 1 <= self.max_chunk_chars:
+                    current_rows.append(row_line)
+                    current_len += len(row_line) + 1
+                else:
+                    if current_rows:
+                        chunk_text = header_line + '\n' + '|---|' * len(table.header) + '\n' + '\n'.join(current_rows)
+                        chunk_id = chunk_id_counter[0]
+                        chunk_id_counter[0] += 1
+                        metadata = self._build_metadata(doc_meta, source_file, section_path, level, "")
+                        metadata['content_type'] = 'table'
+                        metadata['table_rows'] = len(current_rows)
+                        metadata['table_cols'] = len(table.header)
+                        chunks.append(Chunk(
+                            content=chunk_text,
+                            section_path=section_path,
+                            metadata=metadata,
+                            chunk_id=chunk_id,
+                            parent_chunk_id=parent_chunk_id,
+                            level=level,
+                        ))
+                    current_rows = [row_line]
+                    current_len = len(header_line) + len(row_line) + 2
+
+            if current_rows:
+                chunk_text = header_line + '\n' + '|---|' * len(table.header) + '\n' + '\n'.join(current_rows)
+                chunk_id = chunk_id_counter[0]
+                chunk_id_counter[0] += 1
+                metadata = self._build_metadata(doc_meta, source_file, section_path, level, "")
+                metadata['content_type'] = 'table'
+                metadata['table_rows'] = len(current_rows)
+                metadata['table_cols'] = len(table.header)
+                chunks.append(Chunk(
+                    content=chunk_text,
+                    section_path=section_path,
+                    metadata=metadata,
+                    chunk_id=chunk_id,
+                    parent_chunk_id=parent_chunk_id,
+                    level=level,
+                ))
+
+        return chunks
+
+    def _filter_table_regions(
+        self,
+        body: str,
+        tables: List[MarkdownTable],
+        is_within_table_func: Optional[Callable[[int, List[MarkdownTable]], bool]] = None,
+    ) -> str:
+        """过滤掉表格区域，只保留非表格文本"""
+        if not tables or not is_within_table_func:
+            return body
+
+        # 构建表格区域外的文本
+        result_parts: List[str] = []
+        last_end = 0
+
+        for table in sorted(tables, key=lambda t: t.start_pos):
+            if table.start_pos > last_end:
+                result_parts.append(body[last_end:table.start_pos])
+            last_end = table.end_pos
+
+        if last_end < len(body):
+            result_parts.append(body[last_end:])
+
+        return '\n\n'.join(p for p in result_parts if p.strip())
+
     def _build_metadata(
         self,
         doc_meta: DocumentMeta,
@@ -610,16 +768,22 @@ class MdParser:
             chunk.next_chunk_id = chunks[i + 1].chunk_id if i + 1 < len(chunks) else None
 
     def _chunks_to_nodes(self, chunks: List[Chunk]) -> List[TextNode]:
-        """转换为TextNode，添加智能overlap"""
+        """转换为TextNode，添加智能overlap
+
+        表格chunk不参与overlap。
+        """
         nodes: List[TextNode] = []
 
         for i, chunk in enumerate(chunks):
             content = chunk.content
+            prev_chunk = chunks[i - 1] if i > 0 else None
 
-            if i > 0 and self.chunk_overlap_chars > 0:
-                overlap = self._get_smart_overlap(chunks[i - 1].content)
-                if overlap and len(content) + len(overlap) <= self.max_chunk_chars:
-                    content = overlap + content
+            # 表格不参与overlap
+            if prev_chunk and self.chunk_overlap_chars > 0:
+                if prev_chunk.metadata.get('content_type') != 'table':
+                    overlap = self._get_smart_overlap(prev_chunk.content)
+                    if overlap and len(content) + len(overlap) <= self.max_chunk_chars:
+                        content = overlap + content
 
             metadata = chunk.metadata.copy()
             metadata['chunk_id'] = chunk.chunk_id
