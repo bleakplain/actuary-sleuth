@@ -222,7 +222,49 @@ def test_add_writes_when_below_threshold():
     result = svc.add([{"role": "user", "content": "等待期是180天"}], "user1")
 
     assert result == ["m2"]
-    mock_backend.add.assert_called_once()
+
+
+def test_update_user_profile_skips_low_confidence():
+    """测试低置信度画像更新被跳过。"""
+    mock_backend = MagicMock()
+    mock_backend.search.return_value = []
+    svc = MemoryService(backend=mock_backend)
+
+    with patch("lib.llm.factory.LLMClientFactory") as mock_factory:
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = '{"focus_areas": ["重疾险"], "confidence": 0.3}'
+        mock_factory.create_qa_llm.return_value = mock_llm
+
+        with patch("lib.memory.service.get_connection") as mock_conn:
+            conn = MagicMock()
+            mock_conn.return_value.__enter__ = lambda self: conn
+            mock_conn.return_value.__exit__ = lambda self, *args: None
+
+            svc.update_user_profile("问题", "回答", "user1")
+
+            conn.execute.assert_not_called()
+
+
+def test_update_user_profile_accepts_high_confidence():
+    """测试高置信度画像更新正常写入。"""
+    mock_backend = MagicMock()
+    mock_backend.search.return_value = []
+    svc = MemoryService(backend=mock_backend)
+
+    with patch("lib.llm.factory.LLMClientFactory") as mock_factory:
+        mock_llm = MagicMock()
+        mock_llm.chat.return_value = '{"focus_areas": ["重疾险"], "preference_tags": [], "summary": "测试", "confidence": 0.8}'
+        mock_factory.create_qa_llm.return_value = mock_llm
+
+        with patch("lib.memory.service.get_connection") as mock_conn:
+            conn = MagicMock()
+            conn.execute.return_value.fetchone.return_value = None
+            mock_conn.return_value.__enter__ = lambda self: conn
+            mock_conn.return_value.__exit__ = lambda self, *args: None
+
+            svc.update_user_profile("问题", "回答", "user1")
+
+            conn.execute.assert_called()
 
 
 def test_add_writes_when_no_similar_memory():

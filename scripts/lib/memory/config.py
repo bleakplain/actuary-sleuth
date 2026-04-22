@@ -27,6 +27,7 @@ class MemoryConfig:
     memory_context_max_chars: int = 2000
     memory_search_limit: int = 3
     dedup_similarity_threshold: float = 0.9
+    profile_confidence_threshold: float = 0.6
 
     def get_ttl(self, category: str) -> int:
         """获取指定分类的 TTL。"""

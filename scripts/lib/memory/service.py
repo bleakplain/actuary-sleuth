@@ -182,6 +182,11 @@ class MemoryService:
             logger.debug("用户画像自动提取失败，跳过", exc_info=True)
             return
 
+        confidence = extracted.get("confidence", 0.5)
+        if self._config and confidence < self._config.profile_confidence_threshold:
+            logger.debug(f"跳过低置信度画像更新: confidence={confidence}")
+            return
+
         focus_areas = extracted.get("focus_areas", [])
         preference_tags = extracted.get("preference_tags", [])
         summary = extracted.get("summary", "")
