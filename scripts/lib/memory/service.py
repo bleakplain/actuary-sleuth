@@ -8,10 +8,11 @@ from typing import Any, Dict, List, Optional, Protocol
 
 from lib.common.database import get_connection
 from lib.memory.base import MemoryBase, Mem0Memory
-from lib.memory.config import MEMORY_TTL_DAYS
 from lib.memory.prompts import PROFILE_EXTRACTION_PROMPT
 
 logger = logging.getLogger(__name__)
+
+MEMORY_TTL_DAYS = 30
 
 
 class UserProfileUpdateRequest(Protocol):
