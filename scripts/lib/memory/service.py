@@ -239,19 +239,17 @@ class MemoryService:
     def _insert_metadata(self, mem0_id: str, user_id: str, metadata: Optional[Dict]) -> None:
         if not self._config:
             return
-        category = (metadata or {}).get("category", "fact")
 
-        ttl_days = self._config.get_ttl(category)
         expires_at = None
-        if ttl_days > 0:
-            expires_at = (datetime.now() + timedelta(days=ttl_days)).isoformat()
+        if self._config.ttl_days > 0:
+            expires_at = (datetime.now() + timedelta(days=self._config.ttl_days)).isoformat()
 
         try:
             with get_connection() as conn:
                 conn.execute(
                     "INSERT OR IGNORE INTO memory_metadata (mem0_id, user_id, session_id, category, expires_at) "
                     "VALUES (?, ?, ?, ?, ?)",
-                    (mem0_id, user_id, (metadata or {}).get("session_id"), category, expires_at),
+                    (mem0_id, user_id, (metadata or {}).get("session_id"), (metadata or {}).get("category", "fact"), expires_at),
                 )
         except Exception:
             logger.debug(f"插入记忆元数据失败: {mem0_id}", exc_info=True)

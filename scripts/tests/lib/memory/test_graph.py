@@ -216,7 +216,13 @@ def test_retrieve_memory_triggered_by_company_keyword(mock_engine, mock_llm, moc
 
 def test_retrieve_memory_skips_when_no_trigger(mock_engine, mock_llm, mock_memory_service):
     """测试无触发词时跳过记忆检索。"""
-    state = AskState(**_make_base_state(question="你好"))
+    import time
+    state = AskState(
+        **_make_base_state(
+            question="你好",
+            session_context={"_last_memory_retrieve": time.time()}
+        )
+    )
     context = GraphContext(
         rag_engine=mock_engine,
         llm_client=mock_llm,
