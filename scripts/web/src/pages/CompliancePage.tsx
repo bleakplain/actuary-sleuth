@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Card, Form, Input, Button, Table, Tag, Typography, theme,
   message, Tabs, Space, Descriptions, Popconfirm, Drawer, Grid,
@@ -434,6 +434,7 @@ export default function CompliancePage() {
       const report = await complianceApi.checkDocument({
         document_content: parsedDocument.combined_text,
         product_name: productName || parsedDocument.file_name || undefined,
+        parse_id: parsedDocument.parse_id,
       });
       setCheckingResult(report);
       message.success('合规检查完成');
@@ -500,6 +501,39 @@ export default function CompliancePage() {
     },
   ];
 
+  const groupedByClause = useMemo(() => {
+    const items = checkingResult?.result?.items || [];
+    if (items.length === 0) return {};
+    const groups: Record<string, ComplianceItem[]> = {};
+    for (const item of items) {
+      const clauseNum = item.clause_number || '其他';
+      if (!groups[clauseNum]) groups[clauseNum] = [];
+      groups[clauseNum].push(item);
+    }
+    const sortedKeys = Object.keys(groups).sort((a, b) => {
+      const aParts = a.split('.').map(Number);
+      const bParts = b.split('.').map(Number);
+      for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+        const aVal = aParts[i] || 0;
+        const bVal = bParts[i] || 0;
+        if (aVal !== bVal) return aVal - bVal;
+      }
+      return 0;
+    });
+    const sorted: Record<string, ComplianceItem[]> = {};
+    for (const key of sortedKeys) {
+      sorted[key] = groups[key];
+    }
+    return sorted;
+  }, [checkingResult?.result?.items]);
+
+  const getClauseSummary = (items: ComplianceItem[]) => {
+    const compliant = items.filter(i => i.status === 'compliant').length;
+    const nonCompliant = items.filter(i => i.status === 'non_compliant').length;
+    const attention = items.filter(i => i.status === 'attention').length;
+    return { compliant, nonCompliant, attention };
+  };
+
   const handleDeleteReport = async (reportId: string) => {
     try {
       await complianceApi.deleteComplianceReport(reportId);
@@ -563,15 +597,68 @@ export default function CompliancePage() {
                   需关注 {docSummary.attention} 项
                 </Tag>
               </Space>
-              <Table
-                dataSource={docResult.items || []}
-                columns={itemColumns}
-                rowKey={(r: ComplianceItem) => r.param}
-                size="small"
-                scroll={{ x: 'max-content' }}
-                pagination={false}
-                rowClassName={(record: ComplianceItem) => record.status === 'non_compliant' ? 'ant-table-row-error' : ''}
-              />
+              {docResult.missing_clauses && docResult.missing_clauses.length > 0 && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: 16 }}
+                  message="遗漏条款提示"
+                  description={
+                    <span>
+                      以下条款未被检查覆盖：
+                      {docResult.missing_clauses.map(c => <Tag key={c} style={{ marginLeft: 4 }}>{c}</Tag>)}
+                    </span>
+                  }
+                />
+              )}
+              {docResult.warning && (
+                <Alert type="warning" showIcon style={{ marginBottom: 16 }} message={docResult.warning} />
+              )}
+              {Object.keys(groupedByClause).length > 0 ? (
+                <Collapse
+                  defaultActiveKey={Object.keys(groupedByClause)}
+                  items={Object.entries(groupedByClause).map(([clauseNum, items]) => {
+                    const clauseSummary = getClauseSummary(items);
+                    return {
+                      key: clauseNum,
+                      label: (
+                        <Space>
+                          <Text strong>条款 {clauseNum}</Text>
+                          <Text type="secondary">({items.length} 项)</Text>
+                          {clauseSummary.nonCompliant > 0 && (
+                            <Tag color="error">{clauseSummary.nonCompliant} 不合规</Tag>
+                          )}
+                          {clauseSummary.attention > 0 && (
+                            <Tag color="warning">{clauseSummary.attention} 需关注</Tag>
+                          )}
+                          {clauseSummary.nonCompliant === 0 && clauseSummary.attention === 0 && (
+                            <Tag color="success">全部合规</Tag>
+                          )}
+                        </Space>
+                      ),
+                      children: (
+                        <Table
+                          dataSource={items}
+                          columns={itemColumns}
+                          rowKey={(r: ComplianceItem) => `${r.clause_number}-${r.param}`}
+                          size="small"
+                          pagination={false}
+                        />
+                      ),
+                    };
+                  })}
+                />
+              ) : (
+                <Table
+                  dataSource={docResult.items || []}
+                  columns={itemColumns}
+                  rowKey={(r: ComplianceItem) => r.param}
+                  size="small"
+                  scroll={{ x: 'max-content' }}
+                  pagination={false}
+                  rowClassName={(record: ComplianceItem) => record.status === 'non_compliant' ? 'ant-table-row-error' : ''}
+                />
+              )}
             </Card>
           ) : null;
         })()}

@@ -156,6 +156,7 @@ export interface MetricsDiff {
 }
 
 export interface ComplianceItem {
+  clause_number?: string;
   param: string;
   value?: string | number;
   requirement: string;
@@ -175,6 +176,8 @@ export interface ComplianceResult {
   sources?: Source[];
   citations?: Citation[];
   extracted_params?: Record<string, string>;
+  missing_clauses?: string[];
+  warning?: string;
 }
 
 export interface ComplianceReport {
@@ -357,4 +360,5 @@ export interface ParsedDocument {
 export interface ComplianceCheckRequest {
   document_content: string;
   product_name?: string;
+  parse_id?: string;
 }

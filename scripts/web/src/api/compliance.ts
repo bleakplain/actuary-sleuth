@@ -13,6 +13,7 @@ export async function checkProduct(params: {
 export async function checkDocument(params: {
   document_content: string;
   product_name?: string;
+  parse_id?: string;
 }): Promise<ComplianceReport> {
   const { data } = await client.post('/api/compliance/check/document', params);
   return data;

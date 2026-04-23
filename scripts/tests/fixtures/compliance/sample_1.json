@@ -1,0 +1,57 @@
+{
+  "description": "健康保险条款合规检查样例",
+  "human_result": {
+    "summary": {"compliant": 2, "non_compliant": 1, "attention": 0},
+    "items": [
+      {
+        "clause_number": "1.1",
+        "param": "等待期",
+        "value": "90天",
+        "status": "compliant",
+        "source": "[来源1]"
+      },
+      {
+        "clause_number": "1.2",
+        "param": "免赔额",
+        "value": "0元",
+        "status": "compliant",
+        "source": "[来源2]"
+      },
+      {
+        "clause_number": "2.1",
+        "param": "保险期间",
+        "value": "1年",
+        "status": "non_compliant",
+        "source": "[来源3]",
+        "suggestion": "建议明确产品为短期健康保险"
+      }
+    ]
+  },
+  "auto_result": {
+    "summary": {"compliant": 2, "non_compliant": 1, "attention": 0},
+    "items": [
+      {
+        "clause_number": "1.1",
+        "param": "等待期",
+        "value": "90天",
+        "status": "compliant",
+        "source": "[来源1]"
+      },
+      {
+        "clause_number": "1.2",
+        "param": "免赔额",
+        "value": "0元",
+        "status": "compliant",
+        "source": "[来源2]"
+      },
+      {
+        "clause_number": "2.1",
+        "param": "保险期间",
+        "value": "1年",
+        "status": "non_compliant",
+        "source": "[来源3]",
+        "suggestion": "建议明确产品为短期健康保险"
+      }
+    ]
+  }
+}
