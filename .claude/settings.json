@@ -1,5 +1,73 @@
 {
   "enabledPlugins": {
     "superpowers@claude-plugins-official": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git branch *)",
+      "Bash(git worktree *)",
+      "Bash(git stash *)",
+      "Bash(gh api *)",
+      "Bash(gh repo *)",
+      "Bash(gh auth *)",
+      "Bash(grep *)",
+      "Bash(lsof *)",
+      "Bash(ps *)",
+      "Bash(pwd)",
+      "Bash(pytest scripts/tests/*)",
+      "Bash(mypy scripts/lib/*)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(git pull *)",
+      "Bash(git merge *)",
+      "Bash(git rebase *)",
+      "Bash(git reset *)",
+      "Bash(git checkout *)",
+      "Bash(git switch *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git rm *)",
+      "Bash(gh pr create *)",
+      "Bash(gh pr merge *)",
+      "Bash(gh pr close *)",
+      "Bash(gh run rerun *)",
+      "Bash(pip install *)",
+      "Bash(pip uninstall *)",
+      "Bash(npm install *)",
+      "Bash(npm uninstall *)",
+      "Bash(mkdir *)",
+      "Bash(mv *)",
+      "Bash(cp *)",
+      "Bash(chmod *)",
+      "Bash(chown *)"
+    ],
+    "deny": [
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf /)",
+      "Bash(rm -rf ~)",
+      "Bash(rm -rf ~/*)",
+      "Bash(sudo rm *)",
+      "Bash(sudo chmod *)",
+      "Bash(sudo chown *)",
+      "Bash(sudo mv *)",
+      "Bash(sudo cp *)",
+      "Bash(sudo dd *)",
+      "Bash(> /etc/*)",
+      "Bash(> /usr/*)",
+      "Bash(> /var/*)",
+      "Bash(> /sys/*)",
+      "Bash(> /proc/*)",
+      "Bash(curl * | bash)",
+      "Bash(curl * | sh)",
+      "Bash(wget * | bash)",
+      "Bash(wget * | sh)",
+      "Bash(ssh-keygen *)",
+      "Bash(passwd *)",
+      "Bash(chpasswd *)"
+    ]
   }
 }
