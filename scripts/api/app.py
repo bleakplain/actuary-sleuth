@@ -161,7 +161,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from api.routers import ask, knowledge, eval as eval_router, compliance, kb_version, feedback, observability, product_doc
+from api.routers import ask, knowledge, eval as eval_router, compliance, kb_version, feedback, observability
 from api.routers.memory import router as memory_router
 app.include_router(ask.router)
 app.include_router(knowledge.router)
@@ -171,7 +171,6 @@ app.include_router(kb_version.router)
 app.include_router(feedback.router)
 app.include_router(observability.router)
 app.include_router(memory_router)
-app.include_router(product_doc.router)
 
 
 @app.get("/api/health")

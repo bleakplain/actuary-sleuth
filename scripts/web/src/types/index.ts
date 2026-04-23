@@ -320,3 +320,41 @@ export interface CacheTrendPoint {
 export interface CacheTrendResponse {
   points: CacheTrendPoint[];
 }
+
+// ── Parsed Document ──
+
+export interface ParsedClause {
+  number: string;
+  title: string;
+  text: string;
+}
+
+export interface ParsedPremiumTable {
+  raw_text: string;
+  data: string[][];
+}
+
+export interface ParsedSection {
+  title: string;
+  content: string;
+}
+
+export interface ParsedDocument {
+  parse_id: string;
+  file_name: string;
+  file_type: string;
+  clauses: ParsedClause[];
+  premium_tables: ParsedPremiumTable[];
+  notices: ParsedSection[];
+  health_disclosures: ParsedSection[];
+  exclusions: ParsedSection[];
+  rider_clauses: ParsedClause[];
+  warnings: string[];
+  combined_text: string;
+  parse_time: string;
+}
+
+export interface ComplianceCheckRequest {
+  document_content: string;
+  product_name?: string;
+}
