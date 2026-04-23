@@ -48,13 +48,13 @@ class PdfParser:
         }
 
         try:
-            for page in pdf.pages:
+            for page_idx, page in enumerate(pdf.pages):
                 tables = page.find_tables()
 
-                page_clauses = self._extract_clauses_from_tables(tables, warnings)
+                page_clauses = self._extract_clauses_from_tables(tables, page_idx, warnings)
                 clauses.extend(page_clauses)
 
-                page_premium = self._extract_premium_from_tables(tables, warnings)
+                page_premium = self._extract_premium_from_tables(tables, page_idx, warnings)
                 premium_tables.extend(page_premium)
 
                 page_sections = self._extract_sections_from_page(page, warnings)
@@ -76,10 +76,10 @@ class PdfParser:
             warnings=warnings,
         )
 
-    def _extract_clauses_from_tables(self, tables, warnings: List[str]) -> List[Clause]:
+    def _extract_clauses_from_tables(self, tables, page_index: int, warnings: List[str]) -> List[Clause]:
         clauses = []
 
-        for table in tables:
+        for table_idx, table in enumerate(tables):
             rows = table.extract()
             if not rows:
                 continue
@@ -93,14 +93,22 @@ class PdfParser:
                     number = first_cell
                     content = str(row[1] or '').strip() if len(row) > 1 else ''
                     title, text = separate_title_and_text(content)
-                    clauses.append(Clause(number=number, title=title, text=text))
+                    bbox = getattr(table, 'bbox', None)
+                    clauses.append(Clause(
+                        number=number,
+                        title=title,
+                        text=text,
+                        page_number=page_index + 1,
+                        bbox=bbox,
+                        table_index=table_idx,
+                    ))
 
         return clauses
 
-    def _extract_premium_from_tables(self, tables, warnings: List[str]) -> List[PremiumTable]:
+    def _extract_premium_from_tables(self, tables, page_index: int, warnings: List[str]) -> List[PremiumTable]:
         premium_tables = []
 
-        for table in tables:
+        for table_idx, table in enumerate(tables):
             rows = table.extract()
             if not rows:
                 continue
@@ -109,7 +117,14 @@ class PdfParser:
             if self.detector.is_premium_table(header):
                 raw_text = '\n'.join('\t'.join(str(cell or '') for cell in row) for row in rows)
                 data = [[str(cell or '') for cell in row] for row in rows]
-                premium_tables.append(PremiumTable(raw_text=raw_text, data=data))
+                bbox = getattr(table, 'bbox', None)
+                premium_tables.append(PremiumTable(
+                    raw_text=raw_text,
+                    data=data,
+                    page_number=page_index + 1,
+                    bbox=bbox,
+                    table_index=table_idx,
+                ))
 
         return premium_tables
 

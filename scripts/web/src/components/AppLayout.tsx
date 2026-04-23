@@ -7,6 +7,7 @@ import {
   SafetyCertificateOutlined,
   DislikeOutlined,
   ExperimentOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { sidebarDarkTheme } from '../theme';
@@ -18,6 +19,7 @@ const { useBreakpoint } = Grid;
 const menuItems = [
   { key: '/ask', icon: <MessageOutlined />, label: '法规问答' },
   { key: '/knowledge', icon: <DatabaseOutlined />, label: '知识库管理' },
+  { key: '/product-docs', icon: <FileTextOutlined />, label: '产品文档审核' },
   { key: '/eval', icon: <BarChartOutlined />, label: 'RAG 评估' },
   { key: '/compliance', icon: <SafetyCertificateOutlined />, label: '合规检查' },
   { key: '/feedback', icon: <DislikeOutlined />, label: '问题反馈' },

@@ -9,6 +9,7 @@ import EvalPage from './pages/EvalPage';
 import CompliancePage from './pages/CompliancePage';
 import FeedbackPage from './pages/FeedbackPage';
 import ObservabilityPage from './pages/ObservabilityPage';
+import ProductDocPage from './pages/ProductDocPage';
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
             <Route path="/compliance" element={<CompliancePage />} />
             <Route path="/feedback" element={<FeedbackPage />} />
             <Route path="/observability" element={<ObservabilityPage />} />
+            <Route path="/product-docs" element={<ProductDocPage />} />
           </Route>
         </Routes>
       </BrowserRouter>
