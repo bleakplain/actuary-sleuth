@@ -48,6 +48,24 @@ class FeishuConfig:
         return self._config.get('target_group_id')
 
 
+class MemoryConfig:
+
+    def __init__(self, config_dict: Dict[str, Any]):
+        self._config = config_dict.get('memory', {})
+
+    @property
+    def ttl_days(self) -> int:
+        return self._config.get('ttl_days', 30)
+
+    @property
+    def similarity_threshold(self) -> float:
+        return self._config.get('similarity_threshold', 0.9)
+
+    @property
+    def confidence_threshold(self) -> float:
+        return self._config.get('confidence_threshold', 0.6)
+
+
 class OllamaConfig:
 
     def __init__(self, config_dict: Dict[str, Any]):
@@ -151,6 +169,10 @@ class DatabaseConfig:
     def models_dir(self) -> str:
         return self._config.get('models_dir', '')
 
+    @property
+    def memory_dir(self) -> str:
+        return self._config.get('memory_dir', '')
+
 
 # ===== 场景化 LLM 配置 =====
 
@@ -229,6 +251,7 @@ class Config:
                 'kb_version_dir': os.getenv('DATA_PATHS_KB_VERSION_DIR', '/root/work/actuary-assets/kb'),
                 'eval_snapshots_dir': os.getenv('DATA_PATHS_EVAL_SNAPSHOTS_DIR', '/root/work/actuary-assets/eval/snapshots'),
                 'models_dir': os.getenv('DATA_PATHS_MODELS_DIR', '/root/work/actuary-assets/models/reranker'),
+                'memory_dir': os.getenv('DATA_PATHS_MEMORY_DIR', '/root/work/actuary-assets/memory'),
             },
             # ollama
             'ollama': {
@@ -288,6 +311,12 @@ class Config:
                 'app_secret': os.getenv('FEISHU_APP_SECRET', ''),
                 'target_group_id': os.getenv('FEISHU_TARGET_GROUP_ID', ''),
             },
+            # memory
+            'memory': {
+                'ttl_days': int(os.getenv('MEMORY_TTL_DAYS', '30')),
+                'similarity_threshold': float(os.getenv('MEMORY_SIMILARITY_THRESHOLD', '0.9')),
+                'confidence_threshold': float(os.getenv('MEMORY_CONFIDENCE_THRESHOLD', '0.6')),
+            },
             # debug
             'debug': os.getenv('DEBUG', 'false').lower() == 'true',
             # cache
@@ -306,6 +335,7 @@ class Config:
         self._minimax = MinimaxConfig(self._config)
         self._llm = LLMConfig(self._config)
         self._data_paths = DatabaseConfig(self._config)
+        self._memory = MemoryConfig(self._config)
 
     @property
     def feishu(self) -> FeishuConfig:
@@ -314,6 +344,10 @@ class Config:
     @property
     def llm(self) -> LLMConfig:
         return self._llm
+
+    @property
+    def memory(self) -> MemoryConfig:
+        return self._memory
 
     @property
     def sqlite_db_path(self) -> str:
@@ -372,6 +406,9 @@ class Config:
     def get_models_dir(self) -> str:
         return self._resolve_path(self._data_paths.models_dir)
 
+    def get_memory_dir(self) -> str:
+        return self._resolve_path(self._data_paths.memory_dir)
+
 
 # ===== 全局配置实例（单例模式）=====
 
@@ -410,6 +447,9 @@ def get_eval_snapshots_dir() -> str:
 def get_models_dir() -> str:
     return _get_config().get_models_dir()
 
+def get_memory_dir() -> str:
+    return _get_config().get_memory_dir()
+
 def get_llm_config() -> LLMConfig:
     return _get_config().llm
 
@@ -446,3 +486,6 @@ def get_ocr_llm_config() -> SimpleNamespace:
 
 def get_feishu_config() -> FeishuConfig:
     return _get_config().feishu
+
+def get_memory_config() -> MemoryConfig:
+    return _get_config().memory

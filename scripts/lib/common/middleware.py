@@ -75,13 +75,9 @@ class MiddlewareChain:
 
 # === LangGraph 工作流中间件 ===
 
-TOPIC_KEYWORDS = frozenset({
-    "等待期", "犹豫期", "保费", "保额",
-    "免责", "理赔", "保单", "续保"
-})
+from lib.memory.constants import TOPIC_KEYWORDS, COMPANY_KEYWORDS
 
 MAX_ENTITIES = 10
-COMPANY_KEYWORDS = frozenset({"泰康", "平安", "国寿", "太保", "新华", "人保"})
 
 
 def _extract_topic(question: str) -> str | None:

@@ -32,6 +32,13 @@ _DEFAULT_VECTOR_SIZE = 1024
 _init_lock = threading.Lock()
 
 
+def _escape_value(value: str) -> str:
+    """SQL 字符串转义：单引号转义为两个单引号（ANSI SQL 标准）。"""
+    if not isinstance(value, str):
+        raise TypeError(f"过滤值必须是字符串，得到: {type(value).__name__}")
+    return value.replace("'", "''")
+
+
 class LanceDBMemoryStore(VectorStoreBase):
 
     def __init__(self, uri: str, table_name: str = "memories", vector_size: int = _DEFAULT_VECTOR_SIZE):
@@ -58,14 +65,12 @@ class LanceDBMemoryStore(VectorStoreBase):
                     if self._table_name in self._db.table_names():
                         self._tbl = self._db.open_table(self._table_name)
                     else:
-                        self._tbl = self._db.create_table(
-                            self._table_name, schema=self._schema()
-                        )
+                        self._tbl = self._db.create_table(self._table_name, schema=self._schema())
         return self._tbl
 
     @staticmethod
     def _to_row(vector: List[float], doc_id: str, payload: Dict) -> Dict[str, Any]:
-        filter_vals = {k: payload.pop(k, "") for k in _FILTER_COLUMNS}
+        filter_vals = {k: payload.get(k, "") for k in _FILTER_COLUMNS}
         return {
             "vector": np.array(vector, dtype=np.float32),
             "id": doc_id,
@@ -81,7 +86,7 @@ class LanceDBMemoryStore(VectorStoreBase):
         parts = []
         for k, v in filters.items():
             if k in _FILTER_COLUMNS and v:
-                parts.append(f"{k} = '{v}'")
+                parts.append(f"{k} = '{_escape_value(str(v))}'")
         return " AND ".join(parts) if parts else None
 
     def create_col(self, name: str, vector_size: Optional[int] = None) -> None:
@@ -96,11 +101,11 @@ class LanceDBMemoryStore(VectorStoreBase):
             rows.append(self._to_row(vec, pid, payload))
         tbl.add(rows)
 
-    def search(self, query: str, vectors: List[List[float]], limit: int = 5, filters: Optional[Dict] = None):
+    def search(self, query: str, vectors: List[List[float]], limit: int = 5, filters: Optional[Dict] = None, **kwargs):
         tbl = self._get_table()
         where = self._build_where(filters)
         vec = vectors[0] if isinstance(vectors[0], list) else vectors
-        q = tbl.search(np.array(vec, dtype=np.float32)).limit(limit)
+        q = tbl.search(np.array(vec, dtype=np.float32)).limit(kwargs.get("top_k", limit))
         if where:
             q = q.where(where)
         results = q.to_arrow()
@@ -115,7 +120,7 @@ class LanceDBMemoryStore(VectorStoreBase):
 
     def delete(self, vector_id: str):
         tbl = self._get_table()
-        tbl.delete(f"id = '{vector_id}'")
+        tbl.delete(f"id = '{_escape_value(vector_id)}'")
 
     def update(self, vector_id: str, vector: Optional[List[float]] = None, payload: Optional[Dict] = None):
         tbl = self._get_table()
@@ -128,20 +133,16 @@ class LanceDBMemoryStore(VectorStoreBase):
             values["text"] = payload.get("data", "")
             values.update(filter_vals)
         if values:
-            tbl.update(where=f"id = '{vector_id}'", values=values)
+            tbl.update(where=f"id = '{_escape_value(vector_id)}'", values=values)
 
     def get(self, vector_id: str) -> Optional[OutputData]:
         tbl = self._get_table()
-        results = tbl.search().where(f"id = '{vector_id}'").limit(1).to_arrow()
+        results = tbl.search().where(f"id = '{_escape_value(vector_id)}'").limit(1).to_arrow()
         if len(results) == 0:
             return None
         meta_raw = results["metadata"][0].as_py()
         meta = json.loads(meta_raw) if isinstance(meta_raw, str) else (meta_raw or {})
-        return OutputData(
-            id=results["id"][0].as_py(),
-            score=None,
-            payload=meta,
-        )
+        return OutputData(id=results["id"][0].as_py(), score=None, payload=meta)
 
     def list_cols(self) -> List[str]:
         return [self._table_name]
@@ -154,10 +155,10 @@ class LanceDBMemoryStore(VectorStoreBase):
         tbl = self._get_table()
         return {"name": self._table_name, "count": tbl.count_rows()}
 
-    def list(self, filters: Optional[Dict] = None, limit: Optional[int] = None):
+    def list(self, filters: Optional[Dict] = None, limit: Optional[int] = None, **kwargs):
         tbl = self._get_table()
         where = self._build_where(filters)
-        q = tbl.search().limit(limit or 100)
+        q = tbl.search().limit(kwargs.get("top_k", limit or 100))
         if where:
             q = q.where(where)
         results = q.to_arrow()
@@ -165,11 +166,7 @@ class LanceDBMemoryStore(VectorStoreBase):
         for i in range(len(results)):
             meta_raw = results["metadata"][i].as_py()
             meta = json.loads(meta_raw) if isinstance(meta_raw, str) else (meta_raw or {})
-            out.append(OutputData(
-                id=results["id"][i].as_py(),
-                score=None,
-                payload=meta,
-            ))
+            out.append(OutputData(id=results["id"][i].as_py(), score=None, payload=meta))
         return out
 
     def reset(self):

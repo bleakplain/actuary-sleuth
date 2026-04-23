@@ -3,24 +3,16 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
-
-
-def _precheck() -> None:
-    for pkg in ("mem0", "lancedb"):
-        try:
-            __import__(pkg)
-        except ImportError:
-            raise ImportError(f"缺少依赖包: {pkg}")
 
 
 class MemoryBase(ABC):
 
     @abstractmethod
     def search(self, query: str, user_id: str, limit: int = 3) -> List[Dict]:
-        """检索与查询相关的用户记忆。"""
         ...
 
     @abstractmethod
@@ -31,17 +23,14 @@ class MemoryBase(ABC):
         metadata: Optional[Dict] = None,
         run_id: Optional[str] = None,
     ) -> List[str]:
-        """写入记忆，返回记忆 ID 列表。"""
         ...
 
     @abstractmethod
     def delete(self, memory_id: str) -> None:
-        """删除单条记忆。"""
         ...
 
     @abstractmethod
     def get_all(self, user_id: str) -> List[Dict]:
-        """获取用户全部记忆。"""
         ...
 
 
@@ -53,19 +42,21 @@ class Mem0Memory(MemoryBase):
 
     @classmethod
     def create(cls) -> Optional[Mem0Memory]:
-        """创建 Mem0 后端，预检失败返回 None（降级模式）。"""
         try:
-            _precheck()
+            for pkg in ("mem0", "lancedb"):
+                __import__(pkg)
 
             from mem0 import Memory
-            from pathlib import Path
 
-            from lib.config import get_qa_llm_config, get_embed_llm_config
+            from lib.config import get_qa_llm_config, get_embed_llm_config, get_memory_dir
             from lib.memory.prompts import AUDIT_FACT_EXTRACTION_PROMPT
 
             qa_cfg = get_qa_llm_config()
             embed_cfg = get_embed_llm_config()
-            lancedb_path = str(Path("./data/lancedb").resolve())
+            memory_dir = Path(get_memory_dir())
+            memory_dir.mkdir(parents=True, exist_ok=True)
+            lancedb_path = str(memory_dir / "lancedb")
+            qdrant_path = str(memory_dir / "qdrant")
 
             llm_provider = qa_cfg.provider
             if llm_provider == "ollama":
@@ -88,17 +79,19 @@ class Mem0Memory(MemoryBase):
                     }
                 }
             else:
-                raise ValueError(f"不支持的记忆LLM provider: {llm_provider}")
+                raise ValueError(f"不支持的 LLM provider: {llm_provider}")
 
             config = {
+                "vector_store": {
+                    "provider": "qdrant",
+                    "config": {"path": qdrant_path, "collection_name": "mem0_memories"}
+                },
                 "llm": llm_config,
                 "embedder": {
                     "provider": "ollama",
-                    "config": {
-                        "model": embed_cfg.model,
-                        "ollama_base_url": embed_cfg.base_url,
-                    }
+                    "config": {"model": embed_cfg.model, "ollama_base_url": embed_cfg.base_url}
                 },
+                "history_db_path": str(memory_dir / "history.db"),
                 "custom_fact_extraction_prompt": AUDIT_FACT_EXTRACTION_PROMPT,
                 "version": "v1.1",
             }
@@ -114,7 +107,7 @@ class Mem0Memory(MemoryBase):
             return None
 
     def search(self, query: str, user_id: str, limit: int = 3) -> List[Dict]:
-        result = self._memory.search(query, user_id=user_id, limit=limit)
+        result = self._memory.search(query, limit=limit, filters={"user_id": user_id})
         return result.get("results", [])
 
     def add(
@@ -124,17 +117,13 @@ class Mem0Memory(MemoryBase):
         metadata: Optional[Dict] = None,
         run_id: Optional[str] = None,
     ) -> List[str]:
-        result = self._memory.add(
-            messages, user_id=user_id, metadata=metadata or {}, run_id=run_id,
-        )
+        result = self._memory.add(messages, user_id=user_id, metadata=metadata or {}, run_id=run_id)
         items = result.get("results", [])
-        if isinstance(items, list):
-            return [item["id"] for item in items if "id" in item]
-        return []
+        return [item["id"] for item in items if "id" in item] if isinstance(items, list) else []
 
     def delete(self, memory_id: str) -> None:
         self._memory.delete(memory_id)
 
     def get_all(self, user_id: str) -> List[Dict]:
-        result = self._memory.get_all(user_id=user_id)
+        result = self._memory.get_all(filters={"user_id": user_id})
         return result.get("results", [])
