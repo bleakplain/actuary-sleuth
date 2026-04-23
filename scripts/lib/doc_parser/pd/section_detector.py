@@ -7,7 +7,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import List, Match, Optional, Set
 
 from ..models import SectionType
 
@@ -39,6 +39,9 @@ class SectionDetector:
         re.compile(r'^([' + _CN_NUM_CHARS + r']+)\s*[、.．]\s*$'),  # 中文数字: 一、二、
         re.compile(r'^\s*[（\(]([' + _CN_NUM_CHARS + r'\d]+)[）\)]\s*$'),  # 括号格式: （一）、(1)
     ]
+
+    # 条款头匹配正则（编号 + 空格 + 标题）
+    CLAUSE_HEADER_PATTERN = re.compile(r'^(\d+(?:\.\d+)*)\s+(.+)$')
 
     def __init__(self, keywords_path: Optional[str] = None):
         if keywords_path:
@@ -98,3 +101,17 @@ class SectionDetector:
     def is_non_clause_table(self, first_row: List[str]) -> bool:
         text = ' '.join(str(cell) for cell in first_row)
         return any(kw in text for kw in self.non_clause_table_keywords)
+
+    def match_clause_header(self, line: str) -> Optional[Match[str]]:
+        """匹配文本流中的条款头。
+
+        匹配格式：编号 + 空格 + 标题
+        例如：'1.2 保险期间'、'2.3.1 等待期设置'
+
+        Args:
+            line: 文本行
+
+        Returns:
+            Match 对象（group(1)=编号, group(2)=标题）或 None
+        """
+        return self.CLAUSE_HEADER_PATTERN.match(line.strip())
