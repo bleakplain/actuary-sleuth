@@ -1,15 +1,20 @@
-"""合规检查路由 — 产品参数检查 + 条款文档审查。"""
+"""合规检查路由 — 产品参数检查 + 条款文档审查 + 文档解析。"""
 
+import os
 import uuid
 import json
 import asyncio
 import logging
-from typing import Dict
+import tempfile
+from typing import Dict, List
+from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 
 from api.schemas.compliance import (
     ProductCheckRequest, DocumentCheckRequest, ComplianceReportOut,
+    ParsedDocumentResponse, ParsedClause, ParsedPremiumTable, ParsedSection,
+    RichTextParseRequest,
 )
 from api.dependencies import get_rag_engine
 
@@ -245,3 +250,222 @@ async def delete_compliance_report(report_id: str):
         if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="报告不存在")
     return {"status": "deleted"}
+
+
+ALLOWED_EXTENSIONS = ['.pdf', '.docx']
+
+
+def _build_combined_text(
+    clauses: List[ParsedClause],
+    premium_tables: List[ParsedPremiumTable],
+    notices: List[ParsedSection],
+    health_disclosures: List[ParsedSection],
+    exclusions: List[ParsedSection],
+    rider_clauses: List[ParsedClause],
+) -> str:
+    """将解析结果合并为文本，用于合规检查"""
+    parts = []
+    for c in clauses:
+        parts.append(f"【条款 {c.number}】{c.title}\n{c.text}")
+    for i, t in enumerate(premium_tables, 1):
+        parts.append(f"【费率表 {i}】\n{t.raw_text}")
+    for s in notices:
+        parts.append(f"【投保须知】{s.title}\n{s.content}")
+    for s in health_disclosures:
+        parts.append(f"【健康告知】{s.title}\n{s.content}")
+    for s in exclusions:
+        parts.append(f"【责任免除】{s.title}\n{s.content}")
+    for c in rider_clauses:
+        parts.append(f"【附加险条款 {c.number}】{c.title}\n{c.text}")
+    return "\n\n".join(parts)
+
+
+def _audit_doc_to_response(audit_doc, file_type: str) -> ParsedDocumentResponse:
+    """将 AuditDocument 转换为 ParsedDocumentResponse"""
+    clauses = [
+        ParsedClause(number=c.number, title=c.title, text=c.text)
+        for c in audit_doc.clauses
+    ]
+    premium_tables = [
+        ParsedPremiumTable(raw_text=t.raw_text, data=[list(row) for row in t.data])
+        for t in audit_doc.premium_tables
+    ]
+    notices = [
+        ParsedSection(title=s.title, content=s.content)
+        for s in audit_doc.notices
+    ]
+    health_disclosures = [
+        ParsedSection(title=s.title, content=s.content)
+        for s in audit_doc.health_disclosures
+    ]
+    exclusions = [
+        ParsedSection(title=s.title, content=s.content)
+        for s in audit_doc.exclusions
+    ]
+    rider_clauses = [
+        ParsedClause(number=c.number, title=c.title, text=c.text)
+        for c in audit_doc.rider_clauses
+    ]
+
+    combined_text = _build_combined_text(
+        clauses, premium_tables, notices, health_disclosures, exclusions, rider_clauses
+    )
+
+    return ParsedDocumentResponse(
+        parse_id=f"pd_{uuid.uuid4().hex[:8]}",
+        file_name=audit_doc.file_name,
+        file_type=file_type,
+        clauses=clauses,
+        premium_tables=premium_tables,
+        notices=notices,
+        health_disclosures=health_disclosures,
+        exclusions=exclusions,
+        rider_clauses=rider_clauses,
+        warnings=list(audit_doc.warnings),
+        combined_text=combined_text,
+        parse_time=audit_doc.parse_time.isoformat(),
+    )
+
+
+@router.post("/parse-file", response_model=ParsedDocumentResponse)
+async def parse_file(file: UploadFile = File(...)):
+    """上传并解析保险产品文档（PDF/DOCX）"""
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"仅支持 PDF 和 DOCX 格式，当前: {ext}")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+        content = await file.read()
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        from lib.doc_parser import parse_product_document, DocumentParseError
+        audit_doc = parse_product_document(tmp_path)
+        return _audit_doc_to_response(audit_doc, ext)
+    except DocumentParseError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Document parse failed: {e}")
+        raise HTTPException(status_code=500, detail=f"文档解析失败: {e}")
+    finally:
+        os.unlink(tmp_path)
+
+
+def _html_to_docx(html_content: str) -> str:
+    """将 HTML 转换为临时 DOCX 文件，返回文件路径"""
+    from docx import Document
+    from html.parser import HTMLParser
+    import re
+
+    class SimpleHTMLParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.paragraphs = []
+            self.tables = []
+            self.current_table = []
+            self.current_row = []
+            self.current_cell = ""
+            self.in_table = False
+            self.in_row = False
+            self.in_cell = False
+            self.current_text = ""
+            self.in_p = False
+
+        def handle_starttag(self, tag, attrs):
+            if tag == 'p':
+                self.in_p = True
+                self.current_text = ""
+            elif tag == 'table':
+                self.in_table = True
+                self.current_table = []
+            elif tag == 'tr':
+                self.in_row = True
+                self.current_row = []
+            elif tag in ['td', 'th']:
+                self.in_cell = True
+                self.current_cell = ""
+            elif tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+                self.in_p = True
+                self.current_text = ""
+
+        def handle_endtag(self, tag):
+            if tag == 'p' and self.in_p:
+                self.in_p = False
+                text = self.current_text.strip()
+                if text:
+                    self.paragraphs.append(text)
+            elif tag == 'table':
+                self.in_table = False
+                if self.current_table:
+                    self.tables.append(self.current_table)
+                self.current_table = []
+            elif tag == 'tr':
+                self.in_row = False
+                if self.current_row:
+                    self.current_table.append(self.current_row)
+                self.current_row = []
+            elif tag in ['td', 'th']:
+                self.in_cell = False
+                self.current_row.append(self.current_cell.strip())
+            elif tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+                self.in_p = False
+                text = self.current_text.strip()
+                if text:
+                    self.paragraphs.append(text)
+
+        def handle_data(self, data):
+            if self.in_p:
+                self.current_text += data
+            elif self.in_cell:
+                self.current_cell += data
+
+    parser = SimpleHTMLParser()
+    parser.feed(html_content)
+
+    doc = Document()
+
+    for p in parser.paragraphs:
+        doc.add_paragraph(p)
+
+    for table_data in parser.tables:
+        if not table_data or not table_data[0]:
+            continue
+        num_cols = max(len(row) for row in table_data)
+        table = doc.add_table(rows=len(table_data), cols=num_cols)
+        table.style = 'Table Grid'
+        for i, row in enumerate(table_data):
+            for j, cell in enumerate(row):
+                if j < num_cols:
+                    table.rows[i].cells[j].text = cell
+
+    tmp_path = tempfile.mktemp(suffix='.docx')
+    doc.save(tmp_path)
+    return tmp_path
+
+
+@router.post("/parse-rich-text", response_model=ParsedDocumentResponse)
+async def parse_rich_text(req: RichTextParseRequest):
+    """解析富文本内容（HTML）"""
+    from lib.doc_parser import DocumentParseError
+
+    if not req.html_content or not req.html_content.strip():
+        raise HTTPException(status_code=400, detail="HTML 内容不能为空")
+
+    tmp_path = None
+    try:
+        tmp_path = _html_to_docx(req.html_content)
+        from lib.doc_parser import parse_product_document
+        audit_doc = parse_product_document(tmp_path)
+        response = _audit_doc_to_response(audit_doc, ".html")
+        if req.product_name:
+            response.file_name = req.product_name
+        return response
+    except DocumentParseError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Rich text parse failed: {e}")
+        raise HTTPException(status_code=500, detail=f"富文本解析失败: {e}")
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)

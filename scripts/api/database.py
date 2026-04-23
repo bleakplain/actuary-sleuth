@@ -188,6 +188,27 @@ CREATE TABLE IF NOT EXISTS cache_metrics_history (
     namespace_metrics_json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cache_metrics_ts ON cache_metrics_history(timestamp);
+
+CREATE TABLE IF NOT EXISTS parsed_documents (
+    id TEXT PRIMARY KEY,
+    file_name TEXT NOT NULL,
+    file_path TEXT,
+    file_type TEXT NOT NULL,
+    clauses TEXT,
+    premium_tables TEXT,
+    notices TEXT,
+    health_disclosures TEXT,
+    exclusions TEXT,
+    rider_clauses TEXT,
+    raw_content TEXT,
+    parse_time TEXT,
+    warnings TEXT,
+    review_status TEXT NOT NULL DEFAULT 'pending',
+    reviewer TEXT,
+    reviewed_at TEXT,
+    review_comment TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -1474,3 +1495,92 @@ def save_session_context(session_id: str, ctx: Dict[str, Any]) -> bool:
     except Exception as e:
         logger.error(f"保存会话上下文失败: session_id={session_id}, error={e}")
         return False
+
+
+_PARSED_DOC_JSON_FIELDS = {
+    "clauses": "clauses",
+    "premium_tables": "premium_tables",
+    "notices": "notices",
+    "health_disclosures": "health_disclosures",
+    "exclusions": "exclusions",
+    "rider_clauses": "rider_clauses",
+    "warnings": "warnings",
+}
+
+
+def _deserialize_parsed_doc(d: Dict) -> Dict:
+    for field in _PARSED_DOC_JSON_FIELDS:
+        if d.get(field):
+            d[field] = json.loads(d[field])
+        else:
+            d[field] = []
+    return d
+
+
+def save_parsed_document(doc: Dict) -> str:
+    with get_connection() as conn:
+        conn.execute("""
+            INSERT OR REPLACE INTO parsed_documents
+            (id, file_name, file_path, file_type, clauses, premium_tables,
+             notices, health_disclosures, exclusions, rider_clauses,
+             raw_content, parse_time, warnings, review_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            doc["id"], doc["file_name"], doc.get("file_path"), doc["file_type"],
+            json.dumps(doc.get("clauses", []), ensure_ascii=False),
+            json.dumps(doc.get("premium_tables", []), ensure_ascii=False),
+            json.dumps(doc.get("notices", []), ensure_ascii=False),
+            json.dumps(doc.get("health_disclosures", []), ensure_ascii=False),
+            json.dumps(doc.get("exclusions", []), ensure_ascii=False),
+            json.dumps(doc.get("rider_clauses", []), ensure_ascii=False),
+            doc.get("raw_content"),
+            doc.get("parse_time", datetime.now(timezone.utc).isoformat()),
+            json.dumps(doc.get("warnings", []), ensure_ascii=False),
+            doc.get("review_status", "pending"),
+        ))
+        return doc["id"]
+
+
+def get_parsed_document(doc_id: str) -> Optional[Dict]:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM parsed_documents WHERE id = ?", (doc_id,)
+        ).fetchone()
+        if not row:
+            return None
+        return _deserialize_parsed_doc(dict(row))
+
+
+def list_parsed_documents(
+    review_status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> List[Dict]:
+    clauses_list: list[str] = []
+    params: list = []
+    if review_status:
+        clauses_list.append("review_status = ?")
+        params.append(review_status)
+    where = ("WHERE " + " AND ".join(clauses_list)) if clauses_list else ""
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM parsed_documents {where} ORDER BY parse_time DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
+        return [_deserialize_parsed_doc(dict(row)) for row in rows]
+
+
+def update_parsed_document_review(
+    doc_id: str,
+    review_status: str,
+    reviewer: str,
+    review_comment: Optional[str] = None,
+) -> bool:
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection() as conn:
+        cur = conn.execute("""
+            UPDATE parsed_documents
+            SET review_status = ?, reviewer = ?, reviewed_at = ?, review_comment = ?
+            WHERE id = ?
+        """, (review_status, reviewer, now, review_comment or "", doc_id))
+        return cur.rowcount > 0

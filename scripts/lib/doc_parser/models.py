@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Tuple
 
 
 class SectionType(str, Enum):
@@ -88,6 +88,9 @@ class Clause:
     title: str        # 条款标题
     text: str         # 条款正文
     section_type: str = "clause"
+    page_number: Optional[int] = None
+    bbox: Optional[Tuple[float, float, float, float]] = None
+    table_index: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -97,6 +100,9 @@ class PremiumTable:
     data: List[List[str]]      # 结构化数据（二维表格）
     remark: str = ""           # 备注
     section_type: str = "premium_table"
+    page_number: Optional[int] = None
+    bbox: Optional[Tuple[float, float, float, float]] = None
+    table_index: Optional[int] = None
 
 
 @dataclass(frozen=True)

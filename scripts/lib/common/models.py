@@ -491,6 +491,28 @@ def _used_fields() -> set:
 # 已移除 create_product_from_dict，统一使用 Product.from_dict() 类方法
 
 
+@dataclass(frozen=True)
+class ParsedDocument:
+    """产品文档解析结果"""
+    id: str
+    file_name: str
+    file_path: Optional[str]
+    file_type: str
+    clauses: List[Dict[str, Any]]
+    premium_tables: List[Dict[str, Any]]
+    notices: List[Dict[str, Any]]
+    health_disclosures: List[Dict[str, Any]]
+    exclusions: List[Dict[str, Any]]
+    rider_clauses: List[Dict[str, Any]]
+    raw_content: Optional[str]
+    parse_time: datetime
+    warnings: List[str]
+    review_status: str = "pending"
+    reviewer: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    review_comment: Optional[str] = None
+
+
 __all__ = [
     # 法规文档模型
     'RegulationStatus',
@@ -504,4 +526,6 @@ __all__ = [
     'Coverage',
     'Premium',
     'AuditRequest',
+    # 产品文档解析结果
+    'ParsedDocument',
 ]

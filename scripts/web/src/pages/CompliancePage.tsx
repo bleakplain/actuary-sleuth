@@ -2,16 +2,19 @@ import React, { useState, useEffect } from 'react';
 import {
   Card, Form, Input, Button, Table, Tag, Typography, theme,
   message, Tabs, Space, Descriptions, Popconfirm, Drawer, Grid,
+  Collapse, Empty, Divider, Alert,
 } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined,
   HistoryOutlined, DeleteOutlined, BookOutlined,
+  FileTextOutlined, CaretRightOutlined, PlusOutlined,
 } from '@ant-design/icons';
 import * as complianceApi from '../api/compliance';
-import type { ComplianceReport, ComplianceItem, Source } from '../types';
+import type { ComplianceReport, ComplianceItem, Source, ParsedDocument } from '../types';
 import { DRAWER_MD } from '../constants/layout';
+import { DocumentViewer } from '../components/DocumentViewer';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 const { TextArea } = Input;
 
 const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
@@ -113,13 +116,222 @@ function SourceDrawer({
   );
 }
 
+function DocumentReviewPanel({
+  document: doc,
+  file,
+  richText,
+  onRichTextChange,
+  onFileUpload,
+  onConfirm,
+  loading,
+}: {
+  document: ParsedDocument | null;
+  file: File | null;
+  richText: string;
+  onRichTextChange: (v: string) => void;
+  onFileUpload: (file: File) => void;
+  onConfirm: () => void;
+  loading: boolean;
+}) {
+  const { token } = theme.useToken();
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md;
+  const [activeKeys, setActiveKeys] = useState<string[]>(['clauses']);
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const hasParsedDoc = !!doc;
+  const totalItems = doc ? doc.clauses.length + doc.premium_tables.length + doc.exclusions.length + doc.notices.length + doc.health_disclosures.length + doc.rider_clauses.length : 0;
+
+  const toggleItem = (itemKey: string) => {
+    setExpandedItems(prev => ({ ...prev, [itemKey]: !prev[itemKey] }));
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) onFileUpload(file);
+  };
+
+  const renderItemContent = (item: { id: string; title: string; content: string }, categoryKey: string) => {
+    const itemKey = `${categoryKey}-${item.id}`;
+    const isExpanded = expandedItems[itemKey];
+    const hasLongContent = item.content.length > 200;
+    const displayContent = isExpanded ? item.content : item.content.slice(0, 200);
+
+    return (
+      <div
+        style={{
+          border: `1px solid ${token.colorBorderSecondary}`,
+          borderRadius: 4,
+          marginBottom: 8,
+          padding: '8px 12px',
+          cursor: hasLongContent ? 'pointer' : 'default',
+          background: token.colorBgContainer,
+        }}
+        onClick={hasLongContent ? () => toggleItem(itemKey) : undefined}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text strong style={{ fontSize: token.fontSize }}>{item.title}</Text>
+          {hasLongContent && (
+            <span style={{ fontSize: token.fontSizeSM, color: token.colorPrimary }}>
+              {isExpanded ? '收起' : '展开'}
+            </span>
+          )}
+        </div>
+        <div style={{ whiteSpace: 'pre-wrap', fontSize: token.fontSizeSM, color: token.colorTextSecondary, marginTop: 8 }}>
+          {displayContent}
+          {hasLongContent && !isExpanded && '...'}
+        </div>
+      </div>
+    );
+  };
+
+  const panelItems = doc ? [
+    { key: 'clauses', label: `条款 (${doc.clauses.length})`, count: doc.clauses.length,
+      items: doc.clauses.map(c => ({ id: c.number, title: `${c.number} ${c.title}`, content: c.text || '' })) },
+    { key: 'premium_tables', label: `费率表 (${doc.premium_tables.length})`, count: doc.premium_tables.length,
+      items: doc.premium_tables.map((t, i) => ({ id: `table-${i}`, title: `费率表 ${i + 1}`, content: t.raw_text || '' })) },
+    { key: 'exclusions', label: `责任免除 (${doc.exclusions.length})`, count: doc.exclusions.length,
+      items: doc.exclusions.map((s, i) => ({ id: `excl-${i}`, title: s.title || `条款 ${i + 1}`, content: s.content || '' })) },
+    { key: 'notices', label: `投保须知 (${doc.notices.length})`, count: doc.notices.length,
+      items: doc.notices.map((s, i) => ({ id: `notice-${i}`, title: s.title || `须知 ${i + 1}`, content: s.content || '' })) },
+    { key: 'health_disclosures', label: `健康告知 (${doc.health_disclosures.length})`, count: doc.health_disclosures.length,
+      items: doc.health_disclosures.map((s, i) => ({ id: `health-${i}`, title: s.title || `告知 ${i + 1}`, content: s.content || '' })) },
+    { key: 'rider_clauses', label: `附加险条款 (${doc.rider_clauses.length})`, count: doc.rider_clauses.length,
+      items: doc.rider_clauses.map(c => ({ id: c.number, title: `${c.number} ${c.title}`, content: c.text || '' })) },
+  ].filter(p => p.count > 0) : [];
+
+  // 左侧内容：有文档时显示 DocumentViewer，无文档时显示可编辑文本区
+  const leftContent = hasParsedDoc && file ? (
+    <DocumentViewer file={file} fileType={doc!.file_type} />
+  ) : hasParsedDoc && !file ? (
+    <div style={{ padding: '8px 12px' }}>
+      <pre style={{ whiteSpace: 'pre-wrap', fontSize: token.fontSizeSM, lineHeight: 1.6, margin: 0 }}>{doc!.combined_text}</pre>
+    </div>
+  ) : (
+    <TextArea
+      style={{ height: '100%', resize: 'none', border: 'none', borderRadius: 0 }}
+      placeholder="请输入或粘贴保险条款文档内容..."
+      value={richText}
+      onChange={(e) => onRichTextChange(e.target.value)}
+    />
+  );
+
+  // 右侧内容：解析结果
+  const rightContent = hasParsedDoc ? (
+    <div style={{ flex: 1, overflow: 'auto', padding: '8px 12px' }}>
+      {doc!.warnings.length > 0 && (
+        <Alert type="warning" showIcon style={{ marginBottom: 12 }} message="解析警告" description={
+          <ul style={{ margin: 0, paddingLeft: 20 }}>{doc!.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+        } />
+      )}
+      {panelItems.length > 0 ? (
+        <Collapse
+          activeKey={activeKeys}
+          onChange={(keys) => setActiveKeys(keys as string[])}
+          expandIcon={({ isActive }) => <CaretRightOutlined rotate={isActive ? 90 : 0} />}
+          items={panelItems.map(p => ({
+            key: p.key,
+            label: p.label,
+            children: <div>{p.items.map(item => renderItemContent(item, p.key))}</div>,
+          }))}
+        />
+      ) : (
+        <Empty description="未解析到任何内容" />
+      )}
+    </div>
+  ) : (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+      <Empty description="请输入文档内容或点击左侧上传文件" />
+    </div>
+  );
+
+  // 隐藏的文件输入
+  const hiddenFileInput = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept=".pdf,.docx"
+      style={{ display: 'none' }}
+      onChange={handleFileSelect}
+    />
+  );
+
+  if (isMobile) {
+    return (
+      <div style={{ position: 'relative' }}>
+        {hiddenFileInput}
+        <Tabs
+          size="small"
+          items={[
+            { key: 'input', label: hasParsedDoc ? '原文' : '输入', children: leftContent },
+            { key: 'parsed', label: `解析结果 (${totalItems})`, children: rightContent },
+          ]}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      {hiddenFileInput}
+      <div style={{ display: 'flex', height: 'calc(100vh - 220px)', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 6 }}>
+        {/* 左侧：原文 */}
+        <div style={{ width: '40%', borderRight: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '8px 12px', background: token.colorFillQuaternary, borderBottom: `1px solid ${token.colorBorderSecondary}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <Text strong style={{ whiteSpace: 'nowrap' }}>原文</Text>
+              {hasParsedDoc && file && (
+                <Text type="secondary" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {doc!.file_name}
+                </Text>
+              )}
+            </div>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              size="small"
+              onClick={() => fileInputRef.current?.click()}
+              loading={loading}
+            >
+              上传文件
+            </Button>
+          </div>
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            {leftContent}
+          </div>
+        </div>
+        {/* 右侧：解析结果 */}
+        <div style={{ width: '60%', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '8px 12px', background: token.colorFillQuaternary, borderBottom: `1px solid ${token.colorBorderSecondary}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <Text strong>解析结果</Text>
+              {hasParsedDoc && (
+                <Text type="secondary">
+                  {[
+                    doc!.clauses.length > 0 ? `${doc!.clauses.length} 条条款` : null,
+                    doc!.premium_tables.length > 0 ? `${doc!.premium_tables.length} 个费率表` : null,
+                  ].filter(Boolean).join('，')}
+                </Text>
+              )}
+            </div>
+            {hasParsedDoc && (
+              <Button type="primary" onClick={onConfirm} loading={loading}>确认并检查</Button>
+            )}
+          </div>
+          {rightContent}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CompliancePage() {
   const { token } = theme.useToken();
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
   const [activeTab, setActiveTab] = useState('product');
   const [productForm] = Form.useForm();
-  const [docForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [currentReport, setCurrentReport] = useState<ComplianceReport | null>(null);
   const [history, setHistory] = useState<ComplianceReport[]>([]);
@@ -128,6 +340,14 @@ export default function CompliancePage() {
   const [sourceDrawerVisible, setSourceDrawerVisible] = useState(false);
   const [selectedSource, setSelectedSource] = useState<Source | undefined>();
   const [selectedExcerpt, setSelectedExcerpt] = useState<string | undefined>();
+
+  // 文档审查状态
+  const [parsing, setParsing] = useState(false);
+  const [richTextContent, setRichTextContent] = useState('');
+  const [parsedDocument, setParsedDocument] = useState<ParsedDocument | null>(null);
+  const [productName, setProductName] = useState('');
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [checkingResult, setCheckingResult] = useState<ComplianceReport | null>(null);
 
   useEffect(() => {
     loadHistory();
@@ -138,7 +358,6 @@ export default function CompliancePage() {
     try {
       const data = await complianceApi.fetchComplianceReports();
       setHistory(data);
-    } catch {
     } finally {
       setHistoryLoading(false);
     }
@@ -163,24 +382,6 @@ export default function CompliancePage() {
     }
   };
 
-  const handleDocumentCheck = async () => {
-    try {
-      const values = await docForm.validateFields();
-      setLoading(true);
-      const report = await complianceApi.checkDocument({
-        document_content: values.document_content,
-        product_name: values.product_name || undefined,
-      });
-      setCurrentReport(report);
-      message.success('检查完成');
-      loadHistory();
-    } catch (err) {
-      message.error(`检查失败: ${err}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const parseParams = (text: string): Record<string, string> => {
     const params: Record<string, string> = {};
     text.split('\n').forEach((line) => {
@@ -190,6 +391,66 @@ export default function CompliancePage() {
       }
     });
     return params;
+  };
+
+  const handleFileUpload = async (file: File) => {
+    setParsing(true);
+    setUploadedFile(file);
+    try {
+      const result = await complianceApi.parseFile(file);
+      setParsedDocument(result);
+      setProductName(result.file_name);
+      setCheckingResult(null);
+    } catch (err) {
+      message.error(`解析失败: ${err}`);
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  // 富文本解析：当文本变化时实时解析
+  useEffect(() => {
+    if (uploadedFile || !richTextContent.trim()) return;
+    const timer = setTimeout(async () => {
+      setParsing(true);
+      try {
+        const result = await complianceApi.parseRichText(richTextContent);
+        setParsedDocument(result);
+        setProductName('');
+        setCheckingResult(null);
+      } catch (err) {
+        // 静默失败，不显示错误
+      } finally {
+        setParsing(false);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [richTextContent, uploadedFile]);
+
+  const handleConfirmReview = async () => {
+    if (!parsedDocument) return;
+    setLoading(true);
+    try {
+      const report = await complianceApi.checkDocument({
+        document_content: parsedDocument.combined_text,
+        product_name: productName || parsedDocument.file_name || undefined,
+      });
+      setCheckingResult(report);
+      message.success('合规检查完成');
+      loadHistory();
+    } catch (err) {
+      message.error(`检查失败: ${err}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetDocumentReview = () => {
+    setParsedDocument(null);
+    setRichTextContent('');
+    setProductName('');
+    setUploadedFile(null);
+    setCheckingResult(null);
   };
 
   const itemColumns = [
@@ -268,6 +529,56 @@ export default function CompliancePage() {
   const result = currentReport?.result;
   const summary = result?.summary;
 
+  const renderDocumentReviewTab = () => {
+    return (
+      <div>
+        <DocumentReviewPanel
+          document={parsedDocument}
+          file={uploadedFile}
+          richText={richTextContent}
+          onRichTextChange={setRichTextContent}
+          onFileUpload={handleFileUpload}
+          onConfirm={handleConfirmReview}
+          loading={loading || parsing}
+        />
+        {checkingResult && (() => {
+          const docResult = checkingResult.result;
+          const docSummary = docResult?.summary;
+          return docResult && docSummary ? (
+            <Card title={`检查报告 - ${checkingResult.product_name || ''}`} style={{ marginTop: 16 }}>
+              <Descriptions size="small" column={isMobile ? 1 : 2} style={{ marginBottom: 16 }}>
+                <Descriptions.Item label="模式">
+                  {checkingResult.mode === 'product' ? '产品参数检查' : '条款文档审查'}
+                </Descriptions.Item>
+                <Descriptions.Item label="检查时间">{checkingResult.created_at}</Descriptions.Item>
+              </Descriptions>
+              <Space size={isMobile ? 'small' : 'large'} wrap style={{ marginBottom: 16 }}>
+                <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
+                  合规 {docSummary.compliant} 项
+                </Tag>
+                <Tag color="error" icon={<CloseCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
+                  不合规 {docSummary.non_compliant} 项
+                </Tag>
+                <Tag color="warning" icon={<ExclamationCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
+                  需关注 {docSummary.attention} 项
+                </Tag>
+              </Space>
+              <Table
+                dataSource={docResult.items || []}
+                columns={itemColumns}
+                rowKey={(r: ComplianceItem) => r.param}
+                size="small"
+                scroll={{ x: 'max-content' }}
+                pagination={false}
+                rowClassName={(record: ComplianceItem) => record.status === 'non_compliant' ? 'ant-table-row-error' : ''}
+              />
+            </Card>
+          ) : null;
+        })()}
+      </div>
+    );
+  };
+
   return (
     <div>
       <Title level={4} className="mb-16">合规检查助手</Title>
@@ -301,22 +612,8 @@ export default function CompliancePage() {
           },
           {
             key: 'document',
-            label: '条款文档审查',
-            children: (
-              <Card title="上传条款文档" size="small" style={{ marginBottom: 16 }}>
-                <Form form={docForm} layout="vertical">
-                  <Form.Item name="product_name" label="产品名称（可选）">
-                    <Input placeholder="如：XX健康保险" />
-                  </Form.Item>
-                  <Form.Item name="document_content" label="条款内容" rules={[{ required: true }]}>
-                    <TextArea rows={10} placeholder="粘贴保险条款文档内容..." />
-                  </Form.Item>
-                  <Button type="primary" onClick={handleDocumentCheck} loading={loading}>
-                    开始审查
-                  </Button>
-                </Form>
-              </Card>
-            ),
+            label: <span><FileTextOutlined /> 条款文档审查</span>,
+            children: renderDocumentReviewTab(),
           },
           {
             key: 'history',
@@ -357,7 +654,7 @@ export default function CompliancePage() {
         ]}
       />
 
-      {result && summary && (
+      {activeTab === 'product' && result && summary && (
         <div ref={reportRef}>
         <Card title={`检查报告 - ${currentReport?.product_name || ''}`} className="mt-16">
           <Descriptions size="small" column={isMobile ? 1 : 2} style={{ marginBottom: 16 }}>
