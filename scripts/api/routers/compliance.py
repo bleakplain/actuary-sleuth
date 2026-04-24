@@ -286,9 +286,9 @@ def _audit_doc_to_response(audit_doc, file_type: str) -> ParsedDocumentResponse:
         ParsedClause(number=c.number, title=c.title, text=c.text)
         for c in audit_doc.clauses
     ]
-    premium_tables = [
+    tables = [
         ParsedPremiumTable(raw_text=t.raw_text, data=[list(row) for row in t.data])
-        for t in audit_doc.premium_tables
+        for t in audit_doc.tables
     ]
     notices = [
         ParsedSection(title=s.title, content=s.content)
@@ -308,7 +308,7 @@ def _audit_doc_to_response(audit_doc, file_type: str) -> ParsedDocumentResponse:
     ]
 
     combined_text = _build_combined_text(
-        clauses, premium_tables, notices, health_disclosures, exclusions, rider_clauses
+        clauses, tables, notices, health_disclosures, exclusions, rider_clauses
     )
 
     return ParsedDocumentResponse(
@@ -316,7 +316,7 @@ def _audit_doc_to_response(audit_doc, file_type: str) -> ParsedDocumentResponse:
         file_name=audit_doc.file_name,
         file_type=file_type,
         clauses=clauses,
-        premium_tables=premium_tables,
+        premium_tables=tables,
         notices=notices,
         health_disclosures=health_disclosures,
         exclusions=exclusions,

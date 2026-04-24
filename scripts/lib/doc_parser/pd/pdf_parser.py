@@ -15,6 +15,7 @@ from .header_footer_filter import HeaderFooterFilter
 from .layout_analyzer import LayoutAnalyzer
 from .section_detector import SectionDetector
 from .table_classifier import TableClassifier
+from .toc_detector import TocDetector
 from .utils import add_section, split_title_and_content
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ class PdfParser:
         self.layout_analyzer = LayoutAnalyzer()
         self.header_footer_filter = HeaderFooterFilter()
         self.table_classifier = TableClassifier()
+        self.toc_detector = TocDetector()
 
     @staticmethod
     def supported_extensions() -> List[str]:
@@ -86,13 +88,19 @@ class PdfParser:
         pending_page: int = 1
 
         for page_idx, page in enumerate(pages):
-            reordered_text, regions = self.layout_analyzer.analyze(page)
-            clean_text = self.header_footer_filter.filter(page)
+            # 目录页检测与过滤
+            is_toc, toc_clean_text = self.toc_detector.detect(page, page_idx)
 
-            if reordered_text and len(reordered_text) > len(clean_text) * 0.8:
-                text = reordered_text
+            if is_toc:
+                text = toc_clean_text
             else:
-                text = clean_text
+                reordered_text, regions = self.layout_analyzer.analyze(page)
+                clean_text = self.header_footer_filter.filter(page)
+
+                if reordered_text and len(reordered_text) > len(clean_text) * 0.8:
+                    text = reordered_text
+                else:
+                    text = clean_text
 
             if not text:
                 text = page.extract_text() or ''
