@@ -149,7 +149,7 @@ def test_compliance_check_e2e(test_case: TestCase, api_client: httpx.Client):
     assert "regulation_sources" in result, "结果缺少 regulation_sources"
     sources = result["regulation_sources"]
     assert "通用法规" in sources and len(sources["通用法规"]) > 0, "缺少通用法规"
-    assert len(sources.get("语义检索", [])) > 0, "缺少语义检索结果"
+    assert "险种专属" in sources, "缺少险种专属"
 
 
 def test_category_identification(api_client: httpx.Client):

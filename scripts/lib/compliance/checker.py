@@ -4,6 +4,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from lib.common.product_types import ProductCategory, classify_product
 from lib.common.regulation_registry import (
     get_category_regulations,
     get_general_regulations,
@@ -164,8 +165,6 @@ def identify_category(document_content: str, product_name: str = "") -> Tuple[Op
     Returns:
         (category, confidence, method): 险种、置信度、识别方法
     """
-    from lib.common.product_types import ProductCategory, classify_product
-
     # 方法1: 关键词匹配（快速）
     category_enum = classify_product(product_name, document_content[:1000])
     if category_enum != ProductCategory.OTHER:

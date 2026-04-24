@@ -6,11 +6,11 @@ import json
 import asyncio
 import logging
 import tempfile
-from typing import Dict, List, Optional
-from datetime import datetime
+from typing import List
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File
 
+from api.database import get_connection, list_compliance_reports, get_compliance_report, save_compliance_report
 from api.schemas.compliance import (
     ProductCheckRequest, DocumentCheckRequest, ComplianceReportOut,
     ParsedDocumentResponse, ParsedClause, ParsedPremiumTable, ParsedSection,
@@ -24,6 +24,7 @@ from lib.compliance.checker import (
     run_compliance_check,
 )
 from lib.compliance.prompts import COMPLIANCE_PROMPT_PRODUCT, COMPLIANCE_PROMPT_DOCUMENT
+from lib.doc_parser import parse_product_document, DocumentParseError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/compliance", tags=["合规检查"])
@@ -49,7 +50,6 @@ async def check_product(req: ProductCheckRequest):
     result["regulation_sources"] = sources_info
 
     report_id = f"cr_{uuid.uuid4().hex[:8]}"
-    from api.database import save_compliance_report
     save_compliance_report(report_id, req.product_name, req.category, "product", result)
 
     return ComplianceReportOut(
@@ -99,7 +99,6 @@ async def check_document(req: DocumentCheckRequest):
 
     report_id = f"cr_{uuid.uuid4().hex[:8]}"
     product_name = req.product_name or "未命名产品"
-    from api.database import save_compliance_report
     save_compliance_report(report_id, product_name, category or "", "document", result)
 
     return ComplianceReportOut(
@@ -135,14 +134,12 @@ async def identify_category_endpoint(req: CategoryIdentifyRequest):
 
 
 @router.get("/reports", response_model=list[ComplianceReportOut])
-async def list_compliance_reports():
-    from api.database import get_compliance_reports
-    return get_compliance_reports()
+async def list_reports():
+    return list_compliance_reports()
 
 
 @router.get("/reports/{report_id}", response_model=ComplianceReportOut)
-async def get_compliance_report(report_id: str):
-    from api.database import get_compliance_report
+async def get_report(report_id: str):
     report = get_compliance_report(report_id)
     if report is None:
         raise HTTPException(status_code=404, detail="报告不存在")
@@ -151,7 +148,6 @@ async def get_compliance_report(report_id: str):
 
 @router.delete("/reports/{report_id}")
 async def delete_compliance_report(report_id: str):
-    from api.database import get_connection
     with get_connection() as conn:
         cur = conn.execute(
             "DELETE FROM compliance_reports WHERE id = ?", (report_id,)
@@ -246,7 +242,6 @@ async def parse_file(file: UploadFile = File(...)):
         tmp_path = tmp.name
 
     try:
-        from lib.doc_parser import parse_product_document, DocumentParseError
         audit_doc = parse_product_document(tmp_path)
         return _audit_doc_to_response(audit_doc, ext)
     except DocumentParseError as e:
@@ -262,7 +257,6 @@ def _html_to_docx(html_content: str) -> str:
     """将 HTML 转换为临时 DOCX 文件，返回文件路径"""
     from docx import Document
     from html.parser import HTMLParser
-    import re
 
     class SimpleHTMLParser(HTMLParser):
         def __init__(self):
@@ -355,15 +349,12 @@ def _html_to_docx(html_content: str) -> str:
 @router.post("/parse-rich-text", response_model=ParsedDocumentResponse)
 async def parse_rich_text(req: RichTextParseRequest):
     """解析富文本内容（HTML）"""
-    from lib.doc_parser import DocumentParseError
-
     if not req.html_content or not req.html_content.strip():
         raise HTTPException(status_code=400, detail="HTML 内容不能为空")
 
     tmp_path = None
     try:
         tmp_path = _html_to_docx(req.html_content)
-        from lib.doc_parser import parse_product_document
         audit_doc = parse_product_document(tmp_path)
         response = _audit_doc_to_response(audit_doc, ".html")
         if req.product_name:

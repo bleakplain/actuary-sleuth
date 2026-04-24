@@ -1064,7 +1064,7 @@ def save_compliance_report(
         )
 
 
-def get_compliance_reports() -> List[Dict]:
+def list_compliance_reports() -> List[Dict]:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT * FROM compliance_reports ORDER BY created_at DESC"
