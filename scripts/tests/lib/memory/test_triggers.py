@@ -33,8 +33,8 @@ def test_entity_trigger():
 
 def test_topic_continuation_trigger():
     """测试话题延续触发。"""
-    ctx = {"current_topic": "核保规则"}
-    result = should_retrieve_memory("核保规则有什么要求？", session_context=ctx, last_retrieve_time=time.time())
+    ctx = {"current_topic": "特定产品咨询"}
+    result = should_retrieve_memory("特定产品咨询有什么特点？", session_context=ctx, last_retrieve_time=time.time())
     assert result.should_retrieve is True
     assert result.trigger_type == "topic"
 
@@ -66,3 +66,11 @@ def test_trigger_result_is_frozen():
     )
     with pytest.raises(AttributeError):
         result.should_retrieve = False
+
+
+def test_keyword_count_meets_requirement():
+    """测试关键词数量满足 30+ 术语要求。"""
+    from lib.memory.constants import TOPIC_KEYWORDS, COMPANY_KEYWORDS
+
+    assert len(TOPIC_KEYWORDS) >= 30
+    assert len(COMPANY_KEYWORDS) >= 6

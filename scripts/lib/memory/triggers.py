@@ -5,7 +5,11 @@ import time
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from lib.common.middleware import TOPIC_KEYWORDS, COMPANY_KEYWORDS
+from lib.memory.constants import (
+    TOPIC_KEYWORDS,
+    COMPANY_KEYWORDS,
+    MEMORY_RETRIEVE_INTERVAL_SECONDS,
+)
 
 
 @dataclass(frozen=True)
@@ -21,7 +25,7 @@ def should_retrieve_memory(
     question: str,
     session_context: Optional[Dict] = None,
     last_retrieve_time: float = 0.0,
-    interval_seconds: int = 60,
+    interval_seconds: int = MEMORY_RETRIEVE_INTERVAL_SECONDS,
 ) -> TriggerResult:
     """判断是否需要触发记忆检索。
 

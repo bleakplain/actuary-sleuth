@@ -130,9 +130,18 @@ async def _auto_classify_loop():
 
 
 async def _memory_cleanup_loop():
-    """每日清理过期记忆。"""
+    """每日清理过期记忆。启动时立即执行一次。"""
     from api.dependencies import get_memory_service
     try:
+        svc = get_memory_service()
+        if svc and svc.available:
+            try:
+                count = svc.cleanup_expired()
+                if count:
+                    logger.info(f"启动清理过期记忆 {count} 条")
+            except Exception as e:
+                logger.warning(f"启动记忆清理失败: {e}")
+
         while True:
             await asyncio.sleep(86400)
             svc = get_memory_service()
