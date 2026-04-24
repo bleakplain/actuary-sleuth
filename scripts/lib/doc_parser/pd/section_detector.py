@@ -71,12 +71,41 @@ class SectionDetector:
             SectionType.RIDER,
         ]
 
-    def detect_section_type(self, title: str) -> Optional[SectionType]:
+    # 章节标题正则：X.Y 格式 或 X．格式（中文句号）
+    SECTION_TITLE_PATTERN = re.compile(r'^(\d+[\.\．]\d*[\.\．]?\d*)\s+.+$')
+
+    def detect_section_type(self, line: str) -> Optional[SectionType]:
+        """检测章节标题行，返回章节类型。
+
+        只检测符合章节标题格式的行，避免误匹配正文中的引用：
+        - 格式：'2.6 责任免除'、'2．保险责任及责任免除'
+        - 标题行不含条款编号时，直接检测关键词
+
+        Args:
+            line: 文本行
+
+        Returns:
+            SectionType 或 None
+        """
+        stripped = line.strip()
+        if not stripped:
+            return None
+
+        # 检测是否为章节标题格式（带编号）
+        is_section_title = self.SECTION_TITLE_PATTERN.match(stripped)
+
         for section_type in self._priority:
             keywords = self.section_keywords.get(section_type.value, [])
             for kw in keywords:
-                if kw in title:
-                    return section_type
+                if kw in stripped:
+                    # 章节标题格式（如 "2.6 责免除"）→ 直接返回
+                    if is_section_title:
+                        return section_type
+                    # 非章节标题格式，但行较短（< 40字）且关键词显著 → 可能是章节标题
+                    # 例如："投保须知" 单独一行
+                    if len(stripped) < 40 and stripped.endswith(kw):
+                        return section_type
+
         return None
 
     def is_clause_table(self, first_col: str) -> bool:

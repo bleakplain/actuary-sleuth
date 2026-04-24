@@ -268,7 +268,7 @@ class PdfParser:
     def _extract_special_sections(self, pages: List, warnings: List[str]) -> Dict[str, List[Any]]:
         """提取特殊章节（告知事项、健康告知、责任免除、附加条款）。
 
-        使用页眉页脚过滤。
+        使用页眉页脚过滤，跳过目录页。
         """
         result: Dict[str, List[Any]] = {
             'notices': [],
@@ -280,10 +280,16 @@ class PdfParser:
         current_type: Optional[SectionType] = None
         current_content: List[str] = []
 
-        for page in pages:
+        for page_idx, page in enumerate(pages):
+            # 目录页整体跳过
+            is_toc, _ = self.toc_detector.detect(page, page_idx)
+            if is_toc:
+                continue
+
             text = self.header_footer_filter.filter(page)
             if not text:
                 text = page.extract_text() or ''
+
             lines = text.split('\n')
 
             for line in lines:
@@ -293,10 +299,14 @@ class PdfParser:
 
                 detected = self.detector.detect_section_type(stripped)
                 if detected:
-                    if current_type and current_content:
-                        add_section(result, current_type, '', '\n'.join(current_content))
-                    current_type = detected
-                    current_content = []
+                    # 同类型章节标题视为延续，不重新开始
+                    if detected == current_type:
+                        current_content.append(stripped)
+                    else:
+                        if current_type and current_content:
+                            add_section(result, current_type, '', '\n'.join(current_content))
+                        current_type = detected
+                        current_content = []
                 elif current_type:
                     current_content.append(stripped)
 
