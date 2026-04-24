@@ -477,36 +477,61 @@ class RAGEngine:
 
     def search_by_metadata(
         self,
-        query: str,
-        law_name: Optional[str] = None,
-        category: Optional[str] = None,
-        hierarchy_level: Optional[str] = None,
-        issuing_authority: Optional[str] = None
+        filters: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
-        """
-        使用增强元数据进行检索
+        """基于 metadata 过滤检索全量数据（无语义检索）
 
         Args:
-            query: 查询文本
-            law_name: 法规名称过滤
-            category: 分类过滤
-            hierarchy_level: 层级过滤
-            issuing_authority: 发布机关过滤
+            filters: metadata 过滤条件
+                - {"law_name": "健康保险管理办法"}  → 返回该法规所有条款
+                - {"category": "健康险"}             → 返回该险种所有法规
 
         Returns:
-            List[Dict]: 检索结果
+            符合条件的所有数据
         """
-        filters = {}
-        if law_name:
-            filters['law_name'] = law_name
-        if category:
-            filters['category'] = category
-        if hierarchy_level:
-            filters['hierarchy_level'] = hierarchy_level
-        if issuing_authority:
-            filters['issuing_authority'] = issuing_authority
+        if not self._initialized:
+            if not self.initialize():
+                return []
 
-        return self.search(query, filters=filters)
+        try:
+            import lancedb
+            db = lancedb.connect(self.config.vector_db_path)
+            table = db.open_table(self.config.collection_name)
+
+            df = table.to_pandas()
+
+            results = []
+            for _, row in df.iterrows():
+                meta = row.get('metadata', {})
+                if isinstance(meta, str):
+                    import json
+                    meta = json.loads(meta)
+
+                match = True
+                for key, value in filters.items():
+                    if meta.get(key) != value:
+                        match = False
+                        break
+
+                if match:
+                    results.append({
+                        'law_name': meta.get('law_name', ''),
+                        'article_number': meta.get('article_number', ''),
+                        'category': meta.get('category', ''),
+                        'content': row.get('text', ''),
+                        'source_file': meta.get('source_file', ''),
+                        'hierarchy_path': meta.get('hierarchy_path', ''),
+                        'doc_number': meta.get('doc_number', ''),
+                        'effective_date': meta.get('effective_date', ''),
+                        'issuing_authority': meta.get('issuing_authority', ''),
+                    })
+
+            logger.debug(f"search_by_metadata: filters={filters}, found={len(results)}")
+            return results
+
+        except Exception as e:
+            logger.error(f"search_by_metadata 失败: {e}")
+            return []
 
 
 # 工厂函数：创建不同场景的引擎

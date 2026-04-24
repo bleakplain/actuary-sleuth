@@ -24,7 +24,8 @@ class OllamaClient(BaseLLMClient):
         self,
         host: str = 'http://localhost:11434',
         model: str = 'qwen2:7b',
-        timeout: int = 30
+        timeout: int = 30,
+        max_tokens: int = 8192
     ):
         """
         初始化Ollama客户端
@@ -33,9 +34,11 @@ class OllamaClient(BaseLLMClient):
             host: Ollama服务地址
             model: 模型名称
             timeout: 请求超时时间
+            max_tokens: 最大生成token数
         """
         super().__init__(model, timeout)
         self.host = host.rstrip('/')
+        self.max_tokens = max_tokens
         self._session = requests.Session()
 
     def _do_generate(self, prompt: str, **kwargs) -> str:
@@ -46,7 +49,7 @@ class OllamaClient(BaseLLMClient):
             "stream": False,
             "options": {
                 "temperature": kwargs.get('temperature', 0.7),
-                "num_predict": kwargs.get('max_tokens', 500)
+                "num_predict": kwargs.get('max_tokens', self.max_tokens)
             }
         }
 
@@ -69,7 +72,7 @@ class OllamaClient(BaseLLMClient):
             "stream": False,
             "options": {
                 "temperature": kwargs.get('temperature', 0.7),
-                "num_predict": kwargs.get('max_tokens', 500)
+                "num_predict": kwargs.get('max_tokens', self.max_tokens)
             }
         }
 
@@ -92,7 +95,7 @@ class OllamaClient(BaseLLMClient):
             "stream": True,
             "options": {
                 "temperature": kwargs.get('temperature', 0.7),
-                "num_predict": kwargs.get('max_tokens', 500),
+                "num_predict": kwargs.get('max_tokens', self.max_tokens),
             },
         }
 

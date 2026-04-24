@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Card, Form, Input, Button, Table, Tag, Typography, theme,
   message, Tabs, Space, Descriptions, Popconfirm, Drawer, Grid,
-  Collapse, Empty, Divider, Alert,
+  Collapse, Empty, Divider, Alert, Select,
 } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined,
@@ -124,6 +124,13 @@ function DocumentReviewPanel({
   onFileUpload,
   onConfirm,
   loading,
+  selectedCategory,
+  onCategoryChange,
+  identifiedCategory,
+  categoryConfidence,
+  suggestedCategories,
+  onIdentifyCategory,
+  identifyingCategory,
 }: {
   document: ParsedDocument | null;
   file: File | null;
@@ -132,6 +139,13 @@ function DocumentReviewPanel({
   onFileUpload: (file: File) => void;
   onConfirm: () => void;
   loading: boolean;
+  selectedCategory: string;
+  onCategoryChange: (v: string) => void;
+  identifiedCategory: string | null;
+  categoryConfidence: number;
+  suggestedCategories: string[];
+  onIdentifyCategory: () => void;
+  identifyingCategory: boolean;
 }) {
   const { token } = theme.useToken();
   const screens = Grid.useBreakpoint();
@@ -201,7 +215,6 @@ function DocumentReviewPanel({
       items: doc.rider_clauses.map(c => ({ id: c.number, title: `${c.number} ${c.title}`, content: c.text || '' })) },
   ].filter(p => p.count > 0) : [];
 
-  // 左侧内容：有文档时显示 DocumentViewer，无文档时显示可编辑文本区
   const leftContent = hasParsedDoc && file ? (
     <DocumentViewer file={file} fileType={doc!.file_type} />
   ) : hasParsedDoc && !file ? (
@@ -217,7 +230,6 @@ function DocumentReviewPanel({
     />
   );
 
-  // 右侧内容：解析结果
   const rightContent = hasParsedDoc ? (
     <div style={{ flex: 1, overflow: 'auto', padding: '8px 12px' }}>
       {doc!.warnings.length > 0 && (
@@ -246,7 +258,6 @@ function DocumentReviewPanel({
     </div>
   );
 
-  // 隐藏的文件输入
   const hiddenFileInput = (
     <input
       ref={fileInputRef}
@@ -319,6 +330,35 @@ function DocumentReviewPanel({
               <Button type="primary" onClick={onConfirm} loading={loading}>确认并检查</Button>
             )}
           </div>
+          {/* 险种选择区域 */}
+          {hasParsedDoc && (
+            <div style={{ padding: '8px 12px', background: token.colorBgContainer, borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+              <Space>
+                <Text strong>险种类型：</Text>
+                <Select
+                  style={{ width: 160 }}
+                  placeholder="选择险种类型"
+                  value={selectedCategory || undefined}
+                  onChange={onCategoryChange}
+                  options={suggestedCategories.length > 0 ? suggestedCategories.map(c => ({ label: c, value: c })) : [
+                    { label: '健康险', value: '健康险' },
+                    { label: '寿险', value: '寿险' },
+                    { label: '意外险', value: '意外险' },
+                    { label: '医疗险', value: '医疗险' },
+                    { label: '重疾险', value: '重疾险' },
+                  ]}
+                />
+                <Button size="small" onClick={onIdentifyCategory} loading={identifyingCategory}>
+                  自动识别
+                </Button>
+                {identifiedCategory && (
+                  <Text type="secondary">
+                    识别结果：{identifiedCategory} (置信度: {(categoryConfidence * 100).toFixed(0)}%)
+                  </Text>
+                )}
+              </Space>
+            </div>
+          )}
           {rightContent}
         </div>
       </div>
@@ -348,6 +388,12 @@ export default function CompliancePage() {
   const [productName, setProductName] = useState('');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [checkingResult, setCheckingResult] = useState<ComplianceReport | null>(null);
+
+  const [identifiedCategory, setIdentifiedCategory] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [suggestedCategories, setSuggestedCategories] = useState<string[]>([]);
+  const [categoryConfidence, setCategoryConfidence] = useState<number>(0);
+  const [identifyingCategory, setIdentifyingCategory] = useState(false);
 
   useEffect(() => {
     loadHistory();
@@ -427,6 +473,25 @@ export default function CompliancePage() {
     return () => clearTimeout(timer);
   }, [richTextContent, uploadedFile]);
 
+  const handleIdentifyCategory = async () => {
+    if (!parsedDocument) return;
+    setIdentifyingCategory(true);
+    try {
+      const result = await complianceApi.identifyCategory({
+        document_content: parsedDocument.combined_text,
+        product_name: productName || undefined,
+      });
+      setIdentifiedCategory(result.category);
+      setSelectedCategory(result.category || '');
+      setSuggestedCategories(result.suggested_categories);
+      setCategoryConfidence(result.confidence);
+    } catch (err) {
+      message.error(`险种识别失败: ${err}`);
+    } finally {
+      setIdentifyingCategory(false);
+    }
+  };
+
   const handleConfirmReview = async () => {
     if (!parsedDocument) return;
     setLoading(true);
@@ -434,6 +499,8 @@ export default function CompliancePage() {
       const report = await complianceApi.checkDocument({
         document_content: parsedDocument.combined_text,
         product_name: productName || parsedDocument.file_name || undefined,
+        parse_id: parsedDocument.parse_id,
+        category: selectedCategory || undefined,
       });
       setCheckingResult(report);
       message.success('合规检查完成');
@@ -451,6 +518,10 @@ export default function CompliancePage() {
     setProductName('');
     setUploadedFile(null);
     setCheckingResult(null);
+    setIdentifiedCategory(null);
+    setSelectedCategory('');
+    setSuggestedCategories([]);
+    setCategoryConfidence(0);
   };
 
   const itemColumns = [
@@ -540,6 +611,13 @@ export default function CompliancePage() {
           onFileUpload={handleFileUpload}
           onConfirm={handleConfirmReview}
           loading={loading || parsing}
+          selectedCategory={selectedCategory}
+          onCategoryChange={setSelectedCategory}
+          identifiedCategory={identifiedCategory}
+          categoryConfidence={categoryConfidence}
+          suggestedCategories={suggestedCategories}
+          onIdentifyCategory={handleIdentifyCategory}
+          identifyingCategory={identifyingCategory}
         />
         {checkingResult && (() => {
           const docResult = checkingResult.result;

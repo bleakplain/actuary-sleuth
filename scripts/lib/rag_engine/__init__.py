@@ -22,6 +22,10 @@
     ├── VectorIndexManager: 向量索引管理
     └── KnowledgeBuilder: 知识库构建编排
 """
+import logging
+import threading
+from typing import Optional
+
 from .config import RAGConfig, get_config, config_to_dict, RetrievalConfig, RerankConfig, GenerationConfig
 from .exceptions import RAGEngineError, EngineInitializationError, RetrievalError
 from .query_preprocessor import QueryPreprocessor, PreprocessedQuery
@@ -43,6 +47,59 @@ from .eval_rating import interpret_metric, generate_eval_summary
 from .quality_detector import detect_quality, compute_retrieval_relevance, compute_info_completeness
 from .badcase_classifier import classify_badcase, assess_compliance_risk
 from .quality_checker import QualityChecker, QualityReport, QualityIssue
+from .kb_manager import KBManager
+
+_logger = logging.getLogger(__name__)
+
+# ===== 引擎单例管理 =====
+
+_engine: Optional[RAGEngine] = None
+_engine_lock = threading.Lock()
+
+
+def get_engine() -> Optional[RAGEngine]:
+    """获取 RAG 引擎实例"""
+    return _engine
+
+
+def init_engine(config: Optional[RAGConfig] = None) -> Optional[RAGEngine]:
+    """初始化 RAG 引擎（应用启动时调用一次）
+
+    Args:
+        config: RAG 配置，默认从 KBManager 加载
+
+    Returns:
+        初始化后的引擎实例，失败返回 None
+    """
+    global _engine
+
+    with _engine_lock:
+        if _engine is not None:
+            return _engine
+
+        try:
+            if config is None:
+                kb_mgr = KBManager()
+                config = kb_mgr.load_kb()
+
+            _engine = create_qa_engine(config)
+            if _engine.initialize():
+                return _engine
+            else:
+                _engine = None
+                return None
+        except Exception as e:
+            _logger.warning(f"RAG 引擎初始化失败: {e}")
+            return None
+
+
+def reset_engine() -> None:
+    """重置引擎（测试用）"""
+    global _engine
+    with _engine_lock:
+        if _engine is not None:
+            _engine.cleanup()
+        _engine = None
 
 __all__ = [
     'RAGConfig',
@@ -64,6 +121,9 @@ __all__ = [
     'Citation',
     'RAGEngine',
     'create_qa_engine',
+    'get_engine',
+    'init_engine',
+    'reset_engine',
     'VectorIndexManager',
     'KnowledgeBuilder',
     'hybrid_search',

@@ -175,6 +175,9 @@ export interface ComplianceResult {
   sources?: Source[];
   citations?: Citation[];
   extracted_params?: Record<string, string>;
+  regulation_sources?: Record<string, string[]>;
+  category?: string;
+  negative_list_checked?: boolean;
 }
 
 export interface ComplianceReport {
@@ -357,4 +360,18 @@ export interface ParsedDocument {
 export interface ComplianceCheckRequest {
   document_content: string;
   product_name?: string;
+  parse_id?: string;
+  category?: string;
+}
+
+export interface CategoryIdentifyRequest {
+  document_content: string;
+  product_name?: string;
+}
+
+export interface CategoryIdentifyResponse {
+  category: string | null;
+  confidence: number;
+  method: string;
+  suggested_categories: string[];
 }

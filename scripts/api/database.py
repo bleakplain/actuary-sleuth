@@ -115,6 +115,20 @@ CREATE TABLE IF NOT EXISTS compliance_reports (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS negative_list (
+    id TEXT PRIMARY KEY,
+    rule_number TEXT NOT NULL,
+    description TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT '中',
+    category TEXT NOT NULL DEFAULT '',
+    remediation TEXT NOT NULL DEFAULT '',
+    keywords TEXT NOT NULL DEFAULT '[]',
+    patterns TEXT NOT NULL DEFAULT '[]',
+    version TEXT NOT NULL DEFAULT '2025',
+    effective_date TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS feedback (
     id TEXT PRIMARY KEY,
     message_id INTEGER NOT NULL REFERENCES messages(id),
