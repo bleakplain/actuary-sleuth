@@ -10,12 +10,12 @@ from typing import Any, Dict, List, Optional
 
 import pdfplumber
 
-from ..models import AuditDocument, Clause, DocumentParseError, PremiumTable, SectionType
+from ..models import AuditDocument, Clause, DataTable, DocumentParseError, SectionType, TableType
 from .header_footer_filter import HeaderFooterFilter
 from .layout_analyzer import LayoutAnalyzer
 from .section_detector import SectionDetector
 from .table_classifier import TableClassifier
-from .utils import add_section, separate_title_and_text
+from .utils import add_section, split_title_and_content
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ class PdfParser:
 
         try:
             clauses = self._extract_clauses(pdf.pages, warnings)
-            premium_tables = self._extract_premium_tables(pdf.pages, warnings)
+            tables = self._extract_tables(pdf.pages, warnings)
             sections_data = self._extract_special_sections(pdf.pages, warnings)
         finally:
             pdf.close()
@@ -63,7 +63,7 @@ class PdfParser:
             file_name=path.name,
             file_type='.pdf',
             clauses=clauses,
-            premium_tables=premium_tables,
+            tables=tables,
             notices=sections_data['notices'],
             health_disclosures=sections_data['health_disclosures'],
             exclusions=sections_data['exclusions'],
@@ -146,18 +146,14 @@ class PdfParser:
     def _match_clause_line(self, line: str):
         """匹配条款行：编号 + 空格 + 标题。
 
-        复用 SectionDetector.is_clause_table 验证编号格式，
-        同时提取标题部分。
+        只匹配 X.Y 格式的条款编号（至少包含一个点），
+        过滤掉单数字格式的章节标题（如 "1 被保险人范围"）。
         """
         stripped = line.strip()
-        # 匹配格式：编号 + 空格 + 标题内容
         import re
-        match = re.match(r'^(\d+(?:\.\d+)*)\s+(.+)$', stripped)
+        match = re.match(r'^(\d+\.\d+(?:\.\d+)*)\s+(.+)$', stripped)
         if match:
-            number = match.group(1)
-            # 复用 is_clause_table 验证编号格式是否有效
-            if self.detector.is_clause_table(number):
-                return match
+            return match
         return None
 
     def _merge_clause(
@@ -205,7 +201,7 @@ class PdfParser:
         page_number: int,
     ) -> Clause:
         """构建条款对象。"""
-        full_title, extra_text = separate_title_and_text(title)
+        full_title, extra_text = split_title_and_content(title)
         all_content = ([extra_text] if extra_text else []) + content_lines
         text = '\n'.join(all_content).strip()
 
@@ -216,17 +212,17 @@ class PdfParser:
             page_number=page_number,
         )
 
-    def _extract_premium_tables(self, pages: List, warnings: List[str]) -> List[PremiumTable]:
+    def _extract_tables(self, pages: List, warnings: List[str]) -> List[DataTable]:
         """提取数据表格。
 
-        提取所有有意义的数据表格（>=2 行），包括费率表、给付比例表等。
         使用 TableClassifier 分类表格类型。
+        过滤单行表格（装饰性章节标题）。
         """
-        premium_tables: List[PremiumTable] = []
+        tables: List[DataTable] = []
 
         for page_idx, page in enumerate(pages):
-            tables = page.find_tables()
-            for table_idx, table in enumerate(tables):
+            page_tables = page.find_tables()
+            for table_idx, table in enumerate(page_tables):
                 classification = self.table_classifier.classify(table)
 
                 rows = table.extract()
@@ -244,20 +240,22 @@ class PdfParser:
                 )
                 data = [[str(cell or '') for cell in row] for row in rows]
                 bbox = getattr(table, 'bbox', None)
-                premium_tables.append(PremiumTable(
-                    raw_text=raw_text,
+
+                tables.append(DataTable(
                     data=data,
+                    table_type=classification.table_type,
+                    raw_text=raw_text,
                     page_number=page_idx + 1,
                     bbox=bbox,
                     table_index=table_idx,
                 ))
 
-                if classification.table_type == "unknown":
+                if classification.table_type == TableType.UNKNOWN:
                     warnings.append(
-                        f"Page {page_idx + 1} table {table_idx} 可能是无边框表格"
+                        f"Page {page_idx + 1} table {table_idx} 类型未知"
                     )
 
-        return premium_tables
+        return tables
 
     def _extract_special_sections(self, pages: List, warnings: List[str]) -> Dict[str, List[Any]]:
         """提取特殊章节（告知事项、健康告知、责任免除、附加条款）。

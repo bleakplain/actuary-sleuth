@@ -12,11 +12,21 @@ from typing import List, Dict, Any, Optional, Tuple
 class SectionType(str, Enum):
     """内容类型枚举"""
     CLAUSE = "clause"
-    PREMIUM_TABLE = "premium_table"
     NOTICE = "notice"
     HEALTH_DISCLOSURE = "health_disclosure"
     EXCLUSION = "exclusion"
     RIDER = "rider"
+
+
+class TableType(str, Enum):
+    """表格类型枚举"""
+    PREMIUM = "premium"              # 费率表
+    COVERAGE = "coverage"            # 保障计划表/给付比例表
+    DRUG_LIST = "drug_list"          # 药品清单表
+    COMPLICATION = "complication"    # 手术并发症表
+    HOSPITAL = "hospital"            # 医院名单表
+    OTHER = "other"                  # 其他数据表格
+    UNKNOWN = "unknown"              # 未知类型
 
 
 @dataclass(frozen=True)
@@ -129,12 +139,12 @@ class Clause:
 
 
 @dataclass(frozen=True)
-class PremiumTable:
-    """费率表"""
-    raw_text: str              # 原始文本
-    data: List[List[str]]      # 结构化数据（二维表格）
-    remark: str = ""           # 备注
-    section_type: str = "premium_table"
+class DataTable:
+    """数据表格"""
+    data: List[List[str]]              # 结构化数据（二维表格）
+    table_type: TableType              # 表格类型
+    raw_text: str = ""                 # 原始文本
+    remark: str = ""                   # 备注
     page_number: Optional[int] = None
     bbox: Optional[Tuple[float, float, float, float]] = None
     table_index: Optional[int] = None
@@ -156,17 +166,18 @@ class PremiumTable:
             lines.append(f"\n*{self.remark}*")
         return "\n".join(lines)
 
-    def split_for_chunking(self, max_rows: int = 50) -> List['PremiumTable']:
+    def split_for_chunking(self, max_rows: int = 50) -> List['DataTable']:
         """将大表格分割为多个子表格，每个子表格携带表头"""
         if len(self.data) <= max_rows:
             return [self]
-        result: List['PremiumTable'] = []
+        result: List['DataTable'] = []
         header = self.data[0]
         for i in range(1, len(self.data), max_rows - 1):
             chunk_data = [header] + self.data[i:i + max_rows - 1]
-            result.append(PremiumTable(
-                raw_text="",
+            result.append(DataTable(
                 data=chunk_data,
+                table_type=self.table_type,
+                raw_text="",
                 remark=self.remark,
                 page_number=self.page_number,
                 bbox=self.bbox,
@@ -189,7 +200,7 @@ class AuditDocument:
     file_type: str  # .docx, .pdf
 
     clauses: List[Clause] = field(default_factory=list)
-    premium_tables: List[PremiumTable] = field(default_factory=list)
+    tables: List[DataTable] = field(default_factory=list)      # 数据表格
     notices: List[DocumentSection] = field(default_factory=list)
     health_disclosures: List[DocumentSection] = field(default_factory=list)
     exclusions: List[DocumentSection] = field(default_factory=list)
@@ -211,7 +222,7 @@ class AuditDocument:
         doc_id = self.file_name.replace('.', '_')
         doc_type = "insurance_contract" if self.file_type in ['.pdf', '.docx'] else "unknown"
         char_count = sum(len(c.text) for c in self.clauses) + sum(
-            len(pt.raw_text) for pt in self.premium_tables
+            len(t.raw_text) for t in self.tables
         )
         return ChunkMetadata(
             doc_id=doc_id,

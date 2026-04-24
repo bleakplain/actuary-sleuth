@@ -8,35 +8,54 @@ from typing import Tuple, Dict, List, Any
 from ..models import SectionType, DocumentSection, Clause
 
 
-def separate_title_and_text(content: str) -> Tuple[str, str]:
+def split_title_and_content(content: str) -> Tuple[str, str]:
     """分离条款标题和正文。
 
-    优先按换行符分离，否则按中文句号边界分离。
+    保险产品条款格式：标题 正文内容
+    如：被保险人范围 凡出生满28天至70周岁7.1，在本公司认可的医院...
+
+    标题通常是 4-15 字的名词短语，以"范围"、"期间"、"责任"等双字词结尾。
     """
     if not content:
         return '', ''
 
     content = content.strip()
 
+    # 先处理换行符
     if '\n' in content:
-        lines = content.split('\n', 1)
-        return lines[0].strip(), lines[1].strip() if len(lines) > 1 else ''
+        lines = content.split('\n')
+        first_line = lines[0].strip()
+        if len(first_line) <= 15 and first_line:
+            remaining = '\n'.join(lines[1:]).strip()
+            return first_line, remaining
 
-    sentences = []
-    current = ''
-    for char in content:
-        current += char
-        if char in '。！？':
-            sentences.append(current.strip())
-            current = ''
+    # 条款标题常见结尾双字词
+    title_enders = [
+        '范围', '期间', '责任', '金额', '事项', '条款', '条件',
+        '原则', '规定', '程序', '流程', '标准', '要求', '义务',
+        '权利', '效力', '限额', '比例', '费用', '保费', '年龄',
+        '构成', '生效', '终止', '解除', '变更', '转让', '计划',
+    ]
 
-    if current:
-        sentences.append(current.strip())
+    # 查找标题边界：检查双字结尾词
+    for i in range(3, min(len(content) - 1, 20)):
+        two_chars = content[i:i+2]
+        if two_chars in title_enders:
+            # 结尾词后是空格或换行
+            if i + 2 < len(content):
+                next_char = content[i + 2]
+                if next_char in ' \n\t':
+                    return content[:i + 2].strip(), content[i + 2:].strip()
+                # 结尾词后是"投保人"、"凡"、"本"等正文开头词
+                next_two = content[i+2:i+4] if i+4 <= len(content) else ''
+                if next_two in ['投保人', '凡出生', '凡投保', '本合同', '被保险', '由投保']:
+                    return content[:i + 2].strip(), content[i + 2:].strip()
 
-    if len(sentences) >= 2 and len(sentences[0]) <= 30:
-        return sentences[0], ''.join(sentences[1:])
+    if len(content) <= 15:
+        return content, ''
 
-    return content, ''
+    return content[:15].strip(), content[15:].strip()
+
 
 
 _SECTION_KEY_MAP = {

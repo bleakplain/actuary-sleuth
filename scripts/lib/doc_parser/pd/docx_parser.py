@@ -11,11 +11,17 @@ from typing import List, Dict, Any, Optional
 from docx import Document
 from docx.table import Table
 
-from ..models import Clause, PremiumTable, AuditDocument, DocumentParseError, SectionType
+import re
+
+from ..models import Clause, DataTable, AuditDocument, DocumentParseError, SectionType, TableType
 from .section_detector import SectionDetector
-from .utils import separate_title_and_text, add_section
+from .table_classifier import TableClassifier
+from .utils import split_title_and_content, add_section
 
 logger = logging.getLogger(__name__)
+
+# 条款编号格式：只匹配 X.Y 或 X.Y.Z 格式（至少包含一个点）
+CLAUSE_NUMBER_PATTERN = re.compile(r'^\d+\.\d+(?:\.\d+)*$')
 
 
 class DocxParser:
@@ -23,6 +29,7 @@ class DocxParser:
 
     def __init__(self, section_detector: Optional[SectionDetector] = None):
         self.detector = section_detector or SectionDetector()
+        self.table_classifier = TableClassifier()
 
     @staticmethod
     def supported_extensions() -> List[str]:
@@ -41,14 +48,14 @@ class DocxParser:
         warnings: List[str] = []
 
         clauses = self._extract_clauses(doc.tables, warnings)
-        premium_tables = self._extract_premium_tables(doc.tables, warnings)
+        tables = self._extract_tables(doc.tables, warnings)
         sections = self._extract_sections(doc.paragraphs, warnings)
 
         return AuditDocument(
             file_name=path.name,
             file_type='.docx',
             clauses=clauses,
-            premium_tables=premium_tables,
+            tables=tables,
             notices=sections['notices'],
             health_disclosures=sections['health_disclosures'],
             exclusions=sections['exclusions'],
@@ -58,6 +65,7 @@ class DocxParser:
         )
 
     def _extract_clauses(self, tables: List[Table], warnings: List[str]) -> List[Clause]:
+        """提取条款，只提取 X.Y 格式的条款，过滤章节标题。"""
         clauses = []
 
         for table in tables:
@@ -73,26 +81,40 @@ class DocxParser:
                 if not cells or not cells[0]:
                     continue
 
-                if self.detector.is_clause_table(cells[0]):
-                    number = cells[0].strip()
-                    title, text = separate_title_and_text(cells[1] if len(cells) > 1 else '')
+                number = cells[0].strip()
+                # 只匹配 X.Y 或 X.Y.Z 格式，过滤单数字章节标题
+                if CLAUSE_NUMBER_PATTERN.match(number):
+                    title, text = split_title_and_content(cells[1] if len(cells) > 1 else '')
                     clauses.append(Clause(number=number, title=title, text=text))
 
         return clauses
 
-    def _extract_premium_tables(self, tables: List[Table], warnings: List[str]) -> List[PremiumTable]:
-        premium_tables = []
+    def _extract_tables(self, tables: List[Table], warnings: List[str]) -> List[DataTable]:
+        """提取数据表格，使用 TableClassifier 分类表格类型。"""
+        result: List[DataTable] = []
 
         for table in tables:
             if not table.rows:
                 continue
 
             rows = [[(cell.text or '').strip() for cell in row.cells] for row in table.rows]
-            if self.detector.is_premium_table(rows[0]):
-                raw_text = '\n'.join('\t'.join(row) for row in rows)
-                premium_tables.append(PremiumTable(raw_text=raw_text, data=rows))
+            if len(rows) < 2:
+                continue
 
-        return premium_tables
+            header = [h for h in rows[0] if h]
+            if len(header) < 2:
+                continue
+
+            classification = self.table_classifier.classify_by_header(' '.join(rows[0]))
+            raw_text = '\n'.join('\t'.join(row) for row in rows)
+
+            result.append(DataTable(
+                data=rows,
+                table_type=classification,
+                raw_text=raw_text,
+            ))
+
+        return result
 
     def _extract_sections(
         self,

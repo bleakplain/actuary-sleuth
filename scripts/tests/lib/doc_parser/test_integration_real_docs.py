@@ -47,7 +47,7 @@ class TestRealDocuments:
 
             total_content = (
                 len(doc.clauses) +
-                len(doc.premium_tables) +
+                len(doc.tables) +
                 len(doc.notices) +
                 len(doc.exclusions)
             )
@@ -55,7 +55,7 @@ class TestRealDocuments:
 
             print(f"\n{pdf_path.name}:")
             print(f"  条款: {len(doc.clauses)}")
-            print(f"  费率表: {len(doc.premium_tables)}")
+            print(f"  数据表格: {len(doc.tables)}")
             print(f"  告知事项: {len(doc.notices)}")
             print(f"  责任免除: {len(doc.exclusions)}")
             print(f"  Warnings: {len(doc.warnings)}")
@@ -70,17 +70,17 @@ class TestRealDocuments:
             assert doc.file_type == '.docx'
             assert doc.file_name == docx_path.name
 
-            total_content = len(doc.clauses) + len(doc.premium_tables)
+            total_content = len(doc.clauses) + len(doc.tables)
             assert total_content > 0, f"{docx_path.name} 未提取到任何内容"
 
-    def test_premium_table_markdown(self, real_pdf_files):
-        """测试费率表 Markdown 输出"""
+    def test_table_markdown(self, real_pdf_files):
+        """测试数据表格 Markdown 输出"""
         if not real_pdf_files:
             pytest.skip("无 PDF 文件")
 
         for pdf_path in real_pdf_files:
             doc = parse_product_document(str(pdf_path))
-            for table in doc.premium_tables:
+            for table in doc.tables:
                 md = table.to_markdown()
                 if md:
                     assert md.startswith("|"), "Markdown 表格应以 | 开头"
