@@ -65,7 +65,12 @@ class DocxParser:
         )
 
     def _extract_clauses(self, tables: List[Table], warnings: List[str]) -> List[Clause]:
-        """提取条款，只提取 X.Y 格式的条款，过滤章节标题。"""
+        """提取条款，只提取 X.Y 格式的条款，过滤章节标题。
+
+        支持多种表格结构：
+        - 2 列：编号 + 内容（标题和正文合并）
+        - 3+ 列：编号 + 标题 + 正文（正文在第 3 列）
+        """
         clauses = []
 
         for table in tables:
@@ -76,6 +81,9 @@ class DocxParser:
             if self.detector.is_non_clause_table(first_row):
                 continue
 
+            # 判断表格列结构
+            num_cols = len(table.rows[0].cells) if table.rows else 0
+
             for row in table.rows:
                 cells = [(cell.text or '').strip() for cell in row.cells]
                 if not cells or not cells[0]:
@@ -84,7 +92,13 @@ class DocxParser:
                 number = cells[0].strip()
                 # 只匹配 X.Y 或 X.Y.Z 格式，过滤单数字章节标题
                 if CLAUSE_NUMBER_PATTERN.match(number):
-                    title, text = split_title_and_content(cells[1] if len(cells) > 1 else '')
+                    if num_cols >= 3:
+                        # 3+ 列结构：编号 + 标题 + 正文
+                        title = cells[1] if len(cells) > 1 else ''
+                        text = cells[2] if len(cells) > 2 else ''
+                    else:
+                        # 2 列结构：编号 + 内容（需分离标题和正文）
+                        title, text = split_title_and_content(cells[1] if len(cells) > 1 else '')
                     clauses.append(Clause(number=number, title=title, text=text))
 
         return clauses
