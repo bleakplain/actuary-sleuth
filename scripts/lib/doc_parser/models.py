@@ -23,6 +23,7 @@ class TableType(str, Enum):
     PREMIUM = "premium"              # 费率表
     COVERAGE = "coverage"            # 保障计划表/给付比例表
     DRUG_LIST = "drug_list"          # 药品清单表
+    GENE_TEST = "gene_test"          # 基因检测产品清单表
     COMPLICATION = "complication"    # 手术并发症表
     HOSPITAL = "hospital"            # 医院名单表
     OTHER = "other"                  # 其他数据表格

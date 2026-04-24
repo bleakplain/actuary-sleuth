@@ -29,7 +29,8 @@ class TableClassifier:
     # 表格类型关键词
     PREMIUM_KEYWORDS = ['费率', '保险费', '保费', '基本保险金额']
     COVERAGE_KEYWORDS = ['给付比例', '保障计划', '保险责任', '保险金额']
-    DRUG_KEYWORDS = ['药品', '商品名', '通用名', '适应疾病', '靶向']
+    GENE_TEST_KEYWORDS = ['基因检测', '产品名称', '检测产品']
+    DRUG_KEYWORDS = ['药品', '商品名', '通用名', '靶向药']
     COMPLICATION_KEYWORDS = ['并发症', '手术', '诊疗类别', '介入诊疗']
     HOSPITAL_KEYWORDS = ['指定医院', '医疗机构', '医院名单', '医院名称']
 
@@ -69,6 +70,11 @@ class TableClassifier:
 
     def _match_type(self, header: str) -> TableType:
         """根据表头关键词匹配表格类型"""
+        # 基因检测产品清单（优先匹配，避免被药品关键词误匹配）
+        for kw in self.GENE_TEST_KEYWORDS:
+            if kw in header:
+                return TableType.GENE_TEST
+
         # 药品清单表
         for kw in self.DRUG_KEYWORDS:
             if kw in header:
