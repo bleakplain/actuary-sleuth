@@ -11,7 +11,10 @@ from typing import Any, Dict, List, Optional
 import pdfplumber
 
 from ..models import AuditDocument, Clause, DocumentParseError, PremiumTable, SectionType
+from .header_footer_filter import HeaderFooterFilter
+from .layout_analyzer import LayoutAnalyzer
 from .section_detector import SectionDetector
+from .table_classifier import TableClassifier
 from .utils import add_section, separate_title_and_text
 
 logger = logging.getLogger(__name__)
@@ -22,6 +25,9 @@ class PdfParser:
 
     def __init__(self, section_detector: Optional[SectionDetector] = None):
         self.detector = section_detector or SectionDetector()
+        self.layout_analyzer = LayoutAnalyzer()
+        self.header_footer_filter = HeaderFooterFilter()
+        self.table_classifier = TableClassifier()
 
     @staticmethod
     def supported_extensions() -> List[str]:
@@ -70,6 +76,7 @@ class PdfParser:
         """提取条款内容。
 
         从文本流识别条款编号和标题，合并跨页重复条款。
+        使用版面分析和页眉页脚过滤。
         """
         clauses_dict: Dict[str, Clause] = {}
 
@@ -79,7 +86,17 @@ class PdfParser:
         pending_page: int = 1
 
         for page_idx, page in enumerate(pages):
-            text = page.extract_text() or ''
+            reordered_text, regions = self.layout_analyzer.analyze(page)
+            clean_text = self.header_footer_filter.filter(page)
+
+            if reordered_text and len(reordered_text) > len(clean_text) * 0.8:
+                text = reordered_text
+            else:
+                text = clean_text
+
+            if not text:
+                text = page.extract_text() or ''
+
             lines = text.split('\n')
 
             for line in lines:
@@ -200,36 +217,53 @@ class PdfParser:
         )
 
     def _extract_premium_tables(self, pages: List, warnings: List[str]) -> List[PremiumTable]:
-        """提取费率表。"""
+        """提取数据表格。
+
+        提取所有有意义的数据表格（>=2 行），包括费率表、给付比例表等。
+        使用 TableClassifier 分类表格类型。
+        """
         premium_tables: List[PremiumTable] = []
 
         for page_idx, page in enumerate(pages):
             tables = page.find_tables()
             for table_idx, table in enumerate(tables):
+                classification = self.table_classifier.classify(table)
+
                 rows = table.extract()
-                if not rows:
+                if not rows or len(rows) < 2:
                     continue
 
                 header = [str(cell or '').strip() for cell in rows[0]]
-                if self.detector.is_premium_table(header):
-                    raw_text = '\n'.join(
-                        '\t'.join(str(cell or '') for cell in row)
-                        for row in rows
+                non_empty_header = [h for h in header if h]
+                if len(non_empty_header) < 2:
+                    continue
+
+                raw_text = '\n'.join(
+                    '\t'.join(str(cell or '') for cell in row)
+                    for row in rows
+                )
+                data = [[str(cell or '') for cell in row] for row in rows]
+                bbox = getattr(table, 'bbox', None)
+                premium_tables.append(PremiumTable(
+                    raw_text=raw_text,
+                    data=data,
+                    page_number=page_idx + 1,
+                    bbox=bbox,
+                    table_index=table_idx,
+                ))
+
+                if classification.table_type == "unknown":
+                    warnings.append(
+                        f"Page {page_idx + 1} table {table_idx} 可能是无边框表格"
                     )
-                    data = [[str(cell or '') for cell in row] for row in rows]
-                    bbox = getattr(table, 'bbox', None)
-                    premium_tables.append(PremiumTable(
-                        raw_text=raw_text,
-                        data=data,
-                        page_number=page_idx + 1,
-                        bbox=bbox,
-                        table_index=table_idx,
-                    ))
 
         return premium_tables
 
     def _extract_special_sections(self, pages: List, warnings: List[str]) -> Dict[str, List[Any]]:
-        """提取特殊章节（告知事项、健康告知、责任免除、附加条款）。"""
+        """提取特殊章节（告知事项、健康告知、责任免除、附加条款）。
+
+        使用页眉页脚过滤。
+        """
         result: Dict[str, List[Any]] = {
             'notices': [],
             'health_disclosures': [],
@@ -241,7 +275,9 @@ class PdfParser:
         current_content: List[str] = []
 
         for page in pages:
-            text = page.extract_text() or ''
+            text = self.header_footer_filter.filter(page)
+            if not text:
+                text = page.extract_text() or ''
             lines = text.split('\n')
 
             for line in lines:
