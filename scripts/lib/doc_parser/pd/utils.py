@@ -14,47 +14,38 @@ def split_title_and_content(content: str) -> Tuple[str, str]:
     保险产品条款格式：标题 正文内容
     如：被保险人范围 凡出生满28天至70周岁7.1，在本公司认可的医院...
 
-    标题通常是 4-15 字的名词短语，以"范围"、"期间"、"责任"等双字词结尾。
+    分离策略：
+    1. 优先按空格分离（标题和正文之间通常有空格）
+    2. 按换行符分离（标题单独一行）
+    3. 无法分离时返回空正文（后续从下文提取）
     """
     if not content:
         return '', ''
 
     content = content.strip()
 
-    # 先处理换行符
+    # 先处理换行符（标题单独一行）
     if '\n' in content:
         lines = content.split('\n')
         first_line = lines[0].strip()
-        if len(first_line) <= 15 and first_line:
+        # 第一行是标题（长度 <= 15 且不含标点）
+        if len(first_line) <= 15 and first_line and not any(c in first_line for c in ['，', '。', '、']):
             remaining = '\n'.join(lines[1:]).strip()
             return first_line, remaining
+        # 第一行过长，可能是标题+正文合并
+        content = first_line
 
-    # 条款标题常见结尾双字词
-    title_enders = [
-        '范围', '期间', '责任', '金额', '事项', '条款', '条件',
-        '原则', '规定', '程序', '流程', '标准', '要求', '义务',
-        '权利', '效力', '限额', '比例', '费用', '保费', '年龄',
-        '构成', '生效', '终止', '解除', '变更', '转让', '计划',
-    ]
+    # 按空格分离（标题和正文之间有空格）
+    first_space_idx = content.find(' ')
+    if first_space_idx > 0:
+        potential_title = content[:first_space_idx]
+        # 标题特征：长度 3-15，不含标点
+        if 3 <= len(potential_title) <= 15:
+            if not any(c in potential_title for c in ['，', '。', '、', '；', '：']):
+                return potential_title, content[first_space_idx + 1:].strip()
 
-    # 查找标题边界：检查双字结尾词
-    for i in range(3, min(len(content) - 1, 20)):
-        two_chars = content[i:i+2]
-        if two_chars in title_enders:
-            # 结尾词后是空格或换行
-            if i + 2 < len(content):
-                next_char = content[i + 2]
-                if next_char in ' \n\t':
-                    return content[:i + 2].strip(), content[i + 2:].strip()
-                # 结尾词后是"投保人"、"凡"、"本"等正文开头词
-                next_two = content[i+2:i+4] if i+4 <= len(content) else ''
-                if next_two in ['投保人', '凡出生', '凡投保', '本合同', '被保险', '由投保']:
-                    return content[:i + 2].strip(), content[i + 2:].strip()
-
-    if len(content) <= 15:
-        return content, ''
-
-    return content[:15].strip(), content[15:].strip()
+    # 无法分离，视为纯标题（正文从后续行提取）
+    return content, ''
 
 
 
