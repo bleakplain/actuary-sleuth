@@ -1,8 +1,7 @@
-"""合规检查路由 — 产品参数检查 + 条款文档审查 + 文档解析。"""
+"""合规检查路由 — 条款文档审查 + 文档解析。"""
 
 import os
 import uuid
-import json
 import asyncio
 import logging
 import tempfile
@@ -12,7 +11,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 
 from api.database import get_connection, list_compliance_reports, get_compliance_report, save_compliance_report
 from api.schemas.compliance import (
-    ProductCheckRequest, DocumentCheckRequest, ComplianceReportOut,
+    DocumentCheckRequest, ComplianceReportOut,
     ParsedDocumentResponse, ParsedClause, ParsedPremiumTable, ParsedSection,
     RichTextParseRequest, CategoryIdentifyRequest, CategoryIdentifyResponse,
 )
@@ -23,43 +22,11 @@ from lib.compliance.checker import (
     build_enhanced_context,
     run_compliance_check,
 )
-from lib.compliance.prompts import COMPLIANCE_PROMPT_PRODUCT, COMPLIANCE_PROMPT_DOCUMENT
+from lib.compliance.prompts import COMPLIANCE_PROMPT_DOCUMENT
 from lib.doc_parser import parse_product_document, DocumentParseError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/compliance", tags=["合规检查"])
-
-
-@router.post("/check/product", response_model=ComplianceReportOut)
-async def check_product(req: ProductCheckRequest):
-    context, sources_info = build_enhanced_context(category=req.category)
-
-    prompt = COMPLIANCE_PROMPT_PRODUCT.format(
-        product_name=req.product_name,
-        category=req.category,
-        params_json=json.dumps(req.params, ensure_ascii=False),
-        context=context,
-    )
-
-    try:
-        result = await asyncio.to_thread(run_compliance_check, prompt)
-    except Exception as e:
-        logger.error(f"Compliance check failed: {e}")
-        raise HTTPException(status_code=500, detail=f"合规检查失败: {e}")
-
-    result["regulation_sources"] = sources_info
-
-    report_id = f"cr_{uuid.uuid4().hex[:8]}"
-    save_compliance_report(report_id, req.product_name, req.category, "product", result)
-
-    return ComplianceReportOut(
-        id=report_id,
-        product_name=req.product_name,
-        category=req.category,
-        mode="product",
-        result=result,
-        created_at="",
-    )
 
 
 @router.post("/check/document", response_model=ComplianceReportOut)

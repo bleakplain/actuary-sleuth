@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Card, Form, Input, Button, Table, Tag, Typography, theme,
+  Card, Input, Button, Table, Tag, Typography, theme,
   message, Tabs, Space, Descriptions, Popconfirm, Drawer, Grid,
-  Collapse, Empty, Divider, Alert, Select,
+  Collapse, Empty, Alert, Select,
 } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined,
@@ -370,12 +370,9 @@ export default function CompliancePage() {
   const { token } = theme.useToken();
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
-  const [activeTab, setActiveTab] = useState('product');
-  const [productForm] = Form.useForm();
+  const [activeTab, setActiveTab] = useState('document');
   const [loading, setLoading] = useState(false);
-  const [currentReport, setCurrentReport] = useState<ComplianceReport | null>(null);
   const [history, setHistory] = useState<ComplianceReport[]>([]);
-  const reportRef = React.useRef<HTMLDivElement>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [sourceDrawerVisible, setSourceDrawerVisible] = useState(false);
   const [selectedSource, setSelectedSource] = useState<Source | undefined>();
@@ -407,36 +404,6 @@ export default function CompliancePage() {
     } finally {
       setHistoryLoading(false);
     }
-  };
-
-  const handleProductCheck = async () => {
-    try {
-      const values = await productForm.validateFields();
-      setLoading(true);
-      const report = await complianceApi.checkProduct({
-        product_name: values.product_name,
-        category: values.category,
-        params: parseParams(values.params_text),
-      });
-      setCurrentReport(report);
-      message.success('检查完成');
-      loadHistory();
-    } catch (err) {
-      message.error(`检查失败: ${err}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const parseParams = (text: string): Record<string, string> => {
-    const params: Record<string, string> = {};
-    text.split('\n').forEach((line) => {
-      const idx = line.indexOf(':');
-      if (idx > 0) {
-        params[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
-      }
-    });
-    return params;
   };
 
   const handleFileUpload = async (file: File) => {
@@ -575,30 +542,20 @@ export default function CompliancePage() {
     try {
       await complianceApi.deleteComplianceReport(reportId);
       message.success('删除成功');
-      if (currentReport?.id === reportId) setCurrentReport(null);
       loadHistory();
     } catch (err) {
       message.error(`删除失败: ${err}`);
     }
   };
 
-  const handleSelectReport = (record: ComplianceReport) => {
-    setCurrentReport(record);
-    setActiveTab('history');
-    setTimeout(() => reportRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
-  };
-
   const handleSourceClick = (sourceIdx: number, excerpt?: string) => {
-    const sources = result?.sources;
+    const sources = checkingResult?.result?.sources;
     if (sources && sourceIdx < sources.length) {
       setSelectedSource(sources[sourceIdx]);
       setSelectedExcerpt(excerpt);
       setSourceDrawerVisible(true);
     }
   };
-
-  const result = currentReport?.result;
-  const summary = result?.summary;
 
   const renderDocumentReviewTab = () => {
     return (
@@ -625,9 +582,6 @@ export default function CompliancePage() {
           return docResult && docSummary ? (
             <Card title={`检查报告 - ${checkingResult.product_name || ''}`} style={{ marginTop: 16 }}>
               <Descriptions size="small" column={isMobile ? 1 : 2} style={{ marginBottom: 16 }}>
-                <Descriptions.Item label="模式">
-                  {checkingResult.mode === 'product' ? '产品参数检查' : '条款文档审查'}
-                </Descriptions.Item>
                 <Descriptions.Item label="检查时间">{checkingResult.created_at}</Descriptions.Item>
               </Descriptions>
               <Space size={isMobile ? 'small' : 'large'} wrap style={{ marginBottom: 16 }}>
@@ -666,29 +620,6 @@ export default function CompliancePage() {
         onChange={setActiveTab}
         items={[
           {
-            key: 'product',
-            label: '产品参数检查',
-            children: (
-              <Card title="输入产品参数" size="small" style={{ marginBottom: 16 }}>
-                <Form form={productForm} layout="vertical">
-                  <Form.Item name="product_name" label="产品名称" rules={[{ required: true }]}>
-                    <Input placeholder="如：XX健康保险" />
-                  </Form.Item>
-                  <Form.Item name="category" label="险种类型" rules={[{ required: true }]}>
-                    <Input placeholder="如：健康险、寿险、财产险" />
-                  </Form.Item>
-                  <Form.Item name="params_text" label="产品参数" rules={[{ required: true }]}
-                    extra="每行一个参数，格式：参数名: 值，如：等待期: 90天">
-                    <TextArea rows={6} placeholder={`等待期: 90天\n免赔额: 0元\n保险期间: 1年\n缴费方式: 年缴`} />
-                  </Form.Item>
-                  <Button type="primary" onClick={handleProductCheck} loading={loading}>
-                    开始检查
-                  </Button>
-                </Form>
-              </Card>
-            ),
-          },
-          {
             key: 'document',
             label: <span><FileTextOutlined /> 条款文档审查</span>,
             children: renderDocumentReviewTab(),
@@ -704,17 +635,9 @@ export default function CompliancePage() {
                 size="small"
                 pagination={{ pageSize: 20 }}
                 scroll={{ x: 'max-content' }}
-                onRow={(record) => ({
-                  onClick: () => handleSelectReport(record),
-                  style: { cursor: 'pointer' },
-                })}
                 columns={[
                   { title: '产品名称', dataIndex: 'product_name', key: 'product_name' },
                   { title: '险种', dataIndex: 'category', key: 'category' },
-                  {
-                    title: '模式', dataIndex: 'mode', key: 'mode', width: 100,
-                    render: (m: string) => m === 'product' ? '参数检查' : '文档审查',
-                  },
                   { title: '检查时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
                   {
                     title: '操作', key: 'action', width: 80,
@@ -731,44 +654,6 @@ export default function CompliancePage() {
           },
         ]}
       />
-
-      {activeTab === 'product' && result && summary && (
-        <div ref={reportRef}>
-        <Card title={`检查报告 - ${currentReport?.product_name || ''}`} className="mt-16">
-          <Descriptions size="small" column={isMobile ? 1 : 2} style={{ marginBottom: 16 }}>
-            <Descriptions.Item label="模式">
-              {currentReport?.mode === 'product' ? '产品参数检查' : '条款文档审查'}
-            </Descriptions.Item>
-            <Descriptions.Item label="检查时间">{currentReport?.created_at}</Descriptions.Item>
-          </Descriptions>
-
-          <Space size={isMobile ? 'small' : 'large'} wrap style={{ marginBottom: 16 }}>
-            <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
-              合规 {summary.compliant} 项
-            </Tag>
-            <Tag color="error" icon={<CloseCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
-              不合规 {summary.non_compliant} 项
-            </Tag>
-            <Tag color="warning" icon={<ExclamationCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
-              需关注 {summary.attention} 项
-            </Tag>
-          </Space>
-
-          <Table
-            dataSource={result.items || []}
-            columns={itemColumns}
-            rowKey={(r: ComplianceItem) => r.param}
-            size="small"
-            scroll={{ x: 'max-content' }}
-            pagination={false}
-            rowClassName={(record: ComplianceItem) => {
-              if (record.status === 'non_compliant') return 'ant-table-row-error';
-              return '';
-            }}
-          />
-        </Card>
-        </div>
-      )}
 
       <SourceDrawer
         visible={sourceDrawerVisible}

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  checkProduct,
   checkDocument,
   fetchComplianceReports,
   fetchComplianceReport,
@@ -18,30 +17,6 @@ const mockedClient = vi.mocked(client);
 describe('compliance API', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('checkProduct posts product check', async () => {
-    const report = {
-      id: 'cr1',
-      product_name: '测试产品',
-      category: '健康险',
-      mode: 'product',
-      result: { summary: { compliant: 2, non_compliant: 0, attention: 0 }, items: [] },
-      created_at: '',
-    };
-    mockedClient.post.mockResolvedValueOnce({ data: report });
-
-    const result = await checkProduct({
-      product_name: '测试产品',
-      category: '健康险',
-      params: { 等待期: '90天' },
-    });
-    expect(result).toEqual(report);
-    expect(mockedClient.post).toHaveBeenCalledWith('/api/compliance/check/product', {
-      product_name: '测试产品',
-      category: '健康险',
-      params: { 等待期: '90天' },
-    });
   });
 
   it('checkDocument posts document check', async () => {

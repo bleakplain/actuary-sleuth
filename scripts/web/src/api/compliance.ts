@@ -1,15 +1,6 @@
 import client from './client';
 import type { ComplianceReport, ParsedDocument, CategoryIdentifyRequest, CategoryIdentifyResponse } from '../types';
 
-export async function checkProduct(params: {
-  product_name: string;
-  category: string;
-  params: Record<string, string | number>;
-}): Promise<ComplianceReport> {
-  const { data } = await client.post('/api/compliance/check/product', params);
-  return data;
-}
-
 export async function checkDocument(params: {
   document_content: string;
   product_name?: string;

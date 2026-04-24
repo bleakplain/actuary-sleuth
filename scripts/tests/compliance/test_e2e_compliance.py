@@ -175,27 +175,6 @@ def test_category_identification(api_client: httpx.Client):
         assert len(result["suggested_categories"]) <= 5
 
 
-def test_product_check(api_client: httpx.Client):
-    """测试产品参数检查"""
-    response = api_client.post(
-        "/api/compliance/check/product",
-        json={
-            "product_name": "测试重疾险",
-            "category": "重疾险",
-            "params": {
-                "等待期": "90天",
-                "保险期间": "终身",
-                "缴费期间": "20年",
-            }
-        }
-    )
-
-    assert response.status_code == 200
-    result = response.json()
-    assert "result" in result
-    assert "regulation_sources" in result["result"]
-
-
 def test_report_crud(api_client: httpx.Client):
     """测试报告 CRUD 操作"""
     response = api_client.post(
