@@ -172,13 +172,20 @@ class DataTable:
             return [self]
         result: List['DataTable'] = []
         header = self.data[0]
+        chunk_idx = 0
         for i in range(1, len(self.data), max_rows - 1):
             chunk_data = [header] + self.data[i:i + max_rows - 1]
+            chunk_idx += 1
+            # 为每个 chunk 生成 raw_text
+            chunk_raw_text = '\n'.join(
+                '\t'.join(str(cell or '') for cell in row)
+                for row in chunk_data
+            )
             result.append(DataTable(
                 data=chunk_data,
                 table_type=self.table_type,
-                raw_text="",
-                remark=self.remark,
+                raw_text=chunk_raw_text,
+                remark=self.remark if chunk_idx == 1 else "",  # 仅第一个 chunk 显示备注
                 page_number=self.page_number,
                 bbox=self.bbox,
             ))

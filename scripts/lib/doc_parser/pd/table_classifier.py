@@ -31,7 +31,7 @@ class TableClassifier:
     COVERAGE_KEYWORDS = ['给付比例', '保障计划', '保险责任', '保险金额']
     DRUG_KEYWORDS = ['药品', '商品名', '通用名', '适应疾病', '靶向']
     COMPLICATION_KEYWORDS = ['并发症', '手术', '诊疗类别', '介入诊疗']
-    HOSPITAL_KEYWORDS = ['医院', '指定医院', '医疗机构']
+    HOSPITAL_KEYWORDS = ['指定医院', '医疗机构', '医院名单', '医院名称']
 
     def __init__(self, border_threshold: float = 0.5):
         self.border_threshold = border_threshold
