@@ -13,6 +13,9 @@ def split_title_and_content(content: str) -> Tuple[str, str]:
 
     保险产品条款格式：标题 正文内容
     如：被保险人范围 凡出生满28天至70周岁7.1，在本公司认可的医院...
+    或名词释义格式：术语 定义
+    如：周岁 以法定身份证明文件中记载的出生日期为基础计算...
+    或复合术语：先天性畸形、变形或染色体异常 指被保险人出生时就具有的...
 
     分离策略：
     1. 优先按空格分离（标题和正文之间通常有空格）
@@ -28,8 +31,8 @@ def split_title_and_content(content: str) -> Tuple[str, str]:
     if '\n' in content:
         lines = content.split('\n')
         first_line = lines[0].strip()
-        # 第一行是标题（长度 <= 15 且不含标点）
-        if len(first_line) <= 15 and first_line and not any(c in first_line for c in ['，', '。', '、']):
+        # 第一行是标题（长度 <= 25 且不含句号）
+        if len(first_line) <= 25 and first_line and '。' not in first_line:
             remaining = '\n'.join(lines[1:]).strip()
             return first_line, remaining
         # 第一行过长，可能是标题+正文合并
@@ -39,10 +42,24 @@ def split_title_and_content(content: str) -> Tuple[str, str]:
     first_space_idx = content.find(' ')
     if first_space_idx > 0:
         potential_title = content[:first_space_idx]
-        # 标题特征：长度 3-15，不含标点
-        if 3 <= len(potential_title) <= 15:
-            if not any(c in potential_title for c in ['，', '。', '、', '；', '：']):
-                return potential_title, content[first_space_idx + 1:].strip()
+        potential_content = content[first_space_idx + 1:].strip()
+
+        # 标题特征：长度 2-25
+        if 2 <= len(potential_title) <= 25:
+            # 检查标题不含句号（句号表示正文开始）
+            # 注意：顿号、逗号在名词释义标题中是合法的
+            if '。' not in potential_title:
+                # 检查有正文内容（不为空）
+                if potential_content:
+                    return potential_title, potential_content
+
+    # 书名号分离（标准/法规名称引用格式）
+    # 格式：《标准名称》是由xxx发布...或《标准名称》指xxx
+    if content.startswith('《') and '》' in content:
+        end_idx = content.find('》') + 1
+        remaining = content[end_idx:].strip()
+        if remaining:
+            return content[:end_idx], remaining
 
     # 无法分离，视为纯标题（正文从后续行提取）
     return content, ''
