@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass, field
 
+from lib.config import get_rerank_config
+
 
 @dataclass(frozen=True)
 class ChunkConfig:
@@ -162,5 +164,18 @@ class RAGConfig:
 
 
 def get_config(**kwargs) -> RAGConfig:
-    """获取配置实例，kwargs 覆盖默认值。"""
+    """获取配置实例，从环境变量读取默认值，kwargs 覆盖。"""
+    rerank_cfg = get_rerank_config()
+    default_rerank = RerankConfig(
+        enable_rerank=rerank_cfg.enable,
+        reranker_type=rerank_cfg.reranker_type,
+        rerank_top_k=rerank_cfg.top_k,
+        rerank_min_score=rerank_cfg.min_score,
+        reranker_model=rerank_cfg.model,
+        reranker_batch_size=rerank_cfg.batch_size,
+        reranker_max_length=rerank_cfg.max_length,
+        reranker_quantized=rerank_cfg.quantized,
+    )
+    if 'rerank' not in kwargs:
+        kwargs['rerank'] = default_rerank
     return RAGConfig.create(**kwargs)

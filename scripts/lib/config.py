@@ -66,6 +66,44 @@ class MemoryConfig:
         return self._config.get('confidence_threshold', 0.6)
 
 
+class RerankConfig:
+
+    def __init__(self, config_dict: Dict[str, Any]):
+        self._config = config_dict.get('rerank', {})
+
+    @property
+    def enable(self) -> bool:
+        return self._config.get('enable', True)
+
+    @property
+    def reranker_type(self) -> str:
+        return self._config.get('reranker_type', 'llm')
+
+    @property
+    def top_k(self) -> int:
+        return self._config.get('top_k', 5)
+
+    @property
+    def min_score(self) -> float:
+        return self._config.get('min_score', 0.0)
+
+    @property
+    def model(self) -> str:
+        return self._config.get('model', '')
+
+    @property
+    def batch_size(self) -> int:
+        return self._config.get('batch_size', 32)
+
+    @property
+    def max_length(self) -> int:
+        return self._config.get('max_length', 512)
+
+    @property
+    def quantized(self) -> bool:
+        return self._config.get('quantized', False)
+
+
 class OllamaConfig:
 
     def __init__(self, config_dict: Dict[str, Any]):
@@ -326,6 +364,17 @@ class Config:
                 'retrieval_ttl': int(os.getenv('CACHE_RETRIEVAL_TTL', '3600')),
                 'generation_ttl': int(os.getenv('CACHE_GENERATION_TTL', '3600')),
             },
+            # rerank
+            'rerank': {
+                'enable': os.getenv('RERANK_ENABLE', 'true').lower() == 'true',
+                'reranker_type': os.getenv('RERANKER_TYPE', 'llm'),
+                'top_k': int(os.getenv('RERANK_TOP_K', '5')),
+                'min_score': float(os.getenv('RERANK_MIN_SCORE', '0.0')),
+                'model': os.getenv('RERANKER_MODEL', ''),
+                'batch_size': int(os.getenv('RERANKER_BATCH_SIZE', '32')),
+                'max_length': int(os.getenv('RERANKER_MAX_LENGTH', '512')),
+                'quantized': os.getenv('RERANKER_QUANTIZED', 'false').lower() == 'true',
+            },
         }
 
     def _init_nested_configs(self) -> None:
@@ -336,6 +385,7 @@ class Config:
         self._llm = LLMConfig(self._config)
         self._data_paths = DatabaseConfig(self._config)
         self._memory = MemoryConfig(self._config)
+        self._rerank = RerankConfig(self._config)
 
     @property
     def feishu(self) -> FeishuConfig:
@@ -348,6 +398,10 @@ class Config:
     @property
     def memory(self) -> MemoryConfig:
         return self._memory
+
+    @property
+    def rerank(self) -> RerankConfig:
+        return self._rerank
 
     @property
     def sqlite_db_path(self) -> str:
@@ -489,3 +543,6 @@ def get_feishu_config() -> FeishuConfig:
 
 def get_memory_config() -> MemoryConfig:
     return _get_config().memory
+
+def get_rerank_config() -> RerankConfig:
+    return _get_config().rerank
