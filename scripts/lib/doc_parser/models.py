@@ -12,11 +12,58 @@ from typing import List, Dict, Any, Optional, Tuple
 class SectionType(str, Enum):
     """内容类型枚举"""
     CLAUSE = "clause"
-    PREMIUM_TABLE = "premium_table"
     NOTICE = "notice"
     HEALTH_DISCLOSURE = "health_disclosure"
     EXCLUSION = "exclusion"
     RIDER = "rider"
+
+
+class TableType(str, Enum):
+    """表格类型枚举"""
+    PREMIUM = "premium"              # 费率表
+    COVERAGE = "coverage"            # 保障计划表/给付比例表
+    DRUG_LIST = "drug_list"          # 药品清单表
+    GENE_TEST = "gene_test"          # 基因检测产品清单表
+    COMPLICATION = "complication"    # 手术并发症表
+    HOSPITAL = "hospital"            # 医院名单表
+    APPENDIX = "appendix"            # 附表（如恶性肿瘤分期表、职业类别表等）
+    OTHER = "other"                  # 其他数据表格
+    UNKNOWN = "unknown"              # 未知类型
+
+
+@dataclass(frozen=True)
+class ChunkMetadata:
+    """Chunk 元数据"""
+    doc_id: str
+    doc_name: str
+    doc_type: str
+    section_path: str
+    section_level: int
+    chunk_index: int
+    char_count: int
+    is_key_clause: bool = False
+    has_table: bool = False
+    prev_chunk_id: Optional[str] = None
+    next_chunk_id: Optional[str] = None
+    parse_confidence: float = 0.95
+    update_time: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'doc_id': self.doc_id,
+            'doc_name': self.doc_name,
+            'doc_type': self.doc_type,
+            'section_path': self.section_path,
+            'section_level': self.section_level,
+            'chunk_index': self.chunk_index,
+            'char_count': self.char_count,
+            'is_key_clause': self.is_key_clause,
+            'has_table': self.has_table,
+            'prev_chunk_id': self.prev_chunk_id,
+            'next_chunk_id': self.next_chunk_id,
+            'parse_confidence': self.parse_confidence,
+            'update_time': self.update_time,
+        }
 
 
 @dataclass(frozen=True)
@@ -94,15 +141,57 @@ class Clause:
 
 
 @dataclass(frozen=True)
-class PremiumTable:
-    """费率表"""
-    raw_text: str              # 原始文本
-    data: List[List[str]]      # 结构化数据（二维表格）
-    remark: str = ""           # 备注
-    section_type: str = "premium_table"
+class DataTable:
+    """数据表格"""
+    data: List[List[str]]              # 结构化数据（二维表格）
+    table_type: TableType              # 表格类型
+    raw_text: str = ""                 # 原始文本
+    remark: str = ""                   # 备注
     page_number: Optional[int] = None
     bbox: Optional[Tuple[float, float, float, float]] = None
     table_index: Optional[int] = None
+
+    def to_markdown(self) -> str:
+        """转换为 Markdown 表格格式"""
+        if not self.data:
+            return ""
+        lines: List[str] = []
+        headers = [str(cell).replace('\n', ' ') for cell in self.data[0]]
+        lines.append("| " + " | ".join(headers) + " |")
+        lines.append("| " + " | ".join("---" for _ in headers) + " |")
+        for row in self.data[1:]:
+            cells = [str(cell).replace('\n', ' ') for cell in row]
+            while len(cells) < len(headers):
+                cells.append("")
+            lines.append("| " + " | ".join(cells[:len(headers)]) + " |")
+        if self.remark:
+            lines.append(f"\n*{self.remark}*")
+        return "\n".join(lines)
+
+    def split_for_chunking(self, max_rows: int = 50) -> List['DataTable']:
+        """将大表格分割为多个子表格，每个子表格携带表头"""
+        if len(self.data) <= max_rows:
+            return [self]
+        result: List['DataTable'] = []
+        header = self.data[0]
+        chunk_idx = 0
+        for i in range(1, len(self.data), max_rows - 1):
+            chunk_data = [header] + self.data[i:i + max_rows - 1]
+            chunk_idx += 1
+            # 为每个 chunk 生成 raw_text
+            chunk_raw_text = '\n'.join(
+                '\t'.join(str(cell or '') for cell in row)
+                for row in chunk_data
+            )
+            result.append(DataTable(
+                data=chunk_data,
+                table_type=self.table_type,
+                raw_text=chunk_raw_text,
+                remark=self.remark if chunk_idx == 1 else "",  # 仅第一个 chunk 显示备注
+                page_number=self.page_number,
+                bbox=self.bbox,
+            ))
+        return result
 
 
 @dataclass(frozen=True)
@@ -120,7 +209,7 @@ class AuditDocument:
     file_type: str  # .docx, .pdf
 
     clauses: List[Clause] = field(default_factory=list)
-    premium_tables: List[PremiumTable] = field(default_factory=list)
+    tables: List[DataTable] = field(default_factory=list)      # 数据表格
     notices: List[DocumentSection] = field(default_factory=list)
     health_disclosures: List[DocumentSection] = field(default_factory=list)
     exclusions: List[DocumentSection] = field(default_factory=list)
@@ -128,6 +217,37 @@ class AuditDocument:
 
     parse_time: datetime = field(default_factory=datetime.now)
     warnings: List[str] = field(default_factory=list)
+
+    def get_chunk_metadata(
+        self,
+        section_path: str,
+        chunk_index: int,
+        is_key_clause: bool = False,
+        has_table: bool = False,
+        prev_chunk_id: Optional[str] = None,
+        next_chunk_id: Optional[str] = None,
+    ) -> ChunkMetadata:
+        """生成 Chunk 元数据"""
+        doc_id = self.file_name.replace('.', '_')
+        doc_type = "insurance_contract" if self.file_type in ['.pdf', '.docx'] else "unknown"
+        char_count = sum(len(c.text) for c in self.clauses) + sum(
+            len(t.raw_text) for t in self.tables
+        )
+        return ChunkMetadata(
+            doc_id=doc_id,
+            doc_name=self.file_name,
+            doc_type=doc_type,
+            section_path=section_path,
+            section_level=section_path.count('>') + 1,
+            chunk_index=chunk_index,
+            char_count=char_count,
+            is_key_clause=is_key_clause,
+            has_table=has_table,
+            prev_chunk_id=prev_chunk_id,
+            next_chunk_id=next_chunk_id,
+            parse_confidence=0.95,
+            update_time=self.parse_time.isoformat(),
+        )
 
 
 class DocumentParseError(Exception):

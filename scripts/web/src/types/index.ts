@@ -330,6 +330,8 @@ export interface ParsedClause {
 }
 
 export interface ParsedPremiumTable {
+  table_type: string;  // premium, appendix, coverage, drug_list, gene_test, hospital, other
+  remark: string;
   raw_text: string;
   data: string[][];
 }

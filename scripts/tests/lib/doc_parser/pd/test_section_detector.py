@@ -30,6 +30,11 @@ class TestSectionDetector:
         detector = SectionDetector()
         result = detector.detect_section_type("附加险说明")
         assert result == SectionType.RIDER
+        # 独立章节标题
+        assert detector.detect_section_type("附加险条款") == SectionType.RIDER
+        # 条款正文中的"附加险"不应误匹配
+        assert detector.detect_section_type("2.1 保险期间 本附加险合同的保险期间为1年") is None
+        assert detector.detect_section_type("2.5 保险责任 本附加险合同有效期内") is None
 
     def test_is_clause_table(self):
         detector = SectionDetector()
