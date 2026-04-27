@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 import numpy as np
 
-from lib.memory.vector_store import LanceDBMemoryStore, OutputData
+from lib.memory.vector_store import LanceDBMemoryStore, OutputData, _escape_value
 
 
 @pytest.fixture
@@ -59,7 +59,7 @@ def test_insert_adds_rows(mock_lancedb, mock_table):
     mock_lancedb.open_table.return_value = mock_table
 
     store = LanceDBMemoryStore("/path/to/db", "test_table")
-    vectors = [[0.1, 0.2] * 512]  # 1024 维
+    vectors = [[0.1, 0.2] * 512]
     payloads = [{"data": "test", "user_id": "u1"}]
 
     store.insert(vectors, payloads=payloads, ids=["id1"])
@@ -141,3 +141,24 @@ def test_output_data_model():
     assert data.id == "test_id"
     assert data.score == 0.95
     assert data.payload == {"key": "value"}
+
+
+def test_escape_value_escapes_single_quotes():
+    assert _escape_value("normal") == "normal"
+    assert _escape_value("it's") == "it''s"
+    assert _escape_value("a'b'c") == "a''b''c"
+
+
+def test_escape_value_rejects_non_string():
+    with pytest.raises(TypeError, match="必须是字符串"):
+        _escape_value(123)
+    with pytest.raises(TypeError, match="必须是字符串"):
+        _escape_value(None)
+
+
+def test_to_row_does_not_mutate_payload():
+    original = {"data": "test", "user_id": "u1", "extra": "value"}
+    row = LanceDBMemoryStore._to_row([0.1] * 1024, "id1", original)
+    assert original.get("user_id") == "u1"
+    assert original.get("extra") == "value"
+    assert row["user_id"] == "u1"
