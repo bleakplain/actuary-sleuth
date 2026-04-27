@@ -27,7 +27,6 @@ from .llm_reranker import LLMReranker, RerankConfig
 from .query_preprocessor import QueryPreprocessor
 from .exceptions import EngineInitializationError, RetrievalError
 from .attribution import parse_citations, AttributionResult
-from .cross_encoder_reranker import CrossEncoderReranker
 from lib.llm import BaseLLMClient, LLMClientFactory
 from lib.llm.trace import trace_span
 from lib.common.cache import get_cache_manager, SCOPE_GENERATION, SCOPE_RETRIEVAL
@@ -163,10 +162,6 @@ class RAGEngine:
         if rc.reranker_type == "llm":
             self._active_reranker_type = "llm"
             return LLMReranker(self._llm_client, rerank_config)
-
-        if rc.reranker_type == "hf":
-            self._active_reranker_type = "cross_encoder"
-            return CrossEncoderReranker()
 
         self._active_reranker_type = "none"
         return None

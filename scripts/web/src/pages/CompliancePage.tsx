@@ -10,7 +10,7 @@ import {
   FileTextOutlined, CaretRightOutlined, PlusOutlined,
 } from '@ant-design/icons';
 import * as complianceApi from '../api/compliance';
-import type { ComplianceReport, ComplianceItem, Source, ParsedDocument } from '../types';
+import type { ComplianceReport, ComplianceItem, Source, ParsedDocument, ParsedPremiumTable } from '../types';
 import { DRAWER_MD } from '../constants/layout';
 import { DocumentViewer } from '../components/DocumentViewer';
 
@@ -22,6 +22,23 @@ const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactNode; labe
   non_compliant: { color: 'error', icon: <CloseCircleOutlined />, label: '不合规' },
   attention: { color: 'warning', icon: <ExclamationCircleOutlined />, label: '需关注' },
 };
+
+const TABLE_TYPE_LABELS: Record<string, string> = {
+  premium: '费率表',
+  appendix: '附表',
+  coverage: '保障计划表',
+  drug_list: '药品清单',
+  gene_test: '基因检测清单',
+  hospital: '医院名单',
+  other: '数据表',
+  unknown: '表格',
+};
+
+function getTableLabel(t: ParsedPremiumTable, index: number): string {
+  const typeLabel = TABLE_TYPE_LABELS[t.table_type] || '表格';
+  const remark = t.remark ? ` (${t.remark.slice(0, 20)})` : '';
+  return `${typeLabel} ${index + 1}${remark}`;
+}
 
 function SourceDrawer({
   visible,
@@ -189,8 +206,8 @@ function DocumentReviewPanel({
   const panelItems = doc ? [
     { key: 'clauses', label: `条款 (${doc.clauses.length})`, count: doc.clauses.length,
       items: doc.clauses.map(c => ({ id: c.number, title: `${c.number} ${c.title}`, content: c.text || '' })) },
-    { key: 'premium_tables', label: `费率表 (${doc.premium_tables.length})`, count: doc.premium_tables.length,
-      items: doc.premium_tables.map((t, i) => ({ id: `table-${i}`, title: `费率表 ${i + 1}`, content: t.raw_text || '' })) },
+    { key: 'premium_tables', label: `表格 (${doc.premium_tables.length})`, count: doc.premium_tables.length,
+      items: doc.premium_tables.map((t, i) => ({ id: `table-${i}`, title: getTableLabel(t, i), content: t.raw_text || '' })) },
     { key: 'exclusions', label: `责任免除 (${doc.exclusions.length})`, count: doc.exclusions.length,
       items: doc.exclusions.map((s, i) => ({ id: `excl-${i}`, title: s.title || `条款 ${i + 1}`, content: s.content || '' })) },
     { key: 'notices', label: `投保须知 (${doc.notices.length})`, count: doc.notices.length,
@@ -306,14 +323,6 @@ function DocumentReviewPanel({
           <div style={{ padding: '8px 12px', background: token.colorFillQuaternary, borderBottom: `1px solid ${token.colorBorderSecondary}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
               <Text strong>解析结果</Text>
-              {hasParsedDoc && (
-                <Text type="secondary">
-                  {[
-                    doc!.clauses.length > 0 ? `${doc!.clauses.length} 条条款` : null,
-                    doc!.premium_tables.length > 0 ? `${doc!.premium_tables.length} 个费率表` : null,
-                  ].filter(Boolean).join('，')}
-                </Text>
-              )}
             </div>
             {hasParsedDoc && (
               <Button type="primary" onClick={onConfirm} loading={loading}>确认并检查</Button>

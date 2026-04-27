@@ -346,11 +346,29 @@ def _migrate_db():
             user_id TEXT PRIMARY KEY,
             focus_areas TEXT DEFAULT '[]',
             preference_tags TEXT DEFAULT '[]',
-            audit_stats TEXT DEFAULT '{}',
             summary TEXT DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
         """)
+
+        profile_cols = {row[1] for row in conn.execute("PRAGMA table_info(user_profiles)").fetchall()}
+        if 'audit_stats' in profile_cols:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS user_profiles_new (
+                    user_id TEXT PRIMARY KEY,
+                    focus_areas TEXT DEFAULT '[]',
+                    preference_tags TEXT DEFAULT '[]',
+                    summary TEXT DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+            """)
+            conn.execute("""
+                INSERT INTO user_profiles_new (user_id, focus_areas, preference_tags, summary, updated_at)
+                SELECT user_id, focus_areas, preference_tags, summary, updated_at
+                FROM user_profiles
+            """)
+            conn.execute("DROP TABLE user_profiles")
+            conn.execute("ALTER TABLE user_profiles_new RENAME TO user_profiles")
 
         session_cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
         if 'user_id' not in session_cols:

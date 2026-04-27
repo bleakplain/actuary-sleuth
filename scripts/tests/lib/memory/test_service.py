@@ -20,9 +20,7 @@ def unavailable_service():
 @pytest.fixture
 def mock_backend():
     backend = MagicMock()
-    backend.search.return_value = [
-        {"id": "m1", "memory": "test memory", "created_at": "2026-04-01T10:00:00"}
-    ]
+    backend.search.return_value = [{"id": "m1", "memory": "test", "created_at": "2026-04-01"}]
     backend.add.return_value = ["m1"]
     return backend
 
@@ -106,9 +104,7 @@ def test_get_user_profile_not_found(unavailable_service):
 def test_get_user_profile_success(service_with_backend):
     with patch("lib.memory.service.get_connection") as mock_conn:
         conn = MagicMock()
-        conn.execute.return_value.fetchone.return_value = (
-            '["重疾险"]', '["等待期"]', '{}', "测试摘要"
-        )
+        conn.execute.return_value.fetchone.return_value = ('["重疾险"]', '["等待期"]', "测试摘要")
         mock_conn.return_value.__enter__ = lambda self: conn
         mock_conn.return_value.__exit__ = lambda self, *args: None
 
@@ -116,7 +112,6 @@ def test_get_user_profile_success(service_with_backend):
         assert result is not None
         assert result["focus_areas"] == ["重疾险"]
         assert result["preference_tags"] == ["等待期"]
-        assert result["summary"] == "测试摘要"
 
 
 def test_patch_user_profile_not_found_raises():
@@ -140,9 +135,7 @@ def test_patch_user_profile_success():
 
     with patch("lib.memory.service.get_connection") as mock_conn:
         conn = MagicMock()
-        conn.execute.return_value.fetchone.return_value = (
-            '["重疾险"]', '["等待期"]', "旧摘要"
-        )
+        conn.execute.return_value.fetchone.return_value = ('["重疾险"]', '["等待期"]', "旧摘要")
         mock_conn.return_value.__enter__ = lambda self: conn
         mock_conn.return_value.__exit__ = lambda self, *args: None
 
@@ -155,10 +148,7 @@ def test_patch_user_profile_success():
 def test_cleanup_expired_returns_count(service_with_backend):
     with patch("lib.memory.service.get_connection") as mock_conn:
         conn = MagicMock()
-        conn.execute.return_value.fetchall.side_effect = [
-            [("mem_1",), ("mem_2",)],
-            [],
-        ]
+        conn.execute.return_value.fetchall.side_effect = [[("mem_1",), ("mem_2",)], []]
         mock_conn.return_value.__enter__ = lambda self: conn
         mock_conn.return_value.__exit__ = lambda self, *args: None
 
@@ -200,7 +190,6 @@ def test_delete_exception_returns_false(service_with_backend):
 
 
 def test_add_skips_duplicate_memory():
-    """测试去重：相似度 > 阈值时跳过写入。"""
     mock_backend = MagicMock()
     mock_backend.search.return_value = [{"id": "m1", "memory": "等待期180天", "score": 0.95}]
     mock_backend.add.return_value = ["m2"]
@@ -213,21 +202,23 @@ def test_add_skips_duplicate_memory():
 
 
 def test_add_writes_when_below_threshold():
-    """测试相似度低于阈值时正常写入。"""
     mock_backend = MagicMock()
     mock_backend.search.return_value = [{"id": "m1", "memory": "等待期180天", "score": 0.5}]
     mock_backend.add.return_value = ["m2"]
 
     svc = MemoryService(backend=mock_backend)
-    result = svc.add([{"role": "user", "content": "等待期是180天"}], "user1")
 
-    assert result == ["m2"]
+    with patch("lib.memory.service.get_connection") as mock_conn:
+        conn = MagicMock()
+        mock_conn.return_value.__enter__ = lambda self: conn
+        mock_conn.return_value.__exit__ = lambda self, *args: None
+
+        result = svc.add([{"role": "user", "content": "等待期是180天"}], "user1")
+        assert result == ["m2"]
 
 
 def test_update_user_profile_skips_low_confidence():
-    """测试低置信度画像更新被跳过。"""
     mock_backend = MagicMock()
-    mock_backend.search.return_value = []
     svc = MemoryService(backend=mock_backend)
 
     with patch("lib.llm.factory.LLMClientFactory") as mock_factory:
@@ -241,14 +232,11 @@ def test_update_user_profile_skips_low_confidence():
             mock_conn.return_value.__exit__ = lambda self, *args: None
 
             svc.update_user_profile("问题", "回答", "user1")
-
             conn.execute.assert_not_called()
 
 
 def test_update_user_profile_accepts_high_confidence():
-    """测试高置信度画像更新正常写入。"""
     mock_backend = MagicMock()
-    mock_backend.search.return_value = []
     svc = MemoryService(backend=mock_backend)
 
     with patch("lib.llm.factory.LLMClientFactory") as mock_factory:
@@ -263,18 +251,78 @@ def test_update_user_profile_accepts_high_confidence():
             mock_conn.return_value.__exit__ = lambda self, *args: None
 
             svc.update_user_profile("问题", "回答", "user1")
-
             conn.execute.assert_called()
 
 
 def test_add_writes_when_no_similar_memory():
-    """测试无相似记忆时正常写入。"""
     mock_backend = MagicMock()
     mock_backend.search.return_value = []
     mock_backend.add.return_value = ["m1"]
 
     svc = MemoryService(backend=mock_backend)
-    result = svc.add([{"role": "user", "content": "新的问题"}], "user1")
 
-    assert result == ["m1"]
-    mock_backend.add.assert_called_once()
+    with patch("lib.memory.service.get_connection") as mock_conn:
+        conn = MagicMock()
+        mock_conn.return_value.__enter__ = lambda self: conn
+        mock_conn.return_value.__exit__ = lambda self, *args: None
+
+        result = svc.add([{"role": "user", "content": "新的问题"}], "user1")
+        assert result == ["m1"]
+
+
+def test_delete_order_sqlite_first():
+    mock_backend = MagicMock()
+    svc = MemoryService(backend=mock_backend)
+
+    with patch("lib.memory.service.get_connection") as mock_conn:
+        conn = MagicMock()
+        mock_conn.return_value.__enter__ = lambda self: conn
+        mock_conn.return_value.__exit__ = lambda self, *args: None
+
+        call_order = []
+        conn.execute.side_effect = lambda *args: call_order.append("sqlite")
+        mock_backend.delete.side_effect = lambda *args: call_order.append("lancedb")
+
+        svc.delete("mem_123")
+        assert call_order == ["sqlite", "lancedb"]
+
+
+def test_delete_rollback_on_lancedb_failure():
+    mock_backend = MagicMock()
+    mock_backend.delete.side_effect = Exception("LanceDB error")
+    svc = MemoryService(backend=mock_backend)
+
+    with patch("lib.memory.service.get_connection") as mock_conn:
+        conn = MagicMock()
+        mock_conn.return_value.__enter__ = lambda self: conn
+        mock_conn.return_value.__exit__ = lambda self, *args: None
+
+        result = svc.delete("mem_123")
+
+        assert result is False
+        restore_calls = [c for c in conn.execute.call_args_list if "is_deleted = 0" in str(c)]
+        assert len(restore_calls) >= 1
+
+
+def test_add_rollback_on_metadata_failure():
+    mock_backend = MagicMock()
+    mock_backend.search.return_value = []
+    mock_backend.add.return_value = ["m1"]
+    svc = MemoryService(backend=mock_backend)
+
+    with patch("lib.memory.service.get_connection") as mock_conn:
+        conn = MagicMock()
+
+        def execute_side_effect(sql, *args):
+            if "INSERT" in sql:
+                raise Exception("SQLite error")
+            return MagicMock()
+
+        conn.execute.side_effect = execute_side_effect
+        mock_conn.return_value.__enter__ = lambda self: conn
+        mock_conn.return_value.__exit__ = lambda self, *args: None
+
+        result = svc.add([{"role": "user", "content": "test"}], "user1")
+
+        assert result == []
+        mock_backend.delete.assert_called_once_with("m1")

@@ -67,7 +67,7 @@ class RerankConfig:
     rerank_top_k: int = 5
     rerank_min_score: float = 0.0
 
-    _VALID_RERANKER_TYPES = {"llm", "hf", "none"}
+    _VALID_RERANKER_TYPES = {"llm", "none"}
 
     def __post_init__(self):
         if self.rerank_top_k < 1:

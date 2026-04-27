@@ -14,19 +14,20 @@ from __future__ import annotations
 
 from .models import (
     Clause,
-    PremiumTable,
+    DataTable,
     DocumentSection,
     AuditDocument,
     DocumentParseError,
     SectionType,
     DocumentMeta,
+    TableType,
 )
 from .kb import parse_knowledge_base
 
 __all__ = [
     # 数据模型
-    'Clause', 'PremiumTable', 'DocumentSection', 'AuditDocument',
-    'DocumentParseError', 'SectionType', 'DocumentMeta',
+    'Clause', 'DataTable', 'DocumentSection', 'AuditDocument',
+    'DocumentParseError', 'SectionType', 'DocumentMeta', 'TableType',
     # 公共接口
     'parse_knowledge_base',
     'parse_product_document',
