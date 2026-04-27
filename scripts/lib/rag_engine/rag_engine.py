@@ -24,6 +24,7 @@ from .retrieval import hybrid_search
 from .bm25_index import BM25Index
 from .reranker_base import BaseReranker
 from .llm_reranker import LLMReranker, RerankConfig
+from .bge_reranker import BgeReranker, QuantizedBgeReranker
 from .query_preprocessor import QueryPreprocessor
 from .exceptions import EngineInitializationError, RetrievalError
 from .attribution import parse_citations, AttributionResult
@@ -162,6 +163,21 @@ class RAGEngine:
         if rc.reranker_type == "llm":
             self._active_reranker_type = "llm"
             return LLMReranker(self._llm_client, rerank_config)
+
+        if rc.reranker_type == "bge":
+            self._active_reranker_type = "bge"
+            model_path = rc.reranker_model if rc.reranker_model else None
+            if rc.reranker_quantized:
+                return QuantizedBgeReranker(
+                    model_path=model_path,
+                    batch_size=rc.reranker_batch_size,
+                    max_length=rc.reranker_max_length,
+                )
+            return BgeReranker(
+                model_name=model_path or "BAAI/bge-reranker-large",
+                max_length=rc.reranker_max_length,
+                batch_size=rc.reranker_batch_size,
+            )
 
         self._active_reranker_type = "none"
         return None

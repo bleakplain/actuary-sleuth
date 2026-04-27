@@ -27,6 +27,7 @@ from .exceptions import RAGEngineError, EngineInitializationError, RetrievalErro
 from .query_preprocessor import QueryPreprocessor, PreprocessedQuery
 from .reranker_base import BaseReranker
 from .llm_reranker import LLMReranker
+from .bge_reranker import BgeReranker, QuantizedBgeReranker
 from .attribution import parse_citations, AttributionResult, Citation
 
 from .rag_engine import RAGEngine, create_qa_engine
@@ -57,6 +58,8 @@ __all__ = [
     'PreprocessedQuery',
     'BaseReranker',
     'LLMReranker',
+    'BgeReranker',
+    'QuantizedBgeReranker',
     'parse_citations',
     'AttributionResult',
     'Citation',

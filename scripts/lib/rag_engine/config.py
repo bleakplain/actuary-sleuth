@@ -66,8 +66,12 @@ class RerankConfig:
     reranker_type: str = "llm"
     rerank_top_k: int = 5
     rerank_min_score: float = 0.0
+    reranker_model: str = ""
+    reranker_batch_size: int = 32
+    reranker_max_length: int = 512
+    reranker_quantized: bool = False
 
-    _VALID_RERANKER_TYPES = {"llm", "none"}
+    _VALID_RERANKER_TYPES = {"llm", "bge", "none"}
 
     def __post_init__(self):
         if self.rerank_top_k < 1:
@@ -82,6 +86,10 @@ class RerankConfig:
                 f"rerank_min_score must be between 0.0 and 1.0, "
                 f"got {self.rerank_min_score}"
             )
+        if self.reranker_batch_size < 1:
+            raise ValueError(f"reranker_batch_size must be >= 1, got {self.reranker_batch_size}")
+        if self.reranker_max_length < 64:
+            raise ValueError(f"reranker_max_length must be >= 64, got {self.reranker_max_length}")
 
 
 @dataclass(frozen=True)

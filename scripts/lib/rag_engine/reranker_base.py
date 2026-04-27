@@ -16,3 +16,21 @@ class BaseReranker(ABC):
         top_k: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         ...
+
+    @staticmethod
+    def _apply_scores(
+        candidates: List[Dict[str, Any]],
+        scores: List[float],
+        top_k: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Annotate candidates with scores, sort descending, optionally truncate."""
+        scored: List[Dict[str, Any]] = []
+        for idx, candidate in enumerate(candidates):
+            item = dict(candidate)
+            item["rerank_score"] = float(scores[idx])
+            item["reranked"] = True
+            scored.append(item)
+        scored.sort(key=lambda x: x["rerank_score"], reverse=True)
+        if top_k is not None:
+            scored = scored[:top_k]
+        return scored
