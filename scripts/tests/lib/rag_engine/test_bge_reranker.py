@@ -105,3 +105,16 @@ class TestApplyScores:
         candidates = [{'content': 'a'}]
         BaseReranker._apply_scores(candidates, [0.5])
         assert 'reranked' not in candidates[0]
+
+
+class TestRerankConfigValidation:
+
+    def test_quantized_requires_model_path(self):
+        from lib.rag_engine.config import RerankConfig
+        with pytest.raises(ValueError, match="reranker_model is required"):
+            RerankConfig(reranker_type="bge", reranker_quantized=True, reranker_model="")
+
+    def test_quantized_with_model_path_ok(self):
+        from lib.rag_engine.config import RerankConfig
+        config = RerankConfig(reranker_type="bge", reranker_quantized=True, reranker_model="/path/to/model")
+        assert config.reranker_quantized is True

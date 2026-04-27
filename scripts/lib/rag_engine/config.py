@@ -90,6 +90,11 @@ class RerankConfig:
             raise ValueError(f"reranker_batch_size must be >= 1, got {self.reranker_batch_size}")
         if self.reranker_max_length < 64:
             raise ValueError(f"reranker_max_length must be >= 64, got {self.reranker_max_length}")
+        if self.reranker_quantized and not self.reranker_model:
+            raise ValueError(
+                "reranker_model is required when reranker_quantized=True "
+                "(QuantizedBgeReranker requires a local model path with model_quantized.onnx)"
+            )
 
 
 @dataclass(frozen=True)

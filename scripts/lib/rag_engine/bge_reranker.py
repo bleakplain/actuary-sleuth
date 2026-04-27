@@ -25,9 +25,8 @@ def _get_best_device() -> str:
 class BgeReranker(BaseReranker):
     """BGE reranker using sentence-transformers CrossEncoder with batch inference.
 
-    Why separate class from CrossEncoderReranker: batch_size control is
-    critical for latency — CrossEncoder.predict() sends all pairs in one call
-    which can OOM on large candidate sets. Explicit batching prevents this.
+    Why explicit batching: CrossEncoder.predict() sends all pairs in one call
+    which can OOM on large candidate sets. Batching by batch_size prevents this.
     """
 
     def __init__(
@@ -150,6 +149,7 @@ class QuantizedBgeReranker(BaseReranker):
             with torch.no_grad():
                 logits = self._model(**encoded).logits
                 if self._use_pytorch:
+                    # MPS tensors cannot be directly converted to numpy; must move to CPU first
                     scores = torch.sigmoid(logits[:, 0]).cpu().numpy()
                 else:
                     scores = torch.sigmoid(logits[:, 0]).numpy()
