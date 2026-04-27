@@ -69,11 +69,11 @@ class BgeReranker(BaseReranker):
 
 
 class QuantizedBgeReranker(BaseReranker):
-    """Quantized BGE reranker using ONNX Runtime INT8.
+    """Quantized BGE reranker — MPS uses PyTorch dynamic INT8, others use ONNX Runtime.
 
-    Why separate class: optimum ONNX runtime has a different API from
-    sentence-transformers CrossEncoder — tokenizer + model are separate
-    objects and inference uses torch.no_grad() with explicit encode/decode.
+    Why two backends: ONNX Runtime has no MPS ExecutionProvider, so Apple Silicon
+    GPU acceleration requires PyTorch native quantization. CUDA/CPU use ONNX for
+    better throughput.
     """
 
     def __init__(
@@ -83,33 +83,47 @@ class QuantizedBgeReranker(BaseReranker):
         max_length: int = 512,
         device: Optional[str] = None,
     ):
+        import torch
+        self._device = device or _get_best_device()
+        self._batch_size = batch_size
+        self._max_length = max_length
+        self._use_pytorch = self._device == "mps"
+        if self._use_pytorch:
+            self._init_pytorch_backend(model_path)
+        else:
+            self._init_onnx_backend(model_path)
+        logger.info(
+            f"QuantizedBgeReranker initialized from {model_path}, "
+            f"device={self._device}, backend={'pytorch' if self._use_pytorch else 'onnx'}"
+        )
+
+    def _init_pytorch_backend(self, model_path: str) -> None:
+        """PyTorch dynamic INT8 quantization for MPS."""
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+        self._tokenizer = AutoTokenizer.from_pretrained(model_path)
+        model = AutoModelForSequenceClassification.from_pretrained(model_path)
+        model.eval()
+        self._model = torch.quantization.quantize_dynamic(
+            model, {torch.nn.Linear}, dtype=torch.qint8,
+        ).to(self._device)
+
+    def _init_onnx_backend(self, model_path: str) -> None:
+        """ONNX Runtime INT8 for CUDA/CPU."""
         try:
             from optimum.onnxruntime import ORTModelForSequenceClassification
             from transformers import AutoTokenizer
         except ImportError:
             raise ImportError(
-                "optimum[onnxruntime] is required for QuantizedBgeReranker. "
+                "optimum[onnxruntime] is required for QuantizedBgeReranker on CUDA/CPU. "
                 "Install with: pip install optimum[onnxruntime]"
             )
-        import torch
         self._tokenizer = AutoTokenizer.from_pretrained(model_path)
-        provider = self._ort_provider(device)
+        provider = "CUDAExecutionProvider" if self._device == "cuda" else "CPUExecutionProvider"
         self._model = ORTModelForSequenceClassification.from_pretrained(
             model_path,
             file_name="model_quantized.onnx",
             provider=provider,
         )
-        self._batch_size = batch_size
-        self._max_length = max_length
-        self._device = device or _get_best_device()
-        logger.info(f"QuantizedBgeReranker initialized from {model_path}, device={self._device}")
-
-    @staticmethod
-    def _ort_provider(device: Optional[str]) -> str:
-        actual = device or _get_best_device()
-        if actual == "cuda":
-            return "CUDAExecutionProvider"
-        return "CPUExecutionProvider"
 
     def rerank(
         self,
@@ -131,8 +145,13 @@ class QuantizedBgeReranker(BaseReranker):
                 max_length=self._max_length,
                 return_tensors="pt",
             )
+            if self._use_pytorch:
+                encoded = {k: v.to(self._device) for k, v in encoded.items()}
             with torch.no_grad():
                 logits = self._model(**encoded).logits
-                scores = torch.sigmoid(logits[:, 0]).numpy()
+                if self._use_pytorch:
+                    scores = torch.sigmoid(logits[:, 0]).cpu().numpy()
+                else:
+                    scores = torch.sigmoid(logits[:, 0]).numpy()
             all_scores.extend(scores.tolist())
         return self._apply_scores(candidates, all_scores, top_k)
