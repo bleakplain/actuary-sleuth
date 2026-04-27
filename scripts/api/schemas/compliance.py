@@ -39,6 +39,8 @@ class ParsedClause(BaseModel):
 
 
 class ParsedPremiumTable(BaseModel):
+    table_type: str = "unknown"  # premium, appendix, coverage, drug_list, gene_test, hospital, other
+    remark: str = ""
     raw_text: str = ""
     data: List[List[str]] = []
 

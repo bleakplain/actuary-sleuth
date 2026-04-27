@@ -287,7 +287,12 @@ def _audit_doc_to_response(audit_doc, file_type: str) -> ParsedDocumentResponse:
         for c in audit_doc.clauses
     ]
     tables = [
-        ParsedPremiumTable(raw_text=t.raw_text, data=[list(row) for row in t.data])
+        ParsedPremiumTable(
+            table_type=t.table_type.value if hasattr(t.table_type, 'value') else str(t.table_type),
+            remark=t.remark or "",
+            raw_text=t.raw_text,
+            data=[list(row) for row in t.data]
+        )
         for t in audit_doc.tables
     ]
     notices = [

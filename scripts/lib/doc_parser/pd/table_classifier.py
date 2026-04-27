@@ -33,6 +33,7 @@ class TableClassifier:
     DRUG_KEYWORDS = ['药品', '商品名', '通用名', '靶向药']
     COMPLICATION_KEYWORDS = ['并发症', '手术', '诊疗类别', '介入诊疗']
     HOSPITAL_KEYWORDS = ['指定医院', '医疗机构', '医院名单', '医院名称']
+    APPENDIX_KEYWORDS = ['附表', '附录', '分期', '职业类别', '分类表']
 
     def __init__(self, border_threshold: float = 0.5):
         self.border_threshold = border_threshold
@@ -89,6 +90,11 @@ class TableClassifier:
         for kw in self.HOSPITAL_KEYWORDS:
             if kw in header:
                 return TableType.HOSPITAL
+
+        # 附表（如恶性肿瘤分期表、职业类别表等）
+        for kw in self.APPENDIX_KEYWORDS:
+            if kw in header:
+                return TableType.APPENDIX
 
         # 给付比例表/保障计划表
         for kw in self.COVERAGE_KEYWORDS:

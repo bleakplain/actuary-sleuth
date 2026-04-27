@@ -26,6 +26,7 @@ class TableType(str, Enum):
     GENE_TEST = "gene_test"          # 基因检测产品清单表
     COMPLICATION = "complication"    # 手术并发症表
     HOSPITAL = "hospital"            # 医院名单表
+    APPENDIX = "appendix"            # 附表（如恶性肿瘤分期表、职业类别表等）
     OTHER = "other"                  # 其他数据表格
     UNKNOWN = "unknown"              # 未知类型
 
