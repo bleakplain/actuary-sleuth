@@ -114,7 +114,10 @@ class LanceDBMemoryStore(VectorStoreBase):
             mid = results["id"][i].as_py()
             meta_raw = results["metadata"][i].as_py()
             meta = json.loads(meta_raw) if isinstance(meta_raw, str) else (meta_raw or {})
-            score = results["_distance"][i].as_py() if "_distance" in results.column_names else None
+            # LanceDB uses L2 distance by default, convert to similarity score
+            # L2 distance: larger = less similar, so we invert: similarity = 1 / (1 + distance)
+            distance = results["_distance"][i].as_py() if "_distance" in results.column_names else 0
+            score = 1.0 / (1.0 + distance) if distance is not None else 1.0
             out.append(OutputData(id=mid, score=score, payload=meta))
         return out
 

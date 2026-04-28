@@ -149,6 +149,9 @@ Worktree 创建时自动拷贝 settings.json 和 .env，各 worktree 配置独�
 18. Code compactness: minimize unnecessary blank lines in code; keep related statements together for readability
 19. Document design decisions: in docstrings, explain "why" not just "what" — especially for non-obvious choices like separate registries, domain-specific parsers, or extension points
 20. Test data strategy: use fixtures for unit tests (fast, isolated); use real files from `/mnt/d/work/actuary-assets/products/` and `<data_root>/kb/references/` for integration tests
+21. **Module naming**: `common.py` should be split into `constants.py` (shared constants) and `utils.py` (utility functions) — avoid mixing different concern types in one file
+22. **Function naming scope**: when function is in a module with clear context (e.g., `activate_config` in `eval_configs.py`), don't repeat module context in function name — avoid `activate_eval_config`, prefer `activate_config`
+23. **Collection naming convention**: `get_*` for single item, `list_*` for multiple items — e.g., `get_snapshot()` returns one, `list_snapshots()` returns list
 
 ## Development Workflow (SDD)
 
