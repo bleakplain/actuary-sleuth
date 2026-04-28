@@ -15,6 +15,8 @@ arguments:
 > **深入分析代码库，理解系统架构、数据流、关键模块，识别潜在问题，生成包含代码示例和具体位置的研究报告。**
 >
 > **支持两种模式：SDD 模式（基于 spec.md 定向研究）和兼容模式（原有深度分析）。**
+>
+> **所有工作在主仓库进行，specs 产物输出到 `.claude/specs/<feature-name>/`。**
 
 ## 命令格式
 
@@ -33,12 +35,12 @@ arguments:
 
 ## 模式检测
 
-从当前 git branch 名提取 feature-name（如 `001-kb-search`），检查 `.claude/specs/<feature-name>/spec.md` 是否存在。
+从 `.claude/specs/` 目录检测 feature-name，检查对应的 `spec.md` 是否存在。
 
 | 模式 | 触发条件 | 行为 |
 |------|---------|------|
 | **SDD 模式** | `.claude/specs/<feature-name>/spec.md` 存在 | 基于 spec.md 定向研究：分析现有代码如何支持需求实现、技术选型调研、依赖分析 |
-| **兼容模式** | 无 spec.md | 询问 feature-name → 基于 origin/master 创建 worktree → 保持原有行为：深度代码分析、问题识别 |
+| **兼容模式** | 无 spec.md | 询问 feature-name → 在主仓库保持原有行为：深度代码分析、问题识别 |
 
 ---
 
@@ -46,9 +48,10 @@ arguments:
 
 ### 第一步：读取 spec.md
 
-1. 读取 `.claude/specs/<feature-name>/spec.md`
-2. 提取所有 User Stories、Functional Requirements、Key Entities
-3. 识别需要研究的技术问题
+1. 扫描 `.claude/specs/` 目录，找到最新的 feature-name
+2. 读取 `.claude/specs/<feature-name>/spec.md`
+3. 提取所有 User Stories、Functional Requirements、Key Entities
+4. 识别需要研究的技术问题
 
 ### 第二步：现有代码分析
 
@@ -352,6 +355,7 @@ class NewModel:
 5. **客观分析**: 区分问题和风格偏好
 6. **可操作建议**: 提出具体可执行的改进建议
 7. **产物位置**: 所有输出写入 `.claude/specs/<feature-name>/research.md`，不写项目根目录
+8. **主仓库工作**: 所有分析在主仓库进行，不创建 worktree
 
 ---
 

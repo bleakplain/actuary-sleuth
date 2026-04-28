@@ -40,46 +40,39 @@ arguments:
 
 ---
 
-## 第零步：Specs 文档提交状态检查
+## 第一步：提交并推送 Specs 文档
 
-**在任何执行前，必须确保当前 feature 的 specs 文档已提交并推送。**
+**在执行任何代码变更前，必须确保当前 feature 的 specs 文档已提交并推送。**
 
 ### 检测步骤
 
-1. **提取 feature-name** — 从当前 git branch 或 `.claude/specs/` 目录名提取（如 `014-multi-turn-session`）
+1. **提取 feature-name** — 从 `.claude/specs/` 目录或 `plan.md` 路径中提取
 2. **检查 specs 目录** — 确认 `.claude/specs/<feature-name>/` 存在且包含必要文件：
-   - `spec.md` ✅
+   - `spec.md` ✅（SDD 模式）
    - `research.md` ✅
    - `plan.md` ✅
 3. **检查 git 追踪状态**：
    ```bash
    git status .claude/specs/<feature-name>/
    ```
-   - 如果显示 "Untracked files" → **停止并提示用户提交**
-   - 如果显示 "Changes not staged for commit" → **停止并提示用户提交**
 4. **检查远程推送状态**：
    ```bash
-   git log origin/$(git branch --show-current)..HEAD --oneline -- .claude/specs/<feature-name>/
+   git log origin/master..HEAD --oneline -- .claude/specs/<feature-name>/
    ```
-   - 如果有输出 → **停止并提示用户推送**
 
-### 提示模板
+### 自动提交和推送
 
-如果检测失败，输出：
+如果 specs 文档未提交或未推送，**自动执行**：
 
-```
-⚠️ Specs 文档未提交/未推送
+```bash
+# 添加 specs 目录
+git add .claude/specs/<feature-name>/
 
-当前 feature: <feature-name>
-检测到的文件: spec.md, research.md, plan.md
+# 提交
+git commit -m "docs: add <feature-name> specs (spec, research, plan)"
 
-请先执行以下步骤：
-
-1. git add .claude/specs/<feature-name>/
-2. git commit -m "docs: add <feature-name> specs (spec, research, plan)"
-3. git push origin $(git branch --show-current)
-
-完成后重新执行 /exec-plan
+# 推送到 master（specs 文档在主仓库管理）
+git push origin master
 ```
 
 ### 为什么必须提交
@@ -90,61 +83,62 @@ arguments:
 
 ---
 
-## 第一步：Worktree 检查与创建
+## 第二步：创建并切换 Worktree
 
-**执行任何代码变更前，必须确保在 worktree 中工作。**
-
-#### 前置检查（worktree 就绪后、执行任务前）
-
-1. **检查并拷贝 .env**: 确认 `scripts/.env` 存在，若不存在则从主仓库拷贝：
-   ```bash
-   cp <主仓库>/scripts/.env scripts/.env
-   ```
-2. **检查数据路径可达**: 读取 .env 中 `DATA_PATHS_SQLITE_DB` 等路径，验证关键目录（db、kb）的父目录存在，如果路径不存在则提示用户检查配置，不继续执行任务
+**执行任何代码变更前，必须创建 worktree 隔离开发环境。**
 
 ### 检测是否已在 worktree 中
 
 1. 运行 `git worktree list` 检查当前工作目录
-2. 如果当前目录已指向一个 worktree 分支（非 master）→ 跳过创建，直接执行
-3. 如果当前在 master 上 → 必须创建 worktree
+2. 检查当前目录是否在 `.claude/worktrees/` 路径下
+3. **如果当前已在 worktree 中**：
+   - 提取当前 worktree 的 feature-name
+   - 与目标 feature-name 比较
+   - **相同** → 跳过创建，直接执行（继续当前 worktree）
+   - **不同** → **报错退出**：提示用户先退出当前 worktree（使用 `exit` 或 `/exit-worktree`），再执行新的 `/exec-plan`
+   - **禁止在 worktree 中创建嵌套 worktree**
+
+### 为什么禁止嵌套 Worktree
+
+- 嵌套 worktree 导致路径混乱（`worktrees/022/worktrees/023`）
+- `.claude/commands/` 和 `.claude/specs/` 应该只存在于主仓库
+- Worktree 应该只包含：代码、配置文件（settings.json、.env)
 
 ### 创建 Worktree
 
-1. **提取 feature-name** — 从 `.claude/specs/` 目录或 `plan.md` 路径中提取（如 `004-eval-dataset-curation`）
-2. **扫描编号** — 检查本地+远程分支中已有的 `NNN-*` 分支，取 max+1
-3. **检查分支是否已存在** — 如果 `<feature-name>` 分支已存在，直接切换到对应 worktree
-4. **创建 worktree** — 基于 `origin/master` 创建：
+1. **提取 feature-name** — 从 `.claude/specs/` 目录或 `plan.md` 路径中提取（如 `024-doc-parser-review`）
+2. **检查分支是否已存在** — 如果 `<feature-name>` 分支已存在，直接切换到对应 worktree
+3. **创建 worktree** — 基于 `origin/master` 创建：
    ```bash
    git worktree add .claude/worktrees/<feature-name> -b <feature-name> origin/master
    ```
-5. **拷贝配置文件** — 从当前工作目录拷贝到新 worktree：
+4. **拷贝配置文件** — 从主仓库拷贝到新 worktree：
    ```bash
    cp scripts/config/settings.json .claude/worktrees/<feature-name>/scripts/config/settings.json
    cp scripts/.env .claude/worktrees/<feature-name>/scripts/.env
    ```
-6. **切换工作目录到 worktree**：
+5. **切换工作目录到 worktree**：
    ```
    后续所有操作在 .claude/worktrees/<feature-name>/ 下执行
    ```
 
-### 如果 plan.md 在 master 上且无 .claude/specs 目录
+### 前置检查（worktree 就绪后、执行任务前）
 
-说明是兼容模式且方案文件在项目根目录或其他位置，此时：
-1. 仍需创建 worktree 隔离开发环境
-2. 将方案文件复制到 worktree 对应位置
+1. **检查并拷贝 .env**: 确认 `scripts/.env` 存在，若不存在则从主仓库拷贝
+2. **检查数据路径可达**: 读取 .env 中 `DATA_PATHS_SQLITE_DB` 等路径，验证关键目录（db、kb）的父目录存在，如果路径不存在则提示用户检查配置，不继续执行任务
 
 ---
 
 ## SDD 模式执行步骤
 
-### 第一步：读取并解析 plan.md
+### 第三步：读取并解析 plan.md
 
 1. 读取 `.claude/specs/<feature-name>/plan.md`
 2. 提取所有 Implementation Phases
 3. 识别每个 Phase 对应的 User Story
 4. 提取任务间的依赖关系
 
-### 第二步：生成 tasks.md
+### 第四步：生成 tasks.md
 
 输出到 `.claude/specs/<feature-name>/tasks.md`：
 
@@ -191,7 +185,7 @@ arguments:
 - Core implementation before tests
 ```
 
-### 第三步：创建 todolist
+### 第五步：创建 todolist
 
 使用 TaskCreate 工具将 tasks.md 拆分为任务列表：
 
@@ -200,7 +194,7 @@ arguments:
 3. **设置依赖关系** — 被阻塞的任务设置 blockedBy
 4. **任务粒度** — 每个任务应是一个可独立验证的原子变更
 
-### 第四步：逐任务执行
+### 第六步：逐任务执行
 
 对于每个任务：
 
@@ -211,13 +205,13 @@ arguments:
 5. **运行相关测试** — `pytest scripts/tests/`
 6. **标记为 completed**
 
-### 第五步：更新 tasks.md
+### 第七步：更新 tasks.md
 
 每完成一个任务：
 - 在 tasks.md 对应任务前添加 ✅ 标记
 - Phase 完成后添加阶段完成标记
 
-### 第六步：Checkpoint 验证
+### 第八步：Checkpoint 验证
 
 每个 User Story 的 Phase 完成后：
 
@@ -225,7 +219,7 @@ arguments:
 2. **验收标准检查** — 对照 spec.md 的 Acceptance Scenarios
 3. **类型检查** — `mypy scripts/lib/`
 
-### 第七步：代码审查（强制）
+### 第九步：代码审查（强制）
 
 所有任务完成后，**必须**执行 `/simplify` 命令：
 
@@ -233,7 +227,7 @@ arguments:
 2. **根据反馈修复所有问题**，不跳过任何建议
 3. 修复后重新运行类型检查和测试
 
-### 第八步：完成验证
+### 第十步：完成验证
 
 1. **运行完整类型检查** — `mypy scripts/lib/`
 2. **运行完整测试套件** — `pytest scripts/tests/`
@@ -244,13 +238,13 @@ arguments:
 
 ## 兼容模式执行步骤
 
-### 第一步：读取并解析方案文件
+### 第三步：读取并解析方案文件
 
 1. 读取方案文件（默认 `.claude/specs/<feature-name>/plan.md`）
 2. 解析所有章节和任务条目
 3. 识别任务间的依赖关系和执行顺序
 
-### 第二步：创建 todolist
+### 第四步：创建 todolist
 
 使用 TaskCreate 工具拆分任务：
 
@@ -259,7 +253,7 @@ arguments:
 3. **设置依赖关系**
 4. **任务粒度** — 可独立验证的原子变更
 
-### 第三步：逐任务执行
+### 第五步：逐任务执行
 
 对于每个任务：
 
@@ -270,17 +264,17 @@ arguments:
 5. **运行相关测试** — `pytest scripts/tests/`
 6. **标记为 completed**
 
-### 第四步：更新方案文档
+### 第六步：更新方案文档
 
 每完成一个任务或阶段：
 - 在方案文档对应任务标题后添加 ✅ 标记
 - 在阶段标题后添加完成标记
 
-### 第五步：代码审查（强制）
+### 第七步：代码审查（强制）
 
 所有任务完成后，**必须**执行 `/simplify` 命令。
 
-### 第六步：完成验证
+### 第八步：完成验证
 
 1. **运行完整类型检查** — `mypy scripts/lib/`
 2. **运行完整测试套件** — `pytest scripts/tests/`

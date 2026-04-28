@@ -15,7 +15,7 @@ arguments:
 
 ## 核心要求
 
-> **支持多文档审查（spec/plan/tasks）、批注处理、规则提炼。所有操作基于当前 git branch 的 feature-name 定位产物目录。**
+> **支持多文档审查（spec/plan/tasks）、批注处理、规则提炼。所有操作在主仓库进行，基于 `.claude/specs/<feature-name>/` 目录定位产物。**
 
 ## 命令格式
 
@@ -215,16 +215,23 @@ arguments:
 
 ## 文件定位
 
-所有操作基于当前 git branch 名提取 feature-name：
+所有操作基于 `.claude/specs/` 目录检测 feature-name：
 
 ```
-当前分支: 001-kb-search
-产物目录: .claude/specs/001-kb-search/
-  ├── spec.md
-  ├── research.md
-  ├── plan.md
-  └── tasks.md
+.claude/specs/
+├── 001-kb-search/
+│   ├── spec.md
+│   ├── research.md
+│   ├── plan.md
+│   └── tasks.md
+├── 002-feature-name/
+│   └── ...
+└── <最新 feature-name>/
+    └── ...
 ```
+
+- 如果存在多个 feature 目录，优先使用最新的（按名称排序或按修改时间）
+- 所有操作在主仓库进行，不创建 worktree
 
 ---
 

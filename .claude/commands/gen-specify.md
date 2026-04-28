@@ -1,5 +1,5 @@
 ---
-description: 需求描述生成 spec.md，自动创建 worktree 隔离开发环境
+description: 需求描述生成 spec.md，在主仓库创建 specs 目录
 arguments:
   - name: description
     description: 需求描述（自然语言）
@@ -8,7 +8,7 @@ arguments:
 
 # Gen Specify - 需求规格说明生成器
 
-将自然语言需求描述转化为结构化的 spec.md，并自动创建基于 origin/master 的 worktree 隔离开发环境。
+将自然语言需求描述转化为结构化的 spec.md，在主仓库创建 specs 目录。
 
 ## 核心要求
 
@@ -31,17 +31,13 @@ arguments:
 
 ## 执行步骤
 
-### 第一步：创建 Worktree
+### 第一步：扫描编号并创建 Specs 目录
 
 1. **扫描编号** — 检查本地+远程分支中已有的 `NNN-*` 分支，取 max+1
 2. **生成 feature-name** — 从需求描述中提取 3-4 个关键词，格式 `NNN-keyword-keyword`
-3. **创建 worktree** — 基于 `origin/master` 创建：
+3. **创建 specs 目录** — 在主仓库创建：
    ```bash
-   git worktree add .claude/worktrees/<feature-name> -b <feature-name> origin/master
-   ```
-4. **拷贝配置文件** — 从当前工作目录拷贝到新 worktree：
-   ```bash
-   cp scripts/.env .claude/worktrees/<feature-name>/scripts/.env
+   mkdir -p .claude/specs/<feature-name>
    ```
 
 ### 第二步：需求澄清
@@ -58,7 +54,7 @@ arguments:
 
 ### 第三步：生成 spec.md
 
-在 worktree 中生成 `.claude/specs/<feature-name>/spec.md`：
+在主仓库生成 `.claude/specs/<feature-name>/spec.md`：
 
 ```markdown
 # Feature Specification: [FEATURE NAME]
@@ -146,14 +142,12 @@ arguments:
 ✅ spec.md 已生成
 
 📁 产物位置: .claude/specs/<feature-name>/spec.md
-🌳 工作目录: .claude/worktrees/<feature-name>/
-🌿 分支: <feature-name> (基于 origin/master)
+🌿 分支名: <feature-name>（尚未创建）
 
 ⚠️ NEEDS CLARIFICATION: N 处未明确需求（见上方列表）
 
-→ 请切换到 worktree 目录继续开发：
-  cd .claude/worktrees/<feature-name>
-→ 然后执行 /gen-research 开始技术调研
+→ 继续执行 /gen-research 开始技术调研
+→ 或执行 /fix-plan review spec 查看文档
 ```
 
 ---
@@ -164,6 +158,7 @@ arguments:
 - **独立可测试** — 每个 User Story 必须能独立开发和测试
 - **不明确标注** — 用 `[NEEDS CLARIFICATION]` 标注需要澄清的需求，不猜测
 - **用户确认** — 生成后让用户确认或修正，不强制接受
+- **主仓库工作** — 所有 specs 产物在主仓库创建，不创建 worktree
 
 ---
 

@@ -19,6 +19,8 @@ arguments:
 > **兼容模式：research.md → plan.md（问题修复方案，保持原有行为）。**
 >
 > **所有输出写入 `.claude/specs/<feature-name>/plan.md`，不写项目根目录。**
+>
+> **所有工作在主仓库进行，不创建 worktree。**
 
 ## 命令格式
 
@@ -38,7 +40,7 @@ arguments:
 
 ## 模式检测
 
-从当前 git branch 名提取 feature-name，检查 `.claude/specs/<feature-name>/spec.md` 是否存在。
+从 `.claude/specs/` 目录检测 feature-name，检查对应的 `spec.md` 是否存在。
 
 | 模式 | 触发条件 | 输入 |
 |------|---------|------|
@@ -51,9 +53,9 @@ arguments:
 
 ### 第一步：读取输入
 
-1. 读取 `.claude/specs/<feature-name>/spec.md` — User Stories, Requirements, Success Criteria
-2. 读取 `.claude/specs/<feature-name>/research.md` — 技术调研结果
-3. 从 git branch 名提取 feature-name
+1. 扫描 `.claude/specs/` 目录，找到最新的 feature-name
+2. 读取 `.claude/specs/<feature-name>/spec.md` — User Stories, Requirements, Success Criteria
+3. 读取 `.claude/specs/<feature-name>/research.md` — 技术调研结果
 
 ### 第二步：Constitution Check
 
@@ -281,6 +283,7 @@ arguments:
 3. **权衡分析**: 每个问题至少提供 3 种可行方案
 4. **遵循规范**: 遵循 CLAUDE.md 编码规范
 5. **产物位置**: 输出到 `.claude/specs/<feature-name>/plan.md`
+6. **主仓库工作**: 所有分析在主仓库进行，不创建 worktree
 
 ---
 
