@@ -70,11 +70,9 @@ async def lifespan(app: FastAPI):
     try:
         _ensure_knowledge_base()
 
-        from lib.rag_engine.kb_manager import KBManager
-        kb_mgr = KBManager()
-        from lib.rag_engine import create_qa_engine
-        rag_engine = create_qa_engine(kb_mgr.load_kb())
-        _rag_initialized = rag_engine.initialize()
+        from lib.rag_engine import init_engine
+        rag_engine = init_engine()
+        _rag_initialized = rag_engine is not None
         if _rag_initialized:
             logger.info("RAG 引擎初始化完成")
             from api.dependencies import init_ask_graph

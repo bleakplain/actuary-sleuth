@@ -2,16 +2,11 @@ from typing import Optional, Dict, List
 from pydantic import BaseModel, Field
 
 
-class ProductCheckRequest(BaseModel):
-    product_name: str = Field(..., min_length=1, description="产品名称")
-    category: str = Field(..., min_length=1, description="险种类型")
-    params: Dict[str, object] = Field(..., description="产品参数键值对")
-
-
 class DocumentCheckRequest(BaseModel):
     document_content: str = Field(..., min_length=1, description="条款文档内容")
     product_name: Optional[str] = Field(None, description="产品名称（可选）")
     parse_id: Optional[str] = Field(None, description="解析结果ID，用于遗漏检测")
+    category: Optional[str] = Field(None, description="险种类型（可选，LLM自动识别或用户选择）")
 
 
 class ComplianceItem(BaseModel):
@@ -70,3 +65,15 @@ class ParsedDocumentResponse(BaseModel):
 class RichTextParseRequest(BaseModel):
     html_content: str = Field(..., min_length=1, description="富文本 HTML 内容")
     product_name: Optional[str] = Field(None, description="产品名称（可选）")
+
+
+class CategoryIdentifyRequest(BaseModel):
+    document_content: str = Field(..., min_length=1, description="文档内容")
+    product_name: Optional[str] = Field(None, description="产品名称")
+
+
+class CategoryIdentifyResponse(BaseModel):
+    category: Optional[str] = None
+    confidence: float = 0.0
+    method: str = "unknown"
+    suggested_categories: List[str] = []
