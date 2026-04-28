@@ -168,6 +168,10 @@ class RAGEngine:
             self._active_reranker_type = "bge"
             model_path = rc.model if rc.model else None
             if rc.quantized:
+                if not model_path:
+                    raise ValueError("model path is required for quantized BGE reranker")
+                if not Path(model_path).exists():
+                    raise ValueError(f"BGE model path does not exist: {model_path}")
                 return QuantizedBgeReranker(
                     model_path=model_path,
                     batch_size=rc.batch_size,
