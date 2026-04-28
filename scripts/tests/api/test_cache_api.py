@@ -24,7 +24,7 @@ class TestCacheEndpoints:
             assert "memory_size" in data
             assert "evictions" in data
             assert "l2_size" in data
-            assert "by_namespace" in data
+            assert "by_scope" in data
 
     def test_list_cache_entries(self, client):
         """测试获取缓存条目列表。"""

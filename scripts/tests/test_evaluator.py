@@ -20,9 +20,14 @@ class TestIsRelevant:
         # 3 keywords, 60% threshold = 2, all 3 present -> relevant
         assert _is_relevant(result, [], ["等待期", "既往症", "健康人群"]) is True
 
-    def test_keyword_match_below_threshold(self):
+    def test_keyword_match_below_threshold(self, monkeypatch):
         result = {"content": "等待期", "source_file": "", "law_name": ""}
-        # 3 keywords, 60% threshold = 2, only 1 present -> not relevant
+        # 3 keywords, 60% threshold = 2, only 1 present
+        # keyword match fails but embedding fallback may pass, so mock it low
+        monkeypatch.setattr(
+            'lib.rag_engine.evaluator._compute_embedding_similarity',
+            lambda a, b: 0.1,
+        )
         assert _is_relevant(result, [], ["等待期", "既往症", "健康人群"]) is False
 
     def test_keyword_match_single_keyword(self):

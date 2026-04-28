@@ -94,9 +94,47 @@ def mock_rag_engine(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
 
 @pytest.fixture()
+def mock_ask_graph(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Mock LangGraph 工作流图，返回固定结果。"""
+    graph = MagicMock()
+    graph.invoke.return_value = {
+        "answer": "根据法规，健康保险等待期不得超过90天。",
+        "sources": [
+            {
+                "law_name": "健康保险管理办法",
+                "article_number": "第一条",
+                "category": "健康保险",
+                "content": "健康保险产品的等待期不得超过90天。",
+                "source_file": "health_insurance.md",
+                "hierarchy_path": "",
+                "score": 0.95,
+            }
+        ],
+        "citations": [
+            {
+                "source_idx": 1,
+                "law_name": "健康保险管理办法",
+                "article_number": "第一条",
+                "content": "健康保险产品的等待期不得超过90天。",
+            }
+        ],
+        "unverified_claims": [],
+        "content_mismatches": [],
+        "faithfulness_score": 0.95,
+        "next_action": "respond",
+        "session_context": {},
+        "loop_detected": None,
+        "loop_hint": None,
+    }
+    monkeypatch.setattr("api.dependencies.get_ask_graph", lambda: graph)
+    return graph
+
+
+@pytest.fixture()
 def app_client(
     _patch_database: None,
     mock_rag_engine: MagicMock,
+    mock_ask_graph: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> Generator[TestClient, None, None]:
     """创建测试用 FastAPI TestClient，跳过 lifespan。"""
