@@ -230,14 +230,12 @@ class KBManager:
 
     def load_kb(self, version_id: Optional[str] = None) -> "RAGConfig":
         """创建指定版本的 RAGConfig 实例。"""
-        from .config import RAGConfig
+        from .config import get_config
         vid = version_id or self.active_version
         if not vid:
             raise ValueError("无可用知识库版本，请先创建版本并构建索引")
         paths = self.get_version_paths(vid)
-        return RAGConfig(
-            vector_db_path=paths["vector_db_path"],
-        )
+        return get_config(vector_db_path=paths["vector_db_path"])
 
     def build_kb(
         self,

@@ -17,13 +17,13 @@ try:
 except ImportError:
     Settings = None  # type: ignore[assignment]
 
-from .config import RAGConfig
+from .config import RAGConfig, get_config
 from .index_manager import VectorIndexManager
 from .llamaindex_adapter import ClientLLMAdapter
 from .retrieval import hybrid_search
 from .bm25_index import BM25Index
 from .reranker_base import BaseReranker
-from .llm_reranker import LLMReranker, RerankConfig
+from .llm_reranker import LLMReranker, LLMRerankConfig
 from .bge_reranker import BgeReranker, QuantizedBgeReranker
 from .query_preprocessor import QueryPreprocessor
 from .exceptions import EngineInitializationError, RetrievalError
@@ -151,13 +151,13 @@ class RAGEngine:
     def _create_reranker(self) -> Optional[BaseReranker]:
         rc = self.config.rerank
 
-        if not rc.enable_rerank or rc.reranker_type == "none":
+        if not rc.enable or rc.reranker_type == "none":
             self._active_reranker_type = "none"
             return None
 
-        rerank_config = RerankConfig(
-            enabled=True,
-            top_k=rc.rerank_top_k,
+        rerank_config = LLMRerankConfig(
+            enable=True,
+            top_k=rc.top_k,
         )
 
         if rc.reranker_type == "llm":
@@ -166,17 +166,17 @@ class RAGEngine:
 
         if rc.reranker_type == "bge":
             self._active_reranker_type = "bge"
-            model_path = rc.reranker_model if rc.reranker_model else None
-            if rc.reranker_quantized:
+            model_path = rc.model if rc.model else None
+            if rc.quantized:
                 return QuantizedBgeReranker(
                     model_path=model_path,
-                    batch_size=rc.reranker_batch_size,
-                    max_length=rc.reranker_max_length,
+                    batch_size=rc.batch_size,
+                    max_length=rc.max_length,
                 )
             return BgeReranker(
                 model_name=model_path or "BAAI/bge-reranker-large",
-                max_length=rc.reranker_max_length,
-                batch_size=rc.reranker_batch_size,
+                max_length=rc.max_length,
+                batch_size=rc.batch_size,
             )
 
         self._active_reranker_type = "none"
@@ -434,16 +434,16 @@ class RAGEngine:
         if self._reranker:
             results = self._reranker.rerank(query_text, results, top_k=top_k)
 
-        if results and rk.rerank_min_score > 0:
+        if results and rk.min_score > 0:
             filtered = [
                 r for r in results
                 if not r.get('reranked', False)
-                or r.get('rerank_score', 0) >= rk.rerank_min_score
+                or r.get('rerank_score', 0) >= rk.min_score
             ]
             if len(filtered) < len(results):
                 logger.debug(
                     f"Reranker 阈值过滤: {len(results)} → {len(filtered)} "
-                    f"(阈值={rk.rerank_min_score})"
+                    f"(阈值={rk.min_score})"
                 )
             results = filtered
 
@@ -523,15 +523,4 @@ class RAGEngine:
 # 工厂函数：创建不同场景的引擎
 
 def create_qa_engine(config: Optional[RAGConfig] = None) -> RAGEngine:
-    """
-    创建问答引擎
-
-    使用快速响应模型 (glm-4-flash)，适合面向终端用户的问答场景。
-
-    Args:
-        config: RAG 配置，可选
-
-    Returns:
-        RAGEngine: 配置为问答模式的引擎实例
-    """
-    return RAGEngine(config or RAGConfig(), LLMClientFactory.create_qa_llm())
+    return RAGEngine(config or get_config(), LLMClientFactory.create_qa_llm())

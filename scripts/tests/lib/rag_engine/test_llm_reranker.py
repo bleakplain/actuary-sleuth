@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock
 import pytest
 
-from lib.rag_engine.llm_reranker import LLMReranker, RerankConfig
+from lib.rag_engine.llm_reranker import LLMReranker, LLMRerankConfig
 
 
 @pytest.fixture
@@ -13,7 +13,7 @@ def mock_llm():
 
 @pytest.fixture
 def reranker(mock_llm):
-    config = RerankConfig(enabled=True, top_k=3)
+    config = LLMRerankConfig(enable=True, top_k=3)
     return LLMReranker(mock_llm, config)
 
 
@@ -50,7 +50,7 @@ def test_rerank_respects_top_k(reranker, mock_llm):
 
 
 def test_rerank_disabled(mock_llm):
-    config = RerankConfig(enabled=False)
+    config = LLMRerankConfig(enable=False)
     reranker = LLMReranker(mock_llm, config)
     candidates = _make_candidates(3)
 

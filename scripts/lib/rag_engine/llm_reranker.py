@@ -30,8 +30,8 @@ _BATCH_RERANK_PROMPT = """请根据用户问题，对以下法规条款按相关
 
 
 @dataclass(frozen=True)
-class RerankConfig:
-    enabled: bool = True
+class LLMRerankConfig:
+    enable: bool = True
     top_k: int = 5
     max_candidates: int = 20
     max_content_chars: int = 1500
@@ -39,9 +39,9 @@ class RerankConfig:
 
 class LLMReranker(BaseReranker):
 
-    def __init__(self, llm_client, config: Optional[RerankConfig] = None):
+    def __init__(self, llm_client, config: Optional[LLMRerankConfig] = None):
         self._llm = llm_client
-        self._config = config or RerankConfig()
+        self._config = config or LLMRerankConfig()
 
     def rerank(
         self,
@@ -49,7 +49,7 @@ class LLMReranker(BaseReranker):
         candidates: List[Dict[str, Any]],
         top_k: Optional[int] = None
     ) -> List[Dict[str, Any]]:
-        if not self._config.enabled or not candidates:
+        if not self._config.enable or not candidates:
             return candidates[:top_k] if top_k else candidates
 
         top_k = top_k or self._config.top_k

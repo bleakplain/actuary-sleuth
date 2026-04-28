@@ -9,9 +9,8 @@ from lib.config import get_rerank_config
 
 @dataclass(frozen=True)
 class ChunkConfig:
-    """分块配置"""
     max_chunk_chars: int = 3000
-    chunk_overlap_chars: int = 150  # 5% 重叠
+    chunk_overlap_chars: int = 150
     min_chunk_chars: int = 20
     split_by_sentence: bool = True
 
@@ -41,7 +40,6 @@ class ChunkConfig:
 
 @dataclass(frozen=True)
 class RetrievalConfig:
-    """检索配置（召回 + 融合 + 结果截断）"""
     vector_top_k: int = 20
     keyword_top_k: int = 20
     rrf_k: int = 60
@@ -63,45 +61,43 @@ class RetrievalConfig:
 
 @dataclass(frozen=True)
 class RerankConfig:
-    """重排序配置"""
-    enable_rerank: bool = True
-    reranker_type: str = "llm"
-    rerank_top_k: int = 5
-    rerank_min_score: float = 0.0
-    reranker_model: str = ""
-    reranker_batch_size: int = 32
-    reranker_max_length: int = 512
-    reranker_quantized: bool = False
+    enable: bool = field(default_factory=lambda: get_rerank_config().enable)
+    reranker_type: str = field(default_factory=lambda: get_rerank_config().reranker_type)
+    top_k: int = field(default_factory=lambda: get_rerank_config().top_k)
+    min_score: float = field(default_factory=lambda: get_rerank_config().min_score)
+    model: str = field(default_factory=lambda: get_rerank_config().model)
+    batch_size: int = field(default_factory=lambda: get_rerank_config().batch_size)
+    max_length: int = field(default_factory=lambda: get_rerank_config().max_length)
+    quantized: bool = field(default_factory=lambda: get_rerank_config().quantized)
 
     _VALID_RERANKER_TYPES = {"llm", "bge", "none"}
 
     def __post_init__(self):
-        if self.rerank_top_k < 1:
-            raise ValueError(f"rerank_top_k must be >= 1, got {self.rerank_top_k}")
+        if self.top_k < 1:
+            raise ValueError(f"top_k must be >= 1, got {self.top_k}")
         if self.reranker_type not in self._VALID_RERANKER_TYPES:
             raise ValueError(
                 f"reranker_type must be one of {self._VALID_RERANKER_TYPES}, "
                 f"got {self.reranker_type}"
             )
-        if not 0.0 <= self.rerank_min_score <= 1.0:
+        if not 0.0 <= self.min_score <= 1.0:
             raise ValueError(
-                f"rerank_min_score must be between 0.0 and 1.0, "
-                f"got {self.rerank_min_score}"
+                f"min_score must be between 0.0 and 1.0, "
+                f"got {self.min_score}"
             )
-        if self.reranker_batch_size < 1:
-            raise ValueError(f"reranker_batch_size must be >= 1, got {self.reranker_batch_size}")
-        if self.reranker_max_length < 64:
-            raise ValueError(f"reranker_max_length must be >= 64, got {self.reranker_max_length}")
-        if self.reranker_quantized and not self.reranker_model:
+        if self.batch_size < 1:
+            raise ValueError(f"batch_size must be >= 1, got {self.batch_size}")
+        if self.max_length < 64:
+            raise ValueError(f"max_length must be >= 64, got {self.max_length}")
+        if self.quantized and not self.model:
             raise ValueError(
-                "reranker_model is required when reranker_quantized=True "
+                "model is required when quantized=True "
                 "(QuantizedBgeReranker requires a local model path with model_quantized.onnx)"
             )
 
 
 @dataclass(frozen=True)
 class GenerationConfig:
-    """生成配置"""
     max_context_chars: int = 12000
 
     def __post_init__(self):
@@ -121,7 +117,6 @@ def config_to_dict(retrieval: RetrievalConfig, rerank: RerankConfig,
 
 @dataclass(frozen=True)
 class RAGConfig:
-    """法规 RAG 引擎配置"""
 
     regulations_dir: str = ""
     vector_db_path: Optional[str] = None
@@ -164,18 +159,4 @@ class RAGConfig:
 
 
 def get_config(**kwargs) -> RAGConfig:
-    """获取配置实例，从环境变量读取默认值，kwargs 覆盖。"""
-    rerank_cfg = get_rerank_config()
-    default_rerank = RerankConfig(
-        enable_rerank=rerank_cfg.enable,
-        reranker_type=rerank_cfg.reranker_type,
-        rerank_top_k=rerank_cfg.top_k,
-        rerank_min_score=rerank_cfg.min_score,
-        reranker_model=rerank_cfg.model,
-        reranker_batch_size=rerank_cfg.batch_size,
-        reranker_max_length=rerank_cfg.max_length,
-        reranker_quantized=rerank_cfg.quantized,
-    )
-    if 'rerank' not in kwargs:
-        kwargs['rerank'] = default_rerank
     return RAGConfig.create(**kwargs)
