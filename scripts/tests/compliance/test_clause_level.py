@@ -1,6 +1,61 @@
-"""条款级合规检查测试"""
+"""合规检查 JSON 解析测试"""
 import pytest
-from api.routers.compliance import _detect_missing_clauses, _run_compliance_check
+from unittest.mock import MagicMock, patch
+from lib.compliance.checker import run_compliance_check
+
+
+def test_run_compliance_check_normal_json():
+    """测试正常 JSON 解析"""
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = '{"summary": {"compliant": 2, "non_compliant": 1, "attention": 0}, "items": []}'
+    with patch('lib.compliance.checker.get_qa_llm', return_value=mock_llm):
+        result = run_compliance_check("test prompt")
+        assert result["summary"]["compliant"] == 2
+
+
+def test_run_compliance_check_with_thinking_tag():
+    """测试 thinking tag 剥离"""
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = '<tool_call>分析...厄 {"summary": {"compliant": 1, "non_compliant": 0, "attention": 0}, "items": []}'
+    with patch('lib.compliance.checker.get_qa_llm', return_value=mock_llm):
+        result = run_compliance_check("test prompt")
+        assert result["summary"]["compliant"] == 1
+
+
+def test_run_compliance_check_with_code_fence():
+    """测试 markdown code fence 剥离"""
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = '```json\n{"summary": {"compliant": 1, "non_compliant": 0, "attention": 0}, "items": []}\n```'
+    with patch('lib.compliance.checker.get_qa_llm', return_value=mock_llm):
+        result = run_compliance_check("test prompt")
+        assert result["summary"]["compliant"] == 1
+
+
+def test_run_compliance_check_truncated_json():
+    """测试截断 JSON 修复"""
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = '{"summary": {"compliant": 1}, "items": [{"param": "test"'
+    with patch('lib.compliance.checker.get_qa_llm', return_value=mock_llm):
+        result = run_compliance_check("test prompt")
+        assert "summary" in result
+
+
+def test_run_compliance_check_no_json():
+    """测试非 JSON 响应"""
+    mock_llm = MagicMock()
+    mock_llm.chat.return_value = '这是一个保险条款文档，符合法规。'
+    with patch('lib.compliance.checker.get_qa_llm', return_value=mock_llm):
+        result = run_compliance_check("test prompt")
+        assert "summary" in result
+
+
+def test_run_compliance_check_llm_error():
+    """测试 LLM 调用失败"""
+    mock_llm = MagicMock()
+    mock_llm.chat.side_effect = RuntimeError("LLM unavailable")
+    with patch('lib.compliance.checker.get_qa_llm', return_value=mock_llm):
+        result = run_compliance_check("test prompt")
+        assert "error" in result
 
 
 def test_clause_number_in_output():
@@ -14,49 +69,3 @@ def test_clause_number_in_output():
     }
     for item in result["items"]:
         assert item["clause_number"], f"item {item['param']} missing clause_number"
-
-
-def test_detect_missing_clauses():
-    """测试遗漏检测"""
-    parsed_doc = {
-        "clauses": [
-            {"number": "1", "title": "保险责任"},
-            {"number": "2", "title": "责任免除"},
-            {"number": "3", "title": "保费"},
-        ]
-    }
-    check_result = {
-        "items": [
-            {"clause_number": "1", "param": "等待期", "status": "compliant"},
-            {"clause_number": "2", "param": "免责条款", "status": "compliant"},
-        ]
-    }
-    missing = _detect_missing_clauses(parsed_doc, check_result)
-    assert len(missing) == 1
-    assert missing[0]["clause_number"] == "3"
-    assert missing[0]["status"] == "attention"
-
-
-def test_detect_missing_clauses_empty():
-    """测试无遗漏情况"""
-    parsed_doc = {
-        "clauses": [
-            {"number": "1", "title": "保险责任"},
-        ]
-    }
-    check_result = {
-        "items": [
-            {"clause_number": "1", "param": "等待期", "status": "compliant"},
-        ]
-    }
-    missing = _detect_missing_clauses(parsed_doc, check_result)
-    assert len(missing) == 0
-
-
-def test_run_compliance_check_no_results():
-    """测试法规无结果处理"""
-    result = _run_compliance_check(None, "", [])
-    assert result["summary"]["attention"] == 1
-    assert len(result["items"]) == 1
-    assert result["items"][0]["param"] == "法规检索"
-    assert result["warning"] == "法规检索无结果，无法进行合规检查"

@@ -35,8 +35,8 @@ class ParsedClause(BaseModel):
     text: str = ""
 
 
-class ParsedPremiumTable(BaseModel):
-    table_type: str = "unknown"  # premium, appendix, coverage, drug_list, gene_test, hospital, other
+class ParsedDataTable(BaseModel):
+    table_type: str = "unknown"  # premium, coverage, drug_list, gene_test, complication, hospital, appendix, other
     remark: str = ""
     raw_text: str = ""
     data: List[List[str]] = []
@@ -52,7 +52,7 @@ class ParsedDocumentResponse(BaseModel):
     file_name: str = ""
     file_type: str = ""
     clauses: List[ParsedClause] = []
-    premium_tables: List[ParsedPremiumTable] = []
+    data_tables: List[ParsedDataTable] = []
     notices: List[ParsedSection] = []
     health_disclosures: List[ParsedSection] = []
     exclusions: List[ParsedSection] = []

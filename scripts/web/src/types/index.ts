@@ -350,7 +350,7 @@ export interface ParsedDocument {
   file_name: string;
   file_type: string;
   clauses: ParsedClause[];
-  premium_tables: ParsedPremiumTable[];
+  data_tables: ParsedDataTable[];
   notices: ParsedSection[];
   health_disclosures: ParsedSection[];
   exclusions: ParsedSection[];

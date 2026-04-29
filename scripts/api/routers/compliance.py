@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from api.database import get_connection, list_compliance_reports, get_compliance_report, save_compliance_report
 from api.schemas.compliance import (
     DocumentCheckRequest, ComplianceReportOut,
-    ParsedDocumentResponse, ParsedClause, ParsedPremiumTable, ParsedSection,
+    ParsedDocumentResponse, ParsedClause, ParsedDataTable, ParsedSection,
     RichTextParseRequest, CategoryIdentifyRequest, CategoryIdentifyResponse,
 )
 from lib.common.constants import ComplianceConstants
@@ -29,19 +29,34 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/compliance", tags=["合规检查"])
 
 
+MAX_DOCUMENT_CHARS = 150_000
+
+
+def _prepare_document_content(content: str) -> str:
+    if len(content) <= MAX_DOCUMENT_CHARS:
+        return content
+    truncated = content[:MAX_DOCUMENT_CHARS]
+    last_clause = truncated.rfind("\n【条款")
+    if last_clause > 0:
+        return truncated[:last_clause]
+    return truncated
+
+
 @router.post("/check/document", response_model=ComplianceReportOut)
 async def check_document(req: DocumentCheckRequest):
     # 险种识别（如果未提供）
     category = req.category
     if not category:
-        category, _, _ = identify_category(req.document_content, req.product_name or "")
+        category = identify_category(req.document_content, req.product_name or "").category
 
     # 构建增强的法规上下文（两层检索）
     context, sources_info = build_enhanced_context(category=category)
 
+    document_content = _prepare_document_content(req.document_content)
+
     prompt = COMPLIANCE_PROMPT_DOCUMENT.format(
-        document_content=req.document_content[:3000],
-        context=context[:8000],
+        document_content=document_content,
+        context=context,
     )
 
     try:
@@ -51,7 +66,7 @@ async def check_document(req: DocumentCheckRequest):
         raise HTTPException(status_code=500, detail=f"条款审查失败: {e}")
 
     # 执行负面清单检查
-    negative_items = check_negative_list(req.document_content)
+    negative_items, negative_list_result = check_negative_list(document_content)
 
     # 合并结果
     result["regulation_sources"] = sources_info
@@ -62,7 +77,7 @@ async def check_document(req: DocumentCheckRequest):
         result["summary"]["non_compliant"] = result["summary"].get("non_compliant", 0) + len(negative_items)
         result["regulation_sources"]["负面清单"] = [item["param"] for item in negative_items]
 
-    result["negative_list_checked"] = True
+    result["negative_list_result"] = negative_list_result
 
     report_id = f"cr_{uuid.uuid4().hex[:8]}"
     product_name = req.product_name or "未命名产品"
@@ -81,21 +96,21 @@ async def check_document(req: DocumentCheckRequest):
 @router.post("/identify-category", response_model=CategoryIdentifyResponse)
 async def identify_category_endpoint(req: CategoryIdentifyRequest):
     """识别险种类型"""
-    category, confidence, method = identify_category(
+    result = identify_category(
         req.document_content,
         req.product_name or "",
     )
 
     suggested = []
-    if category:
-        suggested.append(category)
+    if result.category:
+        suggested.append(result.category)
     suggested.extend(ComplianceConstants.VALID_CATEGORIES[:5])
     suggested = list(dict.fromkeys(suggested))[:5]
 
     return CategoryIdentifyResponse(
-        category=category,
-        confidence=confidence,
-        method=method,
+        category=result.category,
+        confidence=result.confidence,
+        method=result.method,
         suggested_categories=suggested,
     )
 
@@ -126,7 +141,7 @@ async def delete_compliance_report(report_id: str):
 
 def _build_combined_text(
     clauses: List[ParsedClause],
-    premium_tables: List[ParsedPremiumTable],
+    data_tables: List[ParsedDataTable],
     notices: List[ParsedSection],
     health_disclosures: List[ParsedSection],
     exclusions: List[ParsedSection],
@@ -136,8 +151,8 @@ def _build_combined_text(
     parts = []
     for c in clauses:
         parts.append(f"【条款 {c.number}】{c.title}\n{c.text}")
-    for i, t in enumerate(premium_tables, 1):
-        parts.append(f"【费率表 {i}】\n{t.raw_text}")
+    for i, t in enumerate(data_tables, 1):
+        parts.append(f"【数据表 {i}】\n{t.raw_text}")
     for s in notices:
         parts.append(f"【投保须知】{s.title}\n{s.content}")
     for s in health_disclosures:
@@ -156,7 +171,7 @@ def _audit_doc_to_response(audit_doc, file_type: str) -> ParsedDocumentResponse:
         for c in audit_doc.clauses
     ]
     tables = [
-        ParsedPremiumTable(
+        ParsedDataTable(
             table_type=t.table_type.value if hasattr(t.table_type, 'value') else str(t.table_type),
             remark=t.remark or "",
             raw_text=t.raw_text,
@@ -190,7 +205,7 @@ def _audit_doc_to_response(audit_doc, file_type: str) -> ParsedDocumentResponse:
         file_name=audit_doc.file_name,
         file_type=file_type,
         clauses=clauses,
-        premium_tables=tables,
+        data_tables=tables,
         notices=notices,
         health_disclosures=health_disclosures,
         exclusions=exclusions,

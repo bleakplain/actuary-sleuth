@@ -10,16 +10,21 @@ from typing import Dict, List, Optional
 
 
 class ProductCategory(Enum):
-    """产品类别枚举"""
-    LIFE = "人寿保险"
-    HEALTH = "健康保险"
-    ACCIDENT = "意外保险"
-    ANNUITY = "年金保险"
-    MOTOR = "机动车保险"
-    PROPERTY = "财产保险"
-    PENSION = "养老保险"
-    EDUCATION = "教育保险"
-    TRAVEL = "旅游保险"
+    """产品类别枚举（简称值用于合规检查险种匹配）
+
+    注意：部分险种归入大类（如教育险→年金险，旅游险→意外险），
+    但保留独立的枚举名用于关键词分类。
+    使用唯一值避免 enum 别名问题。
+    """
+    LIFE = "寿险"
+    HEALTH = "健康险"
+    ACCIDENT = "意外险"
+    ANNUITY = "年金险"
+    MOTOR = "车险"
+    PROPERTY = "财产险"
+    PENSION = "养老险"
+    EDUCATION = "教育险"
+    TRAVEL = "旅游险"
     OTHER = "其他"
 
 
