@@ -4,6 +4,7 @@ import { DatabaseOutlined, ReloadOutlined, ImportOutlined, PlusOutlined, Unorder
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
 import * as kbApi from '../api/knowledge';
 import type { KBVersion } from '../api/knowledge';
 import type { Document, IndexStatus } from '../types';
@@ -110,9 +111,10 @@ export default function KnowledgePage() {
       setIndexStatus(status);
       setVersions(verData.versions);
       setActiveVersion(verData.active_version);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('KnowledgePage loadData error:', err);
-      message.error(`加载失败: ${err?.message || err}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`加载失败: ${msg}`);
     } finally {
       setLoading(false);
     }
@@ -152,8 +154,9 @@ export default function KnowledgePage() {
       setTaskStatus('pending');
       setTaskProgress('');
       message.info('开始导入...');
-    } catch (err) {
-      message.error(`导入失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`导入失败: ${msg}`);
     }
   };
 
@@ -166,8 +169,9 @@ export default function KnowledgePage() {
       setCreateVersionModalOpen(false);
       setVersionDescription('');
       message.info('开始创建新版本...');
-    } catch (err) {
-      message.error(`创建版本失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`创建版本失败: ${msg}`);
     }
   };
 
@@ -176,8 +180,9 @@ export default function KnowledgePage() {
       await kbApi.activateVersion(versionId);
       message.success(`已切换到 ${versionId}`);
       loadData();
-    } catch (err) {
-      message.error(`切换失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`切换失败: ${msg}`);
     }
   };
 
@@ -186,8 +191,9 @@ export default function KnowledgePage() {
       await kbApi.deleteVersion(versionId);
       message.success(`已删除 ${versionId}`);
       loadData();
-    } catch (err) {
-      message.error(`删除失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`删除失败: ${msg}`);
     }
   };
 
@@ -246,8 +252,9 @@ export default function KnowledgePage() {
       ]);
       setRawContent(previewResult.content);
       setChunks(chunksResult.chunks as ChunkItem[]);
-    } catch (err) {
-      message.error(`加载失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`加载失败: ${msg}`);
     } finally {
       setChunksLoading(false);
     }
@@ -270,8 +277,9 @@ export default function KnowledgePage() {
       setRawContent(editContent);
       setEditing(false);
       message.success('保存成功，请重建索引以生效');
-    } catch (err) {
-      message.error(`保存失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`保存失败: ${msg}`);
     } finally {
       setSaving(false);
     }
@@ -570,7 +578,7 @@ export default function KnowledgePage() {
                         />
                       ) : (
                         <div ref={sourceRef} className="markdown-body" style={{ margin: 0, fontSize: token.fontSizeSM, lineHeight: 1.6 }}>
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{sourceContent}</ReactMarkdown>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw, rehypeSanitize]}>{sourceContent}</ReactMarkdown>
                         </div>
                       )}
                     </div>
@@ -602,7 +610,7 @@ export default function KnowledgePage() {
                           <Descriptions.Item label="字数">{selectedChunk.text_length}</Descriptions.Item>
                         </Descriptions>
                         <div className="markdown-body" style={{ background: token.colorFillQuaternary, padding: 12, borderRadius: 6, fontSize: token.fontSize, lineHeight: 1.8, overflow: 'auto' }}>
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{selectedChunk.text}</ReactMarkdown>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw, rehypeSanitize]}>{selectedChunk.text}</ReactMarkdown>
                         </div>
                       </>
                     ) : (
@@ -658,7 +666,7 @@ export default function KnowledgePage() {
                   />
                 ) : (
                   <div ref={sourceRef} className="markdown-body" style={{ margin: 0, fontSize: token.fontSizeSM, lineHeight: 1.6 }}>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{sourceContent}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw, rehypeSanitize]}>{sourceContent}</ReactMarkdown>
                   </div>
                 )}
               </div>
@@ -688,7 +696,7 @@ export default function KnowledgePage() {
                     <Descriptions.Item label="字数">{selectedChunk.text_length}</Descriptions.Item>
                   </Descriptions>
                   <div className="markdown-body" style={{ background: token.colorFillQuaternary, padding: 12, borderRadius: 6, fontSize: token.fontSize, lineHeight: 1.8, maxHeight: 'calc(100vh - var(--header-height) - 336px)', overflow: 'auto' }}>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{selectedChunk.text}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw, rehypeSanitize]}>{selectedChunk.text}</ReactMarkdown>
                   </div>
                 </div>
               ) : (

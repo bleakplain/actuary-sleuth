@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Input, Button, Checkbox, Popconfirm, message, theme, Grid, Space } from 'antd';
 import { SearchOutlined, DeleteOutlined, ClearOutlined } from '@ant-design/icons';
 import { useObservabilityStore } from '../../stores/observabilityStore';
@@ -101,7 +101,6 @@ export default function TraceList() {
   const handleResizeStart = useCallback((colKey: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const startWidth = e.currentTarget.parentElement?.offsetWidth ?? 100;
     let lastX = e.clientX;
 
     const handleMove = (ev: MouseEvent) => {
@@ -277,7 +276,6 @@ export default function TraceList() {
                 checked={selectedIds.includes(item.trace_id)}
                 onClick={(e) => e.stopPropagation()}
                 onChange={(e) => toggleSelect(item.trace_id, e.target.checked)}
-                size="small"
               />
             </span>
             {COLUMNS.map((col) => (

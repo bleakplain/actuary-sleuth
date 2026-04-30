@@ -179,6 +179,8 @@ export interface ComplianceResult {
   regulation_sources?: Record<string, string[]>;
   category?: string;
   negative_list_checked?: boolean;
+  missing_clauses?: string[];
+  warning?: string;
 }
 
 export interface ComplianceReport {

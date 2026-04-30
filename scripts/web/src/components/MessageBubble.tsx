@@ -3,6 +3,7 @@ import { BugOutlined, CloseOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeSanitize from 'rehype-sanitize';
 import CitationTag from './CitationTag';
 import FeedbackButtons from './FeedbackButtons';
 import { useAskStore } from '../stores/askStore';
@@ -147,7 +148,7 @@ export default function MessageBubble({ message, streaming, onCitationClick, isM
           </div>
         ) : message.needsClarification ? (
           <div>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>{content}</ReactMarkdown>
             {message.clarificationOptions && message.clarificationOptions.length > 0 && (
               <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {message.clarificationOptions.map((option, i) => (
@@ -164,7 +165,7 @@ export default function MessageBubble({ message, streaming, onCitationClick, isM
             )}
           </div>
         ) : content ? (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>{content}</ReactMarkdown>
         ) : (
           <Text type="secondary">思考中...</Text>
         )}

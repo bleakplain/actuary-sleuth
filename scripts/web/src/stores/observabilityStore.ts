@@ -47,8 +47,9 @@ export const useObservabilityStore = create<ObservabilityState>((set, get) => ({
           set({ traceDetail: detail, traceLoading: false });
         }
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (get().selectedTraceId === traceId) {
+          if (import.meta.env.DEV) console.error('Failed to load trace detail:', err);
           set({ traceDetail: null, traceLoading: false });
         }
       });

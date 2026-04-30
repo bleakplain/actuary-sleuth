@@ -143,8 +143,9 @@ function SampleDrawer({
     try {
       const results = await evalApi.searchKnowledgeBase(kbQuery.trim());
       setKbResults(results);
-    } catch (err) {
-      message.error(`搜索失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`搜索失败: ${msg}`);
     } finally {
       setKbSearching(false);
     }
@@ -227,8 +228,9 @@ function SampleDrawer({
       });
       message.success('已保存，审核状态重置为待审核');
       onSaved();
-    } catch (err) {
-      message.error(`保存失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`保存失败: ${msg}`);
     }
   };
 
@@ -243,8 +245,9 @@ function SampleDrawer({
       message.success('审核通过');
       onClose();
       onSaved();
-    } catch (err) {
-      message.error(`审核失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`审核失败: ${msg}`);
     }
   };
 
@@ -546,7 +549,9 @@ export default function EvalPage() {
 
   const evalK = useMemo((): number => {
     if (!selectedEvaluation?.config?.rerank) return 5;
-    return (selectedEvaluation.config.rerank as Record<string, unknown>).rerank_top_k as number ?? 5;
+    const rerank = selectedEvaluation.config.rerank as Record<string, unknown> | undefined;
+    const topK = rerank?.rerank_top_k;
+    return typeof topK === 'number' ? topK : 5;
   }, [selectedEvaluation]);
 
   const flattenedMetrics = useMemo((): Record<string, number> => {
@@ -601,23 +606,24 @@ export default function EvalPage() {
     setSelectedEvalIds((prev) => checked ? [...prev, id] : prev.filter((x) => x !== id));
   };
 
-  const load_samples = useCallback(async () => {
+  const loadSamples = useCallback(async () => {
     setSamplesLoading(true);
     try {
-      const [sample_list, snapshot_list] = await Promise.all([
+      const [sampleList, snapshotList] = await Promise.all([
         evalApi.fetchEvalSamples(filters),
         evalApi.fetchSnapshots(),
       ]);
-      setSamples(sample_list);
-      setSnapshots(snapshot_list);
-    } catch (err) {
-      message.error(`加载失败: ${err}`);
+      setSamples(sampleList);
+      setSnapshots(snapshotList);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`加载失败: ${msg}`);
     } finally {
       setSamplesLoading(false);
     }
   }, [filters]);
 
-  const load_review_stats = useCallback(async () => {
+  const loadReviewStats = useCallback(async () => {
     try {
       const statsData = await evalApi.fetchReviewStats();
       setReviewStats(statsData);
@@ -628,18 +634,18 @@ export default function EvalPage() {
 
   useEffect(() => {
     if (activeTab === 'dataset') {
-      load_samples();
-      load_review_stats();
+      loadSamples();
+      loadReviewStats();
     }
-  }, [activeTab, load_samples, load_review_stats]);
+  }, [activeTab, loadSamples, loadReviewStats]);
 
-  const create_sample = () => {
+  const createSample = () => {
     setEditingSample(null);
     form.resetFields();
     setEditModalOpen(true);
   };
 
-  const save_sample = async () => {
+  const saveSample = async () => {
     try {
       const values = await form.validateFields();
       if (editingSample) {
@@ -650,23 +656,25 @@ export default function EvalPage() {
         message.success('创建成功');
       }
       setEditModalOpen(false);
-      load_samples();
-    } catch (err) {
-      message.error(`保存失败: ${err}`);
+      loadSamples();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`保存失败: ${msg}`);
     }
   };
 
-  const delete_sample = async (sample_id: string) => {
+  const deleteSample = async (sampleId: string) => {
     try {
-      await evalApi.deleteEvalSample(sample_id);
+      await evalApi.deleteEvalSample(sampleId);
       message.success('删除成功');
-      load_samples();
-    } catch (err) {
-      message.error(`删除失败: ${err}`);
+      loadSamples();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`删除失败: ${msg}`);
     }
   };
 
-  const import_samples = async () => {
+  const importSamples = async () => {
     try {
       const data = JSON.parse(importText);
       const items = Array.isArray(data) ? data : (data.samples || []);
@@ -674,13 +682,14 @@ export default function EvalPage() {
       message.success(`导入 ${result.imported} 条，跳过 ${result.total - result.imported} 条`);
       setImportModalOpen(false);
       setImportText('');
-      load_samples();
-    } catch (err) {
-      message.error(`导入失败: ${err}`);
+      loadSamples();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`导入失败: ${msg}`);
     }
   };
 
-  const create_snapshot = async () => {
+  const createSnapshot = async () => {
     if (!snapshotName.trim()) {
       message.warning('请输入快照名称');
       return;
@@ -691,19 +700,21 @@ export default function EvalPage() {
       setSnapshotModalOpen(false);
       setSnapshotName('');
       setSnapshotDescription('');
-      load_samples();
-    } catch (err) {
-      message.error(`创建失败: ${err}`);
+      loadSamples();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`创建失败: ${msg}`);
     }
   };
 
-  const restore_snapshot = async (snapshot_id: string) => {
+  const restoreSnapshot = async (snapshotId: string) => {
     try {
-      const result = await evalApi.restoreSnapshot(snapshot_id);
+      const result = await evalApi.restoreSnapshot(snapshotId);
       message.success(`已恢复 ${result.restored} 条数据`);
-      load_samples();
-    } catch (err) {
-      message.error(`恢复失败: ${err}`);
+      loadSamples();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`恢复失败: ${msg}`);
     }
   };
 
@@ -734,7 +745,7 @@ export default function EvalPage() {
       render: (_: undefined, sample: EvalSample) => (
         <Space>
           <Button type="link" size="small" onClick={() => setDrawerSample(sample)}>审核</Button>
-          <Popconfirm title="确定删除？" onConfirm={() => delete_sample(sample.id)}>
+          <Popconfirm title="确定删除？" onConfirm={() => deleteSample(sample.id)}>
             <Button type="link" size="small" danger>删除</Button>
           </Popconfirm>
         </Space>
@@ -742,7 +753,7 @@ export default function EvalPage() {
     },
   ];
 
-  const refresh_evaluation_history = useCallback(async () => {
+  const refreshEvaluationHistory = useCallback(async () => {
     setEvaluationsLoading(true);
     try {
       const data = await evalApi.fetchEvaluations();
@@ -752,8 +763,9 @@ export default function EvalPage() {
         }
         return data;
       });
-    } catch (err) {
-      message.error(`加载失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`加载失败: ${msg}`);
     } finally {
       setEvaluationsLoading(false);
     }
@@ -763,10 +775,14 @@ export default function EvalPage() {
   useEffect(() => {
     if (activeTab === 'runs' || activeTab === 'configs') {
       if (evalConfigs.length === 0) {
-        evalApi.fetchEvalConfigs().then(setEvalConfigs).catch(() => {});
+        evalApi.fetchEvalConfigs().then(setEvalConfigs).catch((err) => {
+          if (import.meta.env.DEV) {
+            console.error('Failed to load eval configs:', err);
+          }
+        });
       }
     }
-  }, [activeTab]);
+  }, [activeTab, evalConfigs.length]);
 
   // Auto-select active config
   useEffect(() => {
@@ -778,15 +794,15 @@ export default function EvalPage() {
 
   useEffect(() => {
     if (activeTab === 'runs') {
-      refresh_evaluation_history();
+      refreshEvaluationHistory();
     }
-  }, [activeTab, refresh_evaluation_history]);
+  }, [activeTab, refreshEvaluationHistory]);
 
   const trendMetricOptions = useMemo(() => {
     const opts: { value: string; label: string }[] = [];
     const seen = new Set<string>();
     for (const e of evaluations) {
-      const rpt = (e as Record<string, unknown>).report as Record<string, Record<string, number>> | undefined;
+      const rpt = (e as unknown as Record<string, unknown>).report as Record<string, Record<string, number>> | undefined;
       if (!rpt) continue;
       for (const [section, metrics] of Object.entries(rpt)) {
         if (typeof metrics !== 'object' || metrics === null) continue;
@@ -816,11 +832,11 @@ export default function EvalPage() {
 
   useEffect(() => {
     if (activeTab !== 'runs' || !hasRunning) return;
-    const timer = setInterval(refresh_evaluation_history, 3000);
+    const timer = setInterval(refreshEvaluationHistory, 3000);
     return () => clearInterval(timer);
-  }, [activeTab, hasRunning, refresh_evaluation_history]);
+  }, [activeTab, hasRunning, refreshEvaluationHistory]);
 
-  const start_evaluation = async (mode: 'retrieval' | 'generation' | 'full') => {
+  const startEvaluation = async (mode: 'retrieval' | 'generation' | 'full') => {
     if (!selectedConfigId) {
       message.warning('请先选择评测配置');
       return;
@@ -831,13 +847,14 @@ export default function EvalPage() {
         config_id: selectedConfigId,
       });
       message.success(`评测任务已创建: ${evaluation_id}`);
-      refresh_evaluation_history();
-    } catch (err) {
-      message.error(`启动失败: ${err}`);
+      refreshEvaluationHistory();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`启动失败: ${msg}`);
     }
   };
 
-  const view_evaluation = async (evaluation: Evaluation) => {
+  const viewEvaluation = async (evaluation: Evaluation) => {
     setSelectedEvaluation(evaluation);
     setSelectedEvalIds([]);
     setDimensionFilter('overall');
@@ -849,8 +866,9 @@ export default function EvalPage() {
         ]);
         setReport(rpt);
         setDetails(det.details);
-      } catch (err) {
-        message.error(`加载报告失败: ${err}`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        message.error(`加载报告失败: ${msg}`);
       }
     } else {
       setReport(null);
@@ -858,7 +876,7 @@ export default function EvalPage() {
     }
   };
 
-  const handle_batch_delete_evals = async () => {
+  const handleBatchDeleteEvals = async () => {
     try {
       const { deleted } = await evalApi.deleteEvaluations(selectedEvalIds);
       message.success(`已删除 ${deleted} 条评测`);
@@ -868,13 +886,14 @@ export default function EvalPage() {
         setDetails([]);
       }
       setSelectedEvalIds([]);
-      refresh_evaluation_history();
-    } catch (err) {
-      message.error(`删除失败: ${err}`);
+      refreshEvaluationHistory();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`删除失败: ${msg}`);
     }
   };
 
-  const download_eval_report = async (eval_id: string, format: 'json' | 'md') => {
+  const downloadEvalReport = async (eval_id: string, format: 'json' | 'md') => {
     try {
       const blob = await evalApi.exportEvaluationReport(eval_id, format);
       const url = URL.createObjectURL(blob);
@@ -883,12 +902,13 @@ export default function EvalPage() {
       a.download = `eval_report_${eval_id}.${format}`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (err) {
-      message.error(`导出失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`导出失败: ${msg}`);
     }
   };
 
-  const run_eval_compare = async () => {
+  const runEvalCompare = async () => {
     const completedIds = selectedEvalIds.filter((id) => {
       const e = evaluations.find((ev) => ev.id === id);
       return e && e.status === 'completed';
@@ -903,7 +923,6 @@ export default function EvalPage() {
       );
       const series: { label: string; data: Record<string, number> }[] = [];
       for (let i = 0; i < completedIds.length; i++) {
-        const e = evaluations.find((ev) => ev.id === completedIds[i]);
         const rpt = reports[i];
         const flat: Record<string, number> = {};
         for (const [section, metrics] of Object.entries(rpt)) {
@@ -919,23 +938,24 @@ export default function EvalPage() {
         });
       }
       setCompareResult(series);
-    } catch (err) {
-      message.error(`对比失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`对比失败: ${msg}`);
     }
   };
 
   // Config Tab handlers
-  const refresh_configs = useCallback(async () => {
+  const refreshConfigs = useCallback(async () => {
     const configs = await evalApi.fetchEvalConfigs();
     setEvalConfigs(configs);
     return configs;
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'configs') refresh_configs();
-  }, [activeTab, refresh_configs]);
+    if (activeTab === 'configs') refreshConfigs();
+  }, [activeTab, refreshConfigs]);
 
-  const view_config = async (config: EvalConfig) => {
+  const viewConfig = async (config: EvalConfig) => {
     setViewingConfig(config);
     setEditingConfig(false);
     try {
@@ -959,7 +979,7 @@ export default function EvalPage() {
     generation_max_context_chars: 12000,
   };
 
-  const form_values_from_config = (json: Record<string, Record<string, unknown>> | undefined) => ({
+  const formValuesFromConfig = (json: Record<string, Record<string, unknown>> | undefined) => ({
     retrieval_vector_top_k: (json?.retrieval?.vector_top_k as number) ?? CONFIG_FORM_DEFAULTS.retrieval_vector_top_k,
     retrieval_keyword_top_k: (json?.retrieval?.keyword_top_k as number) ?? CONFIG_FORM_DEFAULTS.retrieval_keyword_top_k,
     retrieval_rrf_k: (json?.retrieval?.rrf_k as number) ?? CONFIG_FORM_DEFAULTS.retrieval_rrf_k,
@@ -972,25 +992,25 @@ export default function EvalPage() {
     generation_max_context_chars: (json?.generation?.max_context_chars as number) ?? CONFIG_FORM_DEFAULTS.generation_max_context_chars,
   });
 
-  const start_new_config = () => {
+  const startNewConfig = () => {
     setViewingConfig(null);
     setViewingConfigJson(null);
     setEditingConfig(true);
     editForm.setFieldsValue({ description: '', ...CONFIG_FORM_DEFAULTS });
   };
 
-  const clone_config = () => {
+  const cloneConfig = () => {
     if (!viewingConfig || !viewingConfigJson) return;
     setViewingConfig(null);
     setViewingConfigJson(null);
     setEditingConfig(true);
     editForm.setFieldsValue({
       description: viewingConfig.description,
-      ...form_values_from_config(viewingConfigJson as Record<string, Record<string, unknown>>),
+      ...formValuesFromConfig(viewingConfigJson as Record<string, Record<string, unknown>>),
     });
   };
 
-  const save_config = async () => {
+  const saveConfig = async () => {
     try {
       const values = await editForm.validateFields();
       await evalApi.createEvalConfig({
@@ -1013,44 +1033,32 @@ export default function EvalPage() {
         },
       });
       message.success('配置创建成功');
-      await refresh_configs();
+      await refreshConfigs();
       setEditingConfig(false);
       setViewingConfig(null);
-    } catch (err) {
-      message.error(`保存配置失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`保存配置失败: ${msg}`);
     }
   };
 
-  const activate_config = async (configId: number) => {
+  const activateConfig = async (configId: number) => {
     try {
       await evalApi.activateEvalConfig(configId);
       message.success('已切换为当前生效配置');
-      const configs = await refresh_configs();
+      const configs = await refreshConfigs();
       if (viewingConfig?.id === configId) {
         const updated = configs.find((c) => c.id === configId) ?? viewingConfig;
         setViewingConfig(updated);
       }
-    } catch (err) {
-      message.error(`切换失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`切换失败: ${msg}`);
     }
   };
 
-  const delete_config = async (configId: number) => {
-    try {
-      await evalApi.deleteEvalConfig(configId);
-      message.success('配置已删除');
-      if (selectedConfigId === configId) setSelectedConfigId(null);
-      if (viewingConfig?.id === configId) {
-        setViewingConfig(null);
-        setViewingConfigJson(null);
-      }
-      await refresh_configs();
-    } catch (err) {
-      message.error(`删除失败: ${err}`);
-    }
-  };
 
-  const handle_batch_delete_configs = async () => {
+  const handleBatchDeleteConfigs = async () => {
     const deletableIds = configSelectedIds.filter((id) => {
       const cfg = evalConfigs.find((c) => c.id === id);
       return cfg && !cfg.is_active;
@@ -1062,8 +1070,8 @@ export default function EvalPage() {
     let deleted = 0;
     for (const id of deletableIds) {
       try {
-        const ok = await evalApi.deleteEvalConfig(id);
-        if (ok) deleted++;
+        await evalApi.deleteEvalConfig(id);
+        deleted++;
       } catch { /* skip */ }
     }
     if (deleted > 0) message.success(`已删除 ${deleted} 条配置`);
@@ -1073,10 +1081,10 @@ export default function EvalPage() {
       setViewingConfigJson(null);
     }
     setConfigSelectedIds([]);
-    await refresh_configs();
+    await refreshConfigs();
   };
 
-  const run_config_compare = async () => {
+  const runConfigCompare = async () => {
     if (configSelectedIds.length < 2) return;
     const configs = await Promise.all(
       configSelectedIds.map((id) => evalApi.fetchEvalConfig(id)),
@@ -1200,11 +1208,11 @@ export default function EvalPage() {
                       placeholder="主题筛选" style={{ width: isMobile ? '100%' : 120 }}
                       value={filters.topic}
                       onChange={(e) => setFilters({ ...filters, topic: e.target.value || undefined })}
-                      onPressEnter={load_samples}
+                      onPressEnter={loadSamples}
                     />
                   </Space>
                   <Space wrap={isMobile} style={{ width: isMobile ? '100%' : undefined }}>
-                    <Button type="primary" icon={<PlusOutlined />} onClick={create_sample}>新增</Button>
+                    <Button type="primary" icon={<PlusOutlined />} onClick={createSample}>新增</Button>
                     <Button icon={<ImportOutlined />} onClick={() => setImportModalOpen(true)}>批量导入</Button>
                     <Button icon={<SaveOutlined />} onClick={() => setSnapshotModalOpen(true)}>创建快照</Button>
                   </Space>
@@ -1253,16 +1261,17 @@ export default function EvalPage() {
                               )}
                             </div>
                             <Space>
-                              <Popconfirm title={`确定恢复到 ${snapshot.name}？当前数据将被覆盖。`} onConfirm={() => restore_snapshot(snapshot.id)}>
+                              <Popconfirm title={`确定恢复到 ${snapshot.name}？当前数据将被覆盖。`} onConfirm={() => restoreSnapshot(snapshot.id)}>
                                 <Button type="link" size="small" icon={<RollbackOutlined />}>恢复</Button>
                               </Popconfirm>
                               <Popconfirm title={`确定删除快照 ${snapshot.name}？`} onConfirm={async () => {
                                 try {
                                   await evalApi.deleteSnapshot(snapshot.id);
                                   message.success('快照已删除');
-                                  load_samples();
-                                } catch (err) {
-                                  message.error(String(err));
+                                  loadSamples();
+                                } catch (err: unknown) {
+                                  const msg = err instanceof Error ? err.message : String(err);
+                                  message.error(msg);
                                 }
                               }}>
                                 <Button type="link" size="small" danger icon={<DeleteOutlined />} />
@@ -1284,7 +1293,7 @@ export default function EvalPage() {
               <Row gutter={16}>
                 <Col xs={24} md={10}>
                   <Card title="配置列表" size="small" styles={{ body: { padding: 0, overflow: 'hidden' } }}
-                    extra={<Button type="primary" size="small" icon={<PlusOutlined />} onClick={start_new_config}>新增</Button>}
+                    extra={<Button type="primary" size="small" icon={<PlusOutlined />} onClick={startNewConfig}>新增</Button>}
                   >
                     <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - var(--header-height) - 206px)' }}>
                       <Table
@@ -1300,7 +1309,7 @@ export default function EvalPage() {
                                   setConfigSelectedIds((prev) =>
                                     ev.target.checked ? [...prev, cfg.id] : prev.filter((x) => x !== cfg.id),
                                   );
-                                  view_config(cfg);
+                                  viewConfig(cfg);
                                 }}
                                 onClick={(ev) => ev.stopPropagation()}
                               />
@@ -1328,7 +1337,7 @@ export default function EvalPage() {
                         size="small"
                         pagination={false}
                         onRow={(cfg) => ({
-                          onClick: () => view_config(cfg),
+                          onClick: () => viewConfig(cfg),
                           style: {
                             cursor: 'pointer',
                             background: viewingConfig?.id === cfg.id ? token.colorPrimaryBg : undefined,
@@ -1353,12 +1362,12 @@ export default function EvalPage() {
                             <Popconfirm
                               title={`确定删除选中的 ${configSelectedIds.length} 条配置？`}
                               description="生效中的配置无法删除"
-                              onConfirm={handle_batch_delete_configs}
+                              onConfirm={handleBatchDeleteConfigs}
                             >
                               <Button type="primary" danger size="small" icon={<DeleteOutlined />}>删除</Button>
                             </Popconfirm>
                             {configSelectedIds.length >= 2 && (
-                              <Button size="small" icon={<SwapOutlined />} onClick={() => { run_config_compare(); setConfigCompareOpen(true); }}>
+                              <Button size="small" icon={<SwapOutlined />} onClick={() => { runConfigCompare(); setConfigCompareOpen(true); }}>
                                 对比
                               </Button>
                             )}
@@ -1377,9 +1386,9 @@ export default function EvalPage() {
                       <div className="flex-between mb-16">
                         <span style={{ fontWeight: token.fontWeightStrong }}>配置详情</span>
                         <Space>
-                          <Button size="small" icon={<CopyOutlined />} onClick={clone_config}>克隆</Button>
+                          <Button size="small" icon={<CopyOutlined />} onClick={cloneConfig}>克隆</Button>
                           {!viewingConfig.is_active && (
-                            <Popconfirm title="将此配置设为当前生效？" onConfirm={() => activate_config(viewingConfig!.id)}>
+                            <Popconfirm title="将此配置设为当前生效？" onConfirm={() => activateConfig(viewingConfig!.id)}>
                               <Button size="small" icon={<CheckCircleOutlined />}>设为生效</Button>
                             </Popconfirm>
                           )}
@@ -1433,7 +1442,7 @@ export default function EvalPage() {
                       <div className="flex-between mb-16">
                         <span style={{ fontWeight: token.fontWeightStrong }}>新建配置</span>
                         <Space>
-                          <Button type="primary" onClick={save_config}>保存</Button>
+                          <Button type="primary" onClick={saveConfig}>保存</Button>
                           <Button onClick={() => { setEditingConfig(false); setViewingConfig(null); }}>取消</Button>
                         </Space>
                       </div>
@@ -1543,9 +1552,9 @@ export default function EvalPage() {
                     }))}
                   />
                   <Space wrap={isMobile} style={{ width: isMobile ? '100%' : undefined }}>
-                    <Button icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('retrieval')}>检索评测</Button>
-                    <Button icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('generation')}>生成评测</Button>
-                    <Button type="primary" icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => start_evaluation('full')}>完整评测</Button>
+                    <Button icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => startEvaluation('retrieval')}>检索评测</Button>
+                    <Button icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => startEvaluation('generation')}>生成评测</Button>
+                    <Button type="primary" icon={<PlayCircleOutlined />} disabled={!selectedConfigId} onClick={() => startEvaluation('full')}>完整评测</Button>
                   </Space>
                 </div>
 
@@ -1596,7 +1605,7 @@ export default function EvalPage() {
                             scroll={{ x: 660 }}
                             pagination={false}
                             onRow={(evaluation) => ({
-                              onClick: () => view_evaluation(evaluation),
+                              onClick: () => viewEvaluation(evaluation),
                               style: {
                                 cursor: 'pointer',
                                 background: selectedEvaluation?.id === evaluation.id ? token.colorPrimaryBg : undefined,
@@ -1619,12 +1628,12 @@ export default function EvalPage() {
                               <span style={{ color: token.colorPrimary }}>{selectedEvalIds.length} 项</span>
                               <Popconfirm
                                 title={`确定删除 ${selectedEvalIds.length} 条评测？`}
-                                onConfirm={handle_batch_delete_evals}
+                                onConfirm={handleBatchDeleteEvals}
                               >
                                 <Button type="primary" danger size="small" icon={<DeleteOutlined />}>删除</Button>
                               </Popconfirm>
                               {selectedEvalIds.filter((id) => evaluations.find((e) => e.id === id)?.status === 'completed').length >= 2 && (
-                                <Button size="small" icon={<SwapOutlined />} onClick={() => { run_eval_compare(); setCompareModalOpen(true); }}>
+                                <Button size="small" icon={<SwapOutlined />} onClick={() => { runEvalCompare(); setCompareModalOpen(true); }}>
                                   对比
                                 </Button>
                               )}
@@ -1664,9 +1673,9 @@ export default function EvalPage() {
                             <Descriptions.Item label="操作" span={3}>
                               <Space>
                                 <Button size="small" icon={<DownloadOutlined />}
-                                  onClick={() => download_eval_report(selectedEvaluation.id, 'json')}>JSON</Button>
+                                  onClick={() => downloadEvalReport(selectedEvaluation.id, 'json')}>JSON</Button>
                                 <Button size="small" icon={<DownloadOutlined />}
-                                  onClick={() => download_eval_report(selectedEvaluation.id, 'md')}>Markdown</Button>
+                                  onClick={() => downloadEvalReport(selectedEvaluation.id, 'md')}>Markdown</Button>
                               </Space>
                             </Descriptions.Item>
                           )}
@@ -1740,19 +1749,21 @@ export default function EvalPage() {
         ]}
       />
 
-      <SampleDrawer
-        sample={drawerSample!}
-        open={!!drawerSample}
-        onClose={() => setDrawerSample(null)}
-        onSaved={() => { load_samples(); load_review_stats(); }}
-        isMobile={isMobile}
-      />
+      {drawerSample && (
+        <SampleDrawer
+          sample={drawerSample}
+          open={true}
+          onClose={() => setDrawerSample(null)}
+          onSaved={() => { loadSamples(); loadReviewStats(); }}
+          isMobile={isMobile}
+        />
+      )}
 
       <Modal
         title={editingSample ? '编辑评测问题' : '新增评测问题'}
         open={editModalOpen}
         onCancel={() => setEditModalOpen(false)}
-        onOk={save_sample}
+        onOk={saveSample}
         width={isMobile ? '100%' : MODAL_MD}
       >
         <Form form={form} layout="vertical">
@@ -1789,7 +1800,7 @@ export default function EvalPage() {
         title="批量导入"
         open={importModalOpen}
         onCancel={() => setImportModalOpen(false)}
-        onOk={import_samples}
+        onOk={importSamples}
         width={isMobile ? '100%' : MODAL_MD}
       >
         <Text type="secondary">粘贴 JSON 数组或 {"{samples: [...]}"} 格式</Text>
@@ -1806,7 +1817,7 @@ export default function EvalPage() {
         title="创建快照"
         open={snapshotModalOpen}
         onCancel={() => setSnapshotModalOpen(false)}
-        onOk={create_snapshot}
+        onOk={createSnapshot}
         width={isMobile ? '100%' : MODAL_SM}
       >
         <Input
@@ -1859,7 +1870,7 @@ export default function EvalPage() {
             const ver = evalConfigs.find((c) => c.id === id)?.version;
             return `v${ver}`;
           });
-          const makeColumns = (sectionLabel: string) => [
+          const makeColumns = () => [
             { title: '参数', dataIndex: 'param', key: 'param', width: 180 },
             ...versionHeaders.map((header, idx) => ({
               title: header,
@@ -1886,7 +1897,7 @@ export default function EvalPage() {
               <Card key={section} size="small" title={label} style={{ marginBottom: 8 }}>
                 <Table
                   dataSource={rows}
-                  columns={makeColumns(label)}
+                  columns={makeColumns()}
                   pagination={false}
                   size="small"
                   scroll={{ x: 'max-content' }}

@@ -51,9 +51,9 @@ export default function CacheTrendChart() {
             <XAxis dataKey="time" tick={{ fontSize: 10 }} />
             <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} />
             <Tooltip
-              formatter={(value: number, name: string) => {
+              formatter={(value, name) => {
                 if (name === 'hitRate') return [`${value}%`, '命中率'];
-                return [value, name];
+                return [String(value), String(name)];
               }}
             />
             <Line

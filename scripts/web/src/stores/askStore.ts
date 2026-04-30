@@ -2,7 +2,11 @@ import { create } from 'zustand';
 import type { Session, Message, Source } from '../types';
 import * as askApi from '../api/ask';
 
-let _searchTimer: ReturnType<typeof setTimeout> | null = null;
+// 生成客户端临时 ID（递减负数，避免与服务端 ID 冲突）
+let _nextTempId = -1;
+function nextTempId(): number {
+  return _nextTempId--;
+}
 
 interface AskState {
   sessions: Session[];
@@ -14,10 +18,14 @@ interface AskState {
   traceLoading: boolean;
   debugMode: boolean;
   sessionSearch: string;
+  abortController: AbortController | null;
+  requestSequence: number;
+  searchTimer: ReturnType<typeof setTimeout> | null;
 
   loadSessions: (search?: string) => Promise<void>;
   selectSession: (id: string) => Promise<void>;
   sendMessage: (question: string, mode: 'qa' | 'search') => void;
+  abortStreaming: () => void;
   deleteSession: (id: string) => Promise<void>;
   deleteMessage: (messageId: number) => Promise<void>;
   openTrace: (messageId: number) => void;
@@ -37,6 +45,9 @@ export const useAskStore = create<AskState>((set, get) => ({
   traceLoading: false,
   debugMode: false,
   sessionSearch: "",
+  abortController: null,
+  requestSequence: 0,
+  searchTimer: null,
 
   loadSessions: async (search?: string) => {
     const sessions = await askApi.fetchSessions(search);
@@ -44,16 +55,33 @@ export const useAskStore = create<AskState>((set, get) => ({
   },
 
   selectSession: async (id: string) => {
+    get().abortStreaming();
     set({ currentSessionId: id, currentSources: [], activeTraceMessageId: null, traceLoading: false });
     const messages = await askApi.fetchMessages(id);
     set({ messages });
   },
 
+  abortStreaming: () => {
+    const { abortController } = get();
+    if (abortController) {
+      abortController.abort();
+      set({ abortController: null, streaming: false });
+    }
+  },
+
   sendMessage: (question: string, mode: 'qa' | 'search') => {
-    const { currentSessionId, messages } = get();
+    const { currentSessionId, messages, abortController } = get();
+
+    // 取消之前的请求
+    if (abortController) {
+      abortController.abort();
+    }
+
+    const currentSequence = get().requestSequence + 1;
+    set({ requestSequence: currentSequence });
 
     const userMsg: Message = {
-      id: Date.now(),
+      id: nextTempId(),
       session_id: currentSessionId || '',
       role: 'user',
       content: question,
@@ -62,7 +90,7 @@ export const useAskStore = create<AskState>((set, get) => ({
       timestamp: new Date().toISOString(),
     };
     const assistantMsg: Message = {
-      id: Date.now() + 1,
+      id: nextTempId(),
       session_id: currentSessionId || '',
       role: 'assistant',
       content: '',
@@ -76,10 +104,11 @@ export const useAskStore = create<AskState>((set, get) => ({
       askApi
         .chatSearch(question, currentSessionId || undefined)
         .then((data) => {
+          if (get().requestSequence !== currentSequence) return;
           set((s) => ({
             messages: s.messages.map((m) =>
               m.id === assistantMsg.id
-                ? { ...m, content: typeof data.content === 'string' ? data.content : JSON.stringify(data.sources, null, 2) }
+                ? { ...m, content: data.content }
                 : m,
             ),
             currentSources: data.sources || [],
@@ -87,10 +116,12 @@ export const useAskStore = create<AskState>((set, get) => ({
           }));
           get().loadSessions();
         })
-        .catch((err: Error) => {
+        .catch((err: unknown) => {
+          if (get().requestSequence !== currentSequence) return;
+          const msg = err instanceof Error ? err.message : String(err);
           set((s) => ({
             messages: s.messages.map((m) =>
-              m.id === assistantMsg.id ? { ...m, content: `错误: ${err.message}` } : m,
+              m.id === assistantMsg.id ? { ...m, content: `错误: ${msg}` } : m,
             ),
             streaming: false,
           }));
@@ -99,10 +130,11 @@ export const useAskStore = create<AskState>((set, get) => ({
     }
 
     let fullAnswer = '';
-    askApi.chatSSE(
+    const controller = askApi.chatSSE(
       { question, session_id: currentSessionId || undefined, mode: 'qa', debug: get().debugMode },
       {
         onToken: (token) => {
+          if (get().requestSequence !== currentSequence) return;
           fullAnswer += token;
           set((s) => ({
             messages: s.messages.map((m) =>
@@ -111,6 +143,7 @@ export const useAskStore = create<AskState>((set, get) => ({
           }));
         },
         onDone: (doneData) => {
+          if (get().requestSequence !== currentSequence) return;
           set((s) => ({
             messages: s.messages.map((m) =>
               m.id === assistantMsg.id
@@ -119,25 +152,29 @@ export const useAskStore = create<AskState>((set, get) => ({
                     id: doneData.message_id ?? m.id,
                     citations: doneData.citations || [],
                     sources: doneData.sources || [],
-                    trace: doneData.trace ?? undefined,
+                    trace: doneData.trace ?? null,
                   }
                 : m,
             ),
             currentSessionId: doneData.session_id || currentSessionId,
             currentSources: doneData.sources || [],
             streaming: false,
+            abortController: null,
           }));
           get().loadSessions();
         },
         onError: (err) => {
+          if (get().requestSequence !== currentSequence) return;
           set((s) => ({
             messages: s.messages.map((m) =>
               m.id === assistantMsg.id ? { ...m, content: `错误: ${err}` } : m,
             ),
             streaming: false,
+            abortController: null,
           }));
         },
         onClarify: (clarifyData) => {
+          if (get().requestSequence !== currentSequence) return;
           set((s) => ({
             messages: s.messages.map((m) =>
               m.id === assistantMsg.id
@@ -150,16 +187,19 @@ export const useAskStore = create<AskState>((set, get) => ({
                 : m,
             ),
             streaming: false,
+            abortController: null,
           }));
         },
       },
     );
+    set({ abortController: controller });
   },
 
   deleteSession: async (id: string) => {
     await askApi.deleteSession(id);
     const { currentSessionId } = get();
     if (currentSessionId === id) {
+      get().abortStreaming();
       set({ currentSessionId: null, messages: [], activeTraceMessageId: null, traceLoading: false });
     }
     get().loadSessions();
@@ -220,18 +260,22 @@ export const useAskStore = create<AskState>((set, get) => ({
   },
 
   setSessionSearch: (search: string) => {
+    const { searchTimer } = get();
+    if (searchTimer) clearTimeout(searchTimer);
     set({ sessionSearch: search });
-    if (_searchTimer) clearTimeout(_searchTimer);
-    _searchTimer = setTimeout(() => {
-      get().loadSessions(search);
-      _searchTimer = null;
+    const timer = setTimeout(() => {
+      if (get().sessionSearch === search) {
+        get().loadSessions(search);
+      }
     }, 300);
+    set({ searchTimer: timer });
   },
 
   batchDeleteSessions: async (ids: string[]) => {
     await askApi.batchDeleteSessions(ids);
     const { currentSessionId } = get();
     if (ids.includes(currentSessionId || "")) {
+      get().abortStreaming();
       set({ currentSessionId: null, messages: [], activeTraceMessageId: null, traceLoading: false });
     }
     get().loadSessions(get().sessionSearch || undefined);

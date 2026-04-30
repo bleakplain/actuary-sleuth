@@ -1,9 +1,10 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { Table, Tag, Select, Button, Space, message, Popconfirm, Modal, Descriptions, Card, Statistic, Row, Col, Tooltip, Typography, theme, Grid } from 'antd';
 import { ReloadOutlined, ThunderboltOutlined, DislikeOutlined, LikeOutlined, WarningOutlined } from '@ant-design/icons';
 import { useFeedbackStore } from '../stores/feedbackStore';
 import { MODAL_LG } from '../constants/layout';
 import { verifyBadcase, convertBadcase } from '../api/feedback';
+import { usePromptModal } from '../hooks/usePromptModal';
 
 const TYPE_COLORS: Record<string, string> = {
   retrieval_failure: 'orange', hallucination: 'red', knowledge_gap: 'blue',
@@ -24,6 +25,7 @@ export default function FeedbackPage() {
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
   const [filterStatus, setFilterStatus] = React.useState<string | undefined>();
+  const { showPrompt, PromptModal } = usePromptModal();
 
   useEffect(() => { loadBadcases({ status: filterStatus }); }, [filterStatus, loadBadcases]);
   useEffect(() => { loadStats(); }, [loadStats]);
@@ -36,6 +38,19 @@ export default function FeedbackPage() {
       message.error('分类失败');
     }
   };
+
+  const handleConvert = useCallback(async (recordId: string) => {
+    const ground_truth = await showPrompt('请输入正确答案（ground_truth）', '输入正确答案用于评估样本');
+    if (ground_truth) {
+      try {
+        await convertBadcase(recordId, ground_truth);
+        message.success('已转化为评估样本');
+        loadBadcases({ status: filterStatus });
+      } catch {
+        message.error('转化失败');
+      }
+    }
+  }, [showPrompt, loadBadcases, filterStatus]);
 
   const expandedRowRender = (record: typeof badcases[0]) => (
     <div style={{ padding: '8px 16px' }}>
@@ -132,10 +147,10 @@ export default function FeedbackPage() {
                     <Typography.Text strong>新回答：</Typography.Text>
                     <p>{result.new_answer}</p>
                     <p>忠实度: {result.new_faithfulness != null ? (result.new_faithfulness as number).toFixed(2) : '未计算'}</p>
-                    {result.new_unverified_claims?.length > 0 && (
+                    {result.new_unverified_claims && result.new_unverified_claims.length > 0 && (
                       <>
                         <Typography.Text strong>未验证陈述：</Typography.Text>
-                        <ul>{(result.new_unverified_claims as string[]).map((c, i) => <li key={i}>{c}</li>)}</ul>
+                        <ul>{result.new_unverified_claims.map((c, i) => <li key={i}>{c}</li>)}</ul>
                       </>
                     )}
                   </div>
@@ -156,16 +171,7 @@ export default function FeedbackPage() {
           {record.status === 'fixed' && (
             <Popconfirm
               title="转化为评估样本？需要提供正确答案"
-              onConfirm={async () => {
-                const ground_truth = prompt('请输入正确答案（ground_truth）：');
-                if (ground_truth) {
-                  try {
-                    await convertBadcase(record.id, ground_truth);
-                    message.success('已转化为评估样本');
-                    loadBadcases({ status: filterStatus });
-                  } catch { message.error('转化失败'); }
-                }
-              }}
+              onConfirm={() => handleConvert(record.id)}
             >
               <Button size="small" type="dashed">转化</Button>
             </Popconfirm>
@@ -240,6 +246,7 @@ export default function FeedbackPage() {
         expandable={{ expandedRowRender }}
         pagination={{ pageSize: 20 }}
       />
+      <PromptModal />
     </div>
   );
 }

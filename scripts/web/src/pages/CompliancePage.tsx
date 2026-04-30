@@ -423,8 +423,9 @@ export default function CompliancePage() {
       setParsedDocument(result);
       setProductName(result.file_name);
       setCheckingResult(null);
-    } catch (err) {
-      message.error(`解析失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`解析失败: ${msg}`);
     } finally {
       setParsing(false);
     }
@@ -440,7 +441,7 @@ export default function CompliancePage() {
         setParsedDocument(result);
         setProductName('');
         setCheckingResult(null);
-      } catch (err) {
+      } catch {
         // 静默失败，不显示错误
       } finally {
         setParsing(false);
@@ -461,8 +462,9 @@ export default function CompliancePage() {
       setSelectedCategory(result.category || '');
       setSuggestedCategories(result.suggested_categories);
       setCategoryConfidence(result.confidence);
-    } catch (err) {
-      message.error(`险种识别失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`险种识别失败: ${msg}`);
     } finally {
       setIdentifyingCategory(false);
     }
@@ -481,23 +483,12 @@ export default function CompliancePage() {
       setCheckingResult(report);
       message.success('合规检查完成');
       loadHistory();
-    } catch (err) {
-      message.error(`检查失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`检查失败: ${msg}`);
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleResetDocumentReview = () => {
-    setParsedDocument(null);
-    setRichTextContent('');
-    setProductName('');
-    setUploadedFile(null);
-    setCheckingResult(null);
-    setIdentifiedCategory(null);
-    setSelectedCategory('');
-    setSuggestedCategories([]);
-    setCategoryConfidence(0);
   };
 
   const itemColumns = [
@@ -585,8 +576,9 @@ export default function CompliancePage() {
       await complianceApi.deleteComplianceReport(reportId);
       message.success('删除成功');
       loadHistory();
-    } catch (err) {
-      message.error(`删除失败: ${err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`删除失败: ${msg}`);
     }
   };
 

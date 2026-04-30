@@ -35,7 +35,6 @@ function getFrontendPort(): number {
 
 export default defineConfig({
   plugins: [react()],
-  cacheDir: '/tmp/vite_cache',
   server: {
     host: '0.0.0.0',
     port: getFrontendPort(),
