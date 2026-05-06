@@ -360,6 +360,8 @@ export interface ParsedDocument {
   warnings: string[];
   combined_text: string;
   parse_time: string;
+  identified_category: string | null;
+  category_confidence: number;
 }
 
 export interface ComplianceCheckRequest {
@@ -367,16 +369,4 @@ export interface ComplianceCheckRequest {
   product_name?: string;
   parse_id?: string;
   category?: string;
-}
-
-export interface CategoryIdentifyRequest {
-  document_content: string;
-  product_name?: string;
-}
-
-export interface CategoryIdentifyResponse {
-  category: string | null;
-  confidence: number;
-  method: string;
-  suggested_categories: string[];
 }

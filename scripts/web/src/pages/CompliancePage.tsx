@@ -145,9 +145,7 @@ function DocumentReviewPanel({
   onCategoryChange,
   identifiedCategory,
   categoryConfidence,
-  suggestedCategories,
-  onIdentifyCategory,
-  identifyingCategory,
+  validCategories,
 }: {
   document: ParsedDocument | null;
   file: File | null;
@@ -160,9 +158,7 @@ function DocumentReviewPanel({
   onCategoryChange: (v: string) => void;
   identifiedCategory: string | null;
   categoryConfidence: number;
-  suggestedCategories: string[];
-  onIdentifyCategory: () => void;
-  identifyingCategory: boolean;
+  validCategories: string[];
 }) {
   const { token } = theme.useToken();
   const screens = Grid.useBreakpoint();
@@ -349,20 +345,11 @@ function DocumentReviewPanel({
                   placeholder="选择险种类型"
                   value={selectedCategory || undefined}
                   onChange={onCategoryChange}
-                  options={suggestedCategories.length > 0 ? suggestedCategories.map(c => ({ label: c, value: c })) : [
-                    { label: '健康险', value: '健康险' },
-                    { label: '寿险', value: '寿险' },
-                    { label: '意外险', value: '意外险' },
-                    { label: '医疗险', value: '医疗险' },
-                    { label: '重疾险', value: '重疾险' },
-                  ]}
+                  options={validCategories.map(c => ({ label: c, value: c }))}
                 />
-                <Button size="small" onClick={onIdentifyCategory} loading={identifyingCategory}>
-                  自动识别
-                </Button>
                 {identifiedCategory && (
                   <Text type="secondary">
-                    识别结果：{identifiedCategory} (置信度: {(categoryConfidence * 100).toFixed(0)}%)
+                    识别结果：{identifiedCategory} ({Math.round(categoryConfidence * 100)}%)
                   </Text>
                 )}
               </Space>
@@ -397,13 +384,22 @@ export default function CompliancePage() {
 
   const [identifiedCategory, setIdentifiedCategory] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
-  const [suggestedCategories, setSuggestedCategories] = useState<string[]>([]);
   const [categoryConfidence, setCategoryConfidence] = useState<number>(0);
-  const [identifyingCategory, setIdentifyingCategory] = useState(false);
+  const [validCategories, setValidCategories] = useState<string[]>([]);
 
   useEffect(() => {
     loadHistory();
+    loadCategories();
   }, []);
+
+  const loadCategories = async () => {
+    try {
+      const categories = await complianceApi.fetchCategories();
+      setValidCategories(categories);
+    } catch {
+      // 静默失败，使用空列表
+    }
+  };
 
   const loadHistory = async () => {
     setHistoryLoading(true);
@@ -423,6 +419,9 @@ export default function CompliancePage() {
       setParsedDocument(result);
       setProductName(result.file_name);
       setCheckingResult(null);
+      setIdentifiedCategory(result.identified_category);
+      setCategoryConfidence(result.category_confidence);
+      setSelectedCategory(result.identified_category || '');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       message.error(`解析失败: ${msg}`);
@@ -441,6 +440,9 @@ export default function CompliancePage() {
         setParsedDocument(result);
         setProductName('');
         setCheckingResult(null);
+        setIdentifiedCategory(result.identified_category);
+        setCategoryConfidence(result.category_confidence);
+        setSelectedCategory(result.identified_category || '');
       } catch {
         // 静默失败，不显示错误
       } finally {
@@ -449,26 +451,6 @@ export default function CompliancePage() {
     }, 500);
     return () => clearTimeout(timer);
   }, [richTextContent, uploadedFile]);
-
-  const handleIdentifyCategory = async () => {
-    if (!parsedDocument) return;
-    setIdentifyingCategory(true);
-    try {
-      const result = await complianceApi.identifyCategory({
-        document_content: parsedDocument.combined_text,
-        product_name: productName || undefined,
-      });
-      setIdentifiedCategory(result.category);
-      setSelectedCategory(result.category || '');
-      setSuggestedCategories(result.suggested_categories);
-      setCategoryConfidence(result.confidence);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      message.error(`险种识别失败: ${msg}`);
-    } finally {
-      setIdentifyingCategory(false);
-    }
-  };
 
   const handleConfirmReview = async () => {
     if (!parsedDocument) return;
@@ -606,9 +588,7 @@ export default function CompliancePage() {
           onCategoryChange={setSelectedCategory}
           identifiedCategory={identifiedCategory}
           categoryConfidence={categoryConfidence}
-          suggestedCategories={suggestedCategories}
-          onIdentifyCategory={handleIdentifyCategory}
-          identifyingCategory={identifyingCategory}
+          validCategories={validCategories}
         />
         {checkingResult && (() => {
           const docResult = checkingResult.result;
