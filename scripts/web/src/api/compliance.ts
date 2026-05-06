@@ -1,5 +1,5 @@
 import client from './client';
-import type { ComplianceReport, ParsedDocument, CategoryIdentifyRequest, CategoryIdentifyResponse } from '../types';
+import type { ComplianceReport, ParsedDocument } from '../types';
 
 export async function checkDocument(params: {
   document_content: string;
@@ -8,11 +8,6 @@ export async function checkDocument(params: {
   category?: string;
 }): Promise<ComplianceReport> {
   const { data } = await client.post('/api/compliance/check/document', params);
-  return data;
-}
-
-export async function identifyCategory(params: CategoryIdentifyRequest): Promise<CategoryIdentifyResponse> {
-  const { data } = await client.post('/api/compliance/identify-category', params);
   return data;
 }
 
@@ -46,4 +41,9 @@ export async function parseRichText(htmlContent: string, productName?: string): 
     product_name: productName,
   }, { timeout: 180000 });
   return data;
+}
+
+export async function fetchCategories(): Promise<string[]> {
+  const { data } = await client.get('/api/compliance/categories');
+  return data.categories;
 }

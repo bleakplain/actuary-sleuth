@@ -3,16 +3,17 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import mammoth from 'mammoth';
+import DOMPurify from 'dompurify';
 import { Spin, Alert } from 'antd';
 
-// 设置 PDF.js worker
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).toString();
 
 interface DocumentViewerProps {
   file: File | null;
   fileType: string;
-  highlightPage?: number;
-  highlightBbox?: [number, number, number, number];
 }
 
 export function DocumentViewer({ file, fileType }: DocumentViewerProps) {
@@ -22,6 +23,9 @@ export function DocumentViewer({ file, fileType }: DocumentViewerProps) {
   const [error, setError] = useState<string>('');
 
   const scale = 1.2;
+
+  // PDF 文件数据 - 直接传递 File 对象给 react-pdf
+  // react-pdf 会内部处理，无需手动创建 Blob URL
 
   // 处理 DOCX 文件
   useEffect(() => {
@@ -33,10 +37,12 @@ export function DocumentViewer({ file, fileType }: DocumentViewerProps) {
       try {
         const arrayBuffer = e.target?.result as ArrayBuffer;
         const result = await mammoth.convertToHtml({ arrayBuffer });
-        setDocxHtml(result.value);
+        // 使用 DOMPurify 消毒 HTML，防止 XSS
+        const sanitizedHtml = DOMPurify.sanitize(result.value);
+        setDocxHtml(sanitizedHtml);
         setLoading(false);
-      } catch (err) {
-        setError(`DOCX 解析失败: ${err}`);
+      } catch (err: unknown) {
+        setError(`DOCX 解析失败: ${err instanceof Error ? err.message : String(err)}`);
         setLoading(false);
       }
     };
@@ -65,12 +71,11 @@ export function DocumentViewer({ file, fileType }: DocumentViewerProps) {
   }
 
   // PDF 查看 - 显示所有页面
-  if (fileType === '.pdf') {
-    const fileUrl = URL.createObjectURL(file);
+  if (fileType === '.pdf' && file) {
     return (
       <div style={{ height: '100%', overflow: 'auto' }}>
         <Document
-          file={fileUrl}
+          file={file}
           onLoadSuccess={onDocumentLoadSuccess}
           onLoadError={(err) => setError(`PDF 加载失败: ${err}`)}
         >

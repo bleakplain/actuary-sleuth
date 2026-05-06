@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Card, Table, Select, Button, Popconfirm, message, theme, Space } from 'antd';
+import { Card, Table, Select, Button, Popconfirm, message, Space } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
 import { useCacheStore } from '../../stores/cacheStore';
 import type { CacheEntry } from '../../types';
@@ -19,7 +19,6 @@ function formatTTL(ttl: number): string {
 }
 
 export default function CacheEntryList() {
-  const { token } = theme.useToken();
   const {
     entries, entriesTotal, entriesPage, entriesScope, entriesLoading,
     loadEntries, cleanup,

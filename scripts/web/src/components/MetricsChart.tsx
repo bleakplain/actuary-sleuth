@@ -83,7 +83,7 @@ export default function MetricsChart({ metrics, title = '评测指标', k }: Pro
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="name" tick={{ fontSize: 11 }} />
               <YAxis domain={[0, 100]} />
-              <RechartsTooltip formatter={(v) => `${Number(v)}%`} />
+              <RechartsTooltip formatter={(v: unknown) => typeof v === 'number' ? `${v}%` : '-'} />
               <Bar dataKey="value" fill={CATEGORY_COLORS[category] || CHART_COLORS.primary} />
             </BarChart>
           </ResponsiveContainer>
@@ -160,7 +160,7 @@ export function ComparisonChart({ data, title = '指标对比', k }: ComparisonC
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="metric" tick={{ fontSize: 11 }} />
                 <YAxis domain={[0, 100]} />
-                <RechartsTooltip formatter={(v) => `${Number(v)}%`} />
+                <RechartsTooltip formatter={(v: unknown) => typeof v === 'number' ? `${v}%` : '-'} />
                 <Legend />
                 <Bar dataKey="baseline" fill={CHART_COLORS.primary} name="基准" />
                 <Bar dataKey="compare" fill={CHART_COLORS.success} name="对比" />
@@ -264,7 +264,7 @@ export function MultiComparisonChart({ series, k }: MultiComparisonChartProps) {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="metric" tick={{ fontSize: 11 }} />
                 <YAxis domain={[0, 100]} />
-                <RechartsTooltip formatter={(v) => `${Number(v)}%`} />
+                <RechartsTooltip formatter={(v: unknown) => typeof v === 'number' ? `${v}%` : '-'} />
                 <Legend />
                 {series.map((s, i) => (
                   <Bar

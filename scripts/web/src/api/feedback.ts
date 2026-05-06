@@ -51,6 +51,7 @@ export async function verifyBadcase(id: string): Promise<{
   new_sources: Source[];
   new_citations: Citation[];
   new_faithfulness: number | null;
+  new_unverified_claims?: string[];
 }> {
   const { data } = await client.post(`/api/feedback/badcases/${id}/verify`);
   return data;

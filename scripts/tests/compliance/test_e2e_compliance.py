@@ -164,15 +164,15 @@ def test_category_identification(api_client: httpx.Client):
 
     for content, expected_category in test_cases:
         response = api_client.post(
-            "/api/compliance/identify-category",
-            json={"document_content": content}
+            "/api/compliance/parse-rich-text",
+            json={"html_content": f"<p>{content}</p>"}
         )
         assert response.status_code == 200
         result = response.json()
-        assert "category" in result
-        assert "confidence" in result
-        assert "suggested_categories" in result
-        assert len(result["suggested_categories"]) <= 5
+        assert "identified_category" in result
+        assert "category_confidence" in result
+        if result["identified_category"] and result["category_confidence"] > 0.5:
+            assert result["identified_category"] == expected_category
 
 
 def test_report_crud(api_client: httpx.Client):

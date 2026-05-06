@@ -6,13 +6,10 @@ import SourcePanel from './SourcePanel';
 import TracePanel from './TracePanel';
 import { useAskStore } from '../stores/askStore';
 import type { Source } from '../types';
+import { DEFAULT_TRACE_WIDTH, MIN_TRACE_WIDTH, MAX_TRACE_WIDTH } from '../constants/layout';
 
 const { TextArea } = Input;
 const { useBreakpoint } = Grid;
-
-const DEFAULT_TRACE_WIDTH = 520;
-const MIN_TRACE_WIDTH = 360;
-const MAX_TRACE_WIDTH = 800;
 
 export default function ChatPanel() {
   const { token } = theme.useToken();

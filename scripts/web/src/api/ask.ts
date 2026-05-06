@@ -41,6 +41,12 @@ interface ClarifyData {
   original_question: string;
 }
 
+// 获取 API 基础 URL（从 axios client 配置中）
+function getBaseUrl(): string {
+  // 使用相对路径，由 Vite proxy 处理
+  return '';
+}
+
 export function chatSSE(
   req: { question: string; session_id?: string; mode: 'qa' | 'search'; debug?: boolean; skip_clarify?: boolean },
   callbacks: {
@@ -51,13 +57,19 @@ export function chatSSE(
   },
 ): AbortController {
   const controller = new AbortController();
-  fetch('/api/ask/chat', {
+  const baseUrl = getBaseUrl();
+  const url = `${baseUrl}/api/ask/chat`;
+
+  fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
     signal: controller.signal,
   })
     .then(async (res) => {
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
       const reader = res.body?.getReader();
       if (!reader) throw new Error('No response body');
       const decoder = new TextDecoder();
@@ -77,7 +89,8 @@ export function chatSSE(
             currentEvent = line.slice(6).trim();
           } else if (line.startsWith('data:')) {
             try {
-              const data = JSON.parse(line.slice(5).trim());
+              const rawData = line.slice(5).trim();
+              const data = JSON.parse(rawData);
               if (currentEvent === 'clarify') {
                 callbacks.onClarify?.(data);
                 callbacks.onDone({ session_id: data.session_id, citations: [], sources: [] });
@@ -89,15 +102,23 @@ export function chatSSE(
                 callbacks.onError(data.data);
               }
               currentEvent = 'message';
-            } catch {
-              // skip malformed lines
+            } catch (parseErr) {
+              // 记录解析错误以便调试，但不中断流
+              if (import.meta.env.DEV) {
+                console.warn('SSE parse error:', parseErr, 'line:', line.slice(5).trim().slice(0, 50));
+              }
             }
           }
         }
       }
     })
     .catch((err) => {
-      if (err.name !== 'AbortError') callbacks.onError(err.message);
+      if (err.name !== 'AbortError') {
+        callbacks.onError(err.message);
+        if (import.meta.env.DEV) {
+          console.error('SSE error:', err);
+        }
+      }
     });
 
   return controller;

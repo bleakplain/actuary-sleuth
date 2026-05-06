@@ -5,15 +5,15 @@ import uuid
 import asyncio
 import logging
 import tempfile
-from typing import List
+from typing import List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
 
 from api.database import get_connection, list_compliance_reports, get_compliance_report, save_compliance_report
 from api.schemas.compliance import (
     DocumentCheckRequest, ComplianceReportOut,
-    ParsedDocumentResponse, ParsedClause, ParsedDataTable, ParsedSection,
-    RichTextParseRequest, CategoryIdentifyRequest, CategoryIdentifyResponse,
+    ParsedDocumentResponse, ParsedClause, ParsedPremiumTable, ParsedSection,
+    RichTextParseRequest,
 )
 from lib.common.constants import ComplianceConstants
 from lib.compliance.checker import (
@@ -47,7 +47,7 @@ async def check_document(req: DocumentCheckRequest):
     # 险种识别（如果未提供）
     category = req.category
     if not category:
-        category = identify_category(req.document_content, req.product_name or "").category
+        category, _ = await _identify_category_async(req.document_content, req.product_name or "")
 
     # 构建增强的法规上下文（两层检索）
     context, sources_info = build_enhanced_context(category=category)
@@ -93,6 +93,7 @@ async def check_document(req: DocumentCheckRequest):
     )
 
 
+<<<<<<< HEAD
 @router.post("/identify-category", response_model=CategoryIdentifyResponse)
 async def identify_category_endpoint(req: CategoryIdentifyRequest):
     """识别险种类型"""
@@ -113,6 +114,14 @@ async def identify_category_endpoint(req: CategoryIdentifyRequest):
         method=result.method,
         suggested_categories=suggested,
     )
+=======
+
+
+@router.get("/categories")
+async def get_categories():
+    """获取有效的险种类型列表"""
+    return {"categories": ComplianceConstants.VALID_CATEGORIES}
+>>>>>>> origin/master
 
 
 @router.get("/reports", response_model=list[ComplianceReportOut])
@@ -164,8 +173,14 @@ def _build_combined_text(
     return "\n\n".join(parts)
 
 
-def _audit_doc_to_response(audit_doc, file_type: str) -> ParsedDocumentResponse:
-    """将 AuditDocument 转换为 ParsedDocumentResponse"""
+def _audit_doc_to_response(audit_doc, file_type: str,
+                           identified_category: Optional[str] = None,
+                           category_confidence: float = 0.0,
+                           combined_text: Optional[str] = None) -> ParsedDocumentResponse:
+    """将 AuditDocument 转换为 ParsedDocumentResponse
+
+    combined_text: 如已预计算则传入避免重复构建
+    """
     clauses = [
         ParsedClause(number=c.number, title=c.title, text=c.text)
         for c in audit_doc.clauses
@@ -196,9 +211,10 @@ def _audit_doc_to_response(audit_doc, file_type: str) -> ParsedDocumentResponse:
         for c in audit_doc.rider_clauses
     ]
 
-    combined_text = _build_combined_text(
-        clauses, tables, notices, health_disclosures, exclusions, rider_clauses
-    )
+    if combined_text is None:
+        combined_text = _build_combined_text(
+            clauses, tables, notices, health_disclosures, exclusions, rider_clauses
+        )
 
     return ParsedDocumentResponse(
         parse_id=f"pd_{uuid.uuid4().hex[:8]}",
@@ -213,7 +229,21 @@ def _audit_doc_to_response(audit_doc, file_type: str) -> ParsedDocumentResponse:
         warnings=list(audit_doc.warnings),
         combined_text=combined_text,
         parse_time=audit_doc.parse_time.isoformat(),
+        identified_category=identified_category,
+        category_confidence=category_confidence,
     )
+
+
+async def _identify_category_async(combined_text: str, product_name: str) -> Tuple[Optional[str], float]:
+    """异步执行险种识别，失败时返回 None"""
+    try:
+        category, confidence, _ = await asyncio.to_thread(
+            identify_category, combined_text, product_name
+        )
+        return category, confidence
+    except Exception as e:
+        logger.warning(f"险种识别失败: {e}")
+        return None, 0.0
 
 
 @router.post("/parse-file", response_model=ParsedDocumentResponse)
@@ -230,7 +260,12 @@ async def parse_file(file: UploadFile = File(...)):
 
     try:
         audit_doc = parse_product_document(tmp_path)
-        return _audit_doc_to_response(audit_doc, ext)
+        combined_text = _build_combined_text(
+            audit_doc.clauses, audit_doc.tables, audit_doc.notices,
+            audit_doc.health_disclosures, audit_doc.exclusions, audit_doc.rider_clauses
+        )
+        category, confidence = await _identify_category_async(combined_text, audit_doc.file_name)
+        return _audit_doc_to_response(audit_doc, ext, category, confidence, combined_text)
     except DocumentParseError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -343,7 +378,12 @@ async def parse_rich_text(req: RichTextParseRequest):
     try:
         tmp_path = _html_to_docx(req.html_content)
         audit_doc = parse_product_document(tmp_path)
-        response = _audit_doc_to_response(audit_doc, ".html")
+        combined_text = _build_combined_text(
+            audit_doc.clauses, audit_doc.tables, audit_doc.notices,
+            audit_doc.health_disclosures, audit_doc.exclusions, audit_doc.rider_clauses
+        )
+        category, confidence = await _identify_category_async(combined_text, req.product_name or "")
+        response = _audit_doc_to_response(audit_doc, ".html", category, confidence, combined_text)
         if req.product_name:
             response.file_name = req.product_name
         return response

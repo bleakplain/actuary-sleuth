@@ -18,3 +18,8 @@ export const CONTENT_PADDING = 16;
 /** Mobile navigation */
 export const MOBILE_NAV_HEIGHT = 50;
 export const MOBILE_BREAKPOINT = 768;
+
+/** Trace panel widths */
+export const DEFAULT_TRACE_WIDTH = 520;
+export const MIN_TRACE_WIDTH = 360;
+export const MAX_TRACE_WIDTH = 800;

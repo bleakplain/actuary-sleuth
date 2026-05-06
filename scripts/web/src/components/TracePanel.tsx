@@ -233,10 +233,14 @@ function SpanDetails({ span, depth, isMobile }: { span: TraceSpan; depth: number
       {/* retrieval */}
       {cat === 'retrieval' && out && (
         <>
-          {out.per_query_results && out.per_query_results.length > 0 && (
+          {out.per_query_results && Array.isArray(out.per_query_results) && out.per_query_results.length > 0 && (
             <>
               <SectionHeader label="分查询检索明细" />
-              {(out.per_query_results as Array<Record<string, unknown>>).map((qr, qi) => (
+              {(out.per_query_results as Array<Record<string, unknown>>).map((qr, qi) => {
+                const qrObj = qr as Record<string, unknown>;
+                const vectorTop = qrObj.vector_top as Array<Record<string, unknown>> | undefined;
+                const keywordTop = qrObj.keyword_top as Array<Record<string, unknown>> | undefined;
+                return (
                 <div key={qi} style={{
                   marginBottom: 8, padding: '6px 8px', background: 'var(--ant-color-bg-container)',
                   borderRadius: 4, border: '1px solid var(--ant-color-border)',
@@ -247,35 +251,35 @@ function SpanDetails({ span, depth, isMobile }: { span: TraceSpan; depth: number
                       borderRadius: 4, background: qi === 0 ? 'var(--ant-color-primary-bg)' : 'var(--ant-color-border)',
                       color: qi === 0 ? 'var(--ant-color-primary)' : 'var(--ant-color-text-secondary)',
                     }}>
-                      {String(qr.label || `查询 ${qi + 1}`)}
+                      {String(qrObj.label || `查询 ${qi + 1}`)}
                     </span>
                     <span style={{ fontSize: 11, color: 'var(--ant-color-text-tertiary)', fontStyle: 'italic' }}>
-                      {String(qr.query || '')}
+                      {String(qrObj.query || '')}
                     </span>
                   </div>
-                  {qr.vector_top && (qr.vector_top as Array<Record<string, unknown>>).length > 0 && (
+                  {vectorTop && vectorTop.length > 0 && (
                     <div style={{ marginBottom: 4 }}>
                       <span style={{ fontSize: 10, color: 'var(--ant-color-text-quaternary)' }}>
-                        向量检索 ({qr.vector_count} 条)
+                        向量检索 ({String(qrObj.vector_count ?? 0)} 条)
                       </span>
-                      <RetrievalResults results={qr.vector_top as Array<Record<string, unknown>>} />
+                      <RetrievalResults results={vectorTop} />
                     </div>
                   )}
-                  {qr.keyword_top && (qr.keyword_top as Array<Record<string, unknown>>).length > 0 && (
+                  {keywordTop && keywordTop.length > 0 && (
                     <div>
                       <span style={{ fontSize: 10, color: 'var(--ant-color-text-quaternary)' }}>
-                        BM25 检索 ({qr.keyword_count} 条)
+                        BM25 检索 ({String(qrObj.keyword_count ?? 0)} 条)
                       </span>
-                      <RetrievalResults results={qr.keyword_top as Array<Record<string, unknown>>} />
+                      <RetrievalResults results={keywordTop} />
                     </div>
                   )}
                 </div>
-              ))}
+              );})}
             </>
           )}
-          {out.fusion_results && out.fusion_results.length > 0 && (
+          {out.fusion_results && Array.isArray(out.fusion_results) && out.fusion_results.length > 0 && (
             <>
-              <SectionHeader label="RRF 融合结果" count={out.fusion_result_count} shown={out.fusion_results.length} />
+              <SectionHeader label="RRF 融合结果" count={out.fusion_result_count as number | undefined} shown={out.fusion_results.length} />
               <RetrievalResults results={out.fusion_results as Array<Record<string, unknown>>} maxScore={undefined} />
             </>
           )}
@@ -333,16 +337,19 @@ function SpanDetails({ span, depth, isMobile }: { span: TraceSpan; depth: number
       {cat === 'memory' && out && out.memory_count !== undefined && (
         <div style={{ fontSize: 11, color: 'var(--ant-color-text-secondary)', lineHeight: 1.6 }}>
           检索到 <span style={{ fontWeight: 'var(--ant-font-weight-strong, 600)', color: catStyle.color }}>{String(out.memory_count)}</span> 条记忆
-          {out.has_profile ? '，含用户画像' : ''}
-          {out.memories && out.memories.length > 0 && (
-            <div style={{ marginTop: 6 }}>
-              {out.memories.map((m, i) => (
-                <div key={i} style={{ padding: '4px 0', borderBottom: '1px solid var(--ant-color-border-secondary)' }}>
-                  {String(m)}
-                </div>
-              ))}
-            </div>
-          )}
+          {String(out.has_profile) === 'true' ? '，含用户画像' : ''}
+          {Array.isArray(out.memories) && (() => {
+            const mems = out.memories as string[];
+            return mems.length > 0 ? (
+              <div style={{ marginTop: 6 }}>
+                {mems.map((m, i) => (
+                  <div key={i} style={{ padding: '4px 0', borderBottom: '1px solid var(--ant-color-border-secondary)' }}>
+                    {String(m)}
+                  </div>
+                ))}
+              </div>
+            ) : null;
+          })()}
         </div>
       )}
 
@@ -464,11 +471,15 @@ function SpanRow({ span, depth, maxDuration, isMobile }: {
 function buildSpanTree(spans: TraceSpan[]): TraceSpan[] {
   const map = new Map<string, TraceSpan>();
   const roots: TraceSpan[] = [];
+  const seen = new Set<string>();
   for (const s of spans) {
+    if (seen.has(s.span_id)) continue;
+    seen.add(s.span_id);
     map.set(s.span_id, { ...s, children: [] });
   }
   for (const s of spans) {
-    const node = map.get(s.span_id)!;
+    const node = map.get(s.span_id);
+    if (!node) continue;
     if (s.parent_span_id && map.has(s.parent_span_id)) {
       map.get(s.parent_span_id)!.children.push(node);
     } else {

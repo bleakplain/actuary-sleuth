@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { appTheme } from './theme';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import AppLayout from './components/AppLayout';
 import AskPage from './pages/AskPage';
 import KnowledgePage from './pages/KnowledgePage';
@@ -12,20 +13,22 @@ import ObservabilityPage from './pages/ObservabilityPage';
 
 export default function App() {
   return (
-    <ConfigProvider locale={zhCN} theme={appTheme}>
-      <BrowserRouter>
-        <Routes>
-          <Route element={<AppLayout />}>
-            <Route path="/" element={<AskPage />} />
-            <Route path="/ask" element={<AskPage />} />
-            <Route path="/knowledge" element={<KnowledgePage />} />
-            <Route path="/eval" element={<EvalPage />} />
-            <Route path="/compliance" element={<CompliancePage />} />
-            <Route path="/feedback" element={<FeedbackPage />} />
-            <Route path="/observability" element={<ObservabilityPage />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </ConfigProvider>
+    <ErrorBoundary>
+      <ConfigProvider locale={zhCN} theme={appTheme}>
+        <BrowserRouter>
+          <Routes>
+            <Route element={<AppLayout />}>
+              <Route path="/" element={<AskPage />} />
+              <Route path="/ask" element={<AskPage />} />
+              <Route path="/knowledge" element={<KnowledgePage />} />
+              <Route path="/eval" element={<EvalPage />} />
+              <Route path="/compliance" element={<CompliancePage />} />
+              <Route path="/feedback" element={<FeedbackPage />} />
+              <Route path="/observability" element={<ObservabilityPage />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </ConfigProvider>
+    </ErrorBoundary>
   );
 }

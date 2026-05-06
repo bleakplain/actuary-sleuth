@@ -60,20 +60,10 @@ class ParsedDocumentResponse(BaseModel):
     warnings: List[str] = []
     combined_text: str = ""
     parse_time: str = ""
+    identified_category: Optional[str] = None
+    category_confidence: float = 0.0
 
 
 class RichTextParseRequest(BaseModel):
     html_content: str = Field(..., min_length=1, description="富文本 HTML 内容")
     product_name: Optional[str] = Field(None, description="产品名称（可选）")
-
-
-class CategoryIdentifyRequest(BaseModel):
-    document_content: str = Field(..., min_length=1, description="文档内容")
-    product_name: Optional[str] = Field(None, description="产品名称")
-
-
-class CategoryIdentifyResponse(BaseModel):
-    category: Optional[str] = None
-    confidence: float = 0.0
-    method: str = "unknown"
-    suggested_categories: List[str] = []

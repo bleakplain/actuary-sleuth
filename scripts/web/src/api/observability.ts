@@ -1,5 +1,5 @@
 import client from './client';
-import type { TraceListResponse, TraceData, CleanupRequest, CleanupResponse, CacheStats, CacheEntryListResponse, CacheTrendResponse } from '../types';
+import type { TraceListItem, TraceData, CleanupRequest, CleanupResponse, CacheStats, CacheEntryListResponse, CacheTrendResponse } from '../types';
 
 export interface TraceSearchParams {
   trace_id?: string;
@@ -10,6 +10,11 @@ export interface TraceSearchParams {
   end_date?: string;
   page?: number;
   size?: number;
+}
+
+export interface TraceListResponse {
+  items: TraceListItem[];
+  total: number;
 }
 
 export async function fetchTraces(params: TraceSearchParams = {}): Promise<TraceListResponse> {
@@ -34,7 +39,7 @@ export async function cleanupTraces(req: CleanupRequest): Promise<CleanupRespons
   return data;
 }
 
-export async function fetchCacheStats(): Promise<CacheStats | { status: string }> {
+export async function fetchCacheStats(): Promise<CacheStats> {
   const { data } = await client.get('/api/observability/cache/stats');
   return data;
 }
