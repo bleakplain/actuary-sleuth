@@ -2,6 +2,9 @@
 /test_*.py
 /*_test.py
 
+# IDE
+.idea/
+
 # Python
 __pycache__/
 *$py.class
