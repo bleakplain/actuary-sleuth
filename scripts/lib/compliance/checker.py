@@ -13,6 +13,19 @@ from lib.common.regulation_registry import (
 from lib.llm import get_qa_llm
 from lib.rag_engine import get_engine
 
+# ProductCategory 枚举值(全称) → VALID_CATEGORIES(简称) 映射
+_ENUM_TO_CATEGORY: Dict[ProductCategory, str] = {
+    ProductCategory.HEALTH: "健康险",
+    ProductCategory.ACCIDENT: "意外险",
+    ProductCategory.ANNUITY: "年金险",
+    ProductCategory.PROPERTY: "财产险",
+    ProductCategory.LIFE: "寿险",
+    ProductCategory.MOTOR: "财产险",
+    ProductCategory.PENSION: "年金险",
+    ProductCategory.EDUCATION: "年金险",
+    ProductCategory.TRAVEL: "意外险",
+}
+
 logger = logging.getLogger(__name__)
 
 
@@ -168,7 +181,7 @@ def identify_category(document_content: str, product_name: str = "") -> Tuple[Op
     # 方法1: 关键词匹配（快速）
     category_enum = classify_product(product_name, document_content[:1000])
     if category_enum != ProductCategory.OTHER:
-        return category_enum.value, 0.7, "keyword"
+        return _ENUM_TO_CATEGORY.get(category_enum), 0.7, "keyword"
 
     # 方法2: LLM 提取
     try:
@@ -197,7 +210,6 @@ def identify_category(document_content: str, product_name: str = "") -> Tuple[Op
 
 def build_enhanced_context(
     category: Optional[str],
-    top_k: int = 10,
 ) -> Tuple[str, Dict[str, List[str]]]:
     """构建增强的法规上下文
 
@@ -207,7 +219,6 @@ def build_enhanced_context(
 
     Args:
         category: 险种类型
-        top_k: 保留参数（兼容性）
 
     Returns:
         (context_str, sources_info): 法规上下文字符串和来源信息
@@ -267,11 +278,6 @@ def run_compliance_check(prompt: str) -> Dict:
         answer = str(response)
 
         logger.info(f"LLM response length: {len(answer)}, preview: {answer[:200]}")
-
-        # 移除思维链标签
-        if "<tool_call>" in answer and "遭遇" in answer:
-            think_end = answer.rfind("遭遇") + len("遭遇")
-            answer = answer[think_end:].strip()
 
         # 移除 markdown 代码块标记
         if "```json" in answer:

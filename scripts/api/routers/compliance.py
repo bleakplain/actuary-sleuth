@@ -78,8 +78,6 @@ async def check_document(req: DocumentCheckRequest):
     )
 
 
-
-
 @router.get("/categories")
 async def get_categories():
     """获取有效的险种类型列表"""
