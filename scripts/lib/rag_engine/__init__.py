@@ -40,12 +40,6 @@ from .builder import KnowledgeBuilder
 from .retrieval import hybrid_search, vector_search
 from .fusion import reciprocal_rank_fusion
 from .bm25_index import BM25Index
-from .evaluator import RetrievalEvaluator, GenerationEvaluator, RAGEvalReport
-from .eval_dataset import EvalSample, QuestionType, load_eval_dataset, save_eval_dataset
-from .dataset_validator import validate_dataset, QualityAuditReport
-from .eval_rating import interpret_metric, generate_eval_summary
-from .quality_detector import detect_quality, compute_retrieval_relevance, compute_info_completeness
-from .badcase_classifier import classify_badcase, assess_compliance_risk
 from .quality_checker import QualityChecker, QualityReport, QualityIssue
 from .kb_manager import KBManager
 
@@ -131,22 +125,6 @@ __all__ = [
     'vector_search',
     'reciprocal_rank_fusion',
     'BM25Index',
-    'RetrievalEvaluator',
-    'GenerationEvaluator',
-    'RAGEvalReport',
-    'EvalSample',
-    'QuestionType',
-    'load_eval_dataset',
-    'save_eval_dataset',
-    'detect_quality',
-    'compute_retrieval_relevance',
-    'compute_info_completeness',
-    'classify_badcase',
-    'assess_compliance_risk',
-    'validate_dataset',
-    'QualityAuditReport',
-    'interpret_metric',
-    'generate_eval_summary',
     'QualityChecker',
     'QualityReport',
     'QualityIssue',

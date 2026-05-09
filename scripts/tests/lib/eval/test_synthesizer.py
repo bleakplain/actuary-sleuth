@@ -1,7 +1,7 @@
 import pytest
 
-from lib.rag_engine.sample_synthesizer import SynthQA, SynthConfig, SynthResult
-from lib.rag_engine.eval_dataset import EvalSample, QuestionType
+from lib.eval.synthesizer import SynthQA, SynthConfig, SynthResult
+from lib.eval.dataset import EvalSample, QuestionType
 
 
 @pytest.fixture

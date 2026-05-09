@@ -1,5 +1,5 @@
 import pytest
-from lib.rag_engine.badcase_classifier import (
+from lib.eval.badcase import (
     classify_badcase,
     assess_compliance_risk,
 )

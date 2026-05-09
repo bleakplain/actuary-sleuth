@@ -1,4 +1,4 @@
-from lib.rag_engine.eval_dataset import EvalSample, RegulationRef, ReviewStatus, QuestionType
+from lib.eval.dataset import EvalSample, RegulationRef, ReviewStatus, QuestionType
 
 
 def test_regulation_ref_roundtrip():
@@ -130,7 +130,7 @@ def test_unanswerable_type_serialization():
 
 
 def test_load_eval_dataset_from_db():
-    from lib.rag_engine.eval_dataset import load_eval_dataset
+    from lib.eval.dataset import load_eval_dataset
     # DB is empty in tests; load_eval_dataset returns [] when DB has no samples
     loaded = load_eval_dataset()
     assert isinstance(loaded, list)

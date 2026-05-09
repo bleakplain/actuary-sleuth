@@ -87,8 +87,8 @@ async def classify_badcases():
 
 async def classify_pending_badcases() -> Dict[str, int]:
     from api.database import list_feedbacks, update_feedback, get_connection
-    from lib.rag_engine.badcase_classifier import classify_badcase, assess_compliance_risk
-    from lib.rag_engine.quality_detector import detect_quality
+    from lib.eval.badcase import classify_badcase, assess_compliance_risk
+    from lib.eval.quality import detect_quality
     from api.dependencies import get_rag_engine
 
     pending = list_feedbacks(status="pending")
@@ -166,7 +166,7 @@ async def verify_badcase(feedback_id: str):
 
         result = rag_engine.ask(query, include_sources=True)
 
-        from lib.rag_engine.evaluator import compute_faithfulness
+        from lib.eval.evaluator import compute_faithfulness
         contexts = [s.get('content', '') for s in result.get('sources', [])]
         answer = result.get('answer', '')
         faithfulness = compute_faithfulness(contexts, answer) if contexts and answer else None

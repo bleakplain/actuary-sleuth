@@ -9,13 +9,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from lib.rag_engine.eval_dataset import (
+from lib.eval.dataset import (
     EvalSample,
     QuestionType,
     load_eval_dataset,
     save_eval_dataset,
 )
-from lib.rag_engine.evaluator import (
+from lib.eval.evaluator import (
     RetrievalEvaluator,
     GenerationEvaluator,
     RetrievalEvalReport,
@@ -170,7 +170,7 @@ class TestRetrievalMetrics:
 
     def test_is_relevant_single_keyword_wrong_source(self, sample_eval, monkeypatch):
         """单领域关键词 + 错误 source_file 应判为不相关（禁用 embedding 兜底）"""
-        monkeypatch.setattr('lib.rag_engine.evaluator._get_embed_model', lambda: None)
+        monkeypatch.setattr('lib.eval.evaluator._get_embed_model', lambda: None)
         result = {
             'content': '等待期相关内容',
             'law_name': '未知',
@@ -196,7 +196,7 @@ class TestRetrievalMetrics:
         assert _is_relevant(result, sample_eval.evidence_docs, sample_eval.evidence_keywords) is True
 
     def test_is_relevant_no_match(self, irrelevant_results, sample_eval, monkeypatch):
-        monkeypatch.setattr('lib.rag_engine.evaluator._get_embed_model', lambda: None)
+        monkeypatch.setattr('lib.eval.evaluator._get_embed_model', lambda: None)
         assert _is_relevant(irrelevant_results[0], sample_eval.evidence_docs, sample_eval.evidence_keywords) is False
 
     def test_is_relevant_substring_no_false_positive(self):
@@ -216,7 +216,7 @@ class TestRetrievalMetrics:
         def mock_similarity(text_a, text_b):
             return 0.75
         monkeypatch.setattr(
-            'lib.rag_engine.evaluator._compute_embedding_similarity',
+            'lib.eval.evaluator._compute_embedding_similarity',
             mock_similarity,
         )
         result = {
@@ -231,7 +231,7 @@ class TestRetrievalMetrics:
         def mock_similarity(text_a, text_b):
             return 0.4
         monkeypatch.setattr(
-            'lib.rag_engine.evaluator._compute_embedding_similarity',
+            'lib.eval.evaluator._compute_embedding_similarity',
             mock_similarity,
         )
         result = {
@@ -249,7 +249,7 @@ class TestRetrievalMetrics:
             call_count += 1
             return 0.0
         monkeypatch.setattr(
-            'lib.rag_engine.evaluator._compute_embedding_similarity',
+            'lib.eval.evaluator._compute_embedding_similarity',
             mock_similarity,
         )
         result = {
@@ -306,7 +306,7 @@ class TestRetrievalMetrics:
 
     def test_is_relevant_generic_keywords_rejected(self, monkeypatch):
         """泛关键词不单独触发相关（禁用 embedding 兜底）"""
-        monkeypatch.setattr('lib.rag_engine.evaluator._get_embed_model', lambda: None)
+        monkeypatch.setattr('lib.eval.evaluator._get_embed_model', lambda: None)
         result = {
             'content': '保险合同条款规定了相关要求',
             'law_name': '保险法',
@@ -789,7 +789,7 @@ class TestEvaluateRetrieval:
             )
 
     def test_run_with_all_pass(self, mock_rag_engine, sample_eval):
-        from lib.rag_engine.evaluator import evaluate_retrieval
+        from lib.eval.evaluator import evaluate_retrieval
 
         mock_rag_engine.search.return_value = [
             {'content': '等待期规定相关内容', 'law_name': '健康保险产品开发', 'source_file': '05_健康保险产品开发.md', 'score': 0.9},

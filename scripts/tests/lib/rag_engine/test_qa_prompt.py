@@ -172,27 +172,27 @@ class TestUnverifiedClaimsDetection:
 class TestFaithfulness:
 
     def test_high_faithfulness(self):
-        from lib.rag_engine.evaluator import compute_faithfulness
+        from lib.eval.evaluator import compute_faithfulness
         contexts = ["健康保险产品的等待期不得超过90天"]
         answer = "健康保险产品的等待期不得超过90天"
         score = compute_faithfulness(contexts, answer)
         assert score > 0.8
 
     def test_low_faithfulness(self):
-        from lib.rag_engine.evaluator import compute_faithfulness
+        from lib.eval.evaluator import compute_faithfulness
         contexts = ["健康保险产品的等待期不得超过90天"]
         answer = "根据宇宙大爆炸理论，宇宙已有138亿年历史"
         score = compute_faithfulness(contexts, answer)
         assert score < 0.3
 
     def test_empty_inputs(self):
-        from lib.rag_engine.evaluator import compute_faithfulness
+        from lib.eval.evaluator import compute_faithfulness
         assert compute_faithfulness([], "答案") == 0.0
         assert compute_faithfulness(["上下文"], "") == 0.0
 
     def test_semantic_faithfulness_different_numbers(self, monkeypatch):
         """bigram 方法无法区分数字差异，但句子结构相似仍得高分"""
-        from lib.rag_engine.evaluator import compute_faithfulness
+        from lib.eval.evaluator import compute_faithfulness
         contexts = ["健康保险产品的等待期不得超过180天"]
         answer = "健康保险产品的等待期不得超过360天"
         score = compute_faithfulness(contexts, answer)
@@ -203,9 +203,9 @@ class TestFaithfulness:
         """embedding 不可用时回退到 bigram 方式"""
         def mock_get_embed():
             return None
-        monkeypatch.setattr('lib.rag_engine.evaluator._get_embed_model', mock_get_embed)
+        monkeypatch.setattr('lib.eval.evaluator._get_embed_model', mock_get_embed)
 
-        from lib.rag_engine.evaluator import compute_faithfulness
+        from lib.eval.evaluator import compute_faithfulness
         contexts = ["健康保险产品的等待期不得超过90天"]
         answer = "健康保险产品的等待期不得超过90天"
         score = compute_faithfulness(contexts, answer)
@@ -215,9 +215,9 @@ class TestFaithfulness:
         """所有句子太短被过滤时，回退到整体 bigram 重叠度"""
         def mock_get_embed():
             return None
-        monkeypatch.setattr('lib.rag_engine.evaluator._get_embed_model', mock_get_embed)
+        monkeypatch.setattr('lib.eval.evaluator._get_embed_model', mock_get_embed)
 
-        from lib.rag_engine.evaluator import compute_faithfulness
+        from lib.eval.evaluator import compute_faithfulness
         contexts = ["健康保险产品的等待期不得超过90天"]
         answer = "嗯。啊。哦。"
         score = compute_faithfulness(contexts, answer)

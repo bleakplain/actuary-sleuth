@@ -1,4 +1,4 @@
-from lib.rag_engine.eval_rating import interpret_metric, generate_eval_summary, EVAL_THRESHOLDS, MetricThreshold
+from lib.eval.rating import interpret_metric, generate_eval_summary, EVAL_THRESHOLDS, MetricThreshold
 
 
 class TestMetricThreshold:

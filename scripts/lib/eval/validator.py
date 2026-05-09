@@ -1,8 +1,8 @@
 """数据集自动校验工具"""
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Dict
 
-from .eval_dataset import EvalSample, QuestionType
+from .dataset import EvalSample, QuestionType
 
 
 @dataclass(frozen=True)
@@ -35,7 +35,7 @@ class QualityAuditReport:
 
 
 def _check_duplicates(samples: List[EvalSample]) -> List[QualityIssue]:
-    from .tokenizer import tokenize_to_set, jaccard_similarity
+    from lib.rag_engine.tokenizer import tokenize_to_set, jaccard_similarity
 
     token_sets = [tokenize_to_set(s.question) for s in samples]
     issues: List[QualityIssue] = []

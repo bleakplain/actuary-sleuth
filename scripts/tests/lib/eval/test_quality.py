@@ -1,5 +1,5 @@
 import pytest
-from lib.rag_engine.quality_detector import (
+from lib.eval.quality import (
     detect_quality,
     compute_retrieval_relevance,
     compute_info_completeness,

@@ -31,7 +31,7 @@ from api.schemas.ask import ChatRequest, SessionOut, MessageOut
 from lib.config import is_debug
 from lib.llm.trace import cleanup_trace_counters, get_llm_call_count, reset_llm_call_count, trace_span
 from lib.rag_engine.graph import AskState, GraphContext
-from lib.rag_engine.quality_detector import detect_quality
+from lib.eval.quality import detect_quality
 from lib.common.cache import get_cache_manager
 
 logger = logging.getLogger(__name__)

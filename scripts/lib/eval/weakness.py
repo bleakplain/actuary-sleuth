@@ -1,8 +1,8 @@
 """弱点驱动的样本补充建议 — 分析评估结果，识别薄弱领域。"""
 from dataclasses import dataclass
-from typing import List, Dict, Tuple
+from typing import List, Dict
 
-from .dataset_coverage import CoverageReport
+from .coverage import CoverageReport
 
 
 @dataclass(frozen=True)

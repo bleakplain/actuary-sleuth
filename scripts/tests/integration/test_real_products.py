@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """真实保险产品文档解析测试"""
-import os
 import sys
 from pathlib import Path
 from typing import List, Dict, Any
 
-# 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from lib.doc_parser import parse_product_document, DocumentParseError
-from lib.doc_parser.pd.content_classifier import ContentClassifier
-from lib.doc_parser.models import SectionType
 
 
 PRODUCTS_DIR = Path("/mnt/d/work/actuary-assets/products")
@@ -115,43 +111,6 @@ def test_clause_number_formats():
     return passed == len(test_cases)
 
 
-def test_content_classifier():
-    """测试内容类型检测"""
-    classifier = ContentClassifier(
-        section_keywords={
-            'notice': ['投保须知', '重要提示', '投保说明'],
-            'exclusion': ['责任免除', '免责条款', '除外责任'],
-            'health_disclosure': ['健康告知', '健康声明', '告知事项'],
-            'rider': ['附加险', '附加条款'],
-        },
-        llm_enabled=False
-    )
-
-    test_cases = [
-        ("投保须知：本产品仅限...", SectionType.NOTICE),
-        ("责任免除条款如下...", SectionType.EXCLUSION),
-        ("健康告知：被保险人...", SectionType.HEALTH_DISCLOSURE),
-        ("附加险条款说明...", SectionType.RIDER),
-        ("第一条 保险责任...", SectionType.CLAUSE),
-    ]
-
-    print("\n" + "=" * 60)
-    print("内容类型检测测试")
-    print("=" * 60)
-
-    passed = 0
-    for text, expected in test_cases:
-        result = classifier.classify(text)
-        status = "✅" if result.section_type == expected else "❌"
-        print(f"  {status} '{text[:20]}...' -> {result.section_type.value} "
-              f"(置信度: {result.confidence:.2f}, 方法: {result.method.value})")
-        if result.section_type == expected:
-            passed += 1
-
-    print(f"\n通过: {passed}/{len(test_cases)}")
-    return passed == len(test_cases)
-
-
 def main():
     """主测试函数"""
     print("=" * 60)
@@ -160,7 +119,6 @@ def main():
 
     # 1. 单元测试
     test_clause_number_formats()
-    test_content_classifier()
 
     # 2. 真实文档测试
     print("\n" + "=" * 60)

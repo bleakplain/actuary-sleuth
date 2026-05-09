@@ -1,5 +1,5 @@
-from lib.rag_engine.weakness_analyzer import generate_weakness_report
-from lib.rag_engine.dataset_coverage import CoverageReport
+from lib.eval.weakness import generate_weakness_report
+from lib.eval.coverage import CoverageReport
 
 
 class TestWeaknessReport:

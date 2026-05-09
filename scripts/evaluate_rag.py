@@ -24,14 +24,13 @@ script_dir = Path(__file__).parent
 sys.path.insert(0, str(script_dir))
 
 from lib.rag_engine import RAGEngine, RAGConfig
-from lib.rag_engine.evaluator import (
-    RetrievalEvaluator,
+from lib.eval.evaluator import (
     GenerationEvaluator,
     GenerationEvalReport,
     RAGEvalReport,
     evaluate_retrieval,
 )
-from lib.rag_engine.eval_dataset import (
+from lib.eval.dataset import (
     EvalSample,
     QuestionType,
     load_eval_dataset,

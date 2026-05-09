@@ -3,8 +3,8 @@
 """数据集校验器单元测试"""
 import pytest
 
-from lib.rag_engine.dataset_validator import validate_dataset, QualityIssue, QualityAuditReport
-from lib.rag_engine.eval_dataset import EvalSample, QuestionType
+from lib.eval.validator import validate_dataset, QualityIssue, QualityAuditReport
+from lib.eval.dataset import EvalSample, QuestionType
 
 
 def _make_sample(

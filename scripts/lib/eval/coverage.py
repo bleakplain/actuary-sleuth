@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import List, Dict
 from pathlib import Path
 
-from .eval_dataset import EvalSample
+from .dataset import EvalSample
 
 
 def _normalize_doc_name(doc_name: str) -> str:

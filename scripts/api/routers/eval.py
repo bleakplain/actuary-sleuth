@@ -30,12 +30,12 @@ from api.database import (
     get_review_stats,
     is_evaluation_cancelled, cancel_evaluation_run, add_evaluation_error,
 )
-from lib.rag_engine.eval_dataset import EvalSample, ReviewStatus
+from lib.eval.dataset import EvalSample, ReviewStatus
 from lib.rag_engine.config import RAGConfig
 from lib.rag_engine.rag_engine import RAGEngine
-from lib.rag_engine import RetrievalEvaluator, GenerationEvaluator, load_eval_dataset
-from lib.rag_engine.eval_guide import generate_eval_summary
-from lib.rag_engine.dataset_validator import validate_dataset
+from lib.eval import RetrievalEvaluator, GenerationEvaluator, load_eval_dataset
+from lib.eval.rating import generate_eval_summary
+from lib.eval.validator import validate_dataset
 from lib.llm import LLMClientFactory
 
 logger = logging.getLogger(__name__)

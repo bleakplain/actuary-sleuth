@@ -5,7 +5,7 @@ import uuid
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
 
-from .eval_dataset import EvalSample, QuestionType, ReviewStatus, save_eval_dataset, RegulationRef
+from .dataset import EvalSample, QuestionType, ReviewStatus, RegulationRef
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ class SynthQA:
 
     def load_chunks(self) -> List[Dict[str, Any]]:
         import lancedb
-        from .kb_manager import KBManager
+        from lib.rag_engine.kb_manager import KBManager
 
         kb_mgr = KBManager()
         paths = kb_mgr.get_active_paths()

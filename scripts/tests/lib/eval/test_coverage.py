@@ -1,5 +1,5 @@
-from lib.rag_engine.eval_dataset import EvalSample, QuestionType
-from lib.rag_engine.dataset_coverage import compute_coverage, get_kb_doc_names, CoverageReport
+from lib.eval.dataset import EvalSample, QuestionType
+from lib.eval.coverage import compute_coverage, get_kb_doc_names, CoverageReport
 
 
 def _make_sample(id: str, doc: str, topic: str = "健康保险") -> EvalSample:

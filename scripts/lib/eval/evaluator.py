@@ -18,8 +18,8 @@ try:
 except ImportError:
     pd = None  # type: ignore[assignment, misc]
 
-from .eval_dataset import EvalSample, QuestionType
-from .tokenizer import tokenize_chinese
+from .dataset import EvalSample, QuestionType
+from lib.rag_engine.tokenizer import tokenize_chinese
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +30,10 @@ _ANSWER_SENTENCE_PATTERN = re.compile(r'[^。！？\n]+[。！？\n]?')
 _SEMANTIC_RELEVANCE_THRESHOLD = 0.65
 _SENTENCE_COVERAGE_THRESHOLD = 0.4
 
-# 泛化关键词：过于通用的词汇，不适合作为证据关键词
 GENERIC_KEYWORDS = frozenset([
     '保险', '规定', '条款', '要求', '情况', '内容', '范围', '方式',
     '条件', '标准', '原则', '办法', '措施', '制度', '程序', '责任',
-    '义务', '权利', '期限', '金额', '比例', '比例', '费用', '金额',
+    '义务', '权利', '期限', '金额', '比例', '费用',
     '问题', '产品', '合同', '公司',
 ])
 
