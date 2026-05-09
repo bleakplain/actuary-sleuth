@@ -39,14 +39,12 @@ function formatDuration(ms: number): string {
 
 function formatTimestamp(ts: number): string {
   if (!ts) return '-';
-  const d = new Date(ts * 1000);
-  const mo = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  const h = String(d.getHours()).padStart(2, '0');
-  const m = String(d.getMinutes()).padStart(2, '0');
-  const s = String(d.getSeconds()).padStart(2, '0');
-  const ms = String(d.getMilliseconds()).padStart(3, '0');
-  return `${mo}-${dd} ${h}:${m}:${s}.${ms}`;
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    fractionalSecondDigits: 3,
+    hour12: false,
+  }).format(new Date(ts * 1000));
 }
 
 /* ── collapsible text block ── */
@@ -57,12 +55,16 @@ function CollapsibleText({ text, label, bg }: { text: string; label: string; bg?
 
   const lines = text.split('\n');
   const isLong = lines.length > 6 || text.length > 500;
-  const preview = isLong ? lines.slice(0, 6).join('\n') + '\n...' : text;
+  const preview = isLong ? lines.slice(0, 6).join('\n') + '\n…' : text;
 
   return (
     <div style={{ marginTop: 8 }}>
       <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded); } }}
         style={{
           fontSize: 11, color: 'var(--ant-color-text-tertiary)', cursor: 'pointer',
           display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3,
@@ -130,13 +132,13 @@ function RetrievalResults({ results, maxScore }: {
         );
       })}
       {isLong && !expanded && (
-        <div onClick={() => setExpanded(true)}
+        <div onClick={() => setExpanded(true)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(true); } }}
           style={{ textAlign: 'center', padding: '4px 0', cursor: 'pointer', fontSize: 11, color: 'var(--ant-color-primary)' }}>
           展开剩余 {hidden} 条
         </div>
       )}
       {isLong && expanded && (
-        <div onClick={() => setExpanded(false)}
+        <div onClick={() => setExpanded(false)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(false); } }}
           style={{ textAlign: 'center', padding: '4px 0', cursor: 'pointer', fontSize: 11, color: 'var(--ant-color-text-quaternary)' }}>
           收起
         </div>
@@ -387,7 +389,11 @@ function SpanRow({ span, depth, maxDuration, isMobile }: {
   return (
     <div>
       <div
+        role="treeitem"
+        tabIndex={0}
+        aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); setExpanded(!expanded); } }}
         style={{
           display: 'flex', alignItems: 'center', gap: isMobile ? 4 : 8,
           padding: isMobile ? '8px 8px' : '5px 12px',
@@ -510,7 +516,7 @@ export default function TracePanel({ trace, loading }: Props) {
   if (loading) {
     return (
       <div className="empty-state">
-        <span style={{ fontSize: 13 }}>加载中...</span>
+        <span style={{ fontSize: 13 }}>加载中…</span>
       </div>
     );
   }

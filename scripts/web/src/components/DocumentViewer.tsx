@@ -4,7 +4,7 @@ import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import mammoth from 'mammoth';
 import DOMPurify from 'dompurify';
-import { Spin, Alert } from 'antd';
+import { Skeleton, Alert } from 'antd';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -63,7 +63,7 @@ export function DocumentViewer({ file, fileType }: DocumentViewerProps) {
   }
 
   if (loading) {
-    return <Spin tip="加载文档..." />;
+    return <Skeleton active paragraph={{ rows: 6 }} />;
   }
 
   if (error) {

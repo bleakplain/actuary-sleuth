@@ -67,7 +67,7 @@ export default function MetricsChart({ metrics, title = '评测指标', k }: Pro
                   title={meta.label}
                   value={(item.value * 100).toFixed(1)}
                   suffix="%"
-                  valueStyle={{ fontSize: 16 }}
+                  valueStyle={{ fontSize: 16, fontVariantNumeric: 'tabular-nums' }}
                 />
               </Tooltip>
             </Col>

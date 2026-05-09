@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import {
   Card, Input, Button, Table, Tag, Typography, theme,
   message, Tabs, Space, Descriptions, Popconfirm, Drawer, Grid,
@@ -207,7 +208,7 @@ function DocumentReviewPanel({
         </div>
         <div style={{ whiteSpace: 'pre-wrap', fontSize: token.fontSizeSM, color: token.colorTextSecondary, marginTop: 8 }}>
           {displayContent}
-          {hasLongContent && !isExpanded && '...'}
+          {hasLongContent && !isExpanded && '…'}
         </div>
       </div>
     );
@@ -237,7 +238,9 @@ function DocumentReviewPanel({
   ) : (
     <TextArea
       style={{ height: '100%', resize: 'none', border: 'none', borderRadius: 0 }}
-      placeholder="请输入或粘贴保险条款文档内容..."
+      placeholder="请输入或粘贴保险条款文档内容…"
+      aria-label="保险条款文档内容"
+      spellCheck
       value={richText}
       onChange={(e) => onRichTextChange(e.target.value)}
     />
@@ -380,6 +383,8 @@ export default function CompliancePage() {
   const [parsedDocument, setParsedDocument] = useState<ParsedDocument | null>(null);
   const [productName, setProductName] = useState('');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+
+  useUnsavedChanges(uploadedFile !== null);
   const [checkingResult, setCheckingResult] = useState<ComplianceReport | null>(null);
 
   const [identifiedCategory, setIdentifiedCategory] = useState<string | null>(null);
@@ -573,7 +578,7 @@ export default function CompliancePage() {
 
   const renderDocumentReviewTab = () => {
     return (
-      <div>
+      <div aria-live="polite">
         <DocumentReviewPanel
           document={parsedDocument}
           file={uploadedFile}
@@ -707,7 +712,7 @@ export default function CompliancePage() {
                   {
                     title: '操作', key: 'action', width: 80,
                     render: (_: unknown, record: ComplianceReport) => (
-                      <Popconfirm title="确定删除该检查记录？" onConfirm={(e) => { e?.stopPropagation(); handleDeleteReport(record.id); }}>
+                      <Popconfirm title="确定删除该检查记录？此操作不可恢复。" onConfirm={(e) => { e?.stopPropagation(); handleDeleteReport(record.id); }}>
                         <Button type="text" danger size="small" icon={<DeleteOutlined />}
                           onClick={(e) => e.stopPropagation()} />
                       </Popconfirm>

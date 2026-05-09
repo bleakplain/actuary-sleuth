@@ -27,10 +27,12 @@ export default function CopyBtn({ text }: { text: string }) {
   }, [text]);
 
   return (
-    <CopyOutlined
-      style={{ fontSize: 11, color: token.colorBorder, cursor: 'pointer', marginLeft: 4 }}
+    <button
       onClick={handleCopy}
-      title={copied ? '已复制' : '复制'}
-    />
+      aria-label={copied ? '已复制' : '复制'}
+      style={{ fontSize: 11, color: token.colorBorder, cursor: 'pointer', marginLeft: 4, background: 'none', border: 'none', padding: 0 }}
+    >
+      <CopyOutlined />
+    </button>
   );
 }

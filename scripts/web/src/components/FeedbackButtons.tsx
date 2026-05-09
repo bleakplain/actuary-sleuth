@@ -55,7 +55,7 @@ export default function FeedbackButtons({ messageId, existingFeedback }: Props) 
 
   if (feedback === 'up' && !showReason) {
     return (
-      <Button type="text" size="small" icon={<LikeOutlined />} style={{ color: token.colorSuccess }}>
+      <Button type="text" size="small" icon={<LikeOutlined />} style={{ color: token.colorSuccess }} aria-pressed="true">
         已标记有用
       </Button>
     );
@@ -70,6 +70,7 @@ export default function FeedbackButtons({ messageId, existingFeedback }: Props) 
           icon={<LikeOutlined />}
           onClick={handleUpClick}
           disabled={submitting}
+          aria-pressed={feedback === 'up'}
           style={{ color: feedback === 'up' ? token.colorSuccess : undefined }}
         >
           有用
@@ -80,6 +81,7 @@ export default function FeedbackButtons({ messageId, existingFeedback }: Props) 
           icon={<DislikeOutlined />}
           onClick={handleDownClick}
           disabled={submitting}
+          aria-pressed={feedback === 'down'}
           style={{ color: feedback === 'down' ? token.colorError : undefined }}
         >
           有问题

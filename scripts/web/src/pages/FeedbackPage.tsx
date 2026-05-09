@@ -159,12 +159,12 @@ export default function FeedbackPage() {
             } catch { message.error('验证失败'); }
           }}>验证</Button>
           {record.status === 'pending' && (
-            <Popconfirm title="标记为已驳回？" onConfirm={() => updateBadcase(record.id, { status: 'rejected' })}>
+            <Popconfirm title="标记为已驳回？可随时重新更改状态。" onConfirm={() => updateBadcase(record.id, { status: 'rejected' })}>
               <Button size="small" danger>驳回</Button>
             </Popconfirm>
           )}
           {record.status === 'classified' && (
-            <Popconfirm title="标记为已修复？" onConfirm={() => updateBadcase(record.id, { status: 'fixed' })}>
+            <Popconfirm title="标记为已修复？可随时重新更改状态。" onConfirm={() => updateBadcase(record.id, { status: 'fixed' })}>
               <Button size="small" type="primary">已修复</Button>
             </Popconfirm>
           )}

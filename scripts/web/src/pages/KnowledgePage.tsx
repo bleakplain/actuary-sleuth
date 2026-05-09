@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Card, Table, Button, Space, Modal, Typography, message, Progress, Statistic, Row, Col, Popconfirm, Descriptions, Tag, Spin, Drawer, Input, Badge, Tree, Tabs, theme, Grid } from 'antd';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { Card, Table, Button, Space, Modal, Typography, message, Progress, Statistic, Row, Col, Popconfirm, Descriptions, Tag, Skeleton, Drawer, Input, Badge, Tree, Tabs, theme, Grid } from 'antd';
 import { DatabaseOutlined, ReloadOutlined, ImportOutlined, PlusOutlined, UnorderedListOutlined, HistoryOutlined, DeleteOutlined, CheckCircleOutlined, FolderOutlined, FileOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -53,6 +54,8 @@ export default function KnowledgePage() {
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
+
+  useUnsavedChanges(editing && editContent !== '');
   const [highlightLines, setHighlightLines] = useState<{ start: number; end: number } | null>(null);
   const sourceRef = useRef<HTMLDivElement>(null);
 
@@ -153,7 +156,7 @@ export default function KnowledgePage() {
       setTaskId(task_id);
       setTaskStatus('pending');
       setTaskProgress('');
-      message.info('开始导入...');
+      message.info('开始导入…');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       message.error(`导入失败: ${msg}`);
@@ -168,7 +171,7 @@ export default function KnowledgePage() {
       setTaskProgress('');
       setCreateVersionModalOpen(false);
       setVersionDescription('');
-      message.info('开始创建新版本...');
+      message.info('开始创建新版本…');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       message.error(`创建版本失败: ${msg}`);
@@ -428,10 +431,10 @@ export default function KnowledgePage() {
                 <Progress
                   percent={percent}
                   status={percent === undefined ? 'active' : undefined}
-                  format={percent !== undefined ? undefined : () => taskProgress || '处理中...'}
+                  format={percent !== undefined ? undefined : () => taskProgress || '处理中…'}
                 />
                 <Text type="secondary">
-                  {taskStatus === 'pending' ? '等待中...' : taskProgress || '处理中...'}
+                  {taskStatus === 'pending' ? '等待中…' : taskProgress || '处理中…'}
                 </Text>
               </>
             );
@@ -542,7 +545,7 @@ export default function KnowledgePage() {
         styles={{ body: { padding: 0, height: isMobile ? '100vh' : 'calc(100vh - var(--header-height) - 56px)' } }}
       >
         {chunksLoading ? (
-          <div className="empty-state"><Spin size="large" /></div>
+          <div className="empty-state"><Skeleton active paragraph={{ rows: 6 }} /></div>
         ) : isMobile ? (
           <Tabs
             size="small"
@@ -629,7 +632,7 @@ export default function KnowledgePage() {
                           { title: '条款号', dataIndex: 'article_number', key: 'article_number', width: 90, ellipsis: true, render: (v: string) => v === '未知' ? <Text type="secondary">{v}</Text> : v },
                           { title: '分类', dataIndex: 'category', key: 'category', width: 80, ellipsis: true, render: (v: string) => <Tag>{v}</Tag> },
                           { title: '字数', dataIndex: 'text_length', key: 'text_length', width: 60 },
-                          { title: '内容摘要', key: 'preview', render: (_: unknown, r: ChunkItem) => <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>{r.text.slice(0, 80)}...</Text> },
+                          { title: '内容摘要', key: 'preview', render: (_: unknown, r: ChunkItem) => <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>{r.text.slice(0, 80)}…</Text> },
                         ]}
                       />
                     )}
@@ -716,7 +719,7 @@ export default function KnowledgePage() {
                       { title: '条款号', dataIndex: 'article_number', key: 'article_number', width: 90, ellipsis: true, render: (v: string) => v === '未知' ? <Text type="secondary">{v}</Text> : v },
                       { title: '分类', dataIndex: 'category', key: 'category', width: 80, ellipsis: true, render: (v: string) => <Tag>{v}</Tag> },
                       { title: '字数', dataIndex: 'text_length', key: 'text_length', width: 60 },
-                      { title: '内容摘要', key: 'preview', render: (_: unknown, r: ChunkItem) => <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>{r.text.slice(0, 80)}...</Text> },
+                      { title: '内容摘要', key: 'preview', render: (_: unknown, r: ChunkItem) => <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>{r.text.slice(0, 80)}…</Text> },
                     ]}
                   />
                 </div>
@@ -741,6 +744,7 @@ export default function KnowledgePage() {
         </p>
         <Input.TextArea
           placeholder="版本描述（可选，如：优化分块策略）"
+          aria-label="版本描述"
           value={versionDescription}
           onChange={e => setVersionDescription(e.target.value)}
           rows={2}
@@ -807,7 +811,7 @@ export default function KnowledgePage() {
                 <Space size="small">
                   {!record.active && (
                     <Popconfirm
-                      title={`切换到 ${record.version_id}？`}
+                      title={`切换到 ${record.version_id}？当前版本将被停用，可随时重新激活。`}
                       onConfirm={() => handleActivateVersion(record.version_id)}
                     >
                       <Button type="link" size="small" icon={<CheckCircleOutlined />}>激活</Button>
@@ -815,7 +819,7 @@ export default function KnowledgePage() {
                   )}
                   {!record.active && (
                     <Popconfirm
-                      title={`确定删除 ${record.version_id}？此操作不可恢复。`}
+                      title={`确定删除 ${record.version_id}？此操作不可恢复，关联数据将永久丢失。`}
                       onConfirm={() => handleDeleteVersion(record.version_id)}
                     >
                       <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
