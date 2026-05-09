@@ -93,35 +93,10 @@ async def check_document(req: DocumentCheckRequest):
     )
 
 
-<<<<<<< HEAD
-@router.post("/identify-category", response_model=CategoryIdentifyResponse)
-async def identify_category_endpoint(req: CategoryIdentifyRequest):
-    """识别险种类型"""
-    result = identify_category(
-        req.document_content,
-        req.product_name or "",
-    )
-
-    suggested = []
-    if result.category:
-        suggested.append(result.category)
-    suggested.extend(ComplianceConstants.VALID_CATEGORIES[:5])
-    suggested = list(dict.fromkeys(suggested))[:5]
-
-    return CategoryIdentifyResponse(
-        category=result.category,
-        confidence=result.confidence,
-        method=result.method,
-        suggested_categories=suggested,
-    )
-=======
-
-
 @router.get("/categories")
 async def get_categories():
     """获取有效的险种类型列表"""
     return {"categories": ComplianceConstants.VALID_CATEGORIES}
->>>>>>> origin/master
 
 
 @router.get("/reports", response_model=list[ComplianceReportOut])

@@ -5,19 +5,7 @@ from pydantic import BaseModel, Field
 class DocumentCheckRequest(BaseModel):
     document_content: str = Field(..., min_length=1, description="条款文档内容")
     product_name: Optional[str] = Field(None, description="产品名称（可选）")
-    parse_id: Optional[str] = Field(None, description="解析结果ID，用于遗漏检测")
     category: Optional[str] = Field(None, description="险种类型（可选，LLM自动识别或用户选择）")
-
-
-class ComplianceItem(BaseModel):
-    clause_number: str = ""
-    param: str
-    value: Optional[object] = None
-    requirement: str = ""
-    status: str = Field(..., pattern="^(compliant|non_compliant|attention)$")
-    source: Optional[str] = None
-    source_excerpt: Optional[str] = None
-    suggestion: Optional[str] = None
 
 
 class ComplianceReportOut(BaseModel):

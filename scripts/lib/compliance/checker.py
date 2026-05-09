@@ -10,8 +10,21 @@ from lib.common.regulation_registry import (
     get_general_regulations,
     VALID_CATEGORIES,
 )
-from lib.llm import get_qa_llm
+from lib.llm import get_audit_llm
 from lib.rag_engine import get_engine
+
+# ProductCategory 枚举值(全称) → VALID_CATEGORIES(简称) 映射
+_ENUM_TO_CATEGORY: Dict[ProductCategory, str] = {
+    ProductCategory.HEALTH: "健康险",
+    ProductCategory.ACCIDENT: "意外险",
+    ProductCategory.ANNUITY: "年金险",
+    ProductCategory.PROPERTY: "财产险",
+    ProductCategory.LIFE: "寿险",
+    ProductCategory.MOTOR: "财产险",
+    ProductCategory.PENSION: "年金险",
+    ProductCategory.EDUCATION: "年金险",
+    ProductCategory.TRAVEL: "意外险",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +127,7 @@ def check_negative_list(document_content: str) -> Tuple[List[Dict], str]:
 """
 
     try:
-        llm = get_qa_llm()
+        llm = get_audit_llm()
         response = llm.chat([{"role": "user", "content": prompt}])
         answer = str(response).strip()
 
@@ -170,10 +183,12 @@ def identify_category(document_content: str, product_name: str = "") -> Category
     """
     category_enum = classify_product(product_name, document_content[:1000])
     if category_enum != ProductCategory.OTHER:
-        return CategoryResult(category_enum.value, 0.7, "keyword")
+        mapped = _ENUM_TO_CATEGORY.get(category_enum)
+        if mapped:
+            return CategoryResult(mapped, 0.7, "keyword")
 
     try:
-        llm = get_qa_llm()
+        llm = get_audit_llm()
         prompt = f"""请从以下保险产品文档中识别险种类型。
 
 可选险种类型：健康险、医疗险、重疾险、寿险、意外险、年金险、财产险
@@ -198,7 +213,6 @@ def identify_category(document_content: str, product_name: str = "") -> Category
 
 def build_enhanced_context(
     category: Optional[str],
-    top_k: int = 10,
 ) -> Tuple[str, Dict[str, List[str]]]:
     """构建增强的法规上下文
 
@@ -208,7 +222,6 @@ def build_enhanced_context(
 
     Args:
         category: 险种类型
-        top_k: 保留参数（兼容性）
 
     Returns:
         (context_str, sources_info): 法规上下文字符串和来源信息
@@ -261,7 +274,7 @@ def run_compliance_check(prompt: str) -> Dict:
         检查结果字典
     """
     try:
-        llm = get_qa_llm()
+        llm = get_audit_llm()
 
         logger.info(f"Prompt length: {len(prompt)}")
         response = llm.chat([{"role": "user", "content": prompt}])
@@ -269,12 +282,16 @@ def run_compliance_check(prompt: str) -> Dict:
 
         logger.info(f"LLM response length: {len(answer)}, preview: {answer[:200]}")
 
+<<<<<<< HEAD
         # 层级 1: 移除思维链标签
         if "<tool_call>" in answer and "遭遇" in answer:
             think_end = answer.rfind("遭遇") + len("遭遇")
             answer = answer[think_end:].strip()
 
         # 层级 2: 移除 markdown 代码块标记
+=======
+        # 移除 markdown 代码块标记
+>>>>>>> origin/master
         if "```json" in answer:
             answer = answer.split("```json")[1].split("```")[0]
         elif "```" in answer:

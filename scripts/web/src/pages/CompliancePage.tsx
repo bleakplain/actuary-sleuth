@@ -394,10 +394,9 @@ export default function CompliancePage() {
 
   const loadCategories = async () => {
     try {
-      const categories = await complianceApi.fetchCategories();
-      setValidCategories(categories);
+      setValidCategories(await complianceApi.fetchCategories());
     } catch {
-      // 静默失败，使用空列表
+      // 降级为空列表
     }
   };
 
@@ -459,7 +458,6 @@ export default function CompliancePage() {
       const report = await complianceApi.checkDocument({
         document_content: parsedDocument.combined_text,
         product_name: productName || parsedDocument.file_name || undefined,
-        parse_id: parsedDocument.parse_id,
         category: selectedCategory || undefined,
       });
       setCheckingResult(report);

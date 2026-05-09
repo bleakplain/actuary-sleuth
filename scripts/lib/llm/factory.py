@@ -5,7 +5,6 @@
 from .base import BaseLLMClient
 from .zhipu import ZhipuClient
 from .ollama import OllamaClient
-from .minimax import MinimaxClient
 from lib.config import (
     get_qa_llm_config, get_audit_llm_config, get_eval_llm_config,
     get_embed_llm_config, get_name_parser_llm_config, get_ocr_llm_config,

@@ -367,6 +367,5 @@ export interface ParsedDocument {
 export interface ComplianceCheckRequest {
   document_content: string;
   product_name?: string;
-  parse_id?: string;
   category?: string;
 }

@@ -4,7 +4,6 @@ import type { ComplianceReport, ParsedDocument } from '../types';
 export async function checkDocument(params: {
   document_content: string;
   product_name?: string;
-  parse_id?: string;
   category?: string;
 }): Promise<ComplianceReport> {
   const { data } = await client.post('/api/compliance/check/document', params);
