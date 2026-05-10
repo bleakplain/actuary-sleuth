@@ -3,6 +3,7 @@
 import uuid
 import asyncio
 import logging
+from dataclasses import replace
 from typing import Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -31,7 +32,7 @@ from api.database import (
     is_evaluation_cancelled, cancel_evaluation_run, add_evaluation_error,
 )
 from lib.eval.dataset import EvalSample, ReviewStatus
-from lib.rag_engine.config import RAGConfig
+from lib.rag_engine.config import RAGConfig, RetrievalConfig, RerankConfig, GenerationConfig, ChunkConfig
 from lib.rag_engine.rag_engine import RAGEngine
 from lib.eval import RetrievalEvaluator, GenerationEvaluator, load_eval_dataset
 from lib.eval.rating import generate_eval_summary
@@ -154,11 +155,19 @@ def _build_eval_record(config: RAGConfig, mode: str, total_samples: int,
 
 
 def _load_config(config_id: int):
-    """从 eval_configs 表加载 RAGConfig。"""
+    """从 KBManager 加载基础配置，用 eval_configs 覆盖子配置。"""
     cfg = get_eval_config(config_id)
     if cfg is None:
         raise ValueError(f"配置不存在: {config_id}")
-    config = RAGConfig.from_dict(cfg["config_json"])
+    from lib.rag_engine.kb_manager import KBManager
+    base_config = KBManager().load_kb()
+    overrides = cfg["config_json"]
+    config = replace(base_config,
+        retrieval=RetrievalConfig(**overrides.get("retrieval", {})),
+        rerank=RerankConfig(**overrides.get("rerank", {})),
+        generation=GenerationConfig(**overrides.get("generation", {})),
+        chunking=ChunkConfig(**overrides.get("chunking", {})),
+    )
     return config, cfg["version"]
 
 
@@ -201,10 +210,6 @@ async def create_evaluation(req: EvaluationRequest):
             )
             update_evaluation_status(evaluation_id, "running", progress=0, total=total)
 
-            from lib.rag_engine.kb_manager import KBManager
-            kb_config = KBManager().load_kb()
-            config.vector_db_path = kb_config.vector_db_path
-
             eval_engine = RAGEngine(config)
             if not eval_engine.initialize():
                 raise RuntimeError("评测引擎初始化失败")
@@ -244,7 +249,7 @@ def _run_eval_sync(
             update_evaluation_status(evaluation_id, "running", progress=0, total=total, phase="retrieval")
             ret_eval = RetrievalEvaluator(eval_engine)
             ret_report, ret_details = ret_eval.evaluate_batch(
-                samples, top_k=config.rerank.rerank_top_k,
+                samples, top_k=config.rerank.top_k,
                 on_progress=_make_progress_callback("retrieval"),
             )
             for idx, detail in enumerate(ret_details):

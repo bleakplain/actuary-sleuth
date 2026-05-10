@@ -29,11 +29,11 @@ class TestInsertEvalConfig:
         assert cid == 2  # default config is id=1 so new one is id=2
 
     def test_stores_config_json(self, db):
-        config = {"retrieval": {"vector_top_k": 15}, "rerank": {"enable_rerank": False}}
+        config = {"retrieval": {"vector_top_k": 15}, "rerank": {"enable": False}}
         cid, _ = insert_eval_config("测试", config)
         result = get_eval_config(cid)
         assert result["config_json"]["retrieval"]["vector_top_k"] == 15
-        assert result["config_json"]["rerank"]["enable_rerank"] is False
+        assert result["config_json"]["rerank"]["enable"] is False
 
     def test_description_defaults_empty(self, db):
         cid, _ = insert_eval_config("", {})
