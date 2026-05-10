@@ -9,9 +9,10 @@ const RANGE_OPTIONS = [
   { label: '7天', value: 168 },
 ];
 
+const timeFmt = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
 function formatTime(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return timeFmt.format(new Date(iso));
 }
 
 export default function CacheTrendChart() {

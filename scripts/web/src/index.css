@@ -158,10 +158,13 @@ body {
   top: -40px;
   left: 0;
   padding: 8px 16px;
-  background: var(--ant-color-primary);
-  color: #fff;
+  background: var(--ant-color-bg-elevated);
+  color: var(--ant-color-primary);
+  border: 2px solid var(--ant-color-primary);
   z-index: 9999;
   transition: top 0.2s;
+  font-weight: 600;
+  text-decoration: none;
 }
 .skip-link:focus {
   top: 0;
