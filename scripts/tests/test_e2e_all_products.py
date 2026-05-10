@@ -8,7 +8,7 @@ from typing import List, Optional
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from lib.compliance.checker import identify_category, check_negative_list, build_enhanced_context, run_compliance_check, CheckResult
+from lib.compliance.checker import identify_category, check_negative_list, load_audit_sources, format_context_for_llm, run_compliance_check, CheckResult
 from lib.doc_parser import parse_product_document, DocumentParseError
 from lib.rag_engine import init_engine
 from lib.compliance.prompts import COMPLIANCE_PROMPT_DOCUMENT
@@ -52,18 +52,19 @@ def test_product(file_path: Path) -> TestResult:
         category_result = identify_category(doc_content[:5000], product_name=file_name)
 
         # 构建法规上下文并检查
-        context, sources_info, _sources_detail = build_enhanced_context(category=category_result.category)
+        sources = load_audit_sources(category=category_result.category)
+        context = format_context_for_llm(sources)
         truncated = doc_content[:150000]
         prompt = COMPLIANCE_PROMPT_DOCUMENT.format(
             document_content=truncated,
             context=context,
         )
-        result_data = run_compliance_check(prompt)
+        result_data = run_compliance_check(prompt, num_sources=len(sources))
         items = result_data.get("items", [])
         summary = result_data.get("summary", {})
 
         # 负面清单检查
-        negative_items, negative_result = check_negative_list(doc_content)
+        negative_items, negative_result, _negative_sources = check_negative_list(doc_content)
         if negative_items:
             items.extend(negative_items)
             summary["non_compliant"] = summary.get("non_compliant", 0) + len(negative_items)
