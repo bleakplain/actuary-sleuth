@@ -42,7 +42,7 @@ export class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div style={{ padding: 48, display: 'flex', justifyContent: 'center' }}>
+        <div role="alert" style={{ padding: 48, display: 'flex', justifyContent: 'center' }}>
           <Result
             status="error"
             title="页面出错了"

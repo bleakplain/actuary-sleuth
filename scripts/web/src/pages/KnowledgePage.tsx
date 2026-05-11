@@ -625,6 +625,8 @@ export default function KnowledgePage() {
                         scroll={{ x: 'max-content' }}
                         onRow={(record) => ({
                           onClick: () => { setSelectedChunk(record); locateInSource(record.text); },
+                          tabIndex: 0,
+                          onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedChunk(record); locateInSource(record.text); } },
                           style: { cursor: 'pointer' },
                         })}
                         columns={[

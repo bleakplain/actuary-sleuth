@@ -1231,6 +1231,8 @@ export default function EvalPage() {
                         scroll={{ x: 750 }}
                         onRow={(sample) => ({
                           onClick: () => setDrawerSample(sample),
+                          tabIndex: 0,
+                          onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDrawerSample(sample); } },
                           style: { cursor: 'pointer' },
                         })}
                       />
@@ -1338,6 +1340,8 @@ export default function EvalPage() {
                         pagination={false}
                         onRow={(cfg) => ({
                           onClick: () => viewConfig(cfg),
+                          tabIndex: 0,
+                          onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); viewConfig(cfg); } },
                           style: {
                             cursor: 'pointer',
                             background: viewingConfig?.id === cfg.id ? token.colorPrimaryBg : undefined,
@@ -1606,6 +1610,8 @@ export default function EvalPage() {
                             pagination={false}
                             onRow={(evaluation) => ({
                               onClick: () => viewEvaluation(evaluation),
+                              tabIndex: 0,
+                              onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); viewEvaluation(evaluation); } },
                               style: {
                                 cursor: 'pointer',
                                 background: selectedEvaluation?.id === evaluation.id ? token.colorPrimaryBg : undefined,

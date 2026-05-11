@@ -257,6 +257,8 @@ export default function TraceList() {
           <div
             key={item.trace_id}
             onClick={() => selectTrace(item.trace_id)}
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectTrace(item.trace_id); } }}
             style={{
               padding: '6px 16px',
               cursor: 'pointer',

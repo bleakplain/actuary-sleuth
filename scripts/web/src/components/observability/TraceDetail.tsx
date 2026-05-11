@@ -28,9 +28,12 @@ export default function TraceDetail() {
       >
         <span style={{ fontSize: 14, fontWeight: token.fontWeightStrong, color: token.colorText }}>Trace 详情</span>
         <CloseOutlined
+          role="button"
+          tabIndex={0}
+          aria-label="关闭"
           onClick={() => useObservabilityStore.getState().closeDetail()}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); useObservabilityStore.getState().closeDetail(); } }}
           style={{ fontSize: 14, color: token.colorTextQuaternary, cursor: 'pointer', padding: '8px', minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          title="关闭"
         />
       </div>
       <div style={{ flex: 1, overflow: 'auto' }}>

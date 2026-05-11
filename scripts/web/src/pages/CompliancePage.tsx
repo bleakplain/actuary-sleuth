@@ -160,6 +160,9 @@ function DocumentReviewPanel({
 
     return (
       <div
+        role={hasLongContent ? 'button' : undefined}
+        tabIndex={hasLongContent ? 0 : undefined}
+        aria-expanded={hasLongContent ? isExpanded : undefined}
         style={{
           border: `1px solid ${token.colorBorderSecondary}`,
           borderRadius: 4,
@@ -169,6 +172,7 @@ function DocumentReviewPanel({
           background: token.colorBgContainer,
         }}
         onClick={hasLongContent ? () => toggleItem(itemKey) : undefined}
+        onKeyDown={hasLongContent ? (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleItem(itemKey); } } : undefined}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Text strong style={{ fontSize: token.fontSize }}>{item.title}</Text>
@@ -474,7 +478,7 @@ export default function CompliancePage() {
           return (
             <span>
               {stripped}
-              <a onClick={() => handleRegulationClick(record.chunk_id!)} style={{ cursor: 'pointer', marginLeft: 4, fontSize: token.fontSizeSM }}>{label}</a>
+              <a role="button" tabIndex={0} onClick={() => handleRegulationClick(record.chunk_id!)} onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleRegulationClick(record.chunk_id!); } }} style={{ cursor: 'pointer', marginLeft: 4, fontSize: token.fontSizeSM }}>{label}</a>
             </span>
           );
         }
@@ -578,7 +582,7 @@ export default function CompliancePage() {
           children: (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
               {articles.map(a => (
-                <Tag key={a.chunk_id} style={{ cursor: 'pointer' }} onClick={() => handleRegulationClick(a.chunk_id)}>
+                <Tag key={a.chunk_id} style={{ cursor: 'pointer' }} role="button" tabIndex={0} onClick={() => handleRegulationClick(a.chunk_id)} onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleRegulationClick(a.chunk_id); } }}>
                   {a.article_number}
                 </Tag>
               ))}
@@ -685,6 +689,8 @@ export default function CompliancePage() {
                   pagination={{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100'], showTotal: (total) => `共 ${total} 条` }}
                   onRow={(record: ComplianceReport) => ({
                     onClick: () => handleViewReport(record.id),
+                    tabIndex: 0,
+                    onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleViewReport(record.id); } },
                     style: { cursor: 'pointer' },
                   })}
                   columns={[

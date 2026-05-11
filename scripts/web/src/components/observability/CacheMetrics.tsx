@@ -53,7 +53,7 @@ export default function CacheMetrics() {
     <Card
       title="缓存统计"
       extra={
-        <a onClick={() => loadStats()} style={{ fontSize: 12 }}>刷新</a>
+        <a role="button" tabIndex={0} onClick={() => loadStats()} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); loadStats(); } }} style={{ fontSize: 12, cursor: 'pointer' }}>刷新</a>
       }
     >
       <Row gutter={16}>

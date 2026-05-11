@@ -393,7 +393,7 @@ function SpanRow({ span, depth, maxDuration, isMobile }: {
         tabIndex={0}
         aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
-        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); setExpanded(!expanded); } }}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded); } }}
         style={{
           display: 'flex', alignItems: 'center', gap: isMobile ? 4 : 8,
           padding: isMobile ? '8px 8px' : '5px 12px',
@@ -524,7 +524,7 @@ export default function TracePanel({ trace, loading }: Props) {
   if (!trace) {
     return (
       <div className="empty-state">
-        <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.25 }}>&#x1f50d;</div>
+        <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.25 }} aria-hidden="true">&#x1f50d;</div>
         <span style={{ fontSize: 13 }}>暂无 Trace 数据</span>
         <div style={{ fontSize: 12, color: 'var(--ant-color-text-quaternary)', marginTop: 4 }}>
           发送新消息后将自动记录链路
