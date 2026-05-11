@@ -1,11 +1,41 @@
-from typing import Optional, Dict, List
-from pydantic import BaseModel, Field
+"""合规检查相关 schema"""
+from typing import Dict, List, Optional
+from pydantic import BaseModel, ConfigDict
 
 
-class DocumentCheckRequest(BaseModel):
-    document_content: str = Field(..., min_length=1, description="条款文档内容")
-    product_name: Optional[str] = Field(None, description="产品名称（可选）")
-    category: Optional[str] = Field(None, description="险种类型（可选，LLM自动识别或用户选择）")
+class AuditSourceOut(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    source_id: int = 0
+    law_name: str = ""
+    article_number: str = ""
+    content: str = ""
+    source_type: str = ""
+    doc_number: Optional[str] = None
+    issuing_authority: Optional[str] = None
+    effective_date: Optional[str] = None
+
+
+class AuditItemOut(BaseModel):
+    clause_number: str = ""
+    check_type: str = ""
+    param: str
+    value: str = ""
+    requirement: str = ""
+    status: str
+    source_id: Optional[int] = None
+    source_type: str = ""
+    source_excerpt: str = ""
+    suggestion: str = ""
+
+
+class ComplianceResultOut(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    summary: Dict[str, int] = {}
+    items: List[AuditItemOut] = []
+    sources: List[AuditSourceOut] = []
+    regulation_sources: Dict[str, List[str]] = {}
+    category: Optional[str] = ""
+    negative_list_result: Optional[str] = ""
 
 
 class ComplianceReportOut(BaseModel):
@@ -13,34 +43,40 @@ class ComplianceReportOut(BaseModel):
     product_name: str
     category: str
     mode: str
-    result: Dict[str, object]
+    result: ComplianceResultOut
     created_at: str
 
 
+class DocumentCheckRequest(BaseModel):
+    document_content: str
+    product_name: str = ""
+    category: str = ""
+
+
 class ParsedClause(BaseModel):
-    number: str = ""
-    title: str = ""
-    text: str = ""
+    number: str
+    title: str
+    text: str
 
 
-class ParsedPremiumTable(BaseModel):
-    table_type: str = "unknown"  # premium, appendix, coverage, drug_list, gene_test, hospital, other
+class ParsedDataTable(BaseModel):
+    table_type: str
     remark: str = ""
     raw_text: str = ""
     data: List[List[str]] = []
 
 
 class ParsedSection(BaseModel):
-    title: str = ""
-    content: str = ""
+    title: str
+    content: str
 
 
 class ParsedDocumentResponse(BaseModel):
     parse_id: str
-    file_name: str = ""
-    file_type: str = ""
+    file_name: str
+    file_type: str
     clauses: List[ParsedClause] = []
-    premium_tables: List[ParsedPremiumTable] = []
+    data_tables: List[ParsedDataTable] = []
     notices: List[ParsedSection] = []
     health_disclosures: List[ParsedSection] = []
     exclusions: List[ParsedSection] = []
@@ -53,5 +89,5 @@ class ParsedDocumentResponse(BaseModel):
 
 
 class RichTextParseRequest(BaseModel):
-    html_content: str = Field(..., min_length=1, description="富文本 HTML 内容")
-    product_name: Optional[str] = Field(None, description="产品名称（可选）")
+    html_content: str
+    product_name: str = ""

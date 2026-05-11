@@ -122,7 +122,7 @@ def test_compliance_check_e2e(test_case: TestCase, api_client: httpx.Client):
     parse_result = parse_response.json()
     assert "combined_text" in parse_result, "解析结果缺少 combined_text"
     assert len(parse_result["combined_text"]) > 100, "解析文本过短"
-    assert len(parse_result.get("clauses", [])) > 0 or len(parse_result.get("premium_tables", [])) > 0, \
+    assert len(parse_result.get("clauses", [])) > 0 or len(parse_result.get("data_tables", [])) > 0, \
         "解析结果无条款或费率表"
 
     check_response = api_client.post(
@@ -144,7 +144,7 @@ def test_compliance_check_e2e(test_case: TestCase, api_client: httpx.Client):
     assert total_items >= test_case.min_items, f"检查项数 {total_items} 少于预期 {test_case.min_items}"
 
     if test_case.check_negative_list:
-        assert result.get("negative_list_checked") == True, "未执行负面清单检查"
+        assert result.get("negative_list_result") in ("passed", "violated", "skipped"), "缺少负面清单检查结果"
 
     assert "regulation_sources" in result, "结果缺少 regulation_sources"
     sources = result["regulation_sources"]

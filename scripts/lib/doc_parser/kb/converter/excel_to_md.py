@@ -383,33 +383,9 @@ def _simplify_negative_list_name(name: str) -> tuple:
 
 
 def extract_json_array(text: str) -> Optional[str]:
-    """从 LLM 返回文本中提取 JSON 数组，处理 thinking 文本和 code block。"""
-    start = text.find('[')
-    if start == -1:
-        return None
-    depth = 0
-    in_string = False
-    escape_next = False
-    for i in range(start, len(text)):
-        ch = text[i]
-        if escape_next:
-            escape_next = False
-            continue
-        if ch == '\\' and in_string:
-            escape_next = True
-            continue
-        if ch == '"' and not escape_next:
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if ch == '[':
-            depth += 1
-        elif ch == ']':
-            depth -= 1
-            if depth == 0:
-                return text[start:i + 1]
-    return None
+    """从 LLM 返回文本中提取 JSON 数组（已迁移至 lib.common.json_utils）"""
+    from lib.common.json_utils import extract_json_array as _extract
+    return _extract(text)
 
 
 def parse_regulation_names(

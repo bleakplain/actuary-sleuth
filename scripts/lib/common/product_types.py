@@ -10,16 +10,21 @@ from typing import Dict, List, Optional
 
 
 class ProductCategory(Enum):
-    """产品类别枚举"""
-    LIFE = "人寿保险"
-    HEALTH = "健康保险"
-    ACCIDENT = "意外保险"
-    ANNUITY = "年金保险"
-    MOTOR = "机动车保险"
-    PROPERTY = "财产保险"
-    PENSION = "养老保险"
-    EDUCATION = "教育保险"
-    TRAVEL = "旅游保险"
+    """产品类别枚举（简称值用于合规检查险种匹配）
+
+    注意：部分险种归入大类（如教育险→年金险，旅游险→意外险），
+    但保留独立的枚举名用于关键词分类。
+    使用唯一值避免 enum 别名问题。
+    """
+    LIFE = "寿险"
+    HEALTH = "健康险"
+    ACCIDENT = "意外险"
+    ANNUITY = "年金险"
+    MOTOR = "车险"
+    PROPERTY = "财产险"
+    PENSION = "养老险"
+    EDUCATION = "教育险"
+    TRAVEL = "旅游险"
     OTHER = "其他"
 
 
@@ -130,45 +135,3 @@ def classify_product(product_name: str, description: str = "") -> ProductCategor
             best_score = score
 
     return best_match
-
-
-def get_focus_fields(category: ProductCategory) -> List[str]:
-    """
-    获取产品类别关注的字段
-
-    Args:
-        category: 产品类别
-
-    Returns:
-        list: 字段名称列表
-    """
-    config = get_product_config(category)
-    return config.get("focus_fields", [])
-
-
-def get_scoring_weight(category: ProductCategory) -> float:
-    """
-    获取产品类别的评分权重
-
-    Args:
-        category: 产品类别
-
-    Returns:
-        float: 权重值
-    """
-    config = get_product_config(category)
-    return config.get("scoring_weight", 1.0)
-
-
-def get_premium_range(category: ProductCategory) -> tuple:
-    """
-    获取产品类别的保费范围
-
-    Args:
-        category: 产品类别
-
-    Returns:
-        tuple: (最小保费, 最大保费)
-    """
-    config = get_product_config(category)
-    return config.get("default_premium_range", (100, 10000))

@@ -241,7 +241,7 @@ class LLMConfig:
             api_key=p.api_key,
             model=scene_cfg.get('model', ''),
             temperature=p.temperature,
-            timeout=p.timeout or scene_cfg.get('timeout'),
+            timeout=scene_cfg.get('timeout') or p.timeout,
             max_tokens=p.max_tokens,
         )
 

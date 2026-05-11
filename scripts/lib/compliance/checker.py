@@ -1,191 +1,259 @@
 """合规检查核心逻辑"""
 import json
 import logging
-import re
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from lib.common.constants import ComplianceConstants
 from lib.common.product_types import ProductCategory, classify_product
 from lib.common.regulation_registry import (
     get_category_regulations,
     get_general_regulations,
     VALID_CATEGORIES,
 )
-from lib.llm import get_qa_llm
+from lib.llm import get_audit_llm
 from lib.rag_engine import get_engine
-
-# ProductCategory 枚举值(全称) → VALID_CATEGORIES(简称) 映射
-_ENUM_TO_CATEGORY: Dict[ProductCategory, str] = {
-    ProductCategory.HEALTH: "健康险",
-    ProductCategory.ACCIDENT: "意外险",
-    ProductCategory.ANNUITY: "年金险",
-    ProductCategory.PROPERTY: "财产险",
-    ProductCategory.LIFE: "寿险",
-    ProductCategory.MOTOR: "财产险",
-    ProductCategory.PENSION: "年金险",
-    ProductCategory.EDUCATION: "年金险",
-    ProductCategory.TRAVEL: "意外险",
-}
 
 logger = logging.getLogger(__name__)
 
 
-def _build_context(search_results: List[Dict]) -> str:
-    """将检索结果构建为上下文字符串"""
-    parts = []
-    for i, r in enumerate(search_results):
-        law_name = r.get("law_name", "")
-        article = r.get("article_number", "")
-        content = r.get("content", "")
-        authority = r.get("issuing_authority", "")
-        doc_number = r.get("doc_number", "")
-        effective = r.get("effective_date", "")
-        header = f"[来源{i+1}] 【{law_name}】{article}"
-        if doc_number:
-            header += f"（{doc_number}）"
-        if authority:
-            header += f"\n发布机关：{authority}"
-        if effective:
-            header += f"\n生效日期：{effective}"
-        parts.append(f"{header}\n{content}")
-    return "\n\n".join(parts)
+class CheckResult:
+    """检查结果状态"""
+    PASSED = "passed"
+    VIOLATED = "violated"
+    SKIPPED = "skipped"
 
 
-def _load_negative_list() -> List[Dict]:
-    """从知识库检索负面清单全量文档"""
+@dataclass(frozen=True)
+class CategoryResult:
+    """险种识别结果"""
+    category: Optional[str]
+    confidence: float
+    method: str
+
+
+@dataclass(frozen=True)
+class AuditSource:
+    """法规溯源记录"""
+    source_id: int
+    law_name: str
+    article_number: str
+    content: str
+    source_type: str  # "category" | "general" | "negative_list"
+    doc_number: str = ""
+    issuing_authority: str = ""
+    effective_date: str = ""
+
+
+@dataclass(frozen=True)
+class AuditItem:
+    """审查结果项"""
+    clause_number: str
+    check_type: str  # "regulation" | "negative_list"
+    param: str
+    value: str
+    requirement: str
+    status: str  # "compliant" | "non_compliant" | "attention"
+    source_id: Optional[int]
+    source_type: str  # "regulation" | "negative_list"
+    source_excerpt: str
+    suggestion: str
+
+
+def load_audit_sources(category: Optional[str]) -> List[AuditSource]:
+    """从 RAG 加载法规溯源记录，去重后按险种专属→通用法规排序"""
     engine = get_engine()
     if engine is None:
         logger.warning("RAG 引擎未初始化")
         return []
-    return engine.search_by_metadata({"category": "负面清单检查"})
+
+    all_results = []
+    seen_keys = set()
+
+    # 险种专属法规
+    if category:
+        for reg_name in get_category_regulations(category):
+            results = engine.search_by_metadata({"law_name": reg_name})
+            if not results:
+                logger.warning(f"注册法规在知识库中未找到: {reg_name}")
+            for r in results:
+                key = (r.get("law_name", ""), r.get("article_number", ""))
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    all_results.append((r, "category"))
+
+    # 通用法规（与险种专属去重）
+    for reg_name in get_general_regulations():
+        results = engine.search_by_metadata({"law_name": reg_name})
+        if not results:
+            logger.warning(f"注册法规在知识库中未找到: {reg_name}")
+        for r in results:
+            key = (r.get("law_name", ""), r.get("article_number", ""))
+            if key not in seen_keys:
+                seen_keys.add(key)
+                all_results.append((r, "general"))
+
+    sources = []
+    for i, (r, source_type) in enumerate(all_results):
+        sources.append(AuditSource(
+            source_id=i + 1,
+            law_name=r.get("law_name", ""),
+            article_number=r.get("article_number", ""),
+            content=r.get("content", ""),
+            doc_number=r.get("doc_number", ""),
+            issuing_authority=r.get("issuing_authority", ""),
+            effective_date=r.get("effective_date", ""),
+            source_type=source_type,
+        ))
+
+    logger.info(
+        f"加载法规溯源: 险种专属 + 通用法规, 共 {len(sources)} 条"
+    )
+    return sources
 
 
-def check_negative_list(document_content: str) -> List[Dict]:
+def format_context_for_llm(sources: List[AuditSource]) -> str:
+    """将 AuditSource 列表格式化为 LLM 上下文字符串"""
+    if not sources:
+        return ""
+
+    parts = []
+    for s in sources:
+        header = f"[来源{s.source_id}] 【{s.law_name}】{s.article_number}"
+        if s.doc_number:
+            header += f"（{s.doc_number}）"
+        if s.issuing_authority:
+            header += f"\n发布机关：{s.issuing_authority}"
+        if s.effective_date:
+            header += f"\n生效日期：{s.effective_date}"
+        parts.append(f"{header}\n{s.content}")
+    return "\n\n".join(parts)
+
+
+def check_negative_list(document_content: str) -> Tuple[List[AuditItem], str, List[AuditSource]]:
     """执行负面清单检查
 
-    通过知识库检索负面清单文档，逐条判断是否违规。
-
-    Args:
-        document_content: 文档内容
-
     Returns:
-        检查项列表
+        (items, result, sources): 审查项列表 + 检查状态 + 溯源记录
     """
-    negative_docs = _load_negative_list()
+    engine = get_engine()
+    if engine is None:
+        logger.warning("RAG 引擎未初始化")
+        return [], CheckResult.SKIPPED, []
+
+    negative_docs = engine.search_by_metadata({"category": "负面清单检查"})
     if not negative_docs:
         logger.warning("知识库中未找到负面清单文档")
-        return []
+        return [], CheckResult.SKIPPED, []
 
-    items = []
-    for doc in negative_docs:
-        law_name = doc.get("law_name", "")
-        article_number = doc.get("article_number", "")
-        content = doc.get("content", "")
+    # 构建溯源记录（仅有效条目）
+    sources = []
+    for i, doc in enumerate(negative_docs):
+        if doc.get("content") and doc.get("article_number"):
+            sources.append(AuditSource(
+                source_id=i + 1,
+                law_name=doc.get("law_name", ""),
+                article_number=doc.get("article_number", ""),
+                content=doc.get("content", ""),
+                doc_number=doc.get("doc_number", ""),
+                issuing_authority=doc.get("issuing_authority", ""),
+                effective_date=doc.get("effective_date", ""),
+                source_type="negative_list",
+            ))
 
-        if not content or not article_number:
-            continue
+    rules_text = "\n".join([
+        f"{i+1}. 【{doc.get('law_name', '')}】{doc.get('article_number', '')}: {doc.get('content', '')}"
+        for i, doc in enumerate(negative_docs)
+        if doc.get("content") and doc.get("article_number")
+    ])
 
-        violation = _check_violation(document_content, content, law_name, article_number)
-        if violation:
-            items.append(violation)
+    if not rules_text:
+        return [], CheckResult.SKIPPED, sources
 
-    return items
+    prompt = f"""你是一位保险法规合规专家。请判断以下保险产品文档是否违反负面清单规定。
 
-
-def _check_violation(
-    document_content: str,
-    negative_rule: str,
-    law_name: str,
-    article_number: str,
-) -> Optional[Dict[str, Any]]:
-    """判断文档内容是否违反负面清单规定
-
-    Args:
-        document_content: 待审文档内容
-        negative_rule: 负面清单规则内容
-        law_name: 法规名称
-        article_number: 条款编号
-
-    Returns:
-        违规项字典，无违规返回 None
-    """
-    try:
-        llm = get_qa_llm()
-
-        prompt = f"""你是一位保险法规合规专家。请判断以下保险产品文档内容是否违反了负面清单规定。
-
-## 负面清单规定
-{negative_rule[:500]}
+## 负面清单规定（共 {len(sources)} 条）
+{rules_text}
 
 ## 待审文档内容
-{document_content[:2000]}
+{document_content}
 
 ## 输出要求
-请以 JSON 格式输出判断结果：
-{{
-    "is_violation": true或false,
-    "reason": "<违规原因，说明文档中哪些表述违反了规定>",
-    "source_excerpt": "<文档中违规的原文片段>",
-    "suggestion": "<修改建议，指导如何修改以符合规定>"
-}}
+请以 JSON 格式输出所有违规项：
+[
+  {{"rule_id": 1, "clause_number": "<文档中涉及违规的条款编号，如'3.2'，无法确定时写'未知'>", "is_violation": true, "reason": "<违规原因>", "source_excerpt": "<文档中违规原文>", "suggestion": "<修改建议>"}},
+  {{"rule_id": 2, "is_violation": false}},
+  ...
+]
 
 注意：
-1. 仅当文档内容确实存在违反负面清单规定的表述时，is_violation 为 true
-2. 如果文档内容符合规定或与该负面清单无关，is_violation 为 false
-3. 仅输出 JSON，不要附加其他文字"""
+1. 仅输出 is_violation 为 true 的项（或省略 false 项）
+2. rule_id 对应上面规则的编号
+3. clause_number 应尽量从文档中提取实际条款编号
+4. 仅输出 JSON，不要附加其他文字
+"""
 
+    try:
+        llm = get_audit_llm()
         response = llm.chat([{"role": "user", "content": prompt}])
         answer = str(response).strip()
 
-        # 解析 JSON
-        if "```json" in answer:
-            answer = answer.split("```json")[1].split("```")[0]
-        elif "```" in answer:
-            answer = answer.split("```")[1].split("```")[0]
-
-        json_start = answer.find("{")
-        json_end = answer.rfind("}") + 1
-        if json_start < 0 or json_end <= json_start:
-            return None
-
-        result = json.loads(answer[json_start:json_end])
-
-        if not result.get("is_violation", False):
-            return None
-
-        return {
-            "clause_number": "",
-            "param": f"负面清单检查: {law_name} {article_number}",
-            "value": result.get("source_excerpt", "")[:100],
-            "requirement": f"违反负面清单 {law_name} {article_number}: {negative_rule[:200]}",
-            "status": "non_compliant",
-            "source": "负面清单",
-            "source_excerpt": negative_rule[:300],
-            "suggestion": result.get("suggestion", "请修改相关表述，确保符合负面清单要求"),
-        }
-
+        items = _parse_violation_response(answer, sources)
+        result = CheckResult.VIOLATED if items else CheckResult.PASSED
+        return items, result, sources
     except Exception as e:
-        logger.warning(f"负面清单检查失败: {e}")
-        return None
+        logger.error(f"Negative list check failed: {e}")
+        return [], CheckResult.SKIPPED, sources
 
 
-def identify_category(document_content: str, product_name: str = "") -> Tuple[Optional[str], float, str]:
-    """识别险种类型
+def _parse_violation_response(answer: str, sources: List[AuditSource]) -> List[AuditItem]:
+    """解析 LLM 返回的违规项列表"""
+    from lib.common.json_utils import extract_json_array
+    try:
+        json_str = extract_json_array(answer)
+        if json_str is None:
+            return []
 
-    Args:
-        document_content: 文档内容
-        product_name: 产品名称
+        violations = json.loads(json_str)
+        items = []
+        for v in violations:
+            if not v.get("is_violation", False):
+                continue
+            rule_id = v.get("rule_id", 0)
+            source = None
+            if 0 < rule_id <= len(sources):
+                source = sources[rule_id - 1]
+            else:
+                logger.warning(f"Negative list rule_id {rule_id} out of range")
 
-    Returns:
-        (category, confidence, method): 险种、置信度、识别方法
-    """
-    # 方法1: 关键词匹配（快速）
+            items.append(AuditItem(
+                clause_number=v.get("clause_number") or "未知",
+                check_type="negative_list",
+                param=f"负面清单检查: {source.law_name if source else ''} {source.article_number if source else ''}",
+                value=v.get("source_excerpt", "")[:100],
+                requirement=f"违反负面清单 {source.law_name if source else ''} {source.article_number if source else ''}: {source.content[:200] if source else ''}",
+                status="non_compliant",
+                source_id=source.source_id if source else None,
+                source_type="negative_list",
+                source_excerpt=source.content[:300] if source else "",
+                suggestion=v.get("suggestion", "请修改相关表述"),
+            ))
+        return items
+    except Exception as e:
+        logger.warning(f"Failed to parse violation response: {e}")
+        return []
+
+
+def identify_category(document_content: str, product_name: str = "") -> CategoryResult:
+    """识别险种类型"""
     category_enum = classify_product(product_name, document_content[:1000])
     if category_enum != ProductCategory.OTHER:
-        return _ENUM_TO_CATEGORY.get(category_enum), 0.7, "keyword"
+        mapped = ComplianceConstants.SUBCATEGORY_MAPPING.get(category_enum.value)
+        if mapped:
+            return CategoryResult(mapped, 0.7, "keyword")
 
-    # 方法2: LLM 提取
     try:
-        llm = get_qa_llm()
+        llm = get_audit_llm()
         prompt = f"""请从以下保险产品文档中识别险种类型。
 
 可选险种类型：健康险、医疗险、重疾险、寿险、意外险、年金险、财产险
@@ -201,77 +269,22 @@ def identify_category(document_content: str, product_name: str = "") -> Tuple[Op
 
         for vc in VALID_CATEGORIES:
             if vc in extracted:
-                return vc, 0.85, "llm"
+                return CategoryResult(vc, 0.85, "llm")
     except Exception as e:
         logger.warning(f"LLM category identification failed: {e}")
 
-    return None, 0.0, "unknown"
+    return CategoryResult(None, 0.0, "unknown")
 
 
-def build_enhanced_context(
-    category: Optional[str],
-) -> Tuple[str, Dict[str, List[str]]]:
-    """构建增强的法规上下文
-
-    采用两层检索策略：
-    1. 险种专属法规（精确匹配）
-    2. 通用法规（强制全量加载）
-
-    Args:
-        category: 险种类型
-
-    Returns:
-        (context_str, sources_info): 法规上下文字符串和来源信息
-    """
-    engine = get_engine()
-    if engine is None:
-        logger.warning("RAG 引擎未初始化")
-        return "", {"险种专属": [], "通用法规": []}
-
-    all_results = []
-    sources_info: Dict[str, List[str]] = {
-        "险种专属": [],
-        "通用法规": [],
-    }
-
-    # 第1层：加载险种专属法规（全量精确匹配）
-    if category:
-        category_regs = get_category_regulations(category)
-        for reg_name in category_regs:
-            results = engine.search_by_metadata({"law_name": reg_name})
-            all_results.extend(results)
-            if results:
-                logger.debug(f"险种专属法规 {reg_name}: {len(results)} 条")
-        sources_info["险种专属"] = category_regs
-
-    # 第2层：加载通用法规（全量强制包含）
-    general_regs = get_general_regulations()
-    for reg_name in general_regs:
-        results = engine.search_by_metadata({"law_name": reg_name})
-        all_results.extend(results)
-        if results:
-            logger.debug(f"通用法规 {reg_name}: {len(results)} 条")
-    sources_info["通用法规"] = general_regs
-
-    context = _build_context(all_results)
-    logger.info(
-        f"构建法规上下文: 险种专属 {len(sources_info['险种专属'])} 部, "
-        f"通用法规 {len(sources_info['通用法规'])} 部, 共 {len(all_results)} 条"
-    )
-    return context, sources_info
-
-
-def run_compliance_check(prompt: str) -> Dict:
+def run_compliance_check(prompt: str, num_sources: int = 0) -> Dict:
     """执行合规检查 LLM 调用
 
     Args:
         prompt: 完整的合规检查提示词（已包含法规 context）
-
-    Returns:
-        检查结果字典
+        num_sources: 法规溯源记录数量，用于验证 source_id
     """
     try:
-        llm = get_qa_llm()
+        llm = get_audit_llm()
 
         logger.info(f"Prompt length: {len(prompt)}")
         response = llm.chat([{"role": "user", "content": prompt}])
@@ -279,48 +292,54 @@ def run_compliance_check(prompt: str) -> Dict:
 
         logger.info(f"LLM response length: {len(answer)}, preview: {answer[:200]}")
 
-        # 移除 markdown 代码块标记
         if "```json" in answer:
             answer = answer.split("```json")[1].split("```")[0]
         elif "```" in answer:
             answer = answer.split("```")[1].split("```")[0]
 
-        try:
-            json_start = answer.find("{")
-            json_end = answer.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                json_str = answer[json_start:json_end]
-                try:
-                    parsed = json.loads(json_str)
-                except json.JSONDecodeError:
-                    # 尝试修复截断的 JSON
-                    open_brackets = json_str.count("{") - json_str.count("}")
-                    open_arrays = json_str.count("[") - json_str.count("]")
-                    json_str_fixed = json_str + "]" * open_arrays + "}" * open_brackets
-                    try:
-                        parsed = json.loads(json_str_fixed)
-                    except json.JSONDecodeError:
-                        parsed = {
-                            "summary": {
-                                "compliant": len(re.findall(r'"compliant":\s*\d+', answer)),
-                                "non_compliant": len(re.findall(r'"non_compliant":\s*\d+', answer)),
-                                "attention": len(re.findall(r'"attention":\s*\d+', answer)),
-                            },
-                            "items": [],
-                            "raw_answer": answer[:1000],
-                        }
-            else:
-                logger.warning(f"No JSON found in LLM response: {answer[:200]}")
-                parsed = {"summary": {"compliant": 0, "non_compliant": 0, "attention": 0}, "items": []}
-        except Exception as e:
-            logger.warning(f"JSON parse error: {e}, response: {answer[:500]}")
-            parsed = {
+        json_start = answer.find("{")
+        json_end = answer.rfind("}") + 1
+        if json_start < 0 or json_end <= json_start:
+            logger.warning(f"No JSON found in LLM response: {answer[:200]}")
+            return {
                 "summary": {"compliant": 0, "non_compliant": 0, "attention": 0},
                 "items": [],
+                "error": "json_not_found",
                 "raw_answer": answer[:1000],
             }
 
-        return parsed
+        json_str = answer[json_start:json_end]
+
+        try:
+            result = json.loads(json_str)
+        except json.JSONDecodeError:
+            open_brackets = json_str.count("{") - json_str.count("}")
+            open_arrays = json_str.count("[") - json_str.count("]")
+            json_str_fixed = json_str + "]" * open_arrays + "}" * open_brackets
+            try:
+                result = json.loads(json_str_fixed)
+            except json.JSONDecodeError:
+                logger.warning(f"JSON repair failed, returning empty result")
+                return {
+                    "summary": {"compliant": 0, "non_compliant": 0, "attention": 0},
+                    "items": [],
+                    "error": "json_parse_failed",
+                    "raw_answer": answer[:1000],
+                }
+
+        # 验证并修复 items
+        items = result.get("items", [])
+        for item in items:
+            if not item.get("clause_number"):
+                item["clause_number"] = "未知"
+            sid = item.get("source_id")
+            if sid is not None and (sid < 1 or sid > num_sources):
+                logger.warning(f"source_id {sid} out of range (1..{num_sources})")
+                item["source_id"] = None
+            item["check_type"] = "regulation"
+            item["source_type"] = "regulation"
+
+        return result
 
     except Exception as e:
         logger.error(f"Compliance check failed: {e}")

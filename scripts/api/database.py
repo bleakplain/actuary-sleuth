@@ -1531,7 +1531,7 @@ def save_session_context(session_id: str, ctx: Dict[str, Any]) -> bool:
 
 _PARSED_DOC_JSON_FIELDS = {
     "clauses": "clauses",
-    "premium_tables": "premium_tables",
+    "data_tables": "data_tables",
     "notices": "notices",
     "health_disclosures": "health_disclosures",
     "exclusions": "exclusions",

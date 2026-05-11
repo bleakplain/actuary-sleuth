@@ -7,11 +7,11 @@ import {
 } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined,
-  HistoryOutlined, DeleteOutlined, BookOutlined,
+  HistoryOutlined, DeleteOutlined, EyeOutlined, BookOutlined,
   FileTextOutlined, CaretRightOutlined, PlusOutlined,
 } from '@ant-design/icons';
 import * as complianceApi from '../api/compliance';
-import type { ComplianceReport, ComplianceItem, Source, ParsedDocument, ParsedPremiumTable } from '../types';
+import type { ComplianceReport, ComplianceItem, AuditSource, ParsedDocument, ParsedDataTable } from '../types';
 import { DRAWER_MD } from '../constants/layout';
 import { DocumentViewer } from '../components/DocumentViewer';
 
@@ -35,7 +35,7 @@ const TABLE_TYPE_LABELS: Record<string, string> = {
   unknown: '表格',
 };
 
-function getTableLabel(t: ParsedPremiumTable, index: number): string {
+function getTableLabel(t: ParsedDataTable, index: number): string {
   const typeLabel = TABLE_TYPE_LABELS[t.table_type] || '表格';
   const remark = t.remark ? ` (${t.remark.slice(0, 20)})` : '';
   return `${typeLabel} ${index + 1}${remark}`;
@@ -44,13 +44,11 @@ function getTableLabel(t: ParsedPremiumTable, index: number): string {
 function SourceDrawer({
   visible,
   source,
-  excerpt,
   onClose,
   isMobile,
 }: {
   visible: boolean;
-  source: Source | undefined;
-  excerpt?: string;
+  source: AuditSource | null;
   onClose: () => void;
   isMobile: boolean;
 }) {
@@ -78,38 +76,12 @@ function SourceDrawer({
         {source.effective_date && (
           <Descriptions.Item label="生效日期">{source.effective_date}</Descriptions.Item>
         )}
-        <Descriptions.Item label="分类">{source.category}</Descriptions.Item>
-        {source.hierarchy_path && (
-          <Descriptions.Item label="层级路径">{source.hierarchy_path}</Descriptions.Item>
-        )}
-        {source.score != null && (
-          <Descriptions.Item label="检索相关度">
-            <Tag color={source.score > 0.02 ? 'green' : source.score > 0.01 ? 'orange' : 'red'}>
-              {source.score.toFixed(4)}
-            </Tag>
-          </Descriptions.Item>
-        )}
+        <Descriptions.Item label="来源类型">
+          <Tag color={source.source_type === 'category' ? 'blue' : source.source_type === 'negative_list' ? 'red' : 'default'}>
+            {source.source_type === 'category' ? '险种专属' : source.source_type === 'general' ? '通用法规' : '负面清单'}
+          </Tag>
+        </Descriptions.Item>
       </Descriptions>
-
-      {excerpt && (
-        <div style={{ marginBottom: 16 }}>
-          <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
-            引用原文片段
-          </Typography.Text>
-          <div
-            style={{
-              background: token.colorPrimaryBg,
-              border: `1px solid ${token.colorPrimaryBorder}`,
-              borderRadius: 4,
-              padding: '8px 12px',
-              color: token.colorPrimaryText,
-              fontSize: token.fontSize ?? 14,
-            }}
-          >
-            {excerpt}
-          </div>
-        </div>
-      )}
 
       <div>
         <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
@@ -169,7 +141,7 @@ function DocumentReviewPanel({
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const hasParsedDoc = !!doc;
-  const totalItems = doc ? doc.clauses.length + doc.premium_tables.length + doc.exclusions.length + doc.notices.length + doc.health_disclosures.length + doc.rider_clauses.length : 0;
+  const totalItems = doc ? doc.clauses.length + doc.data_tables.length + doc.exclusions.length + doc.notices.length + doc.health_disclosures.length + doc.rider_clauses.length : 0;
 
   const toggleItem = (itemKey: string) => {
     setExpandedItems(prev => ({ ...prev, [itemKey]: !prev[itemKey] }));
@@ -217,8 +189,8 @@ function DocumentReviewPanel({
   const panelItems = doc ? [
     { key: 'clauses', label: `条款 (${doc.clauses.length})`, count: doc.clauses.length,
       items: doc.clauses.map(c => ({ id: c.number, title: `${c.number} ${c.title}`, content: c.text || '' })) },
-    { key: 'premium_tables', label: `表格 (${doc.premium_tables.length})`, count: doc.premium_tables.length,
-      items: doc.premium_tables.map((t, i) => ({ id: `table-${i}`, title: getTableLabel(t, i), content: t.raw_text || '' })) },
+    { key: 'data_tables', label: `表格 (${doc.data_tables.length})`, count: doc.data_tables.length,
+      items: doc.data_tables.map((t, i) => ({ id: `table-${i}`, title: getTableLabel(t, i), content: t.raw_text || '' })) },
     { key: 'exclusions', label: `责任免除 (${doc.exclusions.length})`, count: doc.exclusions.length,
       items: doc.exclusions.map((s, i) => ({ id: `excl-${i}`, title: s.title || `条款 ${i + 1}`, content: s.content || '' })) },
     { key: 'notices', label: `投保须知 (${doc.notices.length})`, count: doc.notices.length,
@@ -374,8 +346,7 @@ export default function CompliancePage() {
   const [history, setHistory] = useState<ComplianceReport[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [sourceDrawerVisible, setSourceDrawerVisible] = useState(false);
-  const [selectedSource, setSelectedSource] = useState<Source | undefined>();
-  const [selectedExcerpt, setSelectedExcerpt] = useState<string | undefined>();
+  const [selectedSource, setSelectedSource] = useState<AuditSource | null>(null);
 
   // 文档审查状态
   const [parsing, setParsing] = useState(false);
@@ -494,27 +465,17 @@ export default function CompliancePage() {
       },
     },
     {
-      title: '法规来源', dataIndex: 'source', key: 'source', width: 150,
-      render: (text: string, record: ComplianceItem) => {
-        if (!text) return '-';
-        const tags = [...text.matchAll(/\[来源(\d+)\]/g)];
-        if (tags.length === 0) return text;
+      title: '法规来源', key: 'source', width: 150,
+      render: (_: unknown, record: ComplianceItem) => {
+        if (!record.source_id) return '-';
         return (
-          <Space size={4} wrap>
-            {tags.map(([tag, numStr]) => {
-              const idx = parseInt(numStr, 10) - 1;
-              return (
-                <Tag
-                  key={tag}
-                  color="blue"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => handleSourceClick(idx, record.source_excerpt)}
-                >
-                  {tag}
-                </Tag>
-              );
-            })}
-          </Space>
+          <Tag
+            color="blue"
+            style={{ cursor: 'pointer' }}
+            onClick={() => handleSourceClick(record.source_id)}
+          >
+            [来源{record.source_id}]
+          </Tag>
         );
       },
     },
@@ -556,6 +517,17 @@ export default function CompliancePage() {
     return { compliant, nonCompliant, attention };
   };
 
+  const handleViewReport = async (reportId: string) => {
+    try {
+      const report = await complianceApi.fetchComplianceReport(reportId);
+      setCheckingResult(report);
+      setActiveTab('document');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(`加载报告失败: ${msg}`);
+    }
+  };
+
   const handleDeleteReport = async (reportId: string) => {
     try {
       await complianceApi.deleteComplianceReport(reportId);
@@ -567,40 +539,73 @@ export default function CompliancePage() {
     }
   };
 
-  const handleSourceClick = (sourceIdx: number, excerpt?: string) => {
+  const handleSourceClick = (sourceId: number) => {
     const sources = checkingResult?.result?.sources;
-    if (sources && sourceIdx < sources.length) {
-      setSelectedSource(sources[sourceIdx]);
-      setSelectedExcerpt(excerpt);
-      setSourceDrawerVisible(true);
+    if (sources) {
+      const source = sources.find(s => s.source_id === sourceId);
+      if (source) {
+        setSelectedSource(source);
+        setSourceDrawerVisible(true);
+      }
     }
   };
 
   const renderDocumentReviewTab = () => {
+    const hasResult = checkingResult?.result?.summary;
+    const viewingHistory = hasResult && !parsedDocument;
     return (
-      <div aria-live="polite">
-        <DocumentReviewPanel
-          document={parsedDocument}
-          file={uploadedFile}
-          richText={richTextContent}
-          onRichTextChange={setRichTextContent}
-          onFileUpload={handleFileUpload}
-          onConfirm={handleConfirmReview}
-          loading={loading || parsing}
-          selectedCategory={selectedCategory}
-          onCategoryChange={setSelectedCategory}
-          identifiedCategory={identifiedCategory}
-          categoryConfidence={categoryConfidence}
-          validCategories={validCategories}
-        />
-        {checkingResult && (() => {
-          const docResult = checkingResult.result;
-          const docSummary = docResult?.summary;
-          return docResult && docSummary ? (
-            <Card title={`检查报告 - ${checkingResult.product_name || ''}`} style={{ marginTop: 16 }}>
+<div aria-live="polite">
+        {!viewingHistory && (
+          <DocumentReviewPanel
+            document={parsedDocument}
+            file={uploadedFile}
+            richText={richTextContent}
+            onRichTextChange={setRichTextContent}
+            onFileUpload={handleFileUpload}
+            onConfirm={handleConfirmReview}
+            loading={loading || parsing}
+            selectedCategory={selectedCategory}
+            onCategoryChange={setSelectedCategory}
+            identifiedCategory={identifiedCategory}
+            categoryConfidence={categoryConfidence}
+            validCategories={validCategories}
+          />
+        )}
+        {hasResult && (() => {
+          const docResult = checkingResult!.result;
+          const docSummary = docResult.summary;
+          return (
+            <Card
+              title={`检查报告 - ${checkingResult!.product_name || ''}`}
+              style={{ marginTop: viewingHistory ? 0 : 16 }}
+              extra={viewingHistory ? (
+                <Button size="small" onClick={() => { setCheckingResult(null); setActiveTab('history'); }}>返回历史</Button>
+              ) : undefined}
+            >
               <Descriptions size="small" column={isMobile ? 1 : 2} style={{ marginBottom: 16 }}>
-                <Descriptions.Item label="检查时间">{checkingResult.created_at}</Descriptions.Item>
+                <Descriptions.Item label="检查时间">{checkingResult!.created_at}</Descriptions.Item>
+                {docResult.category && <Descriptions.Item label="险种类型">{docResult.category}</Descriptions.Item>}
               </Descriptions>
+              {docResult.negative_list_result && (
+                <Alert
+                  type={docResult.negative_list_result === 'violated' ? 'error' : 'success'}
+                  showIcon
+                  style={{ marginBottom: 16 }}
+                  message={docResult.negative_list_result === 'violated' ? '负面清单检查发现违规' : '负面清单检查通过'}
+                />
+              )}
+              {docResult.regulation_sources && Object.keys(docResult.regulation_sources).length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <Text strong style={{ display: 'block', marginBottom: 8 }}>审查法规</Text>
+                  <Space wrap>
+                    {Object.entries(docResult.regulation_sources).map(([type, laws]) => (
+                      <Tag key={type} color={type === '险种专属' ? 'blue' : type === '负面清单' ? 'red' : 'default'}>
+                        {type}: {laws.length} 部
+                      </Tag>
+                    ))}
+                  </Space>
+                </div>
+              )}
               <Space size={isMobile ? 'small' : 'large'} wrap style={{ marginBottom: 16 }}>
                 <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
                   合规 {docSummary.compliant} 项
@@ -675,7 +680,7 @@ export default function CompliancePage() {
                 />
               )}
             </Card>
-          ) : null;
+          );
         })()}
       </div>
     );
@@ -710,12 +715,16 @@ export default function CompliancePage() {
                   { title: '险种', dataIndex: 'category', key: 'category' },
                   { title: '检查时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
                   {
-                    title: '操作', key: 'action', width: 80,
+                    title: '操作', key: 'action', width: 120,
                     render: (_: unknown, record: ComplianceReport) => (
-                      <Popconfirm title="确定删除该检查记录？此操作不可恢复。" onConfirm={(e) => { e?.stopPropagation(); handleDeleteReport(record.id); }}>
-                        <Button type="text" danger size="small" icon={<DeleteOutlined />}
-                          onClick={(e) => e.stopPropagation()} />
-                      </Popconfirm>
+<Space>
+                        <Button type="link" size="small" icon={<EyeOutlined />}
+                          onClick={(e) => { e.stopPropagation(); handleViewReport(record.id); }}>查看</Button>
+                        <Popconfirm title="确定删除该检查记录？此操作不可恢复。" onConfirm={(e) => { e?.stopPropagation(); handleDeleteReport(record.id); }}>
+                          <Button type="text" danger size="small" icon={<DeleteOutlined />}
+                            onClick={(e) => e.stopPropagation()} />
+                        </Popconfirm>
+                      </Space>
                     ),
                   },
                 ]}
@@ -728,7 +737,6 @@ export default function CompliancePage() {
       <SourceDrawer
         visible={sourceDrawerVisible}
         source={selectedSource}
-        excerpt={selectedExcerpt}
         onClose={() => setSourceDrawerVisible(false)}
         isMobile={isMobile}
       />

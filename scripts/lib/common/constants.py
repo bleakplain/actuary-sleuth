@@ -92,6 +92,19 @@ class ComplianceConstants:
 
     VALID_CATEGORIES: List[str] = ["健康险", "医疗险", "重疾险", "寿险", "意外险", "年金险", "财产险"]
 
+    # ProductCategory 枚举值 → 合规检查险种类别（子类别归入大类）
+    SUBCATEGORY_MAPPING: Dict[str, str] = {
+        "寿险": "寿险",
+        "健康险": "健康险",
+        "意外险": "意外险",
+        "年金险": "年金险",
+        "车险": "财产险",
+        "财产险": "财产险",
+        "养老险": "年金险",
+        "教育险": "年金险",
+        "旅游险": "意外险",
+    }
+
     CATEGORY_REGULATION_REGISTRY: Dict[str, List[str]] = {
         "健康险": [
             "《健康保险管理办法》2019年第3号",
