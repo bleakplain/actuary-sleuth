@@ -1,14 +1,14 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import {
   Card, Input, Button, Table, Tag, Typography, theme,
   message, Tabs, Space, Descriptions, Popconfirm, Drawer, Grid,
-  Collapse, Empty, Alert, Select,
+  Empty, Alert, Select,
 } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined,
   HistoryOutlined, DeleteOutlined, EyeOutlined, BookOutlined,
-  FileTextOutlined, CaretRightOutlined, PlusOutlined,
+  FileTextOutlined, PlusOutlined,
 } from '@ant-design/icons';
 import * as complianceApi from '../api/compliance';
 import type { ComplianceReport, ComplianceItem, AuditSource, ParsedDocument, ParsedDataTable } from '../types';
@@ -447,81 +447,48 @@ export default function CompliancePage() {
     }
   };
 
-  const itemColumns = [
+  const buildItemColumns = (sourceMap: Record<number, AuditSource>) => [
     {
       title: '检查项', dataIndex: 'param', key: 'param', width: 120,
-    },
-    {
-      title: '产品值', dataIndex: 'value', key: 'value', width: 120,
-    },
-    {
-      title: '法规要求', dataIndex: 'requirement', key: 'requirement', ellipsis: true,
-    },
-    {
-      title: '状态', dataIndex: 'status', key: 'status', width: 100,
-      render: (s: string) => {
-        const cfg = STATUS_CONFIG[s] || STATUS_CONFIG.attention;
-        return <Tag color={cfg.color} icon={cfg.icon}>{cfg.label}</Tag>;
+      render: (_: string, record: ComplianceItem) => {
+        const cfg = STATUS_CONFIG[record.status] || STATUS_CONFIG.attention;
+        return <Tag color={cfg.color} icon={cfg.icon}>{record.param}</Tag>;
       },
     },
     {
-      title: '法规来源', key: 'source', width: 150,
+      title: '产品条款', dataIndex: 'value', key: 'value', width: '25%',
+      render: (_: string, record: ComplianceItem) => (
+        <span>{record.clause_number} {record.value}</span>
+      ),
+    },
+    {
+      title: '法规要求', key: 'requirement', width: '40%',
       render: (_: unknown, record: ComplianceItem) => {
-        if (!record.source_id) return '-';
+        const text = record.requirement || '';
+        // 去掉开头法规引用前缀（如「《...》规定：」）
+        const stripped = text.replace(/^《[^》]+》[^：:]*[：:]\s*/, '');
+        if (!record.source_id) return <span>{stripped}</span>;
+        const src = sourceMap[record.source_id];
+        if (!src) return <span>{stripped}</span>;
+        const lawShort = src.law_name?.replace(/[《》]/g, '');
+        const label = [lawShort, src.article_number].filter(Boolean).join(' ');
         return (
-          <Tag
-            color="blue"
-            style={{ cursor: 'pointer' }}
-            onClick={() => handleSourceClick(record.source_id)}
-          >
-            [来源{record.source_id}]
-          </Tag>
+          <span>
+            {stripped}
+            <a onClick={() => handleSourceClick(record.source_id)} style={{ cursor: 'pointer', marginLeft: 4, fontSize: token.fontSizeSM }}>{label}</a>
+          </span>
         );
       },
     },
     {
-      title: '建议', dataIndex: 'suggestion', key: 'suggestion', ellipsis: true, width: 200,
+      title: '建议', dataIndex: 'suggestion', key: 'suggestion', width: '25%',
     },
   ];
-
-  const groupedByClause = useMemo(() => {
-    const items = checkingResult?.result?.items || [];
-    if (items.length === 0) return {};
-    const groups: Record<string, ComplianceItem[]> = {};
-    for (const item of items) {
-      const clauseNum = item.clause_number || '其他';
-      if (!groups[clauseNum]) groups[clauseNum] = [];
-      groups[clauseNum].push(item);
-    }
-    const sortedKeys = Object.keys(groups).sort((a, b) => {
-      const aParts = a.split('.').map(Number);
-      const bParts = b.split('.').map(Number);
-      for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
-        const aVal = aParts[i] || 0;
-        const bVal = bParts[i] || 0;
-        if (aVal !== bVal) return aVal - bVal;
-      }
-      return 0;
-    });
-    const sorted: Record<string, ComplianceItem[]> = {};
-    for (const key of sortedKeys) {
-      sorted[key] = groups[key];
-    }
-    return sorted;
-  }, [checkingResult?.result?.items]);
-
-  const getClauseSummary = (items: ComplianceItem[]) => {
-    const compliant = items.filter(i => i.status === 'compliant').length;
-    const nonCompliant = items.filter(i => i.status === 'non_compliant').length;
-    const attention = items.filter(i => i.status === 'attention').length;
-    return { compliant, nonCompliant, attention };
-  };
 
   const handleViewReport = async (reportId: string) => {
     try {
       const report = await complianceApi.fetchComplianceReport(reportId);
       setCheckingResult(report);
-      setActiveTab('document');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       message.error(`加载报告失败: ${msg}`);
@@ -550,139 +517,82 @@ export default function CompliancePage() {
     }
   };
 
-  const renderDocumentReviewTab = () => {
-    const hasResult = checkingResult?.result?.summary;
-    const viewingHistory = hasResult && !parsedDocument;
+  const renderReportDetail = () => {
+    if (!checkingResult?.result?.summary) return <Empty description="选择左侧报告查看详情" />;
+    const docResult = checkingResult.result;
+    const docSummary = docResult.summary;
+    const sourceMap: Record<number, AuditSource> = {};
+    for (const s of (docResult.sources || [])) {
+      sourceMap[s.source_id] = s;
+    }
     return (
-<div aria-live="polite">
-        {!viewingHistory && (
-          <DocumentReviewPanel
-            document={parsedDocument}
-            file={uploadedFile}
-            richText={richTextContent}
-            onRichTextChange={setRichTextContent}
-            onFileUpload={handleFileUpload}
-            onConfirm={handleConfirmReview}
-            loading={loading || parsing}
-            selectedCategory={selectedCategory}
-            onCategoryChange={setSelectedCategory}
-            identifiedCategory={identifiedCategory}
-            categoryConfidence={categoryConfidence}
-            validCategories={validCategories}
+      <Card
+        title={`检查报告 - ${checkingResult.product_name || ''}`}
+        size="small"
+      >
+        <Descriptions size="small" column={isMobile ? 1 : 2} style={{ marginBottom: 16 }}>
+          <Descriptions.Item label="检查时间">{checkingResult.created_at}</Descriptions.Item>
+          {docResult.category && <Descriptions.Item label="险种类型">{docResult.category}</Descriptions.Item>}
+        </Descriptions>
+        {docResult.negative_list_result && (
+          <Alert
+            type={docResult.negative_list_result === 'violated' ? 'error' : 'success'}
+            showIcon
+            style={{ marginBottom: 16 }}
+            message={docResult.negative_list_result === 'violated' ? '负面清单检查发现违规' : '负面清单检查通过'}
           />
         )}
-        {hasResult && (() => {
-          const docResult = checkingResult!.result;
-          const docSummary = docResult.summary;
-          return (
-            <Card
-              title={`检查报告 - ${checkingResult!.product_name || ''}`}
-              style={{ marginTop: viewingHistory ? 0 : 16 }}
-              extra={viewingHistory ? (
-                <Button size="small" onClick={() => { setCheckingResult(null); setActiveTab('history'); }}>返回历史</Button>
-              ) : undefined}
-            >
-              <Descriptions size="small" column={isMobile ? 1 : 2} style={{ marginBottom: 16 }}>
-                <Descriptions.Item label="检查时间">{checkingResult!.created_at}</Descriptions.Item>
-                {docResult.category && <Descriptions.Item label="险种类型">{docResult.category}</Descriptions.Item>}
-              </Descriptions>
-              {docResult.negative_list_result && (
-                <Alert
-                  type={docResult.negative_list_result === 'violated' ? 'error' : 'success'}
-                  showIcon
-                  style={{ marginBottom: 16 }}
-                  message={docResult.negative_list_result === 'violated' ? '负面清单检查发现违规' : '负面清单检查通过'}
-                />
-              )}
-              {docResult.regulation_sources && Object.keys(docResult.regulation_sources).length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <Text strong style={{ display: 'block', marginBottom: 8 }}>审查法规</Text>
-                  <Space wrap>
-                    {Object.entries(docResult.regulation_sources).map(([type, laws]) => (
-                      <Tag key={type} color={type === '险种专属' ? 'blue' : type === '负面清单' ? 'red' : 'default'}>
-                        {type}: {laws.length} 部
-                      </Tag>
-                    ))}
-                  </Space>
-                </div>
-              )}
-              <Space size={isMobile ? 'small' : 'large'} wrap style={{ marginBottom: 16 }}>
-                <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
-                  合规 {docSummary.compliant} 项
+        {docResult.regulation_sources && Object.keys(docResult.regulation_sources).length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <Text strong style={{ display: 'block', marginBottom: 8 }}>审查法规</Text>
+            <Space wrap>
+              {Object.entries(docResult.regulation_sources).map(([type, laws]) => (
+                <Tag key={type} color={type === '险种专属' ? 'blue' : type === '负面清单' ? 'red' : 'default'}>
+                  {type}: {laws.length} 部
                 </Tag>
-                <Tag color="error" icon={<CloseCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
-                  不合规 {docSummary.non_compliant} 项
-                </Tag>
-                <Tag color="warning" icon={<ExclamationCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
-                  需关注 {docSummary.attention} 项
-                </Tag>
-              </Space>
-              {docResult.missing_clauses && docResult.missing_clauses.length > 0 && (
-                <Alert
-                  type="warning"
-                  showIcon
-                  style={{ marginBottom: 16 }}
-                  message="遗漏条款提示"
-                  description={
-                    <span>
-                      以下条款未被检查覆盖：
-                      {docResult.missing_clauses.map(c => <Tag key={c} style={{ marginLeft: 4 }}>{c}</Tag>)}
-                    </span>
-                  }
-                />
-              )}
-              {docResult.warning && (
-                <Alert type="warning" showIcon style={{ marginBottom: 16 }} message={docResult.warning} />
-              )}
-              {Object.keys(groupedByClause).length > 0 ? (
-                <Collapse
-                  defaultActiveKey={Object.keys(groupedByClause)}
-                  items={Object.entries(groupedByClause).map(([clauseNum, items]) => {
-                    const clauseSummary = getClauseSummary(items);
-                    return {
-                      key: clauseNum,
-                      label: (
-                        <Space>
-                          <Text strong>条款 {clauseNum}</Text>
-                          <Text type="secondary">({items.length} 项)</Text>
-                          {clauseSummary.nonCompliant > 0 && (
-                            <Tag color="error">{clauseSummary.nonCompliant} 不合规</Tag>
-                          )}
-                          {clauseSummary.attention > 0 && (
-                            <Tag color="warning">{clauseSummary.attention} 需关注</Tag>
-                          )}
-                          {clauseSummary.nonCompliant === 0 && clauseSummary.attention === 0 && (
-                            <Tag color="success">全部合规</Tag>
-                          )}
-                        </Space>
-                      ),
-                      children: (
-                        <Table
-                          dataSource={items}
-                          columns={itemColumns}
-                          rowKey={(r: ComplianceItem) => `${r.clause_number}-${r.param}`}
-                          size="small"
-                          pagination={false}
-                        />
-                      ),
-                    };
-                  })}
-                />
-              ) : (
-                <Table
-                  dataSource={docResult.items || []}
-                  columns={itemColumns}
-                  rowKey={(r: ComplianceItem) => r.param}
-                  size="small"
-                  scroll={{ x: 'max-content' }}
-                  pagination={false}
-                  rowClassName={(record: ComplianceItem) => record.status === 'non_compliant' ? 'ant-table-row-error' : ''}
-                />
-              )}
-            </Card>
-          );
-        })()}
-      </div>
+              ))}
+            </Space>
+          </div>
+        )}
+        <Space size={isMobile ? 'small' : 'large'} wrap style={{ marginBottom: 16 }}>
+          <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
+            合规 {docSummary.compliant} 项
+          </Tag>
+          <Tag color="error" icon={<CloseCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
+            不合规 {docSummary.non_compliant} 项
+          </Tag>
+          <Tag color="warning" icon={<ExclamationCircleOutlined />} style={{ fontSize: token.fontSize ?? 14, padding: '4px 12px' }}>
+            需关注 {docSummary.attention} 项
+          </Tag>
+        </Space>
+        {docResult.missing_clauses && docResult.missing_clauses.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="遗漏条款提示"
+            description={
+              <span>
+                以下条款未被检查覆盖：
+                {docResult.missing_clauses.map(c => <Tag key={c} style={{ marginLeft: 4 }}>{c}</Tag>)}
+              </span>
+            }
+          />
+        )}
+        {docResult.warning && (
+          <Alert type="warning" showIcon style={{ marginBottom: 16 }} message={docResult.warning} />
+        )}
+        {docResult.items && docResult.items.length > 0 && (
+          <Table
+            dataSource={docResult.items}
+            columns={buildItemColumns(sourceMap)}
+            rowKey={(r: ComplianceItem) => `${r.clause_number}-${r.param}`}
+            size="small"
+            pagination={false}
+            rowClassName={(record: ComplianceItem) => record.status === 'non_compliant' ? 'ant-table-row-error' : ''}
+          />
+        )}
+      </Card>
     );
   };
 
@@ -697,38 +607,62 @@ export default function CompliancePage() {
           {
             key: 'document',
             label: <span><FileTextOutlined /> 条款文档审查</span>,
-            children: renderDocumentReviewTab(),
+            children: (
+              <div aria-live="polite">
+                <DocumentReviewPanel
+                  document={parsedDocument}
+                  file={uploadedFile}
+                  richText={richTextContent}
+                  onRichTextChange={setRichTextContent}
+                  onFileUpload={handleFileUpload}
+                  onConfirm={handleConfirmReview}
+                  loading={loading || parsing}
+                  selectedCategory={selectedCategory}
+                  onCategoryChange={setSelectedCategory}
+                  identifiedCategory={identifiedCategory}
+                  categoryConfidence={categoryConfidence}
+                  validCategories={validCategories}
+                />
+              </div>
+            ),
           },
           {
             key: 'history',
             label: <span><HistoryOutlined /> 检查历史</span>,
             children: (
-              <Table
-                dataSource={history}
-                loading={historyLoading}
-                rowKey="id"
-                size="small"
-                pagination={{ pageSize: 20 }}
-                scroll={{ x: 'max-content' }}
-                columns={[
-                  { title: '产品名称', dataIndex: 'product_name', key: 'product_name' },
-                  { title: '险种', dataIndex: 'category', key: 'category' },
-                  { title: '检查时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
-                  {
-                    title: '操作', key: 'action', width: 120,
-                    render: (_: unknown, record: ComplianceReport) => (
-<Space>
-                        <Button type="link" size="small" icon={<EyeOutlined />}
-                          onClick={(e) => { e.stopPropagation(); handleViewReport(record.id); }}>查看</Button>
-                        <Popconfirm title="确定删除该检查记录？此操作不可恢复。" onConfirm={(e) => { e?.stopPropagation(); handleDeleteReport(record.id); }}>
-                          <Button type="text" danger size="small" icon={<DeleteOutlined />}
-                            onClick={(e) => e.stopPropagation()} />
-                        </Popconfirm>
-                      </Space>
-                    ),
-                  },
-                ]}
-              />
+              <div style={{ display: 'flex', gap: 16 }}>
+                <div style={{ width: isMobile ? '100%' : '35%', flexShrink: 0 }}>
+                  <Table
+                    dataSource={history}
+                    loading={historyLoading}
+                    rowKey="id"
+                    size="small"
+                    pagination={{ pageSize: 20 }}
+                    onRow={(record: ComplianceReport) => ({
+                      onClick: () => handleViewReport(record.id),
+                      style: { cursor: 'pointer' },
+                    })}
+                    columns={[
+                      { title: '产品名称', dataIndex: 'product_name', key: 'product_name' },
+                      { title: '审核时间', dataIndex: 'created_at', key: 'created_at', width: 150 },
+                      {
+                        title: '', key: 'action', width: 32,
+                        render: (_: unknown, record: ComplianceReport) => (
+                          <Popconfirm title="确定删除该检查记录？此操作不可恢复。" onConfirm={(e) => { e?.stopPropagation(); handleDeleteReport(record.id); }}>
+                            <Button type="text" danger size="small" icon={<DeleteOutlined />}
+                              onClick={(e) => e.stopPropagation()} />
+                          </Popconfirm>
+                        ),
+                      },
+                    ]}
+                  />
+                </div>
+                {!isMobile && (
+                  <div style={{ flex: 1, overflow: 'auto' }}>
+                    {renderReportDetail()}
+                  </div>
+                )}
+              </div>
             ),
           },
         ]}
