@@ -1,5 +1,5 @@
-export interface AuditSource {
-  source_id: number;
+export interface AuditRegulationItem {
+  chunk_id: string;
   law_name: string;
   article_number: string;
   content: string;
@@ -9,14 +9,14 @@ export interface AuditSource {
   effective_date?: string;
 }
 
-export interface ComplianceItem {
+export interface AuditResultItem {
   clause_number: string;
   check_type: string;
   param: string;
   value: string;
   requirement: string;
   status: string;
-  source_id: number | null;
+  chunk_id: string | null;
   source_type: string;
   source_excerpt: string;
   suggestion: string;
@@ -24,8 +24,8 @@ export interface ComplianceItem {
 
 export interface ComplianceResult {
   summary: Record<string, number>;
-  items: ComplianceItem[];
-  sources: AuditSource[];
+  items: AuditResultItem[];
+  regulations: AuditRegulationItem[];
   regulation_sources: Record<string, string[]>;
   category: string;
   negative_list_result: string;

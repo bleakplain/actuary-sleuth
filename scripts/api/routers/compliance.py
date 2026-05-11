@@ -11,19 +11,17 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 
 from api.database import get_connection, list_compliance_reports, get_compliance_report, save_compliance_report
 from api.schemas.compliance import (
-    DocumentCheckRequest, ComplianceReportOut,
+    DocumentCheckRequest, ComplianceReportResponse,
     ParsedDocumentResponse, ParsedClause, ParsedDataTable, ParsedSection,
     RichTextParseRequest,
 )
 from lib.common.constants import ComplianceConstants
 from lib.common.html_converter import html_to_docx
 from lib.compliance.checker import (
-    AuditSource,
-    AuditItem,
     check_negative_list,
     identify_category,
-    load_audit_sources,
-    format_context_for_llm,
+    load_audit_regulations,
+    build_audit_context,
     run_compliance_check,
 )
 from lib.compliance.prompts import COMPLIANCE_PROMPT_DOCUMENT
@@ -46,18 +44,18 @@ def _prepare_document_content(content: str) -> str:
     return truncated
 
 
-@router.post("/check/document", response_model=ComplianceReportOut)
+@router.post("/check/document", response_model=ComplianceReportResponse)
 async def check_document(req: DocumentCheckRequest):
     category = req.category
     if not category:
         category, _ = await _identify_category_async(req.document_content, req.product_name or "")
 
-    sources = await asyncio.to_thread(load_audit_sources, category)
-    context = format_context_for_llm(sources)
+    regulations = await asyncio.to_thread(load_audit_regulations, category)
+    context = build_audit_context(regulations)
 
     regulation_sources: Dict[str, List[str]] = {
-        "险种专属": [s.law_name for s in sources if s.source_type == "category"],
-        "通用法规": [s.law_name for s in sources if s.source_type == "general"],
+        "险种专属": [r.law_name for r in regulations if r.source_type == "category"],
+        "通用法规": [r.law_name for r in regulations if r.source_type == "general"],
     }
 
     document_content = _prepare_document_content(req.document_content)
@@ -68,56 +66,24 @@ async def check_document(req: DocumentCheckRequest):
     )
 
     try:
-        result = await asyncio.to_thread(run_compliance_check, prompt, num_sources=len(sources))
+        result = await asyncio.to_thread(run_compliance_check, prompt, regulations=regulations)
     except Exception as e:
         logger.error(f"Document check failed: {e}")
         raise HTTPException(status_code=500, detail=f"条款审查失败: {e}")
 
-    negative_items, negative_list_result, negative_sources = await asyncio.to_thread(
+    negative_items, negative_list_result, negative_regulations = await asyncio.to_thread(
         check_negative_list, document_content
     )
 
-    # 重新编号负面清单 sources，接续法规 sources 的 source_id
-    reg_count = len(sources)
-    renumbered_neg_sources = []
-    for ns in negative_sources:
-        renumbered_neg_sources.append(AuditSource(
-            source_id=reg_count + ns.source_id,
-            law_name=ns.law_name,
-            article_number=ns.article_number,
-            content=ns.content,
-            source_type=ns.source_type,
-            doc_number=ns.doc_number,
-            issuing_authority=ns.issuing_authority,
-            effective_date=ns.effective_date,
-        ))
-
-    # 重新映射负面清单 AuditItem 的 source_id
-    renumbered_neg_items = []
-    for ni in negative_items:
-        new_sid = (reg_count + ni.source_id) if ni.source_id is not None else None
-        renumbered_neg_items.append(AuditItem(
-            clause_number=ni.clause_number,
-            check_type=ni.check_type,
-            param=ni.param,
-            value=ni.value,
-            requirement=ni.requirement,
-            status=ni.status,
-            source_id=new_sid,
-            source_type=ni.source_type,
-            source_excerpt=ni.source_excerpt,
-            suggestion=ni.suggestion,
-        ))
-
-    all_sources = sources + renumbered_neg_sources
-    result["sources"] = [s.__dict__ for s in all_sources]
+    all_regulations = regulations + negative_regulations
+    result["regulations"] = [r.__dict__ for r in all_regulations]
     result["regulation_sources"] = regulation_sources
     result["category"] = category
 
-    if renumbered_neg_items:
-        result["items"].extend([item.__dict__ for item in renumbered_neg_items])
-        result["summary"]["non_compliant"] = result["summary"].get("non_compliant", 0) + len(renumbered_neg_items)
-        result["regulation_sources"]["负面清单"] = [s.law_name for s in renumbered_neg_sources]
+    if negative_items:
+        result["items"].extend([item.__dict__ for item in negative_items])
+        result["summary"]["non_compliant"] = result["summary"].get("non_compliant", 0) + len(negative_items)
+        result["regulation_sources"]["负面清单"] = [r.law_name for r in negative_regulations]
 
     result["negative_list_result"] = negative_list_result
 
@@ -125,7 +91,7 @@ async def check_document(req: DocumentCheckRequest):
     product_name = req.product_name or "未命名产品"
     save_compliance_report(report_id, product_name, category or "", "document", result)
 
-    return ComplianceReportOut(
+    return ComplianceReportResponse(
         id=report_id,
         product_name=product_name,
         category=category or "",
@@ -141,12 +107,12 @@ async def get_categories():
     return {"categories": ComplianceConstants.VALID_CATEGORIES}
 
 
-@router.get("/reports", response_model=list[ComplianceReportOut])
+@router.get("/reports", response_model=list[ComplianceReportResponse])
 async def list_reports():
     return list_compliance_reports()
 
 
-@router.get("/reports/{report_id}", response_model=ComplianceReportOut)
+@router.get("/reports/{report_id}", response_model=ComplianceReportResponse)
 async def get_report(report_id: str):
     report = get_compliance_report(report_id)
     if report is None:

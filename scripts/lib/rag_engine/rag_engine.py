@@ -530,6 +530,7 @@ class RAGEngine:
 
                 if match:
                     results.append({
+                        'id': row.get('id', ''),
                         'law_name': meta.get('law_name', ''),
                         'article_number': meta.get('article_number', ''),
                         'category': meta.get('category', ''),

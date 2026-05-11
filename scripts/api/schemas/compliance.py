@@ -3,9 +3,9 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel, ConfigDict
 
 
-class AuditSourceOut(BaseModel):
+class AuditRegulationItemResponse(BaseModel):
     model_config = ConfigDict(extra='ignore')
-    source_id: int = 0
+    chunk_id: str = ""
     law_name: str = ""
     article_number: str = ""
     content: str = ""
@@ -15,35 +15,35 @@ class AuditSourceOut(BaseModel):
     effective_date: Optional[str] = None
 
 
-class AuditItemOut(BaseModel):
+class AuditResultItemResponse(BaseModel):
     clause_number: str = ""
     check_type: str = ""
-    param: str
+    param: str = ""
     value: str = ""
     requirement: str = ""
     status: str
-    source_id: Optional[int] = None
+    chunk_id: Optional[str] = None
     source_type: str = ""
     source_excerpt: str = ""
     suggestion: str = ""
 
 
-class ComplianceResultOut(BaseModel):
+class ComplianceReportDataResponse(BaseModel):
     model_config = ConfigDict(extra='ignore')
     summary: Dict[str, int] = {}
-    items: List[AuditItemOut] = []
-    sources: List[AuditSourceOut] = []
+    items: List[AuditResultItemResponse] = []
+    regulations: List[AuditRegulationItemResponse] = []
     regulation_sources: Dict[str, List[str]] = {}
     category: Optional[str] = ""
     negative_list_result: Optional[str] = ""
 
 
-class ComplianceReportOut(BaseModel):
+class ComplianceReportResponse(BaseModel):
     id: str
     product_name: str
     category: str
     mode: str
-    result: ComplianceResultOut
+    result: ComplianceReportDataResponse
     created_at: str
 
 
