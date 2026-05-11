@@ -10,8 +10,9 @@ import * as kbApi from '../api/knowledge';
 import type { KBVersion } from '../api/knowledge';
 import type { Document, IndexStatus } from '../types';
 import { DRAWER_MD, MODAL_SM } from '../constants/layout';
+import PageHeader from '../components/PageHeader';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 interface ChunkItem {
   law_name: string;
@@ -364,7 +365,7 @@ export default function KnowledgePage() {
 
   return (
     <div style={isMobile ? { overflowX: 'hidden' } : undefined}>
-      <Title level={4} className="mb-16">知识库管理</Title>
+      <PageHeader icon={<DatabaseOutlined />} title="知识库管理" description="管理法规知识库的文档与版本" isMobile={isMobile} />
 
       <Row gutter={isMobile ? [8, 8] : [16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={12} sm={6}>

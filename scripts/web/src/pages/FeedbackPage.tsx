@@ -3,6 +3,7 @@ import { Table, Tag, Select, Button, Space, message, Popconfirm, Modal, Descript
 import { ReloadOutlined, ThunderboltOutlined, DislikeOutlined, LikeOutlined, WarningOutlined } from '@ant-design/icons';
 import { useFeedbackStore } from '../stores/feedbackStore';
 import { MODAL_LG } from '../constants/layout';
+import PageHeader from '../components/PageHeader';
 import { verifyBadcase, convertBadcase } from '../api/feedback';
 import { usePromptModal } from '../hooks/usePromptModal';
 
@@ -187,7 +188,7 @@ export default function FeedbackPage() {
 
   return (
     <div>
-      <Typography.Title level={4} className="mb-16">问题反馈</Typography.Title>
+      <PageHeader icon={<DislikeOutlined />} title="问题反馈" description="跟踪和修复 RAG 系统的问题" isMobile={isMobile} />
 
       {/* 统计概览 */}
       {stats && (

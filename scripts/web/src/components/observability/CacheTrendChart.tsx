@@ -1,6 +1,7 @@
 import { Card, Segmented, Skeleton, theme } from 'antd';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useCacheStore } from '../../stores/cacheStore';
+import { CHART_COLORS } from '../../constants/chartColors';
 
 const RANGE_OPTIONS = [
   { label: '1小时', value: 1 },
@@ -61,7 +62,7 @@ export default function CacheTrendChart() {
             <Line
               type="monotone"
               dataKey="hitRate"
-              stroke="#1890ff"
+              stroke={CHART_COLORS.primary}
               dot={false}
               strokeWidth={2}
             />

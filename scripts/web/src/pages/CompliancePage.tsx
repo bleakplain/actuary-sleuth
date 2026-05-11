@@ -3,19 +3,22 @@ import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import {
   Card, Input, Button, Table, Tag, Typography, theme,
   message, Tabs, Space, Descriptions, Popconfirm, Drawer, Grid,
-  Empty, Alert, Select, Collapse,
+  Alert, Select, Collapse,
 } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined,
   HistoryOutlined, DeleteOutlined, EyeOutlined, BookOutlined,
   FileTextOutlined, PlusOutlined, CaretRightOutlined, CloseOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import * as complianceApi from '../api/compliance';
 import type { ComplianceReport, AuditResultItem, AuditRegulationItem, ParsedDocument, ParsedDataTable } from '../types';
 import { DRAWER_MD, DRAWER_LG } from '../constants/layout';
 import { DocumentViewer } from '../components/DocumentViewer';
+import PageHeader from '../components/PageHeader';
+import EmptyGuide from '../components/EmptyGuide';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 const { TextArea } = Input;
 
 const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
@@ -241,12 +244,12 @@ function DocumentReviewPanel({
           }))}
         />
       ) : (
-        <Empty description="未解析到任何内容" />
+        <EmptyGuide description="未解析到任何内容" />
       )}
     </div>
   ) : (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-      <Empty description="请输入文档内容或点击左侧上传文件" />
+      <EmptyGuide description="请输入文档内容或上传文件" />
     </div>
   );
 
@@ -645,7 +648,7 @@ export default function CompliancePage() {
 
   return (
     <div>
-      <Title level={4} className="mb-16">合规检查助手</Title>
+      <PageHeader icon={<SafetyCertificateOutlined />} title="合规检查助手" description="检查保险条款文档的合规性" isMobile={isMobile} />
 
       <Tabs
         activeKey={activeTab}

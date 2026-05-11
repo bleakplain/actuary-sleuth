@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Input, Button, Checkbox, Popconfirm, message, theme, Grid, Space } from 'antd';
 import { SearchOutlined, DeleteOutlined, ClearOutlined } from '@ant-design/icons';
 import { useObservabilityStore } from '../../stores/observabilityStore';
+import EmptyGuide from '../EmptyGuide';
 import type { Dayjs } from 'dayjs';
 import { DatePicker } from 'antd';
 
@@ -249,9 +250,7 @@ export default function TraceList() {
       {/* List */}
       <div style={{ flex: 1, overflow: 'auto' }}>
         {traceList.length === 0 && (
-          <div className="empty-state" style={{ fontSize: 12 }}>
-            暂无 Trace 数据
-          </div>
+          <EmptyGuide description="暂无 Trace 数据" />
         )}
         {traceList.map((item) => (
           <div

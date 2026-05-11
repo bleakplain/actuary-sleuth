@@ -80,7 +80,7 @@ export default function MessageBubble({ message, streaming, onCitationClick, isM
           style={{
             maxWidth: isMobile ? '92%' : '70%',
             background: token.colorPrimary,
-            color: '#ffffff',
+            color: token.colorWhite,
             padding: '8px 16px',
             borderRadius: 12,
             borderBottomRightRadius: 4,

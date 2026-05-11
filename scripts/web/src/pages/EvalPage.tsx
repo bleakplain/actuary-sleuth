@@ -8,7 +8,7 @@ import {
   PlusOutlined, ImportOutlined, SaveOutlined, RollbackOutlined,
   PlayCircleOutlined, DownloadOutlined, SwapOutlined,
   DeleteOutlined, CopyOutlined, CheckCircleOutlined, SearchOutlined, CloseCircleOutlined, LinkOutlined,
-  FolderOutlined,
+  FolderOutlined, BarChartOutlined,
 } from '@ant-design/icons';
 import * as evalApi from '../api/eval';
 import * as kbApi from '../api/knowledge';
@@ -16,8 +16,10 @@ import MetricsChart, { formatMetric, MultiComparisonChart, TrendChart } from '..
 import type { EvalSample, EvalSnapshot, Evaluation, EvalConfig, SampleResult, RegulationRef } from '../types';
 import { resolveMetricMeta } from '../utils/evalMetrics';
 import { DRAWER_SM, DRAWER_LG, MODAL_SM, MODAL_MD, MODAL_LG } from '../constants/layout';
+import PageHeader from '../components/PageHeader';
+import EmptyGuide from '../components/EmptyGuide';
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 
 const QUESTION_TYPE_OPTIONS = [
   { value: 'factual', label: 'FACTUAL（事实类）' },
@@ -1171,7 +1173,7 @@ export default function EvalPage() {
 
   return (
     <div>
-      <Title level={4} className="mb-16">评测管理</Title>
+      <PageHeader icon={<BarChartOutlined />} title="评测管理" description="RAG 检索与生成质量评测" isMobile={isMobile} />
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
@@ -1531,9 +1533,7 @@ export default function EvalPage() {
                   )}
 
                   {!editingConfig && !viewingConfig && (
-                    <div className="empty-state">
-                      <Text type="secondary">选择左侧的配置查看详情，或新建配置</Text>
-                    </div>
+                    <EmptyGuide description="选择左侧的配置查看详情" actionLabel="新增配置" onAction={startNewConfig} />
                   )}
                 </Col>
               </Row>
@@ -1585,7 +1585,7 @@ export default function EvalPage() {
                         {evaluationsLoading ? (
                           <div className="empty-state" style={{ fontSize: token.fontSizeSM }}>加载中…</div>
                         ) : evalPaged.length === 0 ? (
-                          <div className="empty-state" style={{ fontSize: token.fontSizeSM }}>暂无评测记录</div>
+                          <EmptyGuide description="暂无评测记录" />
                         ) : (
                           <Table
                             dataSource={evalPaged}
