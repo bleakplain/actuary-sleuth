@@ -74,7 +74,11 @@ class RegulationDocument:
 # ==================== Audit 接口模型 ====================
 
 class ProductCategory(str, Enum):
-    """产品类别"""
+    """产品类别（audit/product 模块使用，英文值用于数据库存储）
+
+    注意: compliance 模块使用 product_types.ProductCategory（中文简称值），
+    两者枚举名相同但用途不同，勿混淆。
+    """
     CRITICAL_ILLNESS = "critical_illness"
     MEDICAL_INSURANCE = "medical_insurance"
     LIFE_INSURANCE = "life_insurance"

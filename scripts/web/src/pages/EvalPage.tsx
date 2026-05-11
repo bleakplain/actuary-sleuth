@@ -312,7 +312,7 @@ function SampleDrawer({
     <div>
       <div style={{ display: 'flex', gap: 8 }}>
         <Input
-          placeholder="输入问题关键词..."
+          placeholder="输入问题关键词…"
           value={kbQuery}
           onChange={(e) => setKbQuery(e.target.value)}
           onPressEnter={handleSearchKb}
@@ -338,7 +338,7 @@ function SampleDrawer({
                 <div style={{ marginTop: 2, color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>{r.hierarchy_path}</div>
               )}
               <div style={{ marginTop: 2, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
-                {r.excerpt.length > 120 ? r.excerpt.slice(0, 120) + '...' : r.excerpt}
+                {r.excerpt.length > 120 ? r.excerpt.slice(0, 120) + '…' : r.excerpt}
               </div>
             </div>
           ))}
@@ -349,7 +349,7 @@ function SampleDrawer({
 
   const browseTab = (
     <div style={{ minHeight: 320 }}>
-      {kbDocsLoading && <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>加载中...</Text>}
+      {kbDocsLoading && <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>加载中…</Text>}
       {kbDocs.length > 0 && (
         <div style={{ display: 'flex', height: 320 }}>
           <div style={{ width: isMobile ? '100%' : treeWidth, minWidth: isMobile ? '100%' : treeWidth, overflow: 'auto', paddingRight: 4 }}>
@@ -373,7 +373,7 @@ function SampleDrawer({
           />}
           <div style={{ flex: 1, overflow: 'auto', paddingLeft: 8, display: isMobile ? 'none' : undefined }}>
             {docChunksLoading && (
-              <div style={{ color: token.colorTextQuaternary, fontSize: token.fontSizeSM }}>加载条款中...</div>
+              <div style={{ color: token.colorTextQuaternary, fontSize: token.fontSizeSM }}>加载条款中…</div>
             )}
             {selectedDocPath && !docChunksLoading && docChunks.length === 0 && (
               <div style={{ color: token.colorTextQuaternary, fontSize: token.fontSizeSM }}>该文档无条款数据</div>
@@ -399,7 +399,7 @@ function SampleDrawer({
                     })} />
                 </div>
                 <div style={{ marginTop: 2, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
-                  {chunk.text.length > 120 ? chunk.text.slice(0, 120) + '...' : chunk.text}
+                  {chunk.text.length > 120 ? chunk.text.slice(0, 120) + '…' : chunk.text}
                 </div>
               </div>
             ))}
@@ -483,7 +483,7 @@ function SampleDrawer({
                 onClick={() => removeRef(idx)} />
             </div>
             <div style={{ marginTop: 2, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
-              {ref.excerpt && ref.excerpt.length > 150 ? ref.excerpt.slice(0, 150) + '...' : ref.excerpt}
+              {ref.excerpt && ref.excerpt.length > 150 ? ref.excerpt.slice(0, 150) + '…' : ref.excerpt}
             </div>
           </div>
         ))}
@@ -745,7 +745,7 @@ export default function EvalPage() {
       render: (_: undefined, sample: EvalSample) => (
         <Space>
           <Button type="link" size="small" onClick={() => setDrawerSample(sample)}>审核</Button>
-          <Popconfirm title="确定删除？" onConfirm={() => deleteSample(sample.id)}>
+          <Popconfirm title="确定删除？此操作不可恢复。" onConfirm={() => deleteSample(sample.id)}>
             <Button type="link" size="small" danger>删除</Button>
           </Popconfirm>
         </Space>
@@ -1231,6 +1231,8 @@ export default function EvalPage() {
                         scroll={{ x: 750 }}
                         onRow={(sample) => ({
                           onClick: () => setDrawerSample(sample),
+                          tabIndex: 0,
+                          onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDrawerSample(sample); } },
                           style: { cursor: 'pointer' },
                         })}
                       />
@@ -1338,6 +1340,8 @@ export default function EvalPage() {
                         pagination={false}
                         onRow={(cfg) => ({
                           onClick: () => viewConfig(cfg),
+                          tabIndex: 0,
+                          onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); viewConfig(cfg); } },
                           style: {
                             cursor: 'pointer',
                             background: viewingConfig?.id === cfg.id ? token.colorPrimaryBg : undefined,
@@ -1579,7 +1583,7 @@ export default function EvalPage() {
                     <Card title="评测记录" size="small" styles={{ body: { padding: 0, overflow: 'hidden' } }}>
                       <div style={{ overflow: 'auto', maxHeight: 400 }}>
                         {evaluationsLoading ? (
-                          <div className="empty-state" style={{ fontSize: token.fontSizeSM }}>加载中...</div>
+                          <div className="empty-state" style={{ fontSize: token.fontSizeSM }}>加载中…</div>
                         ) : evalPaged.length === 0 ? (
                           <div className="empty-state" style={{ fontSize: token.fontSizeSM }}>暂无评测记录</div>
                         ) : (
@@ -1606,6 +1610,8 @@ export default function EvalPage() {
                             pagination={false}
                             onRow={(evaluation) => ({
                               onClick: () => viewEvaluation(evaluation),
+                              tabIndex: 0,
+                              onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); viewEvaluation(evaluation); } },
                               style: {
                                 cursor: 'pointer',
                                 background: selectedEvaluation?.id === evaluation.id ? token.colorPrimaryBg : undefined,
@@ -1654,7 +1660,7 @@ export default function EvalPage() {
 
                   <Col xs={24} md={14}>
                     {selectedEvaluation ? (
-                      <>
+                      <div aria-live="polite">
                         <Descriptions
                           title={`评测报告 - ${selectedEvaluation.id}`}
                           size="small"
@@ -1735,7 +1741,7 @@ export default function EvalPage() {
                             </Card>
                           </>
                         )}
-                      </>
+                      </div>
                     ) : (
                       <Card style={{ textAlign: 'center', padding: 40 }}>
                         <Text type="secondary">选择一条评测记录查看详情</Text>

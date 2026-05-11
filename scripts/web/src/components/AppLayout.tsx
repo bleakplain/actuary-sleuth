@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Layout, Menu, ConfigProvider, theme, Grid } from 'antd';
+import { Layout, Menu, ConfigProvider, theme, Grid, Button } from 'antd';
 import {
   MessageOutlined,
   DatabaseOutlined,
@@ -7,6 +7,8 @@ import {
   SafetyCertificateOutlined,
   DislikeOutlined,
   ExperimentOutlined,
+  SunOutlined,
+  MoonOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { sidebarDarkTheme } from '../theme';
@@ -68,7 +70,23 @@ function MobileTabBar({ selectedKey, onSelect }: { selectedKey: string; onSelect
         return (
           <div
             key={item.key}
+            role="tab"
+            tabIndex={active ? 0 : -1}
+            aria-selected={active}
             onClick={() => onSelect(item.key)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelect(item.key);
+              } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                const idx = menuItems.findIndex((m) => m.key === item.key);
+                const next = e.key === 'ArrowRight'
+                  ? (idx + 1) % menuItems.length
+                  : (idx - 1 + menuItems.length) % menuItems.length;
+                const nextKey = menuItems[next].key;
+                onSelect(nextKey);
+              }
+            }}
             style={{
               flex: 1,
               display: 'flex',
@@ -94,7 +112,7 @@ function MobileTabBar({ selectedKey, onSelect }: { selectedKey: string; onSelect
   );
 }
 
-export default function AppLayout() {
+export default function AppLayout({ isDark, onToggleTheme }: { isDark: boolean; onToggleTheme: () => void }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
@@ -114,9 +132,17 @@ export default function AppLayout() {
             alignItems: 'center',
             height: 48,
             lineHeight: '48px',
+            paddingTop: 'max(0px, env(safe-area-inset-top))',
           }}
         >
           <span style={{ fontSize: 15, fontWeight: token.fontWeightStrong }}>精算助手</span>
+          <Button
+            type="text"
+            icon={isDark ? <SunOutlined /> : <MoonOutlined />}
+            onClick={onToggleTheme}
+            aria-label={isDark ? '切换到浅色模式' : '切换到深色模式'}
+            style={{ marginLeft: 'auto', minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          />
         </Header>
         <Content
           style={{
@@ -125,9 +151,13 @@ export default function AppLayout() {
             overflow: 'auto',
           }}
         >
-          <Outlet />
+          <main id="main-content">
+            <Outlet />
+          </main>
         </Content>
-        <MobileTabBar selectedKey={selectedKey} onSelect={(key) => navigate(key)} />
+        <nav aria-label="主导航">
+          <MobileTabBar selectedKey={selectedKey} onSelect={(key) => navigate(key)} />
+        </nav>
       </Layout>
     );
   }
@@ -141,6 +171,7 @@ export default function AppLayout() {
           onCollapse={setCollapsed}
           theme="dark"
         >
+          <nav aria-label="主导航">
           <SidebarLogo collapsed={collapsed} />
           <Menu
             mode="inline"
@@ -149,6 +180,7 @@ export default function AppLayout() {
             onClick={({ key }) => navigate(key)}
             style={{ borderRight: 0 }}
           />
+          </nav>
         </Sider>
       </ConfigProvider>
       <Layout>
@@ -160,9 +192,18 @@ export default function AppLayout() {
           }}
         >
           <span style={{ fontSize: 16, fontWeight: token.fontWeightStrong }}>精算法规知识平台</span>
+          <Button
+            type="text"
+            icon={isDark ? <SunOutlined /> : <MoonOutlined />}
+            onClick={onToggleTheme}
+            aria-label={isDark ? '切换到浅色模式' : '切换到深色模式'}
+            style={{ marginLeft: 'auto' }}
+          />
         </Header>
         <Content style={{ margin: 'var(--content-padding)', overflow: 'auto' }}>
-          <Outlet />
+          <main id="main-content">
+            <Outlet />
+          </main>
         </Content>
       </Layout>
     </Layout>

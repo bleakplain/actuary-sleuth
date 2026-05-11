@@ -1,333 +1,44 @@
-export interface Citation {
-  source_idx: number;
-  law_name: string;
-  article_number: string;
-  content: string;
-}
-
-export interface Source {
-  law_name: string;
-  article_number: string;
-  category: string;
-  content: string;
-  source_file: string;
-  hierarchy_path: string;
-  doc_number?: string;
-  effective_date?: string;
-  issuing_authority?: string;
-  score?: number;
-}
-
-export interface Message {
-  id: number;
-  session_id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  citations: Citation[];
-  sources: Source[];
-  timestamp: string;
-  faithfulness_score?: number;
-  unverified_claims?: string[];
-  trace?: TraceData | null;
-  needsClarification?: boolean;
-  clarificationOptions?: string[];
-}
-
-export interface Session {
-  id: string;
-  title: string;
-  created_at: string;
-  message_count: number;
-}
-
-export interface ChatRequest {
-  question: string;
-  session_id?: string;
-  mode: 'qa' | 'search';
-  debug?: boolean;
-}
-
-export interface Document {
-  name: string;
-  file_path: string;
-  clause_count: number;
-  file_size: number;
-  indexed_at?: string;
-  status: string;
-}
-
-export interface IndexStatus {
-  vector_db: Record<string, string | number>;
-  bm25: Record<string, string | number>;
-  document_count: number;
-}
-
-export interface TaskStatus {
-  task_id: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  progress: string;
-  result?: Record<string, string | number>;
-}
-
-export interface RegulationRef {
-  doc_name: string;
-  article: string;
-  excerpt: string;
+export interface AuditRegulationItem {
   chunk_id: string;
+  law_name: string;
+  article_number: string;
+  content: string;
+  source_type: string;
+  doc_number?: string;
+  issuing_authority?: string;
+  effective_date?: string;
 }
 
-export interface EvalSample {
-  id: string;
-  question: string;
-  ground_truth: string;
-  evidence_docs: string[];
-  evidence_keywords: string[];
-  question_type: 'factual' | 'multi_hop' | 'negative' | 'colloquial';
-  difficulty: 'easy' | 'medium' | 'hard';
-  topic: string;
-  regulation_refs: RegulationRef[];
-  review_status: 'pending' | 'approved';
-  reviewer: string;
-  reviewed_at: string;
-  review_comment: string;
-  created_by: 'human' | 'llm';
-  kb_version: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface EvalSnapshot {
-  id: string;
-  name: string;
-  description: string;
-  sample_count: number;
-  version: number;
-  hash_code: string;
-  created_at: string;
-}
-
-export interface Evaluation {
-  id: string;
-  mode: 'retrieval' | 'generation' | 'full';
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  progress: number;
-  total: number;
-  started_at: string;
-  finished_at?: string;
-  config_version?: number;
-  dataset_version?: string;
-  config?: {
-    retrieval?: Record<string, string | number | boolean>;
-    rerank?: Record<string, string | number | boolean>;
-    generation?: Record<string, string | number | boolean>;
-    evaluation?: Record<string, string>;
-    dataset?: Record<string, string | number | null>;
-  };
-}
-
-export interface EvalConfig {
-  id: number;
-  version: number;
-  description: string;
-  is_active: number;
-  created_at: string;
-  config_json?: {
-    retrieval?: Record<string, string | number | boolean>;
-    rerank?: Record<string, string | number | boolean>;
-    generation?: Record<string, string | number | boolean>;
-  };
-}
-
-export interface SampleResult {
-  id: number;
-  evaluation_id: string;
-  sample_id: string;
-  retrieved_docs: Source[];
-  generated_answer: string;
-  retrieval_metrics: Record<string, number>;
-  generation_metrics: Record<string, number>;
-}
-
-export interface MetricsDiff {
-  baseline: number;
-  compare: number;
-  delta: number;
-  pct_change: number;
-}
-
-export interface ComplianceItem {
-  clause_number?: string;
+export interface AuditResultItem {
+  clause_number: string;
+  check_type: string;
   param: string;
-  value?: string | number;
+  value: string;
   requirement: string;
-  status: 'compliant' | 'non_compliant' | 'attention';
-  source?: string;
-  source_excerpt?: string;
-  suggestion?: string;
+  status: string;
+  chunk_id: string | null;
+  source_type: string;
+  source_excerpt: string;
+  suggestion: string;
 }
 
 export interface ComplianceResult {
-  summary: {
-    compliant: number;
-    non_compliant: number;
-    attention: number;
-  };
-  items: ComplianceItem[];
-  sources?: Source[];
-  citations?: Citation[];
-  extracted_params?: Record<string, string>;
-  regulation_sources?: Record<string, string[]>;
-  category?: string;
-  negative_list_checked?: boolean;
-  missing_clauses?: string[];
-  warning?: string;
+  summary: Record<string, number>;
+  items: AuditResultItem[];
+  regulations: AuditRegulationItem[];
+  regulation_sources: Record<string, string[]>;
+  category: string;
+  negative_list_result: string;
 }
 
 export interface ComplianceReport {
   id: string;
   product_name: string;
   category: string;
-  mode: 'product' | 'document';
+  mode: string;
   result: ComplianceResult;
   created_at: string;
 }
-
-export interface Feedback {
-  id: string;
-  message_id: number;
-  session_id: string;
-  rating: 'up' | 'down';
-  reason: string;
-  correction: string;
-  source_channel: string;
-  auto_quality_score: number | null;
-  auto_quality_details: Record<string, number> | null;
-  classified_type: string | null;
-  classified_reason: string | null;
-  classified_fix_direction: string | null;
-  status: 'pending' | 'classified' | 'fixing' | 'fixed' | 'rejected' | 'converted';
-  compliance_risk: number;
-  created_at: string;
-  updated_at: string;
-  user_question: string;
-  assistant_answer: string;
-}
-
-export interface FeedbackStats {
-  total: number;
-  up_count: number;
-  down_count: number;
-  satisfaction_rate: number;
-  by_type: Record<string, number>;
-  by_status: Record<string, number>;
-  by_risk: Record<string, number>;
-}
-
-export interface TraceSpan {
-  span_id: string;
-  trace_id: string;
-  parent_span_id: string | null;
-  name: string;
-  category: string;
-  input: Record<string, unknown> | null;
-  output: Record<string, unknown> | null;
-  metadata: Record<string, unknown>;
-  start_time: number;
-  end_time: number;
-  duration_ms: number;
-  status: 'ok' | 'error';
-  error: string | null;
-  children: TraceSpan[];
-}
-
-export interface TraceSummary {
-  total_duration_ms: number;
-  span_count: number;
-  llm_call_count: number;
-  error_count: number;
-}
-
-export interface TraceData {
-  trace_id: string;
-  root: TraceSpan;
-  spans: TraceSpan[];
-  summary: TraceSummary;
-}
-
-// ── Observability ──
-
-export interface TraceListItem {
-  trace_id: string;
-  message_id: number | null;
-  session_id: string | null;
-  created_at: string;
-  status: 'ok' | 'error';
-  total_duration_ms: number;
-  span_count: number;
-  llm_call_count: number;
-  trace_name: string | null;
-}
-
-export interface TraceListResponse {
-  items: TraceListItem[];
-  total: number;
-}
-
-export interface CleanupRequest {
-  start_date: string;
-  end_date: string;
-  status: string;
-  preview: boolean;
-}
-
-export interface CleanupResponse {
-  count?: number;
-  deleted?: number;
-}
-
-// ── Cache ──
-
-export interface CacheStats {
-  memory_size: number;
-  max_memory_entries: number;
-  hits: number;
-  misses: number;
-  hit_rate: number;
-  kb_version: string;
-  evictions: number;
-  l2_size: number;
-  by_scope: Record<string, { hits: number; misses: number }>;
-}
-
-export interface CacheEntry {
-  key: string;
-  scope: string;
-  created_at: number;
-  ttl: number;
-  kb_version: string;
-  size_bytes: number;
-}
-
-export interface CacheEntryListResponse {
-  items: CacheEntry[];
-  total: number;
-}
-
-export interface CacheTrendPoint {
-  timestamp: string;
-  hits: number;
-  misses: number;
-  hit_rate: number;
-  memory_size: number;
-  evictions: number;
-  l2_size: number;
-}
-
-export interface CacheTrendResponse {
-  points: CacheTrendPoint[];
-}
-
-// ── Parsed Document ──
 
 export interface ParsedClause {
   number: string;
@@ -335,8 +46,8 @@ export interface ParsedClause {
   text: string;
 }
 
-export interface ParsedPremiumTable {
-  table_type: string;  // premium, appendix, coverage, drug_list, gene_test, hospital, other
+export interface ParsedDataTable {
+  table_type: string;
   remark: string;
   raw_text: string;
   data: string[][];
@@ -352,7 +63,7 @@ export interface ParsedDocument {
   file_name: string;
   file_type: string;
   clauses: ParsedClause[];
-  premium_tables: ParsedPremiumTable[];
+  data_tables: ParsedDataTable[];
   notices: ParsedSection[];
   health_disclosures: ParsedSection[];
   exclusions: ParsedSection[];
@@ -362,10 +73,4 @@ export interface ParsedDocument {
   parse_time: string;
   identified_category: string | null;
   category_confidence: number;
-}
-
-export interface ComplianceCheckRequest {
-  document_content: string;
-  product_name?: string;
-  category?: string;
 }

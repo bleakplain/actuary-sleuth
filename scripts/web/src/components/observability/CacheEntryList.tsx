@@ -47,7 +47,7 @@ export default function CacheEntryList() {
       width: 200,
       render: (key: string) => (
         <span style={{ fontFamily: 'monospace', fontSize: 11 }} title={key}>
-          {key.slice(0, 30)}...
+          {key.slice(0, 30)}…
         </span>
       ),
     },

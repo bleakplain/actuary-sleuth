@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
 import CitationTag from './CitationTag';
 import FeedbackButtons from './FeedbackButtons';
+import { ClickableDiv } from './ClickableDiv';
 import { useAskStore } from '../stores/askStore';
 import type { Message, Citation, Source } from '../types';
 
@@ -44,14 +45,15 @@ export default function MessageBubble({ message, streaming, onCitationClick, isM
   if (message.role === 'user') {
     const showDelete = isMobile || hovered;
     return (
-      <div
+      <article
+        aria-label={`用户消息 ${formatMsgTime(message.timestamp)}`}
         style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16, position: 'relative' }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
         {showDelete && (
           <Popconfirm
-            title="删除这条消息及其回答？"
+            title="删除这条消息及其回答？此操作不可恢复。"
             onConfirm={() => deleteMessage(message.id)}
             okText="删除"
             cancelText="取消"
@@ -60,6 +62,7 @@ export default function MessageBubble({ message, streaming, onCitationClick, isM
               type="text"
               size="small"
               icon={<CloseOutlined />}
+              aria-label="删除消息"
               onMouseDown={(e) => e.stopPropagation()}
               style={{
                 position: 'absolute',
@@ -88,7 +91,7 @@ export default function MessageBubble({ message, streaming, onCitationClick, isM
             {formatMsgTime(message.timestamp)}
           </div>
         </div>
-      </div>
+      </article>
     );
   }
 
@@ -99,7 +102,7 @@ export default function MessageBubble({ message, streaming, onCitationClick, isM
   const isSearchResult = content.startsWith('[') && hasSources;
 
   return (
-    <div style={{ marginBottom: 16 }}>
+    <article aria-label={`助手消息 ${formatMsgTime(message.timestamp)}`} style={{ marginBottom: 16 }}>
       <div
         style={{
           maxWidth: isMobile ? '95%' : '85%',
@@ -114,9 +117,9 @@ export default function MessageBubble({ message, streaming, onCitationClick, isM
         {isSearchResult ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {message.sources.map((s: Source, i: number) => (
-              <div
+              <ClickableDiv
                 key={i}
-                onClick={() => onCitationClick?.(s, message.sources)}
+                onActivate={() => onCitationClick?.(s, message.sources)}
                 style={{
                   background: token.colorBgContainer,
                   border: `1px solid ${token.colorBorderSecondary}`,
@@ -143,7 +146,7 @@ export default function MessageBubble({ message, streaming, onCitationClick, isM
                 }}>
                   {s.content}
                 </div>
-              </div>
+              </ClickableDiv>
             ))}
           </div>
         ) : message.needsClarification ? (
@@ -167,7 +170,7 @@ export default function MessageBubble({ message, streaming, onCitationClick, isM
         ) : content ? (
           <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>{content}</ReactMarkdown>
         ) : (
-          <Text type="secondary">思考中...</Text>
+          <Text type="secondary">思考中…</Text>
         )}
         {!isSearchResult && hasSources && (
           <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
@@ -205,6 +208,6 @@ export default function MessageBubble({ message, streaming, onCitationClick, isM
           </div>
         )}
       </div>
-    </div>
+    </article>
   );
 }

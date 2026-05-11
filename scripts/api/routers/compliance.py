@@ -5,21 +5,23 @@ import uuid
 import asyncio
 import logging
 import tempfile
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
 
 from api.database import get_connection, list_compliance_reports, get_compliance_report, save_compliance_report
 from api.schemas.compliance import (
-    DocumentCheckRequest, ComplianceReportOut,
-    ParsedDocumentResponse, ParsedClause, ParsedPremiumTable, ParsedSection,
+    DocumentCheckRequest, ComplianceReportResponse,
+    ParsedDocumentResponse, ParsedClause, ParsedDataTable, ParsedSection,
     RichTextParseRequest,
 )
 from lib.common.constants import ComplianceConstants
+from lib.common.html_converter import html_to_docx
 from lib.compliance.checker import (
     check_negative_list,
     identify_category,
-    build_enhanced_context,
+    load_audit_regulations,
+    build_audit_context,
     run_compliance_check,
 )
 from lib.compliance.prompts import COMPLIANCE_PROMPT_DOCUMENT
@@ -29,46 +31,67 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/compliance", tags=["合规检查"])
 
 
-@router.post("/check/document", response_model=ComplianceReportOut)
+MAX_DOCUMENT_CHARS = 150_000
+
+
+def _prepare_document_content(content: str) -> str:
+    if len(content) <= MAX_DOCUMENT_CHARS:
+        return content
+    truncated = content[:MAX_DOCUMENT_CHARS]
+    last_clause = truncated.rfind("\n【条款")
+    if last_clause > 0:
+        return truncated[:last_clause]
+    return truncated
+
+
+@router.post("/check/document", response_model=ComplianceReportResponse)
 async def check_document(req: DocumentCheckRequest):
-    # 险种识别（如果未提供）
     category = req.category
     if not category:
         category, _ = await _identify_category_async(req.document_content, req.product_name or "")
 
-    # 构建增强的法规上下文（两层检索）
-    context, sources_info = build_enhanced_context(category=category)
+    regulations = await asyncio.to_thread(load_audit_regulations, category)
+    context = build_audit_context(regulations)
+
+    regulation_sources: Dict[str, List[str]] = {
+        "险种专属": [r.law_name for r in regulations if r.source_type == "category"],
+        "通用法规": [r.law_name for r in regulations if r.source_type == "general"],
+    }
+
+    document_content = _prepare_document_content(req.document_content)
 
     prompt = COMPLIANCE_PROMPT_DOCUMENT.format(
-        document_content=req.document_content[:3000],
-        context=context[:8000],
+        document_content=document_content,
+        context=context,
     )
 
     try:
-        result = await asyncio.to_thread(run_compliance_check, prompt)
+        result = await asyncio.to_thread(run_compliance_check, prompt, regulations=regulations)
     except Exception as e:
         logger.error(f"Document check failed: {e}")
         raise HTTPException(status_code=500, detail=f"条款审查失败: {e}")
 
-    # 执行负面清单检查
-    negative_items = check_negative_list(req.document_content)
+    negative_items, negative_list_result, negative_regulations = await asyncio.to_thread(
+        check_negative_list, document_content
+    )
 
-    # 合并结果
-    result["regulation_sources"] = sources_info
+    all_regulations = regulations + negative_regulations
+    result["regulations"] = [r.__dict__ for r in all_regulations]
+    result["regulation_sources"] = regulation_sources
     result["category"] = category
 
     if negative_items:
-        result["items"].extend(negative_items)
+        result["items"].extend([item.__dict__ for item in negative_items])
         result["summary"]["non_compliant"] = result["summary"].get("non_compliant", 0) + len(negative_items)
-        result["regulation_sources"]["负面清单"] = [item["param"] for item in negative_items]
+        result["regulation_sources"]["负面清单"] = [r.law_name for r in negative_regulations]
 
-    result["negative_list_checked"] = True
+    result["negative_list_result"] = negative_list_result
 
     report_id = f"cr_{uuid.uuid4().hex[:8]}"
     product_name = req.product_name or "未命名产品"
     save_compliance_report(report_id, product_name, category or "", "document", result)
 
-    return ComplianceReportOut(
+    return ComplianceReportResponse(
         id=report_id,
         product_name=product_name,
         category=category or "",
@@ -84,12 +107,12 @@ async def get_categories():
     return {"categories": ComplianceConstants.VALID_CATEGORIES}
 
 
-@router.get("/reports", response_model=list[ComplianceReportOut])
+@router.get("/reports", response_model=list[ComplianceReportResponse])
 async def list_reports():
     return list_compliance_reports()
 
 
-@router.get("/reports/{report_id}", response_model=ComplianceReportOut)
+@router.get("/reports/{report_id}", response_model=ComplianceReportResponse)
 async def get_report(report_id: str):
     report = get_compliance_report(report_id)
     if report is None:
@@ -110,7 +133,7 @@ async def delete_compliance_report(report_id: str):
 
 def _build_combined_text(
     clauses: List[ParsedClause],
-    premium_tables: List[ParsedPremiumTable],
+    data_tables: List[ParsedDataTable],
     notices: List[ParsedSection],
     health_disclosures: List[ParsedSection],
     exclusions: List[ParsedSection],
@@ -120,8 +143,8 @@ def _build_combined_text(
     parts = []
     for c in clauses:
         parts.append(f"【条款 {c.number}】{c.title}\n{c.text}")
-    for i, t in enumerate(premium_tables, 1):
-        parts.append(f"【费率表 {i}】\n{t.raw_text}")
+    for i, t in enumerate(data_tables, 1):
+        parts.append(f"【数据表 {i}】\n{t.raw_text}")
     for s in notices:
         parts.append(f"【投保须知】{s.title}\n{s.content}")
     for s in health_disclosures:
@@ -146,7 +169,7 @@ def _audit_doc_to_response(audit_doc, file_type: str,
         for c in audit_doc.clauses
     ]
     tables = [
-        ParsedPremiumTable(
+        ParsedDataTable(
             table_type=t.table_type.value if hasattr(t.table_type, 'value') else str(t.table_type),
             remark=t.remark or "",
             raw_text=t.raw_text,
@@ -181,7 +204,7 @@ def _audit_doc_to_response(audit_doc, file_type: str,
         file_name=audit_doc.file_name,
         file_type=file_type,
         clauses=clauses,
-        premium_tables=tables,
+        data_tables=tables,
         notices=notices,
         health_disclosures=health_disclosures,
         exclusions=exclusions,
@@ -197,10 +220,10 @@ def _audit_doc_to_response(audit_doc, file_type: str,
 async def _identify_category_async(combined_text: str, product_name: str) -> Tuple[Optional[str], float]:
     """异步执行险种识别，失败时返回 None"""
     try:
-        category, confidence, _ = await asyncio.to_thread(
+        cr = await asyncio.to_thread(
             identify_category, combined_text, product_name
         )
-        return category, confidence
+        return cr.category, cr.confidence
     except Exception as e:
         logger.warning(f"险种识别失败: {e}")
         return None, 0.0
@@ -235,99 +258,6 @@ async def parse_file(file: UploadFile = File(...)):
         os.unlink(tmp_path)
 
 
-def _html_to_docx(html_content: str) -> str:
-    """将 HTML 转换为临时 DOCX 文件，返回文件路径"""
-    from docx import Document
-    from html.parser import HTMLParser
-
-    class SimpleHTMLParser(HTMLParser):
-        def __init__(self):
-            super().__init__()
-            self.paragraphs = []
-            self.tables = []
-            self.current_table = []
-            self.current_row = []
-            self.current_cell = ""
-            self.in_table = False
-            self.in_row = False
-            self.in_cell = False
-            self.current_text = ""
-            self.in_p = False
-
-        def handle_starttag(self, tag, attrs):
-            if tag == 'p':
-                self.in_p = True
-                self.current_text = ""
-            elif tag == 'table':
-                self.in_table = True
-                self.current_table = []
-            elif tag == 'tr':
-                self.in_row = True
-                self.current_row = []
-            elif tag in ['td', 'th']:
-                self.in_cell = True
-                self.current_cell = ""
-            elif tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
-                self.in_p = True
-                self.current_text = ""
-
-        def handle_endtag(self, tag):
-            if tag == 'p' and self.in_p:
-                self.in_p = False
-                text = self.current_text.strip()
-                if text:
-                    self.paragraphs.append(text)
-            elif tag == 'table':
-                self.in_table = False
-                if self.current_table:
-                    self.tables.append(self.current_table)
-                self.current_table = []
-            elif tag == 'tr':
-                self.in_row = False
-                if self.current_row:
-                    self.current_table.append(self.current_row)
-                self.current_row = []
-            elif tag in ['td', 'th']:
-                self.in_cell = False
-                self.current_row.append(self.current_cell.strip())
-            elif tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
-                self.in_p = False
-                text = self.current_text.strip()
-                if text:
-                    self.paragraphs.append(text)
-
-        def handle_data(self, data):
-            if self.in_p:
-                self.current_text += data
-            elif self.in_cell:
-                self.current_cell += data
-
-    parser = SimpleHTMLParser()
-    parser.feed(html_content)
-
-    doc = Document()
-
-    for p in parser.paragraphs:
-        doc.add_paragraph(p)
-
-    for table_data in parser.tables:
-        if not table_data or not table_data[0]:
-            continue
-        num_cols = max(len(row) for row in table_data)
-        table = doc.add_table(rows=len(table_data), cols=num_cols)
-        table.style = 'Table Grid'
-        for i, row in enumerate(table_data):
-            for j, cell in enumerate(row):
-                if j < num_cols:
-                    table.rows[i].cells[j].text = cell
-
-    # 使用安全的临时文件创建
-    fd, tmp_path = tempfile.mkstemp(suffix='.docx')
-    os.close(fd)  # 关闭文件描述符，让 doc.save 使用路径
-    doc.save(tmp_path)
-    return tmp_path
-
-
 @router.post("/parse-rich-text", response_model=ParsedDocumentResponse)
 async def parse_rich_text(req: RichTextParseRequest):
     """解析富文本内容（HTML）"""
@@ -336,7 +266,7 @@ async def parse_rich_text(req: RichTextParseRequest):
 
     tmp_path = None
     try:
-        tmp_path = _html_to_docx(req.html_content)
+        tmp_path = html_to_docx(req.html_content)
         audit_doc = parse_product_document(tmp_path)
         combined_text = _build_combined_text(
             audit_doc.clauses, audit_doc.tables, audit_doc.notices,

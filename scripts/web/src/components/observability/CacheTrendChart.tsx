@@ -1,4 +1,4 @@
-import { Card, Segmented, Spin } from 'antd';
+import { Card, Segmented, Skeleton, theme } from 'antd';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useCacheStore } from '../../stores/cacheStore';
 
@@ -9,12 +9,14 @@ const RANGE_OPTIONS = [
   { label: '7天', value: 168 },
 ];
 
+const timeFmt = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
 function formatTime(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return timeFmt.format(new Date(iso));
 }
 
 export default function CacheTrendChart() {
+  const { token } = theme.useToken();
   const { trendPoints, trendRangeHours, trendLoading, loadTrend } = useCacheStore();
 
   const data = trendPoints.map((p) => ({
@@ -38,10 +40,10 @@ export default function CacheTrendChart() {
     >
       {trendLoading ? (
         <div style={{ textAlign: 'center', padding: 40 }}>
-          <Spin />
+          <Skeleton active paragraph={{ rows: 3 }} />
         </div>
       ) : data.length === 0 ? (
-        <div style={{ textAlign: 'center', color: '#999', padding: 40 }}>
+        <div style={{ textAlign: 'center', color: token.colorTextTertiary, padding: 40 }}>
           无历史数据
         </div>
       ) : (

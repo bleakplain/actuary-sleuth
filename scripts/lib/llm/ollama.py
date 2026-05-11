@@ -79,7 +79,20 @@ class OllamaClient(BaseLLMClient):
         response = self._session.post(url, json=data, timeout=self.timeout)
         response.raise_for_status()
         result = response.json()
-        return result.get('message', {}).get('content', '')
+        content = result.get('message', {}).get('content', '')
+        return self._strip_thinking_chain(content)
+
+    @staticmethod
+    def _strip_thinking_chain(content: str) -> str:
+        """移除 qwen3 等模型输出的思维链标签"""
+        if not content:
+            return content
+        # qwen3 使用 <think>...</think> 标签包裹思维链
+        if content.lstrip().startswith("<think>"):
+            think_end = content.find("</think>")
+            if think_end >= 0:
+                return content[think_end + len("</think>"):].strip()
+        return content
 
     @_track_timing("ollama")
     @_with_circuit_breaker("ollama")

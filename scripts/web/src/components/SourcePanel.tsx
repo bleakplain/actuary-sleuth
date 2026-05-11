@@ -1,4 +1,5 @@
 import { Drawer, Typography, Empty, theme, Grid } from 'antd';
+import { ClickableDiv } from './ClickableDiv';
 import type { Source } from '../types';
 import { DRAWER_SM } from '../constants/layout';
 
@@ -31,9 +32,10 @@ export default function SourcePanel({ open, sources, selectedSource, onSelect, o
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {sources.map((s, i) => (
-            <div
+            <ClickableDiv
               key={i}
-              onClick={() => onSelect(s)}
+              aria-selected={selectedSource === s}
+              onActivate={() => onSelect(s)}
               style={{
                 padding: 12,
                 border: `1px solid ${token.colorBorderSecondary}`,
@@ -57,7 +59,7 @@ export default function SourcePanel({ open, sources, selectedSource, onSelect, o
               >
                 {s.content}
               </Paragraph>
-            </div>
+            </ClickableDiv>
           ))}
         </div>
       )}

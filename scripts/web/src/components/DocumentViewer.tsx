@@ -1,15 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import mammoth from 'mammoth';
 import DOMPurify from 'dompurify';
-import { Spin, Alert } from 'antd';
+import { Skeleton, Alert } from 'antd';
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
+pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 interface DocumentViewerProps {
   file: File | null;
@@ -63,7 +61,7 @@ export function DocumentViewer({ file, fileType }: DocumentViewerProps) {
   }
 
   if (loading) {
-    return <Spin tip="加载文档..." />;
+    return <Skeleton active paragraph={{ rows: 6 }} />;
   }
 
   if (error) {

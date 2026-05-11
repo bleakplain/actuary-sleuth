@@ -11,11 +11,19 @@ export default function CitationTag({ citation, onClick }: Props) {
     ? citation.law_name.slice(0, 20) + '…'
     : citation.law_name;
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (onClick && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      onClick(citation);
+    }
+  };
+
   return (
     <Tag
       color="blue"
       style={{ cursor: onClick ? 'pointer' : 'default', maxWidth: 300 }}
       onClick={() => onClick?.(citation)}
+      {...(onClick ? { role: 'button', tabIndex: 0, onKeyDown: handleKeyDown } : {})}
     >
       [{displayName} {citation.article_number}]
     </Tag>

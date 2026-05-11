@@ -209,7 +209,7 @@ class AuditDocument:
     file_type: str  # .docx, .pdf
 
     clauses: List[Clause] = field(default_factory=list)
-    tables: List[DataTable] = field(default_factory=list)      # 数据表格
+    tables: List[DataTable] = field(default_factory=list)
     notices: List[DocumentSection] = field(default_factory=list)
     health_disclosures: List[DocumentSection] = field(default_factory=list)
     exclusions: List[DocumentSection] = field(default_factory=list)

@@ -4,6 +4,7 @@ import { SendOutlined, CloseOutlined, BugOutlined, SearchOutlined, MenuOutlined 
 import MessageBubble from './MessageBubble';
 import SourcePanel from './SourcePanel';
 import TracePanel from './TracePanel';
+import { ClickableDiv } from './ClickableDiv';
 import { useAskStore } from '../stores/askStore';
 import type { Source } from '../types';
 import { DEFAULT_TRACE_WIDTH, MIN_TRACE_WIDTH, MAX_TRACE_WIDTH } from '../constants/layout';
@@ -20,6 +21,7 @@ export default function ChatPanel() {
   const [mode, setMode] = React.useState<'qa' | 'search'>('qa');
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const {
     messages,
     streaming,
@@ -85,6 +87,7 @@ export default function ChatPanel() {
     if (!q || streaming) return;
     setInput('');
     sendMessage(q, mode);
+    setTimeout(() => inputRef.current?.focus(), 0);
   };
 
   const handleCitationClick = (source: Source, messageSources: Source[]) => {
@@ -104,7 +107,7 @@ export default function ChatPanel() {
       </div>
       <div style={{ padding: '0 8px 8px' }}>
         <Input
-          placeholder="搜索会话..."
+          placeholder="搜索会话…"
           prefix={<SearchOutlined style={{ color: token.colorTextQuaternary }} />}
           size="small"
           allowClear
@@ -114,9 +117,9 @@ export default function ChatPanel() {
       </div>
       <div style={{ flex: 1, overflow: 'auto' }}>
         {sessions.map((session) => (
-          <div
+          <ClickableDiv
             key={session.id}
-            onClick={() => {
+            onActivate={() => {
               selectSession(session.id);
               if (isMobile) setSessionDrawerOpen(false);
             }}
@@ -153,12 +156,13 @@ export default function ChatPanel() {
                 type="text"
                 size="small"
                 icon={<CloseOutlined />}
+                aria-label="删除会话"
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
                 style={{ color: token.colorTextTertiary, ...(isMobile ? { minWidth: 44, minHeight: 44, display: 'flex' as const, alignItems: 'center', justifyContent: 'center' } : {}) }}
               />
             </Popconfirm>
-          </div>
+          </ClickableDiv>
         ))}
       </div>
     </>
@@ -212,6 +216,7 @@ export default function ChatPanel() {
             <Button
               type="text"
               icon={<MenuOutlined />}
+              aria-label="打开会话列表"
               onClick={() => setSessionDrawerOpen(true)}
               style={{ minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             />
@@ -221,7 +226,7 @@ export default function ChatPanel() {
           </div>
         )}
 
-        <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? '12px 16px' : '16px 24px' }}>
+        <div aria-live="polite" aria-label="对话消息" style={{ flex: 1, overflow: 'auto', padding: isMobile ? '12px 16px' : '16px 24px' }}>
           {messages.length === 0 && (
             <div className="empty-state" style={{ marginTop: isMobile ? 60 : 100 }}>
               <div style={{ fontSize: 24, marginBottom: 8 }}>法规问答</div>
@@ -254,6 +259,7 @@ export default function ChatPanel() {
           </div>
           <div style={{ display: 'flex', gap: isMobile ? 8 : 8 }}>
             <TextArea
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onPressEnter={(e) => {
@@ -262,8 +268,9 @@ export default function ChatPanel() {
                   handleSend();
                 }
               }}
-              placeholder="输入法规相关问题..."
+              placeholder="输入法规相关问题…"
               autoSize={{ minRows: 1, maxRows: 4 }}
+              autoComplete="off"
               disabled={streaming}
               style={{ flex: 1 }}
             />
@@ -297,6 +304,9 @@ export default function ChatPanel() {
         ) : (
           <>
             <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="调整面板宽度"
               onMouseDown={handleDragStart}
               style={{
                 width: 4,
@@ -358,8 +368,9 @@ export default function ChatPanel() {
                   type="text"
                   size="small"
                   icon={<CloseOutlined />}
+                  aria-label="关闭调试面板"
                   onClick={closeTrace}
-                  style={{ color: token.colorTextTertiary }}
+                  style={{ color: token.colorTextTertiary, ...(isMobile ? { minWidth: 44, minHeight: 44, display: 'flex' as const, alignItems: 'center', justifyContent: 'center' } : {}) }}
                 />
               </div>
               <div style={{ flex: 1, overflow: 'auto' }}>
