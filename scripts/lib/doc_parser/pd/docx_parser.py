@@ -48,6 +48,10 @@ class DocxParser:
         warnings: List[str] = []
 
         clauses = self._extract_clauses(doc.tables, warnings)
+        if len(clauses) < 5:
+            para_clauses = self._extract_clauses_from_paragraphs(doc.paragraphs, warnings)
+            if len(para_clauses) > len(clauses):
+                clauses = para_clauses
         tables = self._extract_tables(doc.tables, warnings)
         sections = self._extract_sections(doc.paragraphs, warnings)
 
@@ -101,6 +105,22 @@ class DocxParser:
                         title, text = split_title_and_content(cells[1] if len(cells) > 1 else '')
                     clauses.append(Clause(number=number, title=title, text=text))
 
+        return clauses
+
+    def _extract_clauses_from_paragraphs(self, paragraphs: List, warnings: List[str]) -> List[Clause]:
+        clauses: List[Clause] = []
+        for para in paragraphs:
+            text = para.text.strip()
+            if not text:
+                continue
+            match = re.match(r'^(\d+\.\d+(?:\.\d+)*)\s+(.+)$', text)
+            if match:
+                number = match.group(1)
+                rest = match.group(2).strip()
+                title, content = split_title_and_content(rest)
+                clauses.append(Clause(number=number, title=title, text=content))
+        if clauses:
+            warnings.append(f"从段落提取了 {len(clauses)} 条条款（表格提取不足）")
         return clauses
 
     def _extract_tables(self, tables: List[Table], warnings: List[str]) -> List[DataTable]:

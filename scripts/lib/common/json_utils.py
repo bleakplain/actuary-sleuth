@@ -1,4 +1,5 @@
 """JSON 解析工具"""
+import json
 import re
 
 
@@ -36,3 +37,35 @@ def extract_json_array(text: str) -> str | None:
         return text[start:end + 1]
 
     return None
+
+
+def extract_json_object(text: str) -> str | None:
+    """从 LLM 输出中提取 JSON 对象字符串，含自动修复"""
+    if not text or not text.strip():
+        return None
+
+    text = text.strip()
+
+    # 提取 markdown 代码块
+    code_block_match = re.search(r'```(?:json)?\s*\n?(.*?)```', text, re.DOTALL)
+    if code_block_match:
+        text = code_block_match.group(1).strip()
+
+    json_start = text.find("{")
+    json_end = text.rfind("}") + 1
+    if json_start < 0 or json_end <= json_start:
+        return None
+
+    json_str = text[json_start:json_end]
+    try:
+        json.loads(json_str)
+        return json_str
+    except json.JSONDecodeError:
+        open_brackets = json_str.count("{") - json_str.count("}")
+        open_arrays = json_str.count("[") - json_str.count("]")
+        fixed = json_str + "]" * open_arrays + "}" * open_brackets
+        try:
+            json.loads(fixed)
+            return fixed
+        except json.JSONDecodeError:
+            return None

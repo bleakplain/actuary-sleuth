@@ -614,13 +614,12 @@ export default function CompliancePage() {
       <>
         <Card type="inner" title="审核结论" size="small" style={{ marginBottom: 16 }}>
           {renderConclusionSection(docResult)}
-          {docResult.missing_clauses && docResult.missing_clauses.length > 0 && (
+          {docResult.clause_coverage && docResult.clause_coverage.unchecked.length > 0 && (
             <Alert type="warning" showIcon style={{ marginTop: 12 }} message="遗漏条款提示" description={
-              <span>以下条款未被检查覆盖：{docResult.missing_clauses.map(c => <Tag key={c} style={{ marginLeft: 4 }}>{c}</Tag>)}</span>
+              <span>共 {docResult.clause_coverage.total} 个条款，已检查 {docResult.clause_coverage.checked} 个。未覆盖：
+                {docResult.clause_coverage.unchecked.map(c => <Tag key={c} style={{ marginLeft: 4 }}>{c}</Tag>)}
+              </span>
             } />
-          )}
-          {docResult.warning && (
-            <Alert type="warning" showIcon style={{ marginTop: 8 }} message={docResult.warning} />
           )}
         </Card>
 

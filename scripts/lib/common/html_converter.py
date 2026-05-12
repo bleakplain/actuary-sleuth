@@ -19,9 +19,14 @@ class SimpleHTMLParser(HTMLParser):
         self.in_p = False
 
     def handle_starttag(self, tag, attrs):
-        if tag == 'p':
+        if tag in ('p', 'div', 'section', 'li'):
             self.in_p = True
             self.current_text = ""
+        elif tag == 'br':
+            if self.in_p:
+                self.current_text += '\n'
+            elif self.in_cell:
+                self.current_cell += '\n'
         elif tag == 'table':
             self.in_table = True
             self.current_table = []
@@ -36,11 +41,19 @@ class SimpleHTMLParser(HTMLParser):
             self.current_text = ""
 
     def handle_endtag(self, tag):
-        if tag == 'p' and self.in_p:
+        if tag in ('p', 'div', 'section') and self.in_p:
             self.in_p = False
             text = self.current_text.strip()
             if text:
                 self.paragraphs.append(text)
+        elif tag == 'li' and self.in_p:
+            self.in_p = False
+            text = self.current_text.strip()
+            if text:
+                self.paragraphs.append(f"• {text}")
+        elif tag in ('ul', 'ol'):
+            if self.paragraphs:
+                self.paragraphs.append("")
         elif tag == 'table':
             self.in_table = False
             if self.current_table:

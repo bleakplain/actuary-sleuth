@@ -18,6 +18,8 @@ class ProductCategory(Enum):
     """
     LIFE = "寿险"
     HEALTH = "健康险"
+    CRITICAL_ILLNESS = "重疾险"
+    MEDICAL = "医疗险"
     ACCIDENT = "意外险"
     ANNUITY = "年金险"
     MOTOR = "车险"
@@ -36,8 +38,20 @@ PRODUCT_TYPE_CONFIGS: Dict[ProductCategory, Dict] = {
         "default_premium_range": (1000, 50000)
     },
     ProductCategory.HEALTH: {
-        "keywords": ["健康", "医疗", "重疾", "百万医疗", "门诊", "住院", "医疗险"],
+        "keywords": ["健康"],
         "focus_fields": ["coverage", "deductible", "payout_ratio", "amount"],
+        "scoring_weight": 1.2,
+        "default_premium_range": (500, 20000)
+    },
+    ProductCategory.CRITICAL_ILLNESS: {
+        "keywords": ["重疾", "重大疾病", "重疾险"],
+        "focus_fields": ["coverage", "waiting_period", "disease_count"],
+        "scoring_weight": 1.2,
+        "default_premium_range": (500, 50000)
+    },
+    ProductCategory.MEDICAL: {
+        "keywords": ["医疗", "百万医疗", "门诊", "住院", "医疗险"],
+        "focus_fields": ["coverage", "deductible", "payout_ratio"],
         "scoring_weight": 1.2,
         "default_premium_range": (500, 20000)
     },

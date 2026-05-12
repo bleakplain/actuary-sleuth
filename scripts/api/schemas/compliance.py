@@ -36,6 +36,7 @@ class ComplianceReportDataResponse(BaseModel):
     regulation_sources: Dict[str, List[str]] = {}
     category: Optional[str] = ""
     negative_list_result: Optional[str] = ""
+    clause_coverage: Optional[Dict] = None
 
 
 class ComplianceReportResponse(BaseModel):

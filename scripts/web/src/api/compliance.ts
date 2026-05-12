@@ -6,7 +6,9 @@ export async function checkDocument(params: {
   product_name?: string;
   category?: string;
 }): Promise<ComplianceReport> {
-  const { data } = await client.post('/api/compliance/check/document', params);
+  const { data } = await client.post('/api/compliance/check/document', params, {
+    timeout: 360000,
+  });
   return data;
 }
 

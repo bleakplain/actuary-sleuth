@@ -21,59 +21,47 @@ from lib.compliance.checker import (
     check_negative_list,
     identify_category,
     load_audit_regulations,
-    build_audit_context,
-    run_compliance_check,
+    batch_compliance_check,
+    extract_section_numbers,
 )
-from lib.compliance.prompts import COMPLIANCE_PROMPT_DOCUMENT
 from lib.doc_parser import parse_product_document, DocumentParseError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/compliance", tags=["合规检查"])
 
 
-MAX_DOCUMENT_CHARS = 150_000
-
-
-def _prepare_document_content(content: str) -> str:
-    if len(content) <= MAX_DOCUMENT_CHARS:
-        return content
-    truncated = content[:MAX_DOCUMENT_CHARS]
-    last_clause = truncated.rfind("\n【条款")
-    if last_clause > 0:
-        return truncated[:last_clause]
-    return truncated
-
-
 @router.post("/check/document", response_model=ComplianceReportResponse)
 async def check_document(req: DocumentCheckRequest):
-    category = req.category
+    category: Optional[str] = req.category
     if not category:
         category, _ = await _identify_category_async(req.document_content, req.product_name or "")
 
     regulations = await asyncio.to_thread(load_audit_regulations, category)
-    context = build_audit_context(regulations)
 
     regulation_sources: Dict[str, List[str]] = {
         "险种专属": [r.law_name for r in regulations if r.source_type == "category"],
         "通用法规": [r.law_name for r in regulations if r.source_type == "general"],
     }
 
-    document_content = _prepare_document_content(req.document_content)
-
-    prompt = COMPLIANCE_PROMPT_DOCUMENT.format(
-        document_content=document_content,
-        context=context,
-    )
-
     try:
-        result = await asyncio.to_thread(run_compliance_check, prompt, regulations=regulations)
+        result = await asyncio.to_thread(
+            batch_compliance_check, req.document_content, regulations
+        )
     except Exception as e:
         logger.error(f"Document check failed: {e}")
         raise HTTPException(status_code=500, detail=f"条款审查失败: {e}")
 
-    negative_items, negative_list_result, negative_regulations = await asyncio.to_thread(
-        check_negative_list, document_content
-    )
+    if "error" in result:
+        logger.error(f"Compliance check returned error: {result['error']}")
+        raise HTTPException(status_code=500, detail="审查结果解析失败，请重试")
+
+    try:
+        negative_items, negative_list_result, negative_regulations = await asyncio.to_thread(
+            check_negative_list, req.document_content
+        )
+    except Exception as e:
+        logger.error(f"Negative list check failed: {e}")
+        negative_items, negative_list_result, negative_regulations = [], "skipped", []
 
     all_regulations = regulations + negative_regulations
     result["regulations"] = [r.__dict__ for r in all_regulations]
@@ -82,10 +70,32 @@ async def check_document(req: DocumentCheckRequest):
 
     if negative_items:
         result["items"].extend([item.__dict__ for item in negative_items])
-        result["summary"]["non_compliant"] = result["summary"].get("non_compliant", 0) + len(negative_items)
+    if negative_regulations:
         result["regulation_sources"]["负面清单"] = [r.law_name for r in negative_regulations]
 
+    result["summary"] = {
+        "compliant": sum(1 for i in result.get("items", []) if i.get("status") == "compliant"),
+        "non_compliant": sum(1 for i in result.get("items", []) if i.get("status") == "non_compliant"),
+        "attention": sum(1 for i in result.get("items", []) if i.get("status") == "attention"),
+    }
+
     result["negative_list_result"] = negative_list_result
+
+    section_info = extract_section_numbers(req.document_content)
+    doc_clause_set = set(section_info["clauses"])
+    checked_clause_set = {
+        c for item in result.get("items", [])
+        if (c := item.get("clause_number", "")) != "未知"
+    }
+    result["clause_coverage"] = {
+        "total": len(doc_clause_set),
+        "checked": len(checked_clause_set & doc_clause_set),
+        "unchecked": list(doc_clause_set - checked_clause_set),
+        "has_notices": section_info["has_notices"],
+        "has_health": section_info["has_health"],
+        "has_exclusions": section_info["has_exclusions"],
+        "has_tables": section_info["has_tables"],
+    }
 
     report_id = f"cr_{uuid.uuid4().hex[:8]}"
     product_name = req.product_name or "未命名产品"

@@ -29,6 +29,15 @@ export interface ComplianceResult {
   regulation_sources: Record<string, string[]>;
   category: string;
   negative_list_result: string;
+  clause_coverage: {
+    total: number;
+    checked: number;
+    unchecked: string[];
+    has_notices?: boolean;
+    has_health?: boolean;
+    has_exclusions?: boolean;
+    has_tables?: boolean;
+  } | null;
 }
 
 export interface ComplianceReport {

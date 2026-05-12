@@ -12,7 +12,7 @@ from lib.llm.trace import incr_llm_call_count
 class BaseLLMClient(ABC):
     """LLM客户端基类"""
 
-    MAX_PROMPT_LENGTH = 100000
+    MAX_PROMPT_LENGTH = 200000
 
     def __init__(self, model: str, timeout: int = 30):
         self.model = model
