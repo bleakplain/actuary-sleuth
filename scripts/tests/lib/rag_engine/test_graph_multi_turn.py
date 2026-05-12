@@ -94,17 +94,14 @@ def test_loop_detection_in_clarify():
         "session_context": {
             "query_history": [question_hash, question_hash, question_hash]
         },
-        "mode": "qa",
         "user_id": "test",
         "session_id": "test_session",
     }
 
     result = clarify_user_query(state)
 
-    # 应该检测到循环
     assert result.get("loop_detected") is True
     assert "loop_hint" in result
-    # 循环时应该继续搜索而不是阻塞
     assert result.get("next_action") == "search"
 
 
@@ -115,9 +112,8 @@ def test_no_loop_normal_flow():
     state = {
         "question": "新问题",
         "session_context": {
-            "query_history": ["a", "b", "c"]  # 不同的历史
+            "query_history": ["a", "b", "c"]
         },
-        "mode": "qa",
         "user_id": "test",
         "session_id": "test_session",
         "skip_clarify": True,

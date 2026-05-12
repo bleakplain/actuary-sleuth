@@ -3,14 +3,14 @@ import { test, expect } from '@playwright/test';
 /**
  * 法规问答页面 E2E 测试
  *
- * 部分测试需要 RAG 引擎就绪（通过实际搜索请求验证），
+ * 部分测试需要 RAG 引擎就绪（通过实际请求验证），
  * 不满足条件时自动 skip。
  */
 
 async function isRagReady(request): Promise<boolean> {
   try {
     const resp = await request.post('http://localhost:8000/api/ask/chat', {
-      data: { question: '测试', mode: 'search' },
+      data: { question: '测试', mode: 'qa' },
     });
     return resp.ok() && resp.status() === 200;
   } catch {
@@ -20,19 +20,16 @@ async function isRagReady(request): Promise<boolean> {
 
 /** 清除所有已有对话，确保测试隔离 */
 async function cleanAllConversations(page) {
-  // 刷新页面以加载最新对话列表
   await page.reload();
   await page.waitForSelector('text=对话历史', { timeout: 10_000 });
   await page.waitForTimeout(1000);
 
-  // 逐个删除（对话列表在"对话历史"标题下方，每个条目含删除按钮）
   const listContainer = page.locator('text=对话历史').locator('..').locator('..');
   for (let attempt = 0; attempt < 50; attempt++) {
     const deleteButtons = listContainer.locator('button.ant-btn-text');
     const count = await deleteButtons.count();
     if (count === 0) return;
 
-    // 点击最后一个对话的删除按钮
     await deleteButtons.last().click();
     await page.locator('.ant-popconfirm').waitFor({ state: 'visible', timeout: 5_000 });
     await page.locator('.ant-popconfirm .ant-btn-primary').click();
@@ -52,15 +49,10 @@ test.describe('法规问答 — 页面与 UI', () => {
     await page.waitForSelector('text=输入问题，检索保险法规并获取带引用的回答', { timeout: 10_000 });
   });
 
-  test('页面初始状态 — 空对话列表、输入框、模式切换', async ({ page }) => {
+  test('页面初始状态 — 空对话列表、输入框', async ({ page }) => {
     await expect(page.locator('text=对话历史')).toBeVisible();
     await expect(page.getByPlaceholder('输入法规相关问题...')).toBeVisible();
     await expect(page.getByRole('button', { name: /send/ })).toBeDisabled();
-
-    const radios = page.locator('.ant-radio-button-wrapper');
-    await expect(radios.first()).toHaveClass(/ant-radio-button-wrapper-checked/);
-    await expect(radios.nth(1)).not.toHaveClass(/ant-radio-button-wrapper-checked/);
-
     await expect(page.locator('text=输入问题，检索保险法规并获取带引用的回答')).toBeVisible();
   });
 
@@ -77,20 +69,6 @@ test.describe('法规问答 — 页面与 UI', () => {
     await expect(sendBtn).toBeDisabled();
   });
 
-  test('模式切换 — 智能问答 ↔ 精确检索', async ({ page }) => {
-    const radios = page.locator('.ant-radio-button-wrapper');
-
-    await expect(radios.first()).toHaveClass(/ant-radio-button-wrapper-checked/);
-
-    await radios.nth(1).click();
-    await expect(radios.nth(1)).toHaveClass(/ant-radio-button-wrapper-checked/);
-    await expect(radios.first()).not.toHaveClass(/ant-radio-button-wrapper-checked/);
-
-    await radios.first().click();
-    await expect(radios.first()).toHaveClass(/ant-radio-button-wrapper-checked/);
-    await expect(radios.nth(1)).not.toHaveClass(/ant-radio-button-wrapper-checked/);
-  });
-
   test('搜索提问 — 用户消息和对话列表出现', async ({ page }) => {
     if (!(await isRagReady(page.request))) {
       test.skip('RAG 搜索不可用');
@@ -99,7 +77,6 @@ test.describe('法规问答 — 页面与 UI', () => {
 
     await cleanAllConversations(page);
 
-    await page.locator('.ant-radio-button-wrapper').nth(1).click();
     const input = page.getByPlaceholder('输入法规相关问题...');
     await input.click();
     await input.type('健康保险等待期');
@@ -123,7 +100,6 @@ test.describe('法规问答 — 页面与 UI', () => {
 
     await cleanAllConversations(page);
 
-    await page.locator('.ant-radio-button-wrapper').nth(1).click();
     const input = page.getByPlaceholder('输入法规相关问题...');
     await input.click();
     await input.type('保险费率规定');
@@ -149,7 +125,6 @@ test.describe('法规问答 — 页面与 UI', () => {
 
     await cleanAllConversations(page);
 
-    await page.locator('.ant-radio-button-wrapper').nth(1).click();
     const input = page.getByPlaceholder('输入法规相关问题...');
     await input.click();
     await input.type('第一个问题');
@@ -181,7 +156,6 @@ test.describe('法规问答 — 页面与 UI', () => {
 
     await cleanAllConversations(page);
 
-    await page.locator('.ant-radio-button-wrapper').nth(1).click();
     const input = page.getByPlaceholder('输入法规相关问题...');
     await input.click();
     await input.type('取消删除测试');

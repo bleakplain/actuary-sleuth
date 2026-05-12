@@ -33,13 +33,12 @@ class TestRunner:
         url = f"{self.base_url}{path}"
         return requests.request(method, url, **kwargs)
 
-    def chat(self, question: str, mode: str = "qa", debug: bool = False) -> dict:
+    def chat(self, question: str, debug: bool = False) -> dict:
         """发送 chat 请求并收集流式响应。"""
         resp = self.request("POST", "/api/ask/chat", json={
             "question": question,
             "session_id": self.session_id,
             "user_id": self.user_id,
-            "mode": mode,
             "debug": debug,
         }, stream=True, timeout=120)
 
@@ -91,16 +90,6 @@ class TestRunner:
             "loop_detected": done_data.get("loop_detected"),
             "loop_hint": done_data.get("loop_hint"),
         }
-
-    def search(self, question: str) -> dict:
-        """search 模式。"""
-        resp = self.request("POST", "/api/ask/chat", json={
-            "question": question,
-            "mode": "search",
-        })
-        if resp.status_code != 200:
-            return {"error": resp.text, "status_code": resp.status_code}
-        return resp.json()
 
     def get_messages(self) -> List[dict]:
         if not self.session_id:
@@ -414,10 +403,10 @@ def make_test_cases() -> List[TestCase]:
     def action_exception(runner: TestRunner) -> dict:
         results = {}
         # 空问题
-        resp = runner.request("POST", "/api/ask/chat", json={"question": "", "mode": "qa"})
+        resp = runner.request("POST", "/api/ask/chat", json={"question": ""})
         results["empty"] = {"rejected": resp.status_code >= 400}
         # SQL注入
-        r2 = runner.search("'; DROP TABLE sessions; --")
+        r2 = runner.chat("'; DROP TABLE sessions; --")
         results["sql"] = {"safe": "error" not in r2}
         # XSS
         r3 = runner.chat("<script>alert('xss')</script>")

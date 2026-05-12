@@ -48,7 +48,7 @@ function getBaseUrl(): string {
 }
 
 export function chatSSE(
-  req: { question: string; session_id?: string; mode: 'qa' | 'search'; debug?: boolean; skip_clarify?: boolean },
+  req: { question: string; session_id?: string; debug?: boolean; skip_clarify?: boolean },
   callbacks: {
     onToken: (token: string) => void;
     onDone: (data: ChatDoneData) => void;
@@ -122,18 +122,6 @@ export function chatSSE(
     });
 
   return controller;
-}
-
-export async function chatSearch(
-  question: string,
-  sessionId?: string,
-): Promise<{ session_id: string; mode: string; content: string; sources: Source[] }> {
-  const { data } = await client.post('/api/ask/chat', {
-    question,
-    session_id: sessionId,
-    mode: 'search',
-  });
-  return data;
 }
 
 export async function fetchTrace(messageId: number): Promise<TraceData> {

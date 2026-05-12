@@ -7,6 +7,7 @@ import { useTheme } from './hooks/useTheme';
 import PageErrorBoundary from './components/PageErrorBoundary';
 import SkipLink from './components/SkipLink';
 import AppLayout from './components/AppLayout';
+import { createContext, useContext } from 'react';
 
 const AskPage = lazy(() => import('./pages/AskPage'));
 const KnowledgePage = lazy(() => import('./pages/KnowledgePage'));
@@ -38,16 +39,23 @@ function PageSkeleton() {
   return <Skeleton active paragraph={{ rows: 6 }} style={{ padding: 24 }} />;
 }
 
+const ThemeContext = createContext<{ isDark: boolean; toggle: () => void }>({ isDark: false, toggle: () => {} });
+
+export function useThemeContext() {
+  return useContext(ThemeContext);
+}
+
 export default function App() {
-  const { isDark } = useTheme();
+  const { isDark, toggle } = useTheme();
 
   return (
     <>
       <SkipLink />
       <ConfigProvider locale={zhCN} theme={isDark ? darkTheme : appTheme}>
         <BrowserRouter>
-          <Routes>
-            <Route element={<AppLayout />}>
+          <ThemeContext.Provider value={{ isDark, toggle }}>
+            <Routes>
+              <Route element={<AppLayout />}>
               <Route path="/" element={<Suspense fallback={<PageSkeleton />}><SafeAsk /></Suspense>} />
               <Route path="/ask" element={<Suspense fallback={<PageSkeleton />}><SafeAsk /></Suspense>} />
               <Route path="/knowledge" element={<Suspense fallback={<PageSkeleton />}><SafeKnowledge /></Suspense>} />
@@ -57,6 +65,7 @@ export default function App() {
               <Route path="/observability" element={<Suspense fallback={<PageSkeleton />}><SafeObservability /></Suspense>} />
             </Route>
           </Routes>
+          </ThemeContext.Provider>
         </BrowserRouter>
       </ConfigProvider>
     </>

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Input, Button, Radio, Popconfirm, Switch, Drawer, theme, Grid } from 'antd';
+import { Input, Button, Popconfirm, Switch, Drawer, theme, Grid } from 'antd';
 import { SendOutlined, CloseOutlined, BugOutlined, SearchOutlined, MenuOutlined } from '@ant-design/icons';
 import MessageBubble from './MessageBubble';
 import SourcePanel from './SourcePanel';
@@ -18,7 +18,6 @@ export default function ChatPanel() {
   const isMobile = !screens.md;
 
   const [input, setInput] = React.useState('');
-  const [mode, setMode] = React.useState<'qa' | 'search'>('qa');
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -86,7 +85,7 @@ export default function ChatPanel() {
     const q = input.trim();
     if (!q || streaming) return;
     setInput('');
-    sendMessage(q, mode);
+    sendMessage(q);
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
@@ -242,15 +241,7 @@ export default function ChatPanel() {
         </div>
 
         <div style={{ borderTop: `1px solid ${token.colorBorderSecondary}`, padding: isMobile ? '8px 12px' : '12px 24px', paddingBottom: isMobile ? 'max(8px, env(safe-area-inset-bottom, 0px))' : undefined }}>
-          <div className="flex-between" style={{ marginBottom: 8, minHeight: isMobile ? 36 : undefined }}>
-            <Radio.Group
-              value={mode}
-              onChange={(e) => setMode(e.target.value)}
-              size={isMobile ? 'middle' : 'small'}
-            >
-              <Radio.Button value="qa">智能问答</Radio.Button>
-              <Radio.Button value="search">精确检索</Radio.Button>
-            </Radio.Group>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8, minHeight: isMobile ? 36 : undefined }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: debugMode ? token.colorPrimary : token.colorTextTertiary }}>
               <BugOutlined />
               <span>调试</span>

@@ -24,7 +24,7 @@ interface AskState {
 
   loadSessions: (search?: string) => Promise<void>;
   selectSession: (id: string) => Promise<void>;
-  sendMessage: (question: string, mode: 'qa' | 'search') => void;
+  sendMessage: (question: string) => void;
   abortStreaming: () => void;
   deleteSession: (id: string) => Promise<void>;
   deleteMessage: (messageId: number) => Promise<void>;
@@ -69,7 +69,7 @@ export const useAskStore = create<AskState>((set, get) => ({
     }
   },
 
-  sendMessage: (question: string, mode: 'qa' | 'search') => {
+  sendMessage: (question: string) => {
     const { currentSessionId, messages, abortController } = get();
 
     // 取消之前的请求
@@ -100,38 +100,9 @@ export const useAskStore = create<AskState>((set, get) => ({
     };
     set({ messages: [...messages, userMsg, assistantMsg], streaming: true, currentSources: [], activeTraceMessageId: null, traceLoading: false });
 
-    if (mode === 'search') {
-      askApi
-        .chatSearch(question, currentSessionId || undefined)
-        .then((data) => {
-          if (get().requestSequence !== currentSequence) return;
-          set((s) => ({
-            messages: s.messages.map((m) =>
-              m.id === assistantMsg.id
-                ? { ...m, content: data.content }
-                : m,
-            ),
-            currentSources: data.sources || [],
-            streaming: false,
-          }));
-          get().loadSessions();
-        })
-        .catch((err: unknown) => {
-          if (get().requestSequence !== currentSequence) return;
-          const msg = err instanceof Error ? err.message : String(err);
-          set((s) => ({
-            messages: s.messages.map((m) =>
-              m.id === assistantMsg.id ? { ...m, content: `错误: ${msg}` } : m,
-            ),
-            streaming: false,
-          }));
-        });
-      return;
-    }
-
     let fullAnswer = '';
     const controller = askApi.chatSSE(
-      { question, session_id: currentSessionId || undefined, mode: 'qa', debug: get().debugMode },
+      { question, session_id: currentSessionId || undefined, debug: get().debugMode },
       {
         onToken: (token) => {
           if (get().requestSequence !== currentSequence) return;

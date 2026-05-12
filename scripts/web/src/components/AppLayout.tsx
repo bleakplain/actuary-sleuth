@@ -12,6 +12,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { sidebarDarkTheme } from '../theme';
+import { useThemeContext } from '../App';
 import { MOBILE_NAV_HEIGHT } from '../constants/layout';
 
 const { Sider, Content, Header } = Layout;
@@ -112,7 +113,8 @@ function MobileTabBar({ selectedKey, onSelect }: { selectedKey: string; onSelect
   );
 }
 
-export default function AppLayout({ isDark, onToggleTheme }: { isDark: boolean; onToggleTheme: () => void }) {
+export default function AppLayout() {
+  const { isDark, toggle: onToggleTheme } = useThemeContext();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
@@ -133,9 +135,10 @@ export default function AppLayout({ isDark, onToggleTheme }: { isDark: boolean; 
             height: 48,
             lineHeight: '48px',
             paddingTop: 'max(0px, env(safe-area-inset-top))',
+            background: token.colorBgContainer,
           }}
         >
-          <span style={{ fontSize: 15, fontWeight: token.fontWeightStrong }}>精算助手</span>
+          <span style={{ fontSize: 15, fontWeight: token.fontWeightStrong, color: token.colorText }}>精算助手</span>
           <Button
             type="text"
             icon={isDark ? <SunOutlined /> : <MoonOutlined />}
@@ -189,9 +192,10 @@ export default function AppLayout({ isDark, onToggleTheme }: { isDark: boolean; 
             padding: '0 24px',
             display: 'flex',
             alignItems: 'center',
+            background: token.colorBgContainer,
           }}
         >
-          <span style={{ fontSize: 16, fontWeight: token.fontWeightStrong }}>精算法规知识平台</span>
+          <span style={{ fontSize: 16, fontWeight: token.fontWeightStrong, color: token.colorText }}>精算法规知识平台</span>
           <Button
             type="text"
             icon={isDark ? <SunOutlined /> : <MoonOutlined />}

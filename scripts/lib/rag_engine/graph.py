@@ -52,7 +52,6 @@ class AskState(TypedDict):
     """LangGraph 工作流状态。"""
 
     question: str
-    mode: str
     user_id: str
     session_id: str
     search_results: List[Dict[str, Any]]
