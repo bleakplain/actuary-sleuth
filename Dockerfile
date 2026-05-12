@@ -16,4 +16,4 @@ COPY scripts/ .
 COPY --from=frontend-build /app/scripts/web/dist ./web/dist
 
 EXPOSE 8000
-CMD ["python", "run_api.py"]
+CMD ["python", "deploy.py", "backend"]

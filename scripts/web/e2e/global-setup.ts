@@ -32,7 +32,7 @@ async function globalSetup(_config: FullConfig) {
 
   console.log('No running backend found, starting...');
   const { spawn } = await import('child_process');
-  const backendProcess = spawn('python3', ['../run_api.py'], {
+  const backendProcess = spawn('python3', ['../deploy.py', 'backend'], {
     cwd: '',
     stdio: 'pipe',
     shell: false,
