@@ -1,4 +1,4 @@
-"""法规问答路由 — 对话式问答 + 精确检索。"""
+"""法规问答路由 — 对话式问答。"""
 
 import asyncio
 import json
@@ -94,21 +94,6 @@ async def chat(req: ChatRequest):
     if req.debug is None:
         req.debug = is_debug()
 
-    if req.mode == "search":
-        try:
-            results = engine.search(req.question)
-            content = json.dumps(results, ensure_ascii=False)
-            add_message(session_id, "assistant", content, sources=results)
-            return {
-                "session_id": session_id,
-                "mode": "search",
-                "content": content,
-                "sources": results,
-            }
-        except Exception as e:
-            logger.error(f"Search failed: {e}")
-            raise HTTPException(status_code=500, detail=f"检索失败: {e}")
-
     async def event_stream():
         root_span = None
         exc_info = (None, None, None)
@@ -117,7 +102,7 @@ async def chat(req: ChatRequest):
                 _span_ctx = trace_span("root", "root")
                 root_span = _span_ctx.__enter__()
                 reset_llm_call_count(root_span.trace_id)
-                root_span.input = {"question": req.question, "mode": req.mode}
+                root_span.input = {"question": req.question}
 
             cache = get_cache_manager()
 
@@ -177,7 +162,7 @@ async def chat(req: ChatRequest):
 
                     if root_span:
                         root_span.output = {"answer_length": len(answer), "cached": True}
-                        root_span.metadata = {"mode": req.mode, "cache_hit": True}
+                        root_span.metadata = {"cache_hit": True}
                         _span_ctx.__exit__(*exc_info)
                         exc_info = (None, None, None)
 
@@ -214,7 +199,7 @@ async def chat(req: ChatRequest):
             memory_svc = get_memory_service()
             graph = get_ask_graph()
             state = AskState(
-                question=effective_question, mode=req.mode, user_id=req.user_id,
+                question=effective_question, user_id=req.user_id,
                 session_id=session_id, search_results=[], memory_context="",
                 answer="", sources=[], citations=[], unverified_claims=[],
                 content_mismatches=[], faithfulness_score=None, error=None,
@@ -261,7 +246,6 @@ async def chat(req: ChatRequest):
                     "source_count": len(result.get("sources", [])),
                 }
                 root_span.metadata = {
-                    "mode": req.mode,
                     "retrieval": "hybrid",
                     "reranker": engine.active_reranker_type,
                 }

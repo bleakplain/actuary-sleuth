@@ -46,7 +46,7 @@ def mock_context(mock_engine, mock_llm, mock_memory_service):
 def _make_base_state(**kwargs):
     """创建基础状态，包含所有必需字段"""
     base = {
-        "question": "", "mode": "qa", "user_id": "test", "session_id": "sess_1",
+        "question": "", "user_id": "test", "session_id": "sess_1",
         "search_results": [], "memory_context": "", "answer": "", "sources": [],
         "citations": [], "unverified_claims": [], "content_mismatches": [],
         "faithfulness_score": None, "error": None,

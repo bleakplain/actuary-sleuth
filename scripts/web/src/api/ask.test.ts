@@ -3,7 +3,6 @@ import {
   fetchSessions,
   fetchMessages,
   deleteSession,
-  chatSearch,
   chatSSE,
 } from './ask';
 
@@ -63,37 +62,6 @@ describe('ask API', () => {
     });
   });
 
-  describe('chatSearch', () => {
-    it('posts search request and returns result', async () => {
-      const searchResult = {
-        session_id: 'c1',
-        mode: 'search',
-        content: '[{"law_name":"保险法"}]',
-        sources: [{ law_name: '保险法', article_number: '第一条' }],
-      };
-      mockedClient.post.mockResolvedValueOnce({ data: searchResult });
-
-      const result = await chatSearch('等待期多久');
-      expect(result).toEqual(searchResult);
-      expect(mockedClient.post).toHaveBeenCalledWith('/api/ask/chat', {
-        question: '等待期多久',
-        session_id: undefined,
-        mode: 'search',
-      });
-    });
-
-    it('passes session_id when provided', async () => {
-      mockedClient.post.mockResolvedValueOnce({ data: { session_id: 'c1', mode: 'search', content: '', sources: [] } });
-
-      await chatSearch('问题', 'c1');
-      expect(mockedClient.post).toHaveBeenCalledWith('/api/ask/chat', {
-        question: '问题',
-        session_id: 'c1',
-        mode: 'search',
-      });
-    });
-  });
-
   describe('chatSSE', () => {
     it('returns AbortController', () => {
       // Mock fetch to return a ReadableStream
@@ -106,7 +74,7 @@ describe('ask API', () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ body: mockStream }));
 
       const controller = chatSSE(
-        { question: '测试', mode: 'qa' },
+        { question: '测试' },
         { onToken: vi.fn(), onDone: vi.fn(), onError: vi.fn() },
       );
 
@@ -132,7 +100,7 @@ describe('ask API', () => {
       });
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ body: mockStream }));
 
-      chatSSE({ question: '测试', mode: 'qa' }, { onToken, onDone, onError: vi.fn() });
+      chatSSE({ question: '测试' }, { onToken, onDone, onError: vi.fn() });
 
       // Wait for stream processing
       await new Promise((r) => setTimeout(r, 100));
@@ -150,7 +118,7 @@ describe('ask API', () => {
       const onError = vi.fn();
       vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')));
 
-      chatSSE({ question: '测试', mode: 'qa' }, { onToken: vi.fn(), onDone: vi.fn(), onError });
+      chatSSE({ question: '测试' }, { onToken: vi.fn(), onDone: vi.fn(), onError });
 
       await new Promise((r) => setTimeout(r, 100));
 

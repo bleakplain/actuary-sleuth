@@ -7,7 +7,6 @@ class TestChatSSE:
         """核心回归测试：SSE done 事件必须包含真实的数据库 message_id。"""
         resp = app_client.post("/api/ask/chat", json={
             "question": "健康保险等待期多长？",
-            "mode": "qa",
         })
         assert resp.status_code == 200
 
@@ -24,7 +23,6 @@ class TestChatSSE:
         """验证 SSE 返回的 message_id 确实存在于数据库中。"""
         resp = app_client.post("/api/ask/chat", json={
             "question": "测试问题",
-            "mode": "qa",
         })
         assert resp.status_code == 200
 
@@ -51,7 +49,6 @@ class TestChatSSE:
         # 1. 发起 SSE 对话
         chat_resp = app_client.post("/api/ask/chat", json={
             "question": "核辐射在承保范围内吗？",
-            "mode": "qa",
         })
         assert chat_resp.status_code == 200
 
@@ -82,7 +79,6 @@ class TestChatSSE:
         """SSE 流包含 token 类型事件。"""
         resp = app_client.post("/api/ask/chat", json={
             "question": "测试",
-            "mode": "qa",
         })
         assert resp.status_code == 200
 
@@ -93,25 +89,12 @@ class TestChatSSE:
     def test_chat_sse_includes_session_id(self, app_client):
         resp = app_client.post("/api/ask/chat", json={
             "question": "测试",
-            "mode": "qa",
         })
         assert resp.status_code == 200
 
         events = _parse_sse_events(resp.text)
         done_data = _find_event_by_type(events, "done")["data"]
         assert done_data["session_id"].startswith("sess_")
-
-
-class TestSearchMode:
-    def test_chat_search_mode(self, app_client):
-        resp = app_client.post("/api/ask/chat", json={
-            "question": "等待期",
-            "mode": "search",
-        })
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["mode"] == "search"
-        assert "sources" in data
 
 
 class TestSessions:
