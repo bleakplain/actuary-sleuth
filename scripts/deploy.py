@@ -41,19 +41,6 @@ def _write_run_batch(updates: dict[str, str]) -> None:
     RUN_FILE.write_text("".join(f"{k}={v}\n" for k, v in data.items()))
 
 
-def _delete_run_keys(*keys: str) -> None:
-    data = _read_run()
-    for k in keys:
-        data.pop(k, None)
-    if data:
-        RUN_FILE.write_text("".join(f"{k}={v}\n" for k, v in data.items()))
-    else:
-        try:
-            RUN_FILE.unlink()
-        except FileNotFoundError:
-            pass
-
-
 def _is_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -62,18 +49,18 @@ def _is_alive(pid: int) -> bool:
         return False
 
 
-def _stop_old_service(role: str) -> int | None:
-    """停止旧服务进程，返回旧端口（仅 backend 角色）。"""
+def _stop_old_service(role: str) -> None:
+    """停止指定角色的旧服务进程。"""
     data = _read_run()
     pid_str = data.get(f"{role}_pid")
     if not pid_str:
-        return None
+        return
     try:
         pid = int(pid_str)
     except ValueError:
-        return None
+        return
     if not _is_alive(pid):
-        return None
+        return
     os.kill(pid, signal.SIGTERM)
     for _ in range(30):
         if not _is_alive(pid):
@@ -81,9 +68,7 @@ def _stop_old_service(role: str) -> int | None:
         time.sleep(0.1)
     if _is_alive(pid):
         os.kill(pid, signal.SIGKILL)
-    old_port = data.get(f"{role}_port")
     print(f"已停止旧{role}服务 (PID {pid})")
-    return int(old_port) if old_port else None
 
 
 def _find_available_port(preferred: int = 0) -> int:
@@ -185,7 +170,7 @@ def _run_frontend() -> None:
     _stop_old_service("frontend")
     data = _read_run()
     if "backend_port" not in data:
-        print("警告: 未检测到后端端口，Vite 代理将使用默认 8000。请确保后端已启动。")
+        print("警告: 未检测到后端端口，API 代理将不可用。请确保后端已启动。")
     proc = _start_frontend()
     _write_run_batch({"frontend_pid": str(proc.pid)})
     print(f"前端已启动 (PID {proc.pid})")
@@ -198,12 +183,13 @@ def _run_all() -> None:
     _stop_old_service("frontend")
     actual_port = _find_available_port(0)
     backend_proc = _start_backend(actual_port)
-    frontend_proc = _start_frontend()
+    # Write backend_port BEFORE starting frontend so Vite proxy can read it
     _write_run_batch({
         "backend_pid": str(backend_proc.pid),
         "backend_port": str(actual_port),
-        "frontend_pid": str(frontend_proc.pid),
     })
+    frontend_proc = _start_frontend()
+    _write_run_batch({"frontend_pid": str(frontend_proc.pid)})
     print(f"后端运行于 http://localhost:{actual_port} (PID {backend_proc.pid})")
     print(f"前端已启动 (PID {frontend_proc.pid})")
     _supervise([backend_proc, frontend_proc])

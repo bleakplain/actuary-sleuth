@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { execSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 
@@ -12,15 +13,14 @@ function getApiPort(): number {
       return parseInt(match[1], 10)
     }
   } catch {
-    // .run file not found, use default
+    console.warn('[vite] .run file not found; API proxy will not work. Start backend first.')
   }
-  return 8000
+  return 0
 }
 
 function getFrontendPort(): number {
-  // 只有 master 分支前端固定 8000，其他随机
+  // master 分支前端固定 8000，其他（worktree/detached HEAD）随机
   try {
-    const { execSync } = require('child_process')
     const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf-8' }).trim()
     return branch === 'master' ? 8000 : 0
   } catch {
