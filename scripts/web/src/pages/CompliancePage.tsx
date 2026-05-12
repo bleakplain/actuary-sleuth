@@ -688,7 +688,7 @@ export default function CompliancePage() {
                   loading={historyLoading}
                   rowKey="id"
                   size="small"
-                  pagination={{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100'], showTotal: (total) => `共 ${total} 条` }}
+                  pagination={{ pageSize: 5, showSizeChanger: true, pageSizeOptions: ['5', '10', '20', '50'], showTotal: (total) => `共 ${total} 条` }}
                   onRow={(record: ComplianceReport) => ({
                     onClick: () => handleViewReport(record.id),
                     tabIndex: 0,
@@ -699,16 +699,16 @@ export default function CompliancePage() {
                     { title: 'ID', dataIndex: 'id', key: 'id', width: 100, ellipsis: true },
                     { title: '产品名称', dataIndex: 'product_name', key: 'product_name', ellipsis: true },
                     { title: '险种类型', dataIndex: 'category', key: 'category', width: 90 },
-                    { title: '审核时间', dataIndex: 'created_at', key: 'created_at', width: 160 },
+                    { title: '审核时间', dataIndex: 'created_at', key: 'created_at', width: 200 },
                     {
-                      title: '操作', key: 'action', width: 140,
+                      title: '操作', key: 'action', width: 100,
                       render: (_: unknown, record: ComplianceReport) => (
                         <Space size="small">
                           <Button type="link" size="small" icon={<EyeOutlined />}
-                            onClick={(e) => { e.stopPropagation(); handleViewReport(record.id); }}>查看</Button>
+                            onClick={(e) => { e.stopPropagation(); handleViewReport(record.id); }} />
                           <Popconfirm title="确定删除？此操作不可恢复。" onConfirm={(e) => { e?.stopPropagation(); handleDeleteReport(record.id); }}>
                             <Button type="link" danger size="small" icon={<DeleteOutlined />}
-                              onClick={(e) => e.stopPropagation()}>删除</Button>
+                              onClick={(e) => e.stopPropagation()} />
                           </Popconfirm>
                         </Space>
                       ),

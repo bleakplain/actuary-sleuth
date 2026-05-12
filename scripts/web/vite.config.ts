@@ -18,19 +18,14 @@ function getApiPort(): number {
 }
 
 function getFrontendPort(): number {
-  // 主仓库前端固定 8000，worktree 随机
-  const gitPath = path.resolve(__dirname, '../../.git')
+  // 只有 master 分支前端固定 8000，其他随机
   try {
-    const stat = fs.statSync(gitPath)
-    // worktree 的 .git 是文件，主仓库是目录
-    if (stat.isFile()) {
-      return 0  // worktree: 随机端口
-    }
+    const { execSync } = require('child_process')
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf-8' }).trim()
+    return branch === 'master' ? 8000 : 0
   } catch {
-    // .git 不存在，使用随机端口
     return 0
   }
-  return 8000  // 主仓库: 固定 8000
 }
 
 export default defineConfig({
