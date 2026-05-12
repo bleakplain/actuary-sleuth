@@ -38,6 +38,7 @@ def _read_run() -> dict[str, str]:
 def _write_run_batch(updates: dict[str, str]) -> None:
     data = _read_run()
     data.update(updates)
+    data.pop("PORT", None)  # legacy key cleanup
     RUN_FILE.write_text("".join(f"{k}={v}\n" for k, v in data.items()))
 
 
@@ -166,14 +167,30 @@ def _run_backend() -> None:
     _supervise([proc])
 
 
+def _resolve_frontend_port() -> int:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, cwd=str(SCRIPTS_DIR),
+        )
+        if result.stdout.strip() == "master":
+            return 8000
+    except Exception:
+        pass
+    return _find_available_port(0)
+
+
 def _run_frontend() -> None:
+    _load_env()
     _stop_old_service("frontend")
     data = _read_run()
     if "backend_port" not in data:
         print("警告: 未检测到后端端口，API 代理将不可用。请确保后端已启动。")
+    frontend_port = _resolve_frontend_port()
+    _write_run_batch({"frontend_port": str(frontend_port)})
     proc = _start_frontend()
     _write_run_batch({"frontend_pid": str(proc.pid)})
-    print(f"前端已启动 (PID {proc.pid})")
+    print(f"前端运行于 http://localhost:{frontend_port} (PID {proc.pid})")
     _supervise([proc])
 
 
@@ -181,17 +198,19 @@ def _run_all() -> None:
     _load_env()
     _stop_old_service("backend")
     _stop_old_service("frontend")
-    actual_port = _find_available_port(0)
-    backend_proc = _start_backend(actual_port)
-    # Write backend_port BEFORE starting frontend so Vite proxy can read it
+    backend_port = _find_available_port(0)
+    frontend_port = _resolve_frontend_port()
+    backend_proc = _start_backend(backend_port)
+    # Write ports BEFORE starting frontend so Vite can read them
     _write_run_batch({
         "backend_pid": str(backend_proc.pid),
-        "backend_port": str(actual_port),
+        "backend_port": str(backend_port),
+        "frontend_port": str(frontend_port),
     })
     frontend_proc = _start_frontend()
     _write_run_batch({"frontend_pid": str(frontend_proc.pid)})
-    print(f"后端运行于 http://localhost:{actual_port} (PID {backend_proc.pid})")
-    print(f"前端已启动 (PID {frontend_proc.pid})")
+    print(f"后端运行于 http://localhost:{backend_port} (PID {backend_proc.pid})")
+    print(f"前端运行于 http://localhost:{frontend_port} (PID {frontend_proc.pid})")
     _supervise([backend_proc, frontend_proc])
 
 
