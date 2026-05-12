@@ -1,355 +1,324 @@
-# 合规审核准确性提升 - 技术调研报告
+# 033-compliance-audit-accuracy 深度自检报告
 
-生成时间: 2026-05-11
-源规格: .claude/specs/033-compliance-audit-accuracy/spec.md
+**生成时间**: 2026-05-12
+**范围**: 合规审查全流程 — 文档解析 → 险种识别 → 法规加载 → 合规检查 → 结果组装 → 前端展示
+**用户反馈问题**: 1. 保险产品条款不完整；2. 法规要求与保险条款及法规来源存在不一致或难以对应
+
+---
 
 ## 执行摘要
 
-通过深入代码分析，发现两个核心问题的根因均指向 **prompt 设计缺陷** 和 **知识库 article_number 不一致**。
+通过深度代码审计，识别出 **18 个问题**，其中 **5 个高风险**（直接影响审查准确性）、**10 个中风险**（影响报告可用性或存在潜在数据丢失）、**3 个低风险**（边界情况）。
 
-**问题 1（条款遗漏）** 的根因：prompt 将所有 88 条法规平铺为一个文本块，LLM 面对庞大且无结构的法规列表时，倾向于只检查前几条，跳过后续条款。没有引导 LLM 逐条扫描文档条款。
-
-**问题 2（法规引用不对应）** 的根因：知识库 `article_number` 混用"第N项"（数组索引）和"第N条"（实际法条号），且 prompt 中法规条目之间缺乏唯一标识符，LLM 容易混淆来源。当前 prompt 仅用 `【法规名-条目号】` 作为锚点，当多个法规涉及同一事项时，LLM 无法准确区分。
-
-**关键数据**：重疾险加载 88 条法规 chunk（5 部险种专属 + 4 部通用），prompt 法规上下文约 16K 字符，文档上限 150K 字符，使用 glm-4-flash（128K context）。prompt 长度本身不是瓶颈。
+两个用户反馈问题的根因定位：
+- **问题1「条款不完整」**: 根因是 `_split_by_clauses` 丢弃首条条款前的文本 + HTML 解析器丢失大量标签内容 + DOCX 解析器只从表格提取条款
+- **问题2「法规要求不一致」**: 根因是 source_ref 匹配失败时保留了 LLM 编造的 requirement + backfill 掩盖语义错误的法规匹配 + requirement/source_excerpt 硬截断丢失关键信息
 
 ---
 
-## 一、现有代码分析
+## 一、高风险问题（5 个）
 
-### 1.1 相关模块梳理
+### H1. `_split_by_clauses` 丢弃首条条款前的所有文本
 
-| 需求 | 对应模块 | 现状 |
-|------|---------|------|
-| FR-001 条款覆盖 | `compliance/prompts.py`, `api/routers/compliance.py` | 需修改 prompt |
-| FR-002 法规引用准确 | `compliance/checker.py`, `compliance/prompts.py` | 需修改 prompt + checker |
-| FR-003 覆盖分析 | 无 | 需新增 |
-| FR-005 匹配失败标注 | `compliance/checker.py:327-334` | 需修改 |
-| FR-006 截断告知 | `api/routers/compliance.py:37-44` | 需修改 |
+**文件**: `checker.py:354`
+**影响**: 长文档分批时，第一个 `【条款` 标记之前的所有内容（产品概述、保险责任概述、定义等）被完全丢弃，LLM 永远看不到这些内容。
 
-### 1.2 可复用组件
-
-- `AuditRegulationItem`: 已有完整法规元数据，可直接复用
-- `_normalize_ref()`: 已实现括号归一化匹配
-- `load_audit_regulations()`: 法规加载逻辑完整，含去重
-- `build_audit_context()`: 法规上下文序列化
-- `_extract_real_article_number()`: 从内容提取实际法条号
-
-### 1.3 需要新增/修改的模块
-
-| 模块 | 操作 | 说明 |
-|------|------|------|
-| `compliance/prompts.py` | 修改 | 重构 prompt 模板，增加编号标注和逐条检查引导 |
-| `compliance/checker.py` | 修改 | 增加覆盖分析、后处理验证、匹配失败标注 |
-| `api/routers/compliance.py` | 修改 | 截断告知、返回覆盖分析数据 |
-
----
-
-## 二、技术选型研究
-
-### 2.1 问题 1：条款覆盖方案对比
-
-| 方案 | 优点 | 缺点 | 选择 |
-|------|------|------|------|
-| A. 分批检查：将文档按条款分批发给 LLM | 覆盖率高、每批法规聚焦 | 多次 LLM 调用、延迟增加、需合并结果 | ❌ |
-| B. 改进 prompt：引导 LLM 逐条扫描 | 单次调用、改动小 | 依赖 LLM 遵循指令的能力 | ✅ |
-| C. 两阶段：先提取条款列表再逐条检查 | 最精确 | 复杂度高、两次以上 LLM 调用 | ❌ |
-
-**选择 B**：在当前 glm-4-flash 能力下，通过 prompt 工程引导逐条检查是最务实的方案。关键改进点：
-1. 在 prompt 中要求 LLM 先列出文档中所有条款编号
-2. 然后逐条检查每条是否涉及法规合规
-3. 输出中包含 clause_number 使覆盖可审计
-
-### 2.2 问题 2：法规引用准确性方案对比
-
-| 方案 | 优点 | 缺点 | 选择 |
-|------|------|------|------|
-| A. 给每条法规分配唯一编号（R1-R88） | LLM 引用简单明确 | 需修改 prompt 和解析逻辑 | ✅ |
-| B. 后处理验证：检查 source_ref 内容相关性 | 不改 prompt | 需额外 LLM 调用验证 | ❌ |
-| C. RAG 检索：只检索相关法规而非全量 | 减少干扰、提高精度 | 需实现向量检索+阈值调优 | 🔶（后续优化） |
-
-**选择 A**：为每条法规分配 `R1`, `R2`, ... `R88` 编号，prompt 中用编号标注法规，LLM 输出 `source_ref` 使用编号。解析时通过编号直接映射，避免法条号混淆。
-
-### 2.3 依赖分析
-
-无新增外部依赖。所有改动在现有 `compliance` 模块内完成。
-
----
-
-## 三、数据流分析
-
-### 3.1 现有数据流
-
-```
-文档上传 → parse_file() → AuditDocument
-         → _build_combined_text() → combined_text（~50-150K chars）
-         → _prepare_document_content() → 截断至 150K
-         → identify_category() → 险种类型
-
-load_audit_regulations(category) → 88 AuditRegulationItem
-  → search_by_metadata({"law_name": reg_name})
-  → 返回所有 chunk（article_number = "第N项" 或 "第N条"）
-  → _extract_real_article_number() 尝试从 content 提取实际法条号
-
-build_audit_context(regulations) → 法规文本块（16K chars）
-  格式: 【法规名-条目号】\n法规内容
-
-COMPLIANCE_PROMPT_DOCUMENT.format(document_content, context) → prompt
-
-run_compliance_check(prompt, regulations)
-  → LLM 返回 JSON（items 含 source_ref）
-  → _normalize_ref() + _build_ref_map() 匹配
-  → 匹配失败时 chunk_id = None
-```
-
-### 3.2 关键发现：article_number 不一致
-
-知识库（LanceDB 329 行）中 article_number 的来源：
-
-**md_parser.py:600**:
 ```python
-metadata['article_number'] = section_path  # 即 heading text，如 "第1项"
+# checker.py:354
+current_start = clause_positions[0]  # 从第一个条款开始，丢弃前面所有内容
 ```
 
-法规 Markdown 文件使用 `## 第N项` 作为标题（不是 `## 第N条`），因此 section_path = "第1项", "第2项", ...
+**场景**: 保险条款文档通常以"保险合同构成"、"保险责任"等非编号段落开头，这些内容对合规审查至关重要（如保险责任描述是否准确）。
 
-`_extract_real_article_number()` 的处理：
-- **保险法**：内容以"第十三条"、"第十四条"开头 → 正则匹配成功 → article_number 被修正为 "第十三条"
-- **其他法规**：内容不以"第X条"开头 → 正则匹配失败 → 使用 fallback "第N项"
-- **重疾险 88 条中**：28 条保险法修正成功，60 条保持"第N项"
-
-**LLM 看到的上下文标题示例**:
-```
-【重大疾病保险的疾病定义使用规范（2020年修订版）-第1项】   ← 混合格式
-【中华人民共和国保险法（2015年修订版）-第十三条】           ← 法条号格式
-【《健康保险管理办法》2019年第3号-第5项】                  ← 混合格式
-```
-
-**LLM 回传的 source_ref 格式不可预测**：
-- 可能回传"健康保险管理办法2019年第3号-第5项" → 匹配成功
-- 可能回传"健康保险管理办法-第五条" → 匹配失败（知识库无此条目）
-- 可能回传"健康保险管理办法-第5项" → 缺少文号部分，可能匹配失败
-
-### 3.3 新增/变更的数据流
-
-```
-修改后:
-
-load_audit_regulations(category)
-  → 为每条法规分配 R-index（R1, R2, ..., R88）
-  → 返回 regulations 带编号
-
-build_audit_context(regulations)
-  → 每条法规标注 [R1], [R2], ... 编号
-  → 格式: [R1] 【法规名】\n法规内容
-
-COMPLIANCE_PROMPT（改进后）
-  → 引导 LLM 逐条扫描文档条款
-  → source_ref 使用 R 编号
-
-run_compliance_check(prompt, regulations)
-  → 解析 LLM 返回的 R 编号
-  → 通过编号直接映射到 regulation（100% 准确）
-  → 新增：覆盖分析（已检查条款 vs 文档条款）
-  → 新增：匹配失败项标记为"法规来源待确认"
-```
+**修复建议**: 将 `current_start` 改为 `0`，或保留首条款前的文本作为第一个 batch 的前缀。
 
 ---
 
-## 四、关键技术问题
+### H2. source_ref 匹配失败时保留了 LLM 编造的 requirement
 
-### 4.1 需要验证的技术假设
+**文件**: `checker.py:328-335`
+**影响**: 当 LLM 输出的 `source_ref` 无法匹配到法规时（如 `R0`、`R100`、空值），代码检查 `if not item.get("requirement")` 才覆盖。但 LLM **总是会输出** requirement 字段（prompt 要求输出），所以 LLM 编造的法规要求文本被**原样保留**，用户看到的是一个看似合法但实际未经核实的法规要求。
 
-- [x] 知识库 article_number 格式不一致 → **已确认**：60 条用"第N项"，28 条用"第N条"
-- [x] LLM 无法准确引用 source_ref → **已确认**：需要为法规分配唯一编号
-- [x] prompt 长度是否超出 context → **已排除**：16K 法规 + 文档 < 128K limit
-- [ ] glm-4-flash 能否遵循"逐条扫描"指令 → 需实测验证
-- [ ] 编号方案是否提高匹配率 → 需实测验证
+```python
+# checker.py:328-335
+else:
+    item["chunk_id"] = None
+    if ref:
+        logger.warning(f"source_ref 匹配失败: {ref}")
+    if not item.get("requirement"):      # LLM 总是写了 requirement，这里永远是 False
+        item["requirement"] = "法规来源待确认"
+```
 
-### 4.2 潜在风险和缓解措施
-
-| 风险 | 概率 | 影响 | 缓解措施 |
-|------|------|------|---------|
-| LLM 忽略逐条扫描指令 | 中 | 条款仍遗漏 | 在 prompt 中加入强制要求 + 输出格式约束 |
-| 编号方案增加 prompt 复杂度 | 低 | LLM 困惑 | 编号格式简洁（R1-R88），示例说明 |
-| 覆盖分析增加后处理复杂度 | 低 | 性能影响 | 纯字符串匹配，无额外 LLM 调用 |
-| 截断告知影响用户体验 | 低 | 用户困惑 | 明确提示哪些内容未检查 |
+**修复建议**: 匹配失败时，无论 LLM 提供了什么 requirement，都应覆盖为 `"法规来源待确认（引用 {ref} 未匹配）"` 或保留但添加标记。
 
 ---
 
-## 五、根因分析总结
+### H3. HTML 解析器丢失大量标签内容
 
-### 问题 1：审核结果遗漏条款
+**文件**: `html_converter.py:63-67`
+**影响**: `SimpleHTMLParser.handle_data` 只在 `self.in_p` 或 `self.in_cell` 为 True 时捕获文本。以下常见 HTML 标签的内容被完全丢弃：
+- `<div>` — 富文本编辑器最常用的容器标签
+- `<span>` — 行内格式
+- `<ul>`/`<ol>`/`<li>` — 列表（保险条款中常见的责任免除、条件列表）
+- `<br>` — 换行
+- `<blockquote>` — 引用
+- `<section>` — HTML5 区段
 
-**根因链**:
+```python
+# html_converter.py:63-67
+def handle_data(self, data):
+    if self.in_p:           # 只有 <p> 内的文本被捕获
+        self.current_text += data
+    elif self.in_cell:      # 只有 <td>/<th> 内的文本被捕获
+        self.current_cell += data
+    # 其他标签内的文本被静默丢弃
+```
 
-1. `COMPLIANCE_PROMPT_DOCUMENT` 没有要求 LLM 逐条扫描文档条款
-2. prompt 中的指令是"检查是否符合相关法规要求"，这是一个开放式指令
-3. LLM（glm-4-flash）倾向选择最显著的合规问题输出，跳过"看起来正常"的条款
-4. 没有后处理验证检查覆盖率
-5. `_prepare_document_content()` 的截断可能丢弃后半部分条款（投保须知、免责条款等）
-
-**关键代码位置**:
-- `prompts.py:3-40` — prompt 模板缺乏逐条检查引导
-- `compliance.py:37-44` — 文档截断只保护"条款"边界，不保护"投保须知"等
-
-### 问题 2：检查项与法规引用不对应
-
-**根因链**:
-
-1. 知识库 `article_number` = `section_path`（来自 md_parser.py:600），是"第N项"格式
-2. 法规 Markdown 使用 `## 第1项` 标题，这是枚举索引，不是实际法条号
-3. `_extract_real_article_number()` 只对保险法有效（内容以"第X条"开头），其他 60+ 条法规保持"第N项"
-4. Prompt 中法规头 `【法规名-第1项】` 对 LLM 来说是无意义的编号——"第1项"无法帮助 LLM 理解这是关于什么的法规条文
-5. LLM 回传 source_ref 时可能：
-   - 按 prompt 中的格式回传 → 匹配成功但内容可能不对应（因为 LLM 混淆了相似的"第N项"）
-   - 自行改写法条号 → 匹配失败
-6. **最关键**：88 条法规平铺在一个列表中，没有分类、没有相关性标记，LLM 在大量法规条目中选择最"像"的 source_ref，容易张冠李戴
-
-**关键代码位置**:
-- `md_parser.py:600` — `article_number = section_path`（根因）
-- `checker.py:60-62` — `_extract_real_article_number()` 仅覆盖保险法
-- `checker.py:112-126` — `build_audit_context()` 平铺法规，无编号
-- `prompts.py:26` — `source_ref` 依赖 LLM 精确复制 `【法规名-条目号】` 格式
+**修复建议**: 扩展解析器以处理 `<div>`、`<li>` 等标签，或使用更健壮的 HTML→DOCX 库（如 `htmldocx`）。
 
 ---
 
-## 六、历史报告实证分析
+### H4. backfill 掩盖语义错误的法规匹配
 
-基于数据库中唯一的历史审核报告 `cr_8af04f54`（团体短期重大疾病保险，重疾险）进行逐项自查。
+**文件**: `checker.py:324-327`
+**影响**: 当 LLM 错误地选择了 `R5`（比如疾病定义法规）来检查等待期条款时，backfill 逻辑会用 R5 法规的真实内容覆盖 LLM 的 requirement。用户看到的是一个"法规名: 真实法规内容"的字符串，看起来完全合法，但法规内容与检查项的参数完全不相关。没有任何机制检测 LLM 选择的法规是否与检查项的 `param`/`value` 语义相关。
 
-### 6.1 报告概况
+```python
+# checker.py:324-327
+if matched:
+    item["chunk_id"] = matched.chunk_id
+    item["requirement"] = f"{matched.law_name}: {matched.content[:200]}"  # 真实法规，但可能语义无关
+    item["source_excerpt"] = matched.content[:300]
+```
 
-| 指标 | 值 |
-|------|-----|
-| 产品名称 | 团体短期重大疾病保险 |
-| 险种分类 | 重疾险 |
-| 加载法规 | 88 条（险种专属 24 + 通用 64）+ 负面清单 102 条 = 共 190 条 |
-| 检查项总数 | 18 项 |
-| 合规 | 10 项 |
-| 需关注 | 8 项 |
-| 不合规 | 0 项 |
-| 负面清单结果 | 通过 |
-
-### 6.2 逐项法规引用相关性评估
-
-对每个检查项评估：检查事项（param）与引用的法规内容是否语义相关。
-
-| # | 条款 | 检查事项 | 引用法规 | 相关性 | 问题 |
-|---|------|---------|---------|--------|------|
-| 1 | 2.1 | 保险期间 | 疾病定义规范-第1项：保障疾病范围要求 | ⚠️ 弱相关 | 法规讲的是必须包含的疾病种类，不涉及保险期间。条款检查"保险期间为一年"，应引用短期健康险或保险期间相关法规 |
-| 2 | 2.2 | 保险金额 | 疾病定义规范-第2项：轻度疾病保额≤重度30% | ⚠️ 部分相关 | 检查事项是"保额约定方式"，引用的法规是"轻重度保额比例"，有联系但角度不同 |
-| 3 | 2.3.1 | 等待期设置 | 疾病定义规范-第3项：可增加其他疾病 | ❌ 不相关 | 法规讲"可增加疾病范围"，与等待期完全无关。应引用健康保险管理办法关于等待期≤180天的规定 |
-| 4 | 2.3.2 | 重大疾病保险金 | 疾病定义规范-第4项：疾病排列顺序 | ❌ 不相关 | 法规讲疾病排列顺序，与重大疾病保险金给付条件无关 |
-| 5 | 2.3.3 | 疾病身故保险金 | 疾病定义规范-第5项：除外责任范围 | ⚠️ 部分相关 | 身故保险金与除外责任有一定联系，但不够直接 |
-| 6 | 2.4 | 责任免除 | 疾病定义规范-第5项：除外责任范围 | ✅ 相关 | 责任免除直接对应除外责任，引用正确 |
-| 7 | 3.1 | 合同成立与生效 | 保险法-第十三条：保险合同成立 | ✅ 相关 | 完全对应 |
-| 8 | 3.2 | 犹豫期 | 健康管理办法-第5项：犹豫期≥15天 | ✅ 相关 | 完全对应。发现合规问题：10天 < 15天 |
-| 9 | 3.3 | 犹豫期后解除合同 | 健康管理办法-第5项：犹豫期≥15天 | ⚠️ 弱相关 | 法规讲犹豫期，但检查事项是"解除合同手续"，应引用保险法关于合同解除的条款 |
-| 10 | 4.1 | 保险费 | 健康管理办法-第7项：短期团体产品报送要求 | ❌ 不相关 | 法规讲的是"产品参数调整办法报送"，与保险费缴纳方式完全无关 |
-| 11 | 5.1 | 保险事故通知 | 健康管理办法-第11项：多份保单理赔顺序 | ❌ 不相关 | 法规讲"多份保单理赔顺序"，与"事故通知时限"完全无关。应引用保险法关于事故通知的条款 |
-| 12 | 5.2 | 受益人 | 保险法-第三十九条 | ⚠️ LLM幻觉 | 法规第三十九条实际内容是关于受益人指定，LLM 选对了法规。但 **source_excerpt 幻觉**：编造了"投保人可以按照合同约定向保险人一次支付全部保险费或者分期支付保险费"（实为第三十五条内容）|
-| 13 | 5.3 | 保险金申请资料 | 保险法-第二十二条：提供证明和资料 | ✅ 相关 | 完全对应 |
-| 14 | 5.4 | 保险金的给付 | 保险法-第二十三条：及时核定 | ✅ 相关 | 完全对应 |
-| 15 | 5.5 | 未成年人身故保险金限制 | 保险法-第三十三条：无民事行为能力人 | ⚠️ 部分相关 | 检查事项是"未成年人身故保额限制"，法规是"不得为无民事行为能力人投保"。有关联但条文不直接对应，应引用保险法关于未成年人的专门规定 |
-| 16 | 5.6 | 诉讼时效 | 保险法-第二十六条：诉讼时效二年 | ✅ 相关 | 完全对应 |
-| 17 | 6.1 | 明确说明与如实告知 | 保险法-第十七条：格式条款说明义务 | ✅ 相关 | 完全对应 |
-| 18 | 6.2 | 合同解除权限制 | 保险法-第十六条：如实告知义务 | ⚠️ 部分相关 | 检查事项是"解除权30天限制"，引用的是"如实告知义务"。相关但不是最精确的条文 |
-
-### 6.3 量化评估
-
-#### 法规引用相关性（Faithfulness）
-
-| 等级 | 数量 | 占比 | 说明 |
-|------|------|------|------|
-| ✅ 相关 | 8/18 | 44.4% | 检查事项与法规内容直接对应 |
-| ⚠️ 弱相关/部分相关 | 5/18 | 27.8% | 有一定联系但不够直接或精确 |
-| ❌ 不相关 | 5/18 | 27.8% | 检查事项与法规内容完全无关 |
-
-**法规引用相关率 = 44.4%**（远低于 spec.md 中 SC-002 的 90% 目标）
-
-#### 不相关项详细分析
-
-| # | 检查事项 | 引用法规 | 问题 | 应引用法规 |
-|---|---------|---------|------|-----------|
-| 3 | 等待期设置 | 疾病定义规范-第3项（增加疾病范围） | 法规内容与等待期无关 | 健康管理办法关于等待期≤180天 |
-| 4 | 重大疾病保险金 | 疾病定义规范-第4项（疾病排列顺序） | 法规内容与保险金给付无关 | 保险法关于保险金给付或重疾定义规范关于疾病定义 |
-| 10 | 保险费 | 健康管理办法-第7项（产品报送要求） | 法规内容与保险费缴纳无关 | 精算规定或保险法关于保险费 |
-| 11 | 保险事故通知 | 健康管理办法-第11项（多份保单理赔顺序） | 法规内容与事故通知时限无关 | 保险法关于保险事故通知 |
-| 12 | 受益人 | 保险法-第三十九条（LLM source_excerpt 幻觉） | LLM 选对了法规（受益人），但编造的摘要来自第三十五条 | source_excerpt 后端回填可解决 |
-
-#### source_ref 匹配成功率
-
-已确认 18/18 项的 chunk_id 非 null（032 分支修复后匹配率达 100%），但匹配成功不等于引用正确——LLM 返回的 source_ref 能匹配到某条法规，但匹配到的那条法规内容可能与检查事项不相关。
-
-#### 条款覆盖完整性
-
-文档包含的条款编号：2.1, 2.2, 2.3.1, 2.3.2, 2.3.3, 2.4, 3.1, 3.2, 3.3, 4.1, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 6.1, 6.2（共 18 条可见条款）。检查项覆盖了全部 18 条。
-
-但需注意：这是一份短期团险产品，条款较少（18 条）。对于包含 50+ 条款的产品，覆盖率可能大幅下降。
-
-### 6.4 关键发现总结
-
-1. **法规引用相关率仅 44.4%**：18 项中仅 8 项的法规引用与检查事项直接相关，4 项完全不相关（修正：Item 12 实际法规内容相关，但 LLM 编造了不忠实的摘要）
-2. **LLM source_excerpt 幻觉 — Item 12（受益人）**：LLM 选对了法规（保险法第三十九条确实关于受益人），但编造的 source_excerpt 来自第三十五条（保险费支付方式）。后端回填可解决此问题
-3. **source_excerpt 忠实率 94.4%**：18 项中 17 项的 source_excerpt 可在对应法规 content 中找到，仅 Item 12 存在幻觉
-4. **"第N项"编号导致 LLM 混淆**：法规按"第1项"、"第2项"...编号，LLM 只能按序号顺序猜测，容易选到相邻但内容不相关的条目
-5. **保险法条文正确率高**（8/8 匹配正确），其他法规相关率低（疾病定义规范 1/6 相关，健康管理办法 1/4 相关），说明保险法的"第X条"编号格式对 LLM 更友好
-6. **负面清单检查通过但可能漏检**：102 条负面清单规则中，LLM 仅作了一次整体判断，未逐条对照检查
-
-### 6.5 现有 RAG 评估指标映射
-
-系统已有以下评估框架（位于 `lib/rag_engine/eval_*.py`），可参考应用于合规审核质量评估：
-
-| RAG 指标 | 合规审核映射 | 当前状态 |
-|----------|-------------|---------|
-| Faithfulness（忠实度） | 检查项的法规引用是否忠实于知识库中该法规的实际内容 | ❌ 未评估（44.4% 相关率说明严重不足） |
-| Answer Relevancy（答案相关性） | 检查项的 requirement/suggestion 是否与 param/value 相关 | ❌ 未评估 |
-| Answer Correctness（答案正确性） | 合规状态判定（compliant/attention/non_compliant）是否正确 | ❌ 未评估（无 golden dataset） |
-| Precision@K | 引用的法规中与检查事项相关的比例 | ✅ 可从 6.3 数据推算：44.4% |
-| Context Relevance | 加载的法规上下文与文档内容的整体相关性 | ❌ 未评估 |
-| Clause Coverage（条款覆盖率） | 文档条款被检查的比例 | 🔶 仅此 1 个样本：100%（18/18） |
-
-### 6.6 建议的合规审核评估指标体系
-
-基于以上分析，建议建立以下指标：
-
-| 指标 | 定义 | 计算方式 | 目标 |
-|------|------|---------|------|
-| **法规引用相关率** | source_ref 对应的法规内容与检查事项语义相关 | 人工标注 / LLM 辅助判定 | ≥90% |
-| **条款覆盖率** | 文档条款被检查项引用的比例 | clause_number 集合 vs 文档条款编号集合 | ≥80% |
-| **合规判定准确率** | status（compliant/non_compliant/attention）判定正确 | 与人工标注对比 | ≥85% |
-| **source_ref 匹配率** | LLM 输出的 source_ref 成功匹配到法规的比例 | chunk_id 非 null 的比例 | ≥95% |
-| **负面清单检查准确率** | 负面清单违规项的准确率 | 与人工标注对比 | ≥80% |
+**修复建议**: 在 prompt 中要求 LLM 说明选择该法规的原因，或在后端添加简单相关性校验（如 param 关键词是否出现在 regulation content 中）。
 
 ---
 
-## 七、已有评估基础设施
+### H5. DOCX 解析器只从表格提取条款，忽略段落中的条款
 
-### 7.1 可复用的评估组件
+**文件**: `doc_parser/pd/docx_parser.py:50-52`
+**影响**: DOCX 解析器的 `extract_clauses` 只扫描 `doc.tables`，不扫描 `doc.paragraphs`。如果条款以段落格式（而非表格格式）存在于 DOCX 文件中，这些条款被完全遗漏。PDF 解析器不存在此问题（它从文本流提取条款）。
 
-| 组件 | 位置 | 用途 |
-|------|------|------|
-| `RetrievalEvaluator` | `lib/rag_engine/evaluator.py` | 检索质量评估（precision, recall, MRR, NDCG） |
-| `GenerationEvaluator` | `lib/rag_engine/evaluator.py` | 生成质量评估（faithfulness, relevancy, correctness） |
-| `compute_faithfulness()` | `lib/rag_engine/evaluator.py` | 基于二元组的忠实度计算（无需 LLM） |
-| `classify_badcase()` | `lib/rag_engine/badcase_classifier.py` | 错误分类（检索失败/幻觉/知识缺口） |
-| `validate_dataset()` | `lib/rag_engine/dataset_validator.py` | 数据集质量审计 |
-| `EvalSample` | `lib/rag_engine/eval_dataset.py` | 评估样本数据模型 |
+这意味着同一份保险文档，PDF 版本和 DOCX 版本可能产生完全不同的解析结果。
 
-### 7.2 合规专用测试
+**修复建议**: 在 DOCX 解析器中增加从段落提取条款的备选路径。
 
-| 文件 | 覆盖范围 |
-|------|---------|
-| `tests/compliance/test_checker.py` | 单元测试：article_number 提取、ref 归一化、ref_map 构建、法规加载 |
-| `tests/compliance/test_e2e_compliance.py` | E2E 测试：10 个产品文档的完整流程 |
-| `tests/compliance/test_negative_list.py` | 负面清单检查测试 |
-| `tests/compliance/test_validation.py` | 条款级准确率验证（golden: sample_1.json） |
-| `tests/compliance/validate_flow.py` | 验证流程 CLI 工具 |
+---
 
-### 7.3 差距分析
+## 二、中风险问题（10 个）
 
-1. **无合规审核专用 eval dataset**：仅有 `sample_1.json`（3 个条款项），远不足以评估准确性
-2. **无自动化回归指标**：条款覆盖率和法规引用相关率无自动化计算
-3. **E2E 测试只检查结构**：`test_e2e_compliance.py` 验证返回值非空、有 items，但不验证 items 内容的正确性
-4. **`compute_faithfulness()` 可直接复用**：用于验证 source_excerpt 是否忠实于法规原文
+### M1. `extract_clause_numbers` 不覆盖非条款区块
+
+**文件**: `checker.py:61-62`
+**影响**: 正则只匹配 `【条款 X.Y】` 和 `【附加险条款 X.Y】`。`_build_combined_text` 生成的 `【数据表】`、`【投保须知】`、`【健康告知】`、`【责任免除】` 区块不计入条款总数。
+
+`compliance.py:86-95` 的 `clause_coverage` 计算因此不准确：如果 LLM 检查了「投保须知」和「责任免除」区块并输出检查项，这些项不计入 "已检查" 覆盖率。
+
+**修复建议**: 扩展 `extract_clause_numbers` 为 `extract_section_numbers`，返回所有区块标记。
+
+---
+
+### M2. `regulation_sources` 缺失负面清单法规（无违规时）
+
+**文件**: `compliance.py:74-76`
+**影响**: `regulation_sources` 的"负面清单"条目仅在 `negative_items` 非空时添加。如果负面清单检查通过（无违规），用户看不到哪些负面清单法规被参考了，误以为系统没有进行负面清单检查。
+
+```python
+# compliance.py:74-76
+if negative_items:  # 只有违规时才添加负面清单法规来源
+    result["items"].extend(...)
+    result["regulation_sources"]["负面清单"] = [...]
+```
+
+**修复建议**: 无论是否有违规，都将负面清单法规添加到 `regulation_sources`。
+
+---
+
+### M3. prompt 未告知 LLM 法规编号的有效范围
+
+**文件**: `prompts.py:34`
+**影响**: prompt 只给出示例（`R1`、`R5`、`R12`），未明确告知范围是 `R1` 到 `R{regulation_count}`。LLM 可能输出超出范围的编号，导致匹配失败（H2 问题）。
+
+```python
+# prompts.py:34
+"source_ref": "<引用上面法规的编号，如 R5>",
+```
+
+**修复建议**: 添加 `"source_ref 必须在 R1 到 R{regulation_count} 范围内"`。
+
+---
+
+### M4. LLM max_tokens=8192 可能截断大型审查响应
+
+**文件**: `llm/zhipu.py`（默认配置）
+**影响**: 当文档有 30+ 条款时，每条生成一个 JSON item，LLM 响应可能超过 8192 tokens。如果截断发生在 items 数组中间，`checker.py:300-315` 的 JSON 修复会补全括号，但丢失的 items 永远无法恢复。用户看到的报告不完整但无任何截断提示。
+
+**修复建议**: 在 `batch_compliance_check` 中，对每个 batch 的 item 数量设置上限（如 20 条），或增加 max_tokens 配置。
+
+---
+
+### M5. batch 失败时丢弃之前所有成功批次的结果
+
+**文件**: `checker.py:392-394`
+**影响**: 3 批检查中，如果第 3 批失败，前 2 批的有效结果被完全丢弃，用户只看到错误提示。
+
+```python
+# checker.py:392-394
+if "error" in batch_result:
+    return batch_result  # 丢弃 all_items 中已收集的结果
+```
+
+**修复建议**: 记录失败批次信息，但仍返回已收集的 items，在结果中标注"部分检查未完成"。
+
+---
+
+### M6. 分批合并后无条款去重
+
+**文件**: `checker.py:383-395`
+**影响**: LLM 可能在不同 batch 中对同一条款编号输出检查项（如 batch 1 的 LLM 注意到 batch 2 范围内的条款并输出检查项，batch 2 也检查了同一条款），导致同一条款出现两条可能矛盾的检查结果。
+
+**修复建议**: 合并后按 `clause_number` 去重，保留 non_compliant 优先。
+
+---
+
+### M7. JSON 修复可能产生不完整 items
+
+**文件**: `checker.py:300-307`
+**影响**: LLM 输出截断时，`json_str_fixed` 补全括号后可能产生只有部分字段的 item（如只有 `clause_number` 和 `param`，缺少 `status` 和 `source_ref`）。这些不完整 items 进入后续流程，`status` 为空字符串，导致 summary 统计丢失（不计入 compliant/non_compliant/attention 任何一类）。
+
+**修复建议**: 在 items 处理后过滤掉 `status` 不在有效值集合的 items。
+
+---
+
+### M8. `identify_category` 只看文档前 1000-2000 字符
+
+**文件**: `checker.py:242, 256`
+**影响**: `classify_product` 只看 `document_content[:1000]`，LLM fallback 只看 `document_content[:2000]`。如果产品类型标识（如"重大疾病保险条款"）出现在文档中后段，分类会失败或降级为 OTHER，导致险种专属法规不被加载。
+
+**修复建议**: 增大采样窗口或从文档标题/前 5000 字符中提取产品类型。
+
+---
+
+### M9. `extra='ignore'` 静默丢弃 API 响应中的未声明字段
+
+**文件**: `schemas/compliance.py:7, 32`
+**影响**: `AuditRegulationItemResponse` 和 `ComplianceReportDataResponse` 使用 `extra='ignore'`。如果 checker 返回的数据中包含 Pydantic schema 未声明的字段（如 `error`、`raw_answer`），这些字段被静默丢弃。虽然 `check_document` 路由在 `error` 情况下直接 raise HTTPException，但 `list_reports`/`get_report` 端点从数据库读取后也通过此 schema 序列化，可能丢失存储在 DB 中但 schema 未声明的字段。
+
+**修复建议**: 审查所有端点的序列化路径，确保关键字段不会被 schema 过滤。
+
+---
+
+### M10. clause_coverage 的 checked_clause_set 不验证条款号有效性
+
+**文件**: `compliance.py:87-90`
+**影响**: LLM 可能输出文档中不存在的条款编号（如编造"9.5"），这些假编号被加入 `checked_clause_set`。虽然不会影响最终结果（因为与 `doc_clause_set` 做交集），但 LLM 输出 `"未知"` 的条目被排除可能导致合规问题的条款不被计入覆盖率。
+
+**修复建议**: 无需修复。交集运算自然过滤了无效编号，影响有限。
+
+---
+
+## 三、低风险问题（3 个）
+
+### L1. `_split_by_clauses` 无条款标记时退化为字符级切割
+
+**文件**: `checker.py:351-352`
+**影响**: 当文档中没有 `【条款` 标记时，fallback 在原始字符边界切割，可能在句子、表格中间截断，LLM 收到不完整内容。
+
+**修复建议**: 增加 fallback 的句子级/段落级切割逻辑。
+
+---
+
+### L2. R-index 编号依赖法规列表的非确定性顺序
+
+**文件**: `checker.py:200-201`
+**影响**: `search_by_metadata` 的返回顺序依赖 LanceDB 内部迭代（`df.iterrows()`），可能不稳定。同一法规在不同请求中可能获得不同的 R 编号。但由于 R-index 仅在单次请求内使用（prompt 和解析共享同一列表），实际影响有限。
+
+**修复建议**: 对 regulations 列表排序后再编号，确保确定性。
+
+---
+
+### L3. negative_list 和 regulation checks 的字段语义不一致
+
+**文件**: `checker.py:222-233` vs `checker.py:322-337`
+**影响**: 两种检查类型的 `requirement`、`value`、`source_excerpt` 字段的含义不同：
+- Regulation: `value` = 条款内容, `requirement` = 法规名+内容前200字, `source_excerpt` = 法规内容前300字
+- Negative list: `value` = 文档违规原文前100字, `requirement` = "违反负面清单"+法规信息, `source_excerpt` = 法规内容前300字
+
+前端需要统一处理这两类 items，但字段语义差异可能导致展示不一致。
+
+**修复建议**: 统一字段语义，或在 API 响应中明确标注字段含义随 check_type 变化。
+
+---
+
+## 四、问题汇总表
+
+| # | 严重度 | 文件:行 | 问题 | 用户反馈关联 |
+|---|--------|---------|------|-------------|
+| H1 | **高** | checker.py:354 | 分批时丢弃首条款前文本 | 问题1 条款不完整 |
+| H2 | **高** | checker.py:328-335 | source_ref 失败时保留 LLM 编造 requirement | 问题2 法规要求不一致 |
+| H3 | **高** | html_converter.py:63-67 | HTML 解析器丢失 div/ul/li 等标签 | 问题1 条款不完整 |
+| H4 | **高** | checker.py:324-327 | backfill 掩盖语义错误匹配 | 问题2 法规要求不一致 |
+| H5 | **高** | docx_parser.py:50 | DOCX 只从表格提取条款 | 问题1 条款不完整 |
+| M1 | 中 | checker.py:61-62 | 条款覆盖率不计非条款区块 | 问题1 条款不完整 |
+| M2 | 中 | compliance.py:74-76 | 无违规时隐藏负面清单法规 | 报告不完整 |
+| M3 | 中 | prompts.py:34 | 未约束 R 编号有效范围 | 问题2 法规要求不一致 |
+| M4 | 中 | llm/zhipu.py | max_tokens 截断大型响应 | 问题1 条款不完整 |
+| M5 | 中 | checker.py:392-394 | batch 失败丢弃成功结果 | 报告不完整 |
+| M6 | 中 | checker.py:383-395 | 合并无条款去重 | 报告重复 |
+| M7 | 中 | checker.py:300-307 | JSON 修复产生不完整 items | 报告不完整 |
+| M8 | 中 | checker.py:242,256 | 分类只看前 1000-2000 字 | 法规加载可能错误 |
+| M9 | 中 | schemas/compliance.py:7,32 | extra='ignore' 丢弃字段 | 数据丢失 |
+| M10 | 中 | compliance.py:87-90 | 覆盖率不验证条款号 | 覆盖率不准确 |
+| L1 | 低 | checker.py:351-352 | 无条款标记时字符级切割 | 边界情况 |
+| L2 | 低 | checker.py:200-201 | R-index 非确定性排序 | 边界情况 |
+| L3 | 低 | checker.py:222-337 | 两种检查类型字段语义不同 | 报告一致性 |
+
+---
+
+## 五、修复优先级建议
+
+### 第一批（必须修复 — 直接影响审查准确性）
+
+| 优先级 | 问题 | 修复工作量 |
+|--------|------|-----------|
+| P0 | H1 分批丢弃首条款前文本 | 小（改 1 行） |
+| P0 | H2 source_ref 失败保留编造 requirement | 小（改 3 行） |
+| P0 | M3 prompt 约束 R 编号范围 | 小（改 prompt） |
+
+### 第二批（应该修复 — 影响报告质量和完整性）
+
+| 优先级 | 问题 | 修复工作量 |
+|--------|------|-----------|
+| P1 | M2 无违规时隐藏负面清单法规 | 小（改 2 行） |
+| P1 | M4 max_tokens 截断 | 中（需配置+分批策略） |
+| P1 | M5 batch 失败丢弃结果 | 小（改 5 行） |
+| P1 | M7 不完整 items 过滤 | 小（加 3 行） |
+
+### 第三批（建议修复 — 需要较大改动）
+
+| 优先级 | 问题 | 修复工作量 |
+|--------|------|-----------|
+| P2 | H3 HTML 解析器 | 大（重写或替换库） |
+| P2 | H4 backfill 掩盖语义错误 | 中（需相关性校验） |
+| P2 | H5 DOCX 只从表格提取条款 | 中（增加段落提取） |
+| P2 | M1 条款覆盖率不全 | 中（扩展正则+逻辑） |
+| P2 | M8 分类采样窗口小 | 小（改参数） |
+
+---
+
+## 六、与已修复问题（issues-fix.md）的关系
+
+issues-fix.md 已修复的问题与本次自检的关系：
+
+| 已修复 | 本次是否仍然存在 | 说明 |
+|--------|-----------------|------|
+| 分批合规审查替代截断 | 部分解决 | 分批机制已实现，但 H1（首条款前文本丢弃）是新发现问题 |
+| 重疾险分类错误 | 已解决 | CRITICAL_ILLNESS 枚举已添加 |
+| clause_coverage 前端展示 | 已解决 | 但 M1 发现覆盖率计算本身不完整 |
+| checkDocument 超时 | 已解决 | 360s 超时已配置 |
+| error 结果透传 | 已解决 | 但 M5 发现分批错误处理不完善 |
+| 摘要计数校验 | 已解决 | 后端重算 summary |
+| 附加险条款覆盖率 | 已解决 | 正则已包含附加险 |
+
+本次新发现的关键问题：**H2（编造 requirement 被保留）和 H4（backfill 掩盖错误匹配）** 是用户反馈"法规要求不一致"的根本原因，之前未被识别。
