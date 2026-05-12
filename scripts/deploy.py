@@ -170,8 +170,8 @@ def _supervise(procs: list[subprocess.Popen]) -> None:
 
 def _run_backend() -> None:
     _load_env()
-    old_port = _stop_old_service("backend")
-    actual_port = _find_available_port(old_port or 0)
+    _stop_old_service("backend")
+    actual_port = _find_available_port(0)
     proc = _start_backend(actual_port)
     _write_run_batch({
         "backend_pid": str(proc.pid),
@@ -194,9 +194,9 @@ def _run_frontend() -> None:
 
 def _run_all() -> None:
     _load_env()
-    old_port = _stop_old_service("backend")
+    _stop_old_service("backend")
     _stop_old_service("frontend")
-    actual_port = _find_available_port(old_port or 0)
+    actual_port = _find_available_port(0)
     backend_proc = _start_backend(actual_port)
     frontend_proc = _start_frontend()
     _write_run_batch({
