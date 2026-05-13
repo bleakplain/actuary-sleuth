@@ -20,6 +20,7 @@ export interface AuditResultItem {
   source_type: string;
   source_excerpt: string;
   suggestion: string;
+  conclusion?: string;
 }
 
 export interface ComplianceResult {

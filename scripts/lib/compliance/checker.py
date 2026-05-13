@@ -132,6 +132,8 @@ def build_audit_context(regulations: List[AuditRegulationItem]) -> str:
     parts = []
     for i, r in enumerate(regulations):
         header = f"[R{i + 1}] {r.law_name}"
+        if r.article_number:
+            header += f" {r.article_number}"
         if r.doc_number:
             header += f"（{r.doc_number}）"
         parts.append(f"{header}\n{r.content}")
@@ -164,7 +166,7 @@ def check_negative_list(document_content: str) -> Tuple[List[AuditResultItem], s
             ))
 
     rules_text = "\n\n".join([
-        f"[R{i + 1}] {r.law_name}\n{r.content}"
+        f"[R{i + 1}] {r.law_name} {r.article_number}\n{r.content}"
         for i, r in enumerate(regulations)
     ])
 
@@ -336,15 +338,20 @@ def run_compliance_check(prompt: str, regulations: Optional[List[AuditRegulation
         for item in items:
             if not item.get("clause_number"):
                 item["clause_number"] = "未知"
-            ref = item.get("source_ref", "")
-            matched = reg_index.get(ref) if ref else None
+            raw_ref = item.get("source_ref", "")
+            matched = None
+            for ref in re.split(r'[,\s、]+', raw_ref):
+                ref = ref.strip()
+                if ref and ref in reg_index:
+                    matched = reg_index[ref]
+                    break
             if matched:
                 _enrich_matched_item(item, matched)
             else:
                 item["chunk_id"] = None
-                if ref:
-                    logger.warning(f"source_ref 匹配失败: {ref}")
-                    item["requirement"] = f"法规来源待确认（引用 {ref} 未匹配）"
+                if raw_ref:
+                    logger.warning(f"source_ref 匹配失败: {raw_ref}")
+                    item["requirement"] = f"法规来源待确认（引用 {raw_ref} 未匹配）"
                 else:
                     item["requirement"] = "法规来源待确认"
                 item["source_excerpt"] = ""
@@ -378,6 +385,9 @@ def _split_by_clauses(text: str, budget: int, max_clauses_per_batch: int = 15) -
     return batches
 
 
+_MAX_CLAUSES_PER_BATCH = 25
+
+
 def batch_compliance_check(
     document_content: str,
     regulations: List[AuditRegulationItem],
@@ -389,7 +399,10 @@ def batch_compliance_check(
         logger.warning(f"法规上下文过长 ({len(context)} chars)，可用文档预算不足")
         budget = 30000
 
-    if len(document_content) <= budget:
+    clause_count = len(re.findall(r'【(?:附加险)?条款\s+', document_content))
+    needs_split = clause_count > _MAX_CLAUSES_PER_BATCH or len(document_content) > budget
+
+    if not needs_split:
         prompt = COMPLIANCE_PROMPT_DOCUMENT.format(
             document_content=document_content,
             context=context,
@@ -397,8 +410,8 @@ def batch_compliance_check(
         )
         return run_compliance_check(prompt, regulations=regulations)
 
-    logger.info(f"文档 {len(document_content)} 字符超过预算 {budget}，按条款分批检查")
-    batches = _split_by_clauses(document_content, budget)
+    logger.info(f"文档 {len(document_content)} 字符，{clause_count} 条款，按条款分批检查")
+    batches = _split_by_clauses(document_content, budget, _MAX_CLAUSES_PER_BATCH)
     all_items: List[Dict] = []
     partial_error = False
     for i, batch_text in enumerate(batches):

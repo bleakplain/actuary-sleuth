@@ -80,13 +80,16 @@ class ZhipuClient(BaseLLMClient):
 
     def _do_generate(self, prompt: str, **kwargs) -> str:
         url = f"{self.base_url}/chat/completions"
-        data = {
-            "model": kwargs.get('model', self.model),
+        model = kwargs.get('model', self.model)
+        data: Dict[str, object] = {
+            "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": kwargs.get('temperature', 0.1),
             "max_tokens": kwargs.get('max_tokens', 8192),
             "top_p": kwargs.get('top_p', 0.7)
         }
+        if "4.5" in model or "4.6" in model or "4.7" in model:
+            data["thinking"] = {"type": "disabled"}
 
         session = self._get_session()
         response = session.post(url, json=data, timeout=self.timeout)
@@ -132,13 +135,16 @@ class ZhipuClient(BaseLLMClient):
 
     def _do_chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         url = f"{self.base_url}/chat/completions"
-        data = {
-            "model": kwargs.get('model', self.model),
+        model = kwargs.get('model', self.model)
+        data: Dict[str, object] = {
+            "model": model,
             "messages": messages,
             "temperature": kwargs.get('temperature', 0.1),
             "max_tokens": kwargs.get('max_tokens', 8192),
             "top_p": kwargs.get('top_p', 0.7)
         }
+        if "4.5" in model or "4.6" in model or "4.7" in model:
+            data["thinking"] = {"type": "disabled"}
 
         session = self._get_session()
         response = session.post(url, json=data, timeout=self.timeout)
@@ -155,10 +161,11 @@ class ZhipuClient(BaseLLMClient):
             raise ValueError(f"Unexpected response format: 'choices' field missing or empty. Response keys: {list(result.keys()) if isinstance(result, dict) else type(result)}")
 
         message = result['choices'][0]['message']
-        if not message.get('content'):
-            raise ValueError(f"Message missing 'content' field. Available keys: {list(message.keys())}")
-
-        return message['content']
+        if message.get('content'):
+            return message['content']
+        if message.get('reasoning_content'):
+            return message['reasoning_content']
+        raise ValueError(f"Message missing both 'content' and 'reasoning_content' fields. Available keys: {list(message.keys())}")
 
     @_track_timing("zhipu")
     @_with_circuit_breaker("zhipu")
@@ -172,14 +179,17 @@ class ZhipuClient(BaseLLMClient):
 
     def _do_chat_stream(self, messages: List[Dict[str, str]], **kwargs) -> Iterator[str]:
         url = f"{self.base_url}/chat/completions"
-        data = {
-            "model": kwargs.get('model', self.model),
+        model = kwargs.get('model', self.model)
+        data: Dict[str, object] = {
+            "model": model,
             "messages": messages,
             "temperature": kwargs.get('temperature', 0.1),
             "max_tokens": kwargs.get('max_tokens', 8192),
             "top_p": kwargs.get('top_p', 0.7),
             "stream": True,
         }
+        if "4.5" in model or "4.6" in model or "4.7" in model:
+            data["thinking"] = {"type": "disabled"}
 
         session = self._get_session()
         response = session.post(url, json=data, stream=True, timeout=self.timeout)

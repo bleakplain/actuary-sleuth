@@ -124,7 +124,7 @@ class TestBuildAuditContext:
             content="test content", source_type="general"
         )]
         context = build_audit_context(regulations)
-        assert "[R1] 保险法" in context
+        assert "[R1] 保险法 第十三条" in context
         assert "test content" in context
 
     def test_regulation_with_doc_number(self):
@@ -152,8 +152,8 @@ class TestBuildAuditContext:
             AuditRegulationItem(chunk_id="id2", law_name="法B", article_number="第2条", content="c2", source_type="general"),
         ]
         context = build_audit_context(regulations)
-        assert "[R1] 法A" in context
-        assert "[R2] 法B" in context
+        assert "[R1] 法A 第1条" in context
+        assert "[R2] 法B 第2条" in context
 
 
 class TestExtractClauseNumbers:
@@ -438,6 +438,17 @@ class TestBatchPartialError:
         result = batch_compliance_check("x" * 300000, regulations)
         assert len(result["items"]) == 1
         assert result.get("partial_error") is True
+
+    @patch("lib.compliance.checker.run_compliance_check")
+    def test_single_batch_short_doc(self, mock_run):
+        mock_run.return_value = {"items": [{"param": "a", "status": "compliant", "clause_number": "1.1"}]}
+        from lib.compliance.checker import batch_compliance_check
+        regulations = [AuditRegulationItem(
+            chunk_id="id1", law_name="法", article_number="第一条", content="c", source_type="general"
+        )]
+        result = batch_compliance_check("短文本", regulations)
+        assert len(result["items"]) == 1
+        mock_run.assert_called_once()
 
 
 class TestExtractSectionNumbers:

@@ -39,8 +39,8 @@ async def check_document(req: DocumentCheckRequest):
     regulations = await asyncio.to_thread(load_audit_regulations, category)
 
     regulation_sources: Dict[str, List[str]] = {
-        "险种专属": [r.law_name for r in regulations if r.source_type == "category"],
-        "通用法规": [r.law_name for r in regulations if r.source_type == "general"],
+        "险种专属": sorted(set(r.law_name for r in regulations if r.source_type == "category")),
+        "通用法规": sorted(set(r.law_name for r in regulations if r.source_type == "general")),
     }
 
     try:
@@ -71,7 +71,7 @@ async def check_document(req: DocumentCheckRequest):
     if negative_items:
         result["items"].extend([item.__dict__ for item in negative_items])
     if negative_regulations:
-        result["regulation_sources"]["负面清单"] = [r.law_name for r in negative_regulations]
+        result["regulation_sources"]["负面清单"] = sorted(set(r.law_name for r in negative_regulations))
 
     result["summary"] = {
         "compliant": sum(1 for i in result.get("items", []) if i.get("status") == "compliant"),

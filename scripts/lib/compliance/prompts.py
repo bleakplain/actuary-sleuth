@@ -24,7 +24,8 @@ COMPLIANCE_PROMPT_DOCUMENT = """你是一位保险法规合规专家。请逐条
             "requirement": "<相关法规的要求摘要>",
             "status": "<compliant|non_compliant|attention>",
             "source_ref": "<引用上面法规的编号，如 R5>",
-            "suggestion": "<修改建议，合规时留空>"
+            "suggestion": "<修改建议，合规时留空>",
+            "conclusion": "<简要说明审核结论，解释该条款为何合规/不合规/需关注，一句话概括>"
         }}
     ]
 }}
@@ -34,4 +35,5 @@ COMPLIANCE_PROMPT_DOCUMENT = """你是一位保险法规合规专家。请逐条
 2. source_ref 必须是上面法规的编号，范围为 R1 到 R{regulation_count}，引用与该条款最相关的法规
 3. 选择 source_ref 时，先理解条款内容，再找到法规列表中内容最匹配的编号
 4. clause_number 必须对应文档中实际的条款编号
-5. 仅输出 JSON"""
+5. conclusion 必须填写，简要说明该条款的审核结论及原因
+6. 仅输出 JSON"""

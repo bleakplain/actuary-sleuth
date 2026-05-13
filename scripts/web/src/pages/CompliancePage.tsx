@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import {
   Card, Input, Button, Table, Tag, Typography, theme,
@@ -11,6 +11,7 @@ import {
   FileTextOutlined, PlusOutlined, CaretRightOutlined, CloseOutlined,
   SafetyCertificateOutlined,
 } from '@ant-design/icons';
+import type { ColumnsType } from 'antd/es/table';
 import * as complianceApi from '../api/compliance';
 import type { ComplianceReport, AuditResultItem, AuditRegulationItem, ParsedDocument, ParsedDataTable } from '../types';
 import { DRAWER_MD, DRAWER_LG } from '../constants/layout';
@@ -454,52 +455,78 @@ export default function CompliancePage() {
     }
   };
 
-  const buildItemColumns = (regulationMap: Record<string, AuditRegulationItem>) => [
-    {
-      title: '检查项', dataIndex: 'param', key: 'param', width: 120,
-      render: (_: string, record: AuditResultItem) => {
-        const cfg = STATUS_CONFIG[record.status] || STATUS_CONFIG.attention;
-        return <Tag color={cfg.color} icon={cfg.icon}>{record.param}</Tag>;
+  const buildItemColumns = (regulationMap: Record<string, AuditRegulationItem>): ColumnsType<AuditResultItem> => {
+    const makeResizeHandle = (colIndex: number) => (
+      <div
+        onMouseDown={(e) => handleResizableHeader(colIndex, e)}
+        style={{
+          position: 'absolute', right: -2, top: 0, bottom: 0, width: 5,
+          cursor: 'col-resize', zIndex: 1,
+        }}
+      />
+    );
+    return [
+      {
+        title: (<div style={{ position: 'relative' }}>产品条款{makeResizeHandle(0)}</div>),
+        dataIndex: 'value', key: 'value', width: colWidths[0], ellipsis: false,
+        render: (_: string, record: AuditResultItem) => (
+          <div>
+            <Text strong>{record.clause_number}</Text>
+            <div style={{ whiteSpace: 'pre-wrap', marginTop: 2 }}>{record.value}</div>
+          </div>
+        ),
       },
-    },
-    {
-      title: '产品条款', dataIndex: 'value', key: 'value', width: '25%',
-      render: (_: string, record: AuditResultItem) => (
-        <span>{record.clause_number} {record.value}</span>
-      ),
-    },
-    {
-      title: '法规要求', key: 'requirement', width: '40%',
-      render: (_: unknown, record: AuditResultItem) => {
-        const text = record.requirement || '';
-        const refMatch = text.match(/^《[^》]+》[^：:]*[：:]\s*/);
-        const stripped = refMatch ? text.slice(refMatch[0].length) : text;
-        const reg = record.chunk_id ? regulationMap[record.chunk_id] : undefined;
-        if (reg) {
-          const lawShort = reg.law_name?.replace(/[《》]/g, '');
-          const label = [lawShort, reg.article_number].filter(Boolean).join(' ');
+      {
+        title: (<div style={{ position: 'relative' }}>审核结论{makeResizeHandle(1)}</div>),
+        key: 'conclusion', width: colWidths[1], ellipsis: false,
+        render: (_: unknown, record: AuditResultItem) => {
+          const cfg = STATUS_CONFIG[record.status] || STATUS_CONFIG.attention;
+          const desc = record.conclusion || (record.status === 'compliant' ? `${record.param}符合法规要求` : `${record.param}${cfg.label}`);
           return (
-            <span>
-              {stripped}
-              <a role="button" tabIndex={0} onClick={() => handleRegulationClick(record.chunk_id!)} onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleRegulationClick(record.chunk_id!); } }} style={{ cursor: 'pointer', marginLeft: 4, fontSize: token.fontSizeSM }}>{label}</a>
-            </span>
+            <div>
+              <Tag color={cfg.color} icon={cfg.icon}>{cfg.label}</Tag>
+              <div style={{ marginTop: 4, fontSize: token.fontSizeSM, color: token.colorTextSecondary, lineHeight: 1.5 }}>{desc}</div>
+            </div>
           );
-        }
-        if (record.source_excerpt) {
-          return (
-            <span>
-              {stripped}
-              <Text type="secondary" style={{ fontSize: token.fontSizeSM, marginLeft: 4 }}>（来源：{record.source_excerpt.slice(0, 60)}…）</Text>
-            </span>
-          );
-        }
-        return <span>{text}</span>;
+        },
       },
-    },
-    {
-      title: '建议', dataIndex: 'suggestion', key: 'suggestion', width: '25%',
-    },
-  ];
+      {
+        title: (<div style={{ position: 'relative' }}>依据的法规{makeResizeHandle(2)}</div>),
+        key: 'regulation', width: colWidths[2], ellipsis: false,
+        render: (_: unknown, record: AuditResultItem) => {
+          const merged = (record as AuditResultItem & { _mergedChunkIds?: string[] })._mergedChunkIds;
+          const chunkIds = merged || (record.chunk_id ? [record.chunk_id] : []);
+          const regs = chunkIds.map(id => regulationMap[id]).filter(Boolean);
+          if (regs.length > 0) {
+            return (
+              <div>
+                {regs.map((reg, i) => {
+                  const lawShort = reg.law_name?.replace(/[《》]/g, '');
+                  const label = [lawShort, reg.article_number].filter(Boolean).join(' ');
+                  return (
+                    <div key={reg.chunk_id} style={i > 0 ? { marginTop: 4 } : undefined}>
+                      <a role="button" tabIndex={0}
+                        onClick={() => handleRegulationClick(reg.chunk_id)}
+                        onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleRegulationClick(reg.chunk_id); } }}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        {label}
+                      </a>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          }
+          return null;
+        },
+      },
+      {
+        title: '修改建议', dataIndex: 'suggestion', key: 'suggestion', width: colWidths[3],
+        render: (text: string) => text ? text.split('\n').map((line, i) => <div key={i}>{line}</div>) : '-',
+      },
+    ];
+  };
 
   const handleViewReport = async (reportId: string) => {
     try {
@@ -537,6 +564,64 @@ export default function CompliancePage() {
     category: { label: '险种专属', color: 'blue' },
     general: { label: '通用法规', color: 'default' },
     negative_list: { label: '负面清单', color: 'red' },
+  };
+
+  const [colWidths, setColWidths] = useState<number[]>([280, 300, 200, 200]);
+  const resizeRef = useRef<{ colIndex: number; startX: number; startWidth: number } | null>(null);
+
+  const handleResizableHeader = useCallback((colIndex: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    resizeRef.current = { colIndex, startX: e.clientX, startWidth: colWidths[colIndex] };
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!resizeRef.current) return;
+      const diff = ev.clientX - resizeRef.current.startX;
+      setColWidths(prev => {
+        const next = [...prev];
+        next[resizeRef.current!.colIndex] = Math.max(100, resizeRef.current!.startWidth + diff);
+        return next;
+      });
+    };
+    const onMouseUp = () => {
+      resizeRef.current = null;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [colWidths]);
+
+  const mergeItemsByClause = (items: AuditResultItem[]): AuditResultItem[] => {
+    const groups = new Map<string, AuditResultItem[]>();
+    for (const item of items) {
+      const key = item.clause_number || '未知';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(item);
+    }
+    const merged: AuditResultItem[] = [];
+    for (const [, group] of groups) {
+      if (group.length === 1) {
+        merged.push(group[0]);
+        continue;
+      }
+      const statuses = group.map(g => g.status);
+      const worst = statuses.includes('non_compliant') ? 'non_compliant' : statuses.includes('attention') ? 'attention' : 'compliant';
+      const requirements = [...new Set(group.map(g => g.requirement).filter(Boolean))];
+      const suggestions = [...new Set(group.map(g => g.suggestion).filter(Boolean))];
+      const sources = [...new Set(group.map(g => g.chunk_id).filter(Boolean) as string[])];
+      const excerpts = [...new Set(group.map(g => g.source_excerpt).filter(Boolean))];
+      merged.push({
+        ...group[0],
+        status: worst,
+        requirement: requirements.join('\n'),
+        suggestion: suggestions.join('\n'),
+        chunk_id: sources[0] || null,
+        source_type: group.map(g => g.source_type).join(','),
+        source_excerpt: excerpts.join('\n'),
+        _mergedChunkIds: sources,
+        _mergedItems: group,
+      } as AuditResultItem & { _mergedChunkIds?: string[]; _mergedItems?: AuditResultItem[] });
+    }
+    return merged;
   };
 
   const renderConclusionSection = (docResult: ComplianceResult) => {
@@ -632,11 +717,12 @@ export default function CompliancePage() {
         {totalItems > 0 && (
           <Card type="inner" title={`产品条款（共 ${totalItems} 项）`} size="small">
             <Table
-              dataSource={docResult.items}
+              dataSource={mergeItemsByClause(docResult.items)}
               columns={buildItemColumns(regulationMap)}
               rowKey={(r: AuditResultItem) => `${r.clause_number}-${r.param}`}
               size="small"
               pagination={false}
+              tableLayout="fixed"
               rowClassName={(record: AuditResultItem) => record.status === 'non_compliant' ? 'ant-table-row-error' : ''}
             />
           </Card>
