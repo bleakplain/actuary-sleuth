@@ -102,7 +102,7 @@ git push origin master
 
 - 嵌套 worktree 导致路径混乱（`worktrees/022/worktrees/023`）
 - `.claude/commands/` 和 `.claude/specs/` 应该只存在于主仓库
-- Worktree 应该只包含：代码、配置文件（settings.json、.env)
+- Worktree 应该只包含：代码、配置文件（.env)
 
 ### 创建 Worktree
 
@@ -114,7 +114,6 @@ git push origin master
    ```
 4. **拷贝配置文件** — 从主仓库拷贝到新 worktree：
    ```bash
-   cp scripts/config/settings.json .claude/worktrees/<feature-name>/scripts/config/settings.json
    cp scripts/.env .claude/worktrees/<feature-name>/scripts/.env
    ```
 5. **切换工作目录到 worktree**：
