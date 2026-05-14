@@ -12,13 +12,9 @@ export interface AuditRegulationItem {
 export interface AuditResultItem {
   clause_number: string;
   check_type: string;
-  param: string;
-  value: string;
-  requirement: string;
+  clause_content: string;
   status: string;
   chunk_id: string | null;
-  source_type: string;
-  source_excerpt: string;
   suggestion: string;
   conclusion?: string;
 }

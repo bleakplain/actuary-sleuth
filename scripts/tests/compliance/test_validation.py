@@ -8,16 +8,16 @@ def test_compare_clause_level_match():
     """测试条款级对比匹配"""
     auto_result = {
         "items": [
-            {"clause_number": "1.1", "param": "等待期", "status": "compliant"},
-            {"clause_number": "1.2", "param": "免赔额", "status": "compliant"},
-            {"clause_number": "2.1", "param": "保险期间", "status": "non_compliant"},
+            {"clause_number": "1.1", "clause_content": "等待期为90天", "status": "compliant"},
+            {"clause_number": "1.2", "clause_content": "免赔额0元", "status": "compliant"},
+            {"clause_number": "2.1", "clause_content": "保险期间1年", "status": "non_compliant"},
         ]
     }
     human_result = {
         "items": [
-            {"clause_number": "1.1", "param": "等待期", "status": "compliant"},
-            {"clause_number": "1.2", "param": "免赔额", "status": "compliant"},
-            {"clause_number": "2.1", "param": "保险期间", "status": "non_compliant"},
+            {"clause_number": "1.1", "clause_content": "等待期为90天", "status": "compliant"},
+            {"clause_number": "1.2", "clause_content": "免赔额0元", "status": "compliant"},
+            {"clause_number": "2.1", "clause_content": "保险期间1年", "status": "non_compliant"},
         ]
     }
     result = compare_clause_level(auto_result, human_result)
@@ -30,12 +30,12 @@ def test_compare_clause_level_mismatch():
     """测试条款级对比不匹配"""
     auto_result = {
         "items": [
-            {"clause_number": "1.1", "param": "等待期", "status": "compliant"},
+            {"clause_number": "1.1", "clause_content": "等待期为90天", "status": "compliant"},
         ]
     }
     human_result = {
         "items": [
-            {"clause_number": "1.1", "param": "等待期", "status": "non_compliant"},
+            {"clause_number": "1.1", "clause_content": "等待期为90天", "status": "non_compliant"},
         ]
     }
     result = compare_clause_level(auto_result, human_result)

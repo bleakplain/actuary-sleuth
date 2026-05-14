@@ -30,7 +30,7 @@ def test_check_negative_list_batch_violation():
     mock_engine.search_by_metadata.return_value = mock_docs
 
     mock_llm = MagicMock()
-    mock_llm.chat.return_value = '[{"source_ref": "R1", "is_violation": true, "reason": "文档中出现保证续保", "source_excerpt": "本产品保证续保", "suggestion": "删除该表述"}]'
+    mock_llm.chat.return_value = '[{"source_ref": "负面清单-1", "is_violation": true, "reason": "文档中出现保证续保", "clause_content": "本产品保证续保", "suggestion": "删除该表述"}]'
 
     with patch('lib.compliance.checker.get_engine', return_value=mock_engine):
         with patch('lib.compliance.checker.get_audit_llm', return_value=mock_llm):

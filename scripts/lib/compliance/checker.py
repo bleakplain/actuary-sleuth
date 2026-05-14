@@ -2,6 +2,7 @@
 import json
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -13,10 +14,16 @@ from lib.common.regulation_registry import (
     VALID_CATEGORIES,
 )
 from lib.llm import get_audit_llm
+from lib.llm.base import BaseLLMClient
 from lib.rag_engine import get_engine
-from lib.compliance.prompts import COMPLIANCE_PROMPT_DOCUMENT
+from lib.compliance.prompts import (
+    NEGATIVE_LIST_SINGLE_PROMPT,
+    CHAPTER_AUDIT_PROMPT,
+)
 
 logger = logging.getLogger(__name__)
+
+_CLAUSE_NUM_RE = re.compile(r'(\d+(?:\.\d+)*)')
 
 
 class CheckResult:
@@ -48,24 +55,51 @@ class AuditRegulationItem:
 class AuditResultItem:
     clause_number: str
     check_type: str  # "regulation" | "negative_list"
-    param: str
-    value: str
-    requirement: str
+    clause_content: str
     status: str  # "compliant" | "non_compliant" | "attention"
     chunk_id: Optional[str]
-    source_type: str  # "regulation" | "negative_list"
-    source_excerpt: str
     suggestion: str
+    conclusion: str = ""
+
+
+# --- Document parsing helpers ---
 
 
 def extract_clause_numbers(document_content: str) -> List[str]:
-    return re.findall(r'【(?:附加险)?条款\s+(\d+(?:\.\d+)*)】', document_content)
+    return [m.group(1) for m in re.finditer(r'【(?:附加险)?条款\s+(\d+(?:\.\d+)*)】', document_content)]
+
+
+def normalize_clause_number(raw: str) -> Optional[str]:
+    m = _CLAUSE_NUM_RE.search(raw)
+    return m.group(1) if m else None
+
+
+def _detect_definition_chapter(clauses: List[str]) -> Optional[str]:
+    if not clauses:
+        return None
+    chapter_counts: Dict[str, int] = {}
+    for c in clauses:
+        parts = c.split(".")
+        if parts:
+            chapter_counts[parts[0]] = chapter_counts.get(parts[0], 0) + 1
+    if not chapter_counts:
+        return None
+    numeric_keys = sorted(chapter_counts.keys(), key=lambda x: int(x))
+    last_chapter = numeric_keys[-1]
+    last_count = chapter_counts[last_chapter]
+    if last_count >= 10 and last_count / len(clauses) >= 0.3:
+        return last_chapter
+    return None
 
 
 def extract_section_numbers(document_content: str) -> Dict[str, Any]:
     clauses = extract_clause_numbers(document_content)
+    definition_chapter = _detect_definition_chapter(clauses)
+    auditable = [c for c in clauses if not c.startswith(f"{definition_chapter}.")] if definition_chapter else clauses
     return {
-        "clauses": clauses,
+        "clauses": auditable,
+        "all_clauses": clauses,
+        "definition_chapter": definition_chapter,
         "has_notices": bool(re.search(r'【投保须知】', document_content)),
         "has_health": bool(re.search(r'【健康告知】', document_content)),
         "has_exclusions": bool(re.search(r'【责任免除】', document_content)),
@@ -73,32 +107,35 @@ def extract_section_numbers(document_content: str) -> Dict[str, Any]:
     }
 
 
+# --- Regulation loading ---
+
+
 def _extract_real_article_number(content: str, fallback: str) -> str:
     match = re.match(r'第([一二三四五六七八九十百零]+)条', content)
     return f"第{match.group(1)}条" if match else fallback
 
 
-def load_audit_regulations(category: Optional[str]) -> List[AuditRegulationItem]:
-    engine = get_engine()
-    if engine is None:
-        logger.warning("RAG 引擎未初始化")
-        return []
+def _build_regulation_item(doc: Dict, source_type: str) -> AuditRegulationItem:
+    return AuditRegulationItem(
+        chunk_id=doc.get("id") or "",
+        law_name=doc.get("law_name") or "",
+        article_number=_extract_real_article_number(doc.get("content", ""), doc.get("article_number", "")),
+        content=doc.get("content", ""),
+        doc_number=doc.get("doc_number", ""),
+        issuing_authority=doc.get("issuing_authority", ""),
+        effective_date=doc.get("effective_date", ""),
+        source_type=source_type,
+    )
 
-    all_results = []
-    seen_keys = set()
 
-    if category:
-        for reg_name in get_category_regulations(category):
-            results = engine.search_by_metadata({"law_name": reg_name})
-            if not results:
-                logger.warning(f"注册法规在知识库中未找到: {reg_name}")
-            for r in results:
-                key = (r.get("law_name", ""), r.get("article_number", ""))
-                if key not in seen_keys:
-                    seen_keys.add(key)
-                    all_results.append((r, "category"))
-
-    for reg_name in get_general_regulations():
+def _load_regulation_chunks(
+    engine: Any,
+    reg_names: List[str],
+    seen_keys: set,
+    all_results: List[Tuple[Dict, str]],
+    source_type: str,
+) -> None:
+    for reg_name in reg_names:
         results = engine.search_by_metadata({"law_name": reg_name})
         if not results:
             logger.warning(f"注册法规在知识库中未找到: {reg_name}")
@@ -106,38 +143,306 @@ def load_audit_regulations(category: Optional[str]) -> List[AuditRegulationItem]
             key = (r.get("law_name", ""), r.get("article_number", ""))
             if key not in seen_keys:
                 seen_keys.add(key)
-                all_results.append((r, "general"))
+                all_results.append((r, source_type))
 
-    regulations = []
-    for r, source_type in all_results:
-        regulations.append(AuditRegulationItem(
-            chunk_id=r.get("id", ""),
-            law_name=r.get("law_name", ""),
-            article_number=_extract_real_article_number(r.get("content", ""), r.get("article_number", "")),
-            content=r.get("content", ""),
-            doc_number=r.get("doc_number", ""),
-            issuing_authority=r.get("issuing_authority", ""),
-            effective_date=r.get("effective_date", ""),
-            source_type=source_type,
-        ))
 
+def load_audit_regulations(category: Optional[str]) -> List[AuditRegulationItem]:
+    engine = get_engine()
+    if engine is None:
+        logger.warning("RAG 引擎未初始化")
+        return []
+    all_results: List[Tuple[Dict, str]] = []
+    seen_keys: set = set()
+    if category:
+        _load_regulation_chunks(engine, get_category_regulations(category), seen_keys, all_results, "category")
+    _load_regulation_chunks(engine, get_general_regulations(), seen_keys, all_results, "general")
+    regulations = [_build_regulation_item(r, source_type) for r, source_type in all_results]
     logger.info(f"加载法规: 险种专属 + 通用法规, 共 {len(regulations)} 条")
     return regulations
 
 
-def build_audit_context(regulations: List[AuditRegulationItem]) -> str:
-    if not regulations:
-        return ""
+# --- Category identification ---
 
-    parts = []
-    for i, r in enumerate(regulations):
-        header = f"[R{i + 1}] {r.law_name}"
-        if r.article_number:
-            header += f" {r.article_number}"
-        if r.doc_number:
-            header += f"（{r.doc_number}）"
-        parts.append(f"{header}\n{r.content}")
-    return "\n\n".join(parts)
+
+def identify_category(document_content: str, product_name: str = "") -> CategoryResult:
+    category_enum = classify_product(product_name, document_content[:5000])
+    if category_enum != ProductCategory.OTHER:
+        mapped = ComplianceConstants.SUBCATEGORY_MAPPING.get(category_enum.value)
+        if mapped:
+            return CategoryResult(mapped, 0.7, "keyword")
+    try:
+        llm = get_audit_llm()
+        category_list = "、".join(VALID_CATEGORIES)
+        prompt = f"""请从以下保险产品文档中识别险种类型。
+
+可选险种类型：{category_list}
+
+产品名称：{product_name}
+文档内容：
+{document_content[:5000]}
+
+仅输出险种类型名称，不要输出其他内容。"""
+        response = llm.chat([{"role": "user", "content": prompt}])
+        extracted = str(response).strip()
+        for vc in VALID_CATEGORIES:
+            if vc in extracted:
+                return CategoryResult(vc, 0.85, "llm")
+    except Exception as e:
+        logger.warning(f"LLM category identification failed: {e}")
+    return CategoryResult(None, 0.0, "unknown")
+
+
+# --- Chapter-based audit ---
+
+
+@dataclass(frozen=True)
+class DocumentChapter:
+    chapter_key: str
+    chapter_title: str
+    clauses: List[str]
+    clause_numbers: List[str]
+    total_chars: int
+
+
+_MAX_CLAUSES_PER_SUBCHAPTER = 8
+_DEFINITIONS_CONTEXT_LIMIT = 2000
+_NEGATIVE_MAX_WORKERS = 2
+_STATUS_PRIORITY = {"non_compliant": 3, "attention": 2, "compliant": 1}
+
+
+def _extract_chapter_title(first_block: str, ch_num: str) -> str:
+    m = re.match(r'【(?:附加险)?条款\s+\d+(?:\.\d+)*】\s*(.+)', first_block)
+    if m:
+        title_line = m.group(1).split('\n')[0].strip()
+        if title_line:
+            return title_line
+    return f"第{ch_num}章"
+
+
+def _split_by_markers(text: str) -> List[Tuple[str, str]]:
+    """Split text into (marker, block) pairs at each 【...】boundary."""
+    marker_re = re.compile(r'【[^】]+】')
+    positions = [(m.start(), m.group(0)) for m in marker_re.finditer(text)]
+    if not positions:
+        return []
+    blocks = []
+    for i, (start, marker) in enumerate(positions):
+        end = positions[i + 1][0] if i + 1 < len(positions) else len(text)
+        blocks.append((marker, text[start:end].strip()))
+    return blocks
+
+
+def extract_chapters(document_content: str) -> List[DocumentChapter]:
+    all_clauses = extract_clause_numbers(document_content)
+    def_chapter = _detect_definition_chapter(all_clauses)
+
+    by_chapter: Dict[str, List[Tuple[str, str]]] = {}
+    for marker, block in _split_by_markers(document_content):
+        num_m = re.match(r'【(?:附加险)?条款\s+(\d+(?:\.\d+)*)】', marker)
+        if not num_m:
+            continue
+        num = num_m.group(1)
+        ch = num.split('.')[0]
+        if ch == def_chapter:
+            continue
+        by_chapter.setdefault(ch, []).append((num, block))
+
+    chapters: List[DocumentChapter] = []
+    for ch_num in sorted(by_chapter.keys(), key=lambda x: int(x)):
+        entries = by_chapter[ch_num]
+        title = _extract_chapter_title(entries[0][1], ch_num)
+        _split_and_add_chapter(chapters, ch_num, title, entries)
+
+    for marker, block in _split_by_markers(document_content):
+        sec_m = re.match(r'【(投保须知|健康告知|责任免除)】', marker)
+        if sec_m:
+            section_name = sec_m.group(1)
+            chapters.append(DocumentChapter(
+                chapter_key=f"special_{section_name}", chapter_title=section_name,
+                clauses=[block], clause_numbers=[], total_chars=len(block),
+            ))
+
+    rider_blocks = []
+    for marker, block in _split_by_markers(document_content):
+        if re.match(r'【附加险条款\s+\d+', marker):
+            rider_blocks.append(block)
+    if rider_blocks:
+        chapters.append(DocumentChapter(
+            chapter_key="special_riders", chapter_title="附加险条款",
+            clauses=rider_blocks, clause_numbers=[], total_chars=sum(len(b) for b in rider_blocks),
+        ))
+
+    return chapters
+
+
+def _split_and_add_chapter(
+    chapters: List[DocumentChapter],
+    ch_num: str, title: str, entries: List[Tuple[str, str]],
+) -> None:
+    if len(entries) <= _MAX_CLAUSES_PER_SUBCHAPTER:
+        nums, blocks = zip(*entries)
+        chapters.append(DocumentChapter(
+            chapter_key=ch_num, chapter_title=title,
+            clauses=list(blocks), clause_numbers=list(nums),
+            total_chars=sum(len(b) for _, b in entries),
+        ))
+        return
+    for i in range(0, len(entries), _MAX_CLAUSES_PER_SUBCHAPTER):
+        batch = entries[i:i + _MAX_CLAUSES_PER_SUBCHAPTER]
+        nums, blocks = zip(*batch)
+        suffix = f" ({i + 1}-{i + len(batch)})" if len(entries) > _MAX_CLAUSES_PER_SUBCHAPTER else ""
+        chapters.append(DocumentChapter(
+            chapter_key=f"{ch_num}_{i // _MAX_CLAUSES_PER_SUBCHAPTER}",
+            chapter_title=f"{title}{suffix}",
+            clauses=list(blocks), clause_numbers=list(nums),
+            total_chars=sum(len(b) for _, b in batch),
+        ))
+
+
+def _extract_definitions_text(document_content: str) -> str:
+    all_clauses = extract_clause_numbers(document_content)
+    def_chapter = _detect_definition_chapter(all_clauses)
+    if def_chapter is None:
+        return ""
+    parts: List[str] = []
+    for marker, block in _split_by_markers(document_content):
+        num_m = re.match(r'【(?:附加险)?条款\s+(\d+(?:\.\d+)*)】', marker)
+        if num_m and num_m.group(1).startswith(f"{def_chapter}."):
+            parts.append(block)
+    text = "\n\n".join(parts)
+    return text[:_DEFINITIONS_CONTEXT_LIMIT]
+
+
+def _audit_single_chapter(
+    chapter: DocumentChapter,
+    regulations: List[AuditRegulationItem],
+    definitions_text: str,
+    llm: BaseLLMClient,
+) -> Optional[List[Dict]]:
+    regs_block_parts = []
+    article_to_chunk: Dict[str, str] = {}
+    for r in regulations:
+        regs_block_parts.append(f"### {r.article_number}（{r.law_name}）\n{r.content}")
+        article_to_chunk[r.article_number] = r.chunk_id
+    regs_block = "\n\n".join(regs_block_parts)
+    chapter_clauses = "\n\n".join(chapter.clauses)
+
+    prompt = CHAPTER_AUDIT_PROMPT.format(
+        chapter_title=chapter.chapter_title,
+        chapter_clauses=chapter_clauses,
+        definitions_context=definitions_text or "（无释义章节）",
+        regulation_count=len(regulations),
+        regulations_block=regs_block,
+    )
+    try:
+        response = llm.chat([{"role": "user", "content": prompt}])
+        answer = str(response).strip()
+        return _parse_chapter_response(answer, article_to_chunk, regulations)
+    except Exception as e:
+        logger.warning(f"Chapter audit failed ({chapter.chapter_key} {chapter.chapter_title}): {e}")
+        return None
+
+
+def _parse_chapter_response(
+    answer: str,
+    article_to_chunk: Dict[str, str],
+    regulations: List[AuditRegulationItem],
+) -> List[Dict]:
+    from lib.common.json_utils import extract_json_object
+    try:
+        json_str = extract_json_object(answer)
+        if json_str is None:
+            return []
+        result = json.loads(json_str)
+        valid_statuses = {"compliant", "non_compliant", "attention"}
+        items = []
+        for item in result.get("items", []):
+            if item.get("status") not in valid_statuses:
+                continue
+            if not item.get("clause_content"):
+                continue
+            if not item.get("clause_number"):
+                item["clause_number"] = "未知"
+            article_num = item.get("article_number", "")
+            chunk_id = article_to_chunk.get(article_num)
+            if chunk_id is None and article_num:
+                for key, cid in article_to_chunk.items():
+                    if key in article_num or article_num in key:
+                        chunk_id = cid
+                        break
+            if chunk_id is None and regulations:
+                conclusion = item.get("conclusion", "")
+                for r in regulations:
+                    if r.content[:80] in conclusion or conclusion[:80] in r.content:
+                        chunk_id = r.chunk_id
+                        break
+            item["chunk_id"] = chunk_id
+            item["check_type"] = "regulation"
+            items.append(item)
+        return items
+    except Exception as e:
+        logger.warning(f"Failed to parse chapter response: {e}")
+        return []
+
+
+def check_chapter_audit(
+    document_content: str,
+    regulations: List[AuditRegulationItem],
+) -> Dict:
+    if not regulations:
+        return {"summary": {"compliant": 0, "non_compliant": 0, "attention": 0}, "items": []}
+
+    chapters = extract_chapters(document_content)
+    if not chapters:
+        return {"summary": {"compliant": 0, "non_compliant": 0, "attention": 0}, "items": []}
+
+    definitions_text = _extract_definitions_text(document_content)
+    llm = get_audit_llm()
+
+    logger.info(f"Chapter audit: {len(regulations)} regulations -> {len(chapters)} chapters")
+    all_items: List[Dict] = []
+    errors: List[str] = []
+
+    for ch in chapters:
+        items = _audit_single_chapter(ch, regulations, definitions_text, llm)
+        if items is None:
+            errors.append(f"Chapter {ch.chapter_key} ({ch.chapter_title})")
+        else:
+            all_items.extend(items)
+            logger.info(f"Chapter {ch.chapter_key} ({ch.chapter_title}): {len(items)} items")
+
+    deduped = _deduplicate_items(all_items)
+    counts: Dict[str, int] = {"compliant": 0, "non_compliant": 0, "attention": 0}
+    for item in deduped:
+        status = item.get("status")
+        if status in counts:
+            counts[status] += 1
+    result: Dict[str, Any] = {"summary": counts, "items": deduped}
+    if errors:
+        result["partial_error"] = True
+    return result
+
+
+def _deduplicate_items(items: List[Dict]) -> List[Dict]:
+    """Keep highest-priority result per clause_number (non_compliant > attention > compliant)."""
+    best: Dict[str, Dict] = {}
+    for item in items:
+        cn = item.get("clause_number", "未知")
+        if cn == "未知":
+            continue
+        existing = best.get(cn)
+        if existing is None:
+            best[cn] = item
+        elif _STATUS_PRIORITY.get(str(item.get("status")), 0) > _STATUS_PRIORITY.get(str(existing.get("status")), 0):
+            best[cn] = item
+    result = list(best.values())
+    for item in items:
+        if item.get("clause_number", "未知") == "未知":
+            result.append(item)
+    return result
+
+
+# --- Negative list checking ---
 
 
 def check_negative_list(document_content: str) -> Tuple[List[AuditResultItem], str, List[AuditRegulationItem]]:
@@ -151,287 +456,64 @@ def check_negative_list(document_content: str) -> Tuple[List[AuditResultItem], s
         logger.warning("知识库中未找到负面清单文档")
         return [], CheckResult.SKIPPED, []
 
-    regulations = []
-    for doc in negative_docs:
-        if doc.get("content") and doc.get("article_number"):
-            regulations.append(AuditRegulationItem(
-                chunk_id=doc.get("id", ""),
-                law_name=doc.get("law_name", ""),
-                article_number=_extract_real_article_number(doc.get("content", ""), doc.get("article_number", "")),
-                content=doc.get("content", ""),
-                doc_number=doc.get("doc_number", ""),
-                issuing_authority=doc.get("issuing_authority", ""),
-                effective_date=doc.get("effective_date", ""),
-                source_type="negative_list",
-            ))
-
-    rules_text = "\n\n".join([
-        f"[R{i + 1}] {r.law_name} {r.article_number}\n{r.content}"
-        for i, r in enumerate(regulations)
-    ])
-
-    if not rules_text:
+    regulations = [
+        _build_regulation_item(doc, "negative_list")
+        for doc in negative_docs
+        if doc.get("content") and doc.get("article_number")
+    ]
+    if not regulations:
         return [], CheckResult.SKIPPED, regulations
 
-    prompt = f"""你是一位保险法规合规专家。请判断以下保险产品文档是否违反负面清单规定。
+    llm = get_audit_llm()
+    all_items: List[AuditResultItem] = []
 
-## 负面清单规定（共 {len(regulations)} 条）
-{rules_text}
+    def _check_one_negative(reg: AuditRegulationItem) -> Optional[AuditResultItem]:
+        prompt = NEGATIVE_LIST_SINGLE_PROMPT.format(
+            law_name=reg.law_name,
+            article_number=reg.article_number,
+            regulation_content=reg.content,
+            document_content=document_content,
+        )
+        try:
+            response = llm.chat([{"role": "user", "content": prompt}])
+            answer = str(response).strip()
+            return _parse_negative_single_response(answer, reg)
+        except Exception as e:
+            logger.warning(f"Negative list check failed for {reg.article_number}: {e}")
+            return None
 
-## 待审文档内容
-{document_content}
+    with ThreadPoolExecutor(max_workers=_NEGATIVE_MAX_WORKERS) as executor:
+        futures = {executor.submit(_check_one_negative, r): r for r in regulations}
+        for future in as_completed(futures):
+            try:
+                item = future.result()
+                if item is not None:
+                    all_items.append(item)
+            except Exception as e:
+                logger.error(f"Negative list worker error: {e}")
 
-## 输出要求
-请以 JSON 格式输出所有违规项：
-[
-  {{"source_ref": "<对应上面法规的编号，如 R5>", "clause_number": "<文档中涉及违规的条款编号，如'3.2'，无法确定时写'未知'>", "is_violation": true, "reason": "<违规原因>", "source_excerpt": "<文档中违规原文>", "suggestion": "<修改建议>"}},
-  {{"is_violation": false}},
-  ...
-]
+    result_status = CheckResult.VIOLATED if all_items else CheckResult.PASSED
+    return all_items, result_status, regulations
 
-注意：
-1. 仅输出 is_violation 为 true 的项（或省略 false 项）
-2. source_ref 必须是上面法规的编号（如 R1、R5）
-3. clause_number 应尽量从文档中提取实际条款编号
-4. 仅输出 JSON，不要附加其他文字
-"""
 
+def _parse_negative_single_response(answer: str, reg: AuditRegulationItem) -> Optional[AuditResultItem]:
+    from lib.common.json_utils import extract_json_object
     try:
-        llm = get_audit_llm()
-        response = llm.chat([{"role": "user", "content": prompt}])
-        answer = str(response).strip()
-
-        items = _parse_violation_response(answer, regulations)
-        result = CheckResult.VIOLATED if items else CheckResult.PASSED
-        return items, result, regulations
-    except Exception as e:
-        logger.error(f"Negative list check failed: {e}")
-        return [], CheckResult.SKIPPED, regulations
-
-
-
-def _build_reg_index(regulations: List[AuditRegulationItem]) -> Dict[str, AuditRegulationItem]:
-    return {f"R{i + 1}": r for i, r in enumerate(regulations)}
-
-
-def _parse_violation_response(answer: str, regulations: List[AuditRegulationItem]) -> List[AuditResultItem]:
-    from lib.common.json_utils import extract_json_array
-    try:
-        json_str = extract_json_array(answer)
-        if json_str is None:
-            return []
-
-        reg_index = _build_reg_index(regulations)
-        violations = json.loads(json_str)
-        items = []
-        for v in violations:
-            if not v.get("is_violation", False):
-                continue
-            ref = v.get("source_ref", "")
-            matched = reg_index.get(ref) if ref else None
-            if not matched and ref:
-                logger.warning(f"负面清单 source_ref 匹配失败: {ref}")
-
-            items.append(AuditResultItem(
-                clause_number=v.get("clause_number") or "未知",
-                check_type="negative_list",
-                param=f"负面清单检查: {matched.law_name if matched else ''} {matched.article_number if matched else ''}",
-                value=v.get("source_excerpt", "")[:100],
-                requirement=f"违反负面清单 {matched.law_name if matched else ''} {matched.article_number if matched else ''}: {matched.content[:200] if matched else ''}",
-                status="non_compliant",
-                chunk_id=matched.chunk_id if matched else None,
-                source_type="negative_list",
-                source_excerpt=matched.content[:300] if matched else "",
-                suggestion=v.get("suggestion", "请修改相关表述"),
-            ))
-        return items
-    except Exception as e:
-        logger.warning(f"Failed to parse violation response: {e}")
-        return []
-
-
-def identify_category(document_content: str, product_name: str = "") -> CategoryResult:
-    """识别险种类型"""
-    category_enum = classify_product(product_name, document_content[:5000])
-    if category_enum != ProductCategory.OTHER:
-        mapped = ComplianceConstants.SUBCATEGORY_MAPPING.get(category_enum.value)
-        if mapped:
-            return CategoryResult(mapped, 0.7, "keyword")
-
-    try:
-        llm = get_audit_llm()
-        category_list = "、".join(VALID_CATEGORIES)
-        prompt = f"""请从以下保险产品文档中识别险种类型。
-
-可选险种类型：{category_list}
-
-产品名称：{product_name}
-文档内容：
-{document_content[:5000]}
-
-仅输出险种类型名称，不要输出其他内容。"""
-
-        response = llm.chat([{"role": "user", "content": prompt}])
-        extracted = str(response).strip()
-
-        for vc in VALID_CATEGORIES:
-            if vc in extracted:
-                return CategoryResult(vc, 0.85, "llm")
-    except Exception as e:
-        logger.warning(f"LLM category identification failed: {e}")
-
-    return CategoryResult(None, 0.0, "unknown")
-
-
-def _check_relevance(param: str, content: str) -> bool:
-    """检查检查项参数与法规内容是否相关（基于关键词子串匹配）"""
-    param_text = param.replace("、", " ").replace("：", " ")
-    keywords: set[str] = set()
-    for word in param_text.split():
-        if len(word) >= 2:
-            keywords.add(word)
-        if len(word) >= 4:
-            for j in range(len(word) - 1):
-                keywords.add(word[j:j+2])
-    return any(kw in content for kw in keywords)
-
-
-def _enrich_matched_item(item: Dict, matched: AuditRegulationItem) -> None:
-    """根据匹配的法规填充 item 的 requirement 和 source_excerpt"""
-    item["chunk_id"] = matched.chunk_id
-    if _check_relevance(item.get("param", ""), matched.content[:500]):
-        item["requirement"] = f"{matched.law_name}: {matched.content[:200]}"
-    else:
-        item["requirement"] = f"[法规相关性待确认] {matched.law_name}: {matched.content[:200]}"
-        logger.info(f"法规相关性低: param={item.get('param')}, regulation={matched.law_name}")
-    item["source_excerpt"] = matched.content[:300]
-
-
-def run_compliance_check(prompt: str, regulations: Optional[List[AuditRegulationItem]] = None) -> Dict:
-    try:
-        llm = get_audit_llm()
-
-        logger.info(f"Prompt length: {len(prompt)}")
-        response = llm.chat([{"role": "user", "content": prompt}])
-        answer = str(response)
-
-        logger.info(f"LLM response length: {len(answer)}, preview: {answer[:200]}")
-
-        from lib.common.json_utils import extract_json_object
         json_str = extract_json_object(answer)
         if json_str is None:
-            logger.warning(f"No JSON found in LLM response: {answer[:200]}")
-            return {
-                "summary": {"compliant": 0, "non_compliant": 0, "attention": 0},
-                "items": [],
-                "error": "json_not_found",
-                "raw_answer": answer[:1000],
-            }
-
+            return None
         result = json.loads(json_str)
-
-        reg_index = _build_reg_index(regulations) if regulations else {}
-        items = result.get("items", [])
-        valid_statuses = {"compliant", "non_compliant", "attention"}
-        items = [item for item in items if item.get("status") in valid_statuses]
-        result["items"] = items
-        for item in items:
-            if not item.get("clause_number"):
-                item["clause_number"] = "未知"
-            raw_ref = item.get("source_ref", "")
-            matched = None
-            for ref in re.split(r'[,\s、]+', raw_ref):
-                ref = ref.strip()
-                if ref and ref in reg_index:
-                    matched = reg_index[ref]
-                    break
-            if matched:
-                _enrich_matched_item(item, matched)
-            else:
-                item["chunk_id"] = None
-                if raw_ref:
-                    logger.warning(f"source_ref 匹配失败: {raw_ref}")
-                    item["requirement"] = f"法规来源待确认（引用 {raw_ref} 未匹配）"
-                else:
-                    item["requirement"] = "法规来源待确认"
-                item["source_excerpt"] = ""
-            item["check_type"] = "regulation"
-            item["source_type"] = "regulation"
-
-        return result
-
+        if not result.get("is_violation", False):
+            return None
+        return AuditResultItem(
+            clause_number=result.get("clause_number") or "未知",
+            check_type="negative_list",
+            clause_content=result.get("clause_content", ""),
+            status="non_compliant",
+            chunk_id=reg.chunk_id,
+            suggestion=result.get("suggestion", "请修改相关表述"),
+            conclusion=result.get("conclusion", result.get("reason", "")),
+        )
     except Exception as e:
-        logger.error(f"Compliance check failed: {e}")
-        return {"summary": {"compliant": 0, "non_compliant": 0, "attention": 0}, "items": [], "error": str(e)}
-
-
-_PROMPT_TEMPLATE_OVERHEAD = 600
-
-
-def _split_by_clauses(text: str, budget: int, max_clauses_per_batch: int = 15) -> List[str]:
-    clause_positions = [m.start() for m in re.finditer(r'【(?:附加险)?条款\s+', text)]
-    if not clause_positions:
-        return [text[i:i + budget] for i in range(0, len(text), budget)]
-    batches = []
-    current_start = 0
-    batch_clause_count = 0
-    for i in range(1, len(clause_positions)):
-        batch_clause_count += 1
-        if clause_positions[i] - current_start >= budget or batch_clause_count >= max_clauses_per_batch:
-            batches.append(text[current_start:clause_positions[i]])
-            current_start = clause_positions[i]
-            batch_clause_count = 0
-    batches.append(text[current_start:])
-    return batches
-
-
-_MAX_CLAUSES_PER_BATCH = 25
-
-
-def batch_compliance_check(
-    document_content: str,
-    regulations: List[AuditRegulationItem],
-) -> Dict:
-    context = build_audit_context(regulations)
-    budget = 200000 - len(context) - _PROMPT_TEMPLATE_OVERHEAD
-
-    if budget < 10000:
-        logger.warning(f"法规上下文过长 ({len(context)} chars)，可用文档预算不足")
-        budget = 30000
-
-    clause_count = len(re.findall(r'【(?:附加险)?条款\s+', document_content))
-    needs_split = clause_count > _MAX_CLAUSES_PER_BATCH or len(document_content) > budget
-
-    if not needs_split:
-        prompt = COMPLIANCE_PROMPT_DOCUMENT.format(
-            document_content=document_content,
-            context=context,
-            regulation_count=len(regulations),
-        )
-        return run_compliance_check(prompt, regulations=regulations)
-
-    logger.info(f"文档 {len(document_content)} 字符，{clause_count} 条款，按条款分批检查")
-    batches = _split_by_clauses(document_content, budget, _MAX_CLAUSES_PER_BATCH)
-    all_items: List[Dict] = []
-    partial_error = False
-    for i, batch_text in enumerate(batches):
-        logger.info(f"分批检查 {i + 1}/{len(batches)}: {len(batch_text)} 字符")
-        prompt = COMPLIANCE_PROMPT_DOCUMENT.format(
-            document_content=batch_text,
-            context=context,
-            regulation_count=len(regulations),
-        )
-        batch_result = run_compliance_check(prompt, regulations=regulations)
-        if "error" in batch_result:
-            logger.warning(f"分批检查 {i + 1}/{len(batches)} 失败: {batch_result['error']}")
-            partial_error = True
-            continue
-        all_items.extend(batch_result.get("items", []))
-
-    compliant = sum(1 for i in all_items if i.get("status") == "compliant")
-    non_compliant = sum(1 for i in all_items if i.get("status") == "non_compliant")
-    attention = sum(1 for i in all_items if i.get("status") == "attention")
-    result = {"summary": {"compliant": compliant, "non_compliant": non_compliant, "attention": attention}, "items": all_items}
-    if partial_error:
-        result["partial_error"] = True
-    return result
+        logger.warning(f"Failed to parse negative list response: {e}")
+        return None

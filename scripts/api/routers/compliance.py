@@ -21,7 +21,8 @@ from lib.compliance.checker import (
     check_negative_list,
     identify_category,
     load_audit_regulations,
-    batch_compliance_check,
+    normalize_clause_number,
+    check_chapter_audit,
     extract_section_numbers,
 )
 from lib.doc_parser import parse_product_document, DocumentParseError
@@ -44,21 +45,20 @@ async def check_document(req: DocumentCheckRequest):
     }
 
     try:
-        result = await asyncio.to_thread(
-            batch_compliance_check, req.document_content, regulations
-        )
+        check_result = await asyncio.to_thread(check_chapter_audit, req.document_content, regulations)
     except Exception as e:
         logger.error(f"Document check failed: {e}")
         raise HTTPException(status_code=500, detail=f"条款审查失败: {e}")
+
+    result = check_result
 
     if "error" in result:
         logger.error(f"Compliance check returned error: {result['error']}")
         raise HTTPException(status_code=500, detail="审查结果解析失败，请重试")
 
     try:
-        negative_items, negative_list_result, negative_regulations = await asyncio.to_thread(
-            check_negative_list, req.document_content
-        )
+        negative_outcome = await asyncio.to_thread(check_negative_list, req.document_content)
+        negative_items, negative_list_result, negative_regulations = negative_outcome
     except Exception as e:
         logger.error(f"Negative list check failed: {e}")
         negative_items, negative_list_result, negative_regulations = [], "skipped", []
@@ -83,14 +83,20 @@ async def check_document(req: DocumentCheckRequest):
 
     section_info = extract_section_numbers(req.document_content)
     doc_clause_set = set(section_info["clauses"])
-    checked_clause_set = {
-        c for item in result.get("items", [])
-        if (c := item.get("clause_number", "")) != "未知"
-    }
+    checked_clause_set = set()
+    for item in result.get("items", []):
+        raw = item.get("clause_number", "")
+        if raw == "未知":
+            continue
+        normalized = normalize_clause_number(raw)
+        if normalized:
+            checked_clause_set.add(normalized)
     result["clause_coverage"] = {
         "total": len(doc_clause_set),
         "checked": len(checked_clause_set & doc_clause_set),
         "unchecked": list(doc_clause_set - checked_clause_set),
+        "all_total": len(section_info.get("all_clauses", doc_clause_set)),
+        "definition_chapter": section_info.get("definition_chapter"),
         "has_notices": section_info["has_notices"],
         "has_health": section_info["has_health"],
         "has_exclusions": section_info["has_exclusions"],

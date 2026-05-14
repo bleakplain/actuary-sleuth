@@ -468,11 +468,11 @@ export default function CompliancePage() {
     return [
       {
         title: (<div style={{ position: 'relative' }}>产品条款{makeResizeHandle(0)}</div>),
-        dataIndex: 'value', key: 'value', width: colWidths[0], ellipsis: false,
+        dataIndex: 'clause_content', key: 'clause_content', width: colWidths[0], ellipsis: false,
         render: (_: string, record: AuditResultItem) => (
           <div>
             <Text strong>{record.clause_number}</Text>
-            <div style={{ whiteSpace: 'pre-wrap', marginTop: 2 }}>{record.value}</div>
+            <div style={{ whiteSpace: 'pre-wrap', marginTop: 2 }}>{record.clause_content}</div>
           </div>
         ),
       },
@@ -481,7 +481,7 @@ export default function CompliancePage() {
         key: 'conclusion', width: colWidths[1], ellipsis: false,
         render: (_: unknown, record: AuditResultItem) => {
           const cfg = STATUS_CONFIG[record.status] || STATUS_CONFIG.attention;
-          const desc = record.conclusion || (record.status === 'compliant' ? `${record.param}符合法规要求` : `${record.param}${cfg.label}`);
+          const desc = record.conclusion || (record.status === 'compliant' ? '符合法规要求' : cfg.label);
           return (
             <div>
               <Tag color={cfg.color} icon={cfg.icon}>{cfg.label}</Tag>
@@ -605,18 +605,13 @@ export default function CompliancePage() {
       }
       const statuses = group.map(g => g.status);
       const worst = statuses.includes('non_compliant') ? 'non_compliant' : statuses.includes('attention') ? 'attention' : 'compliant';
-      const requirements = [...new Set(group.map(g => g.requirement).filter(Boolean))];
       const suggestions = [...new Set(group.map(g => g.suggestion).filter(Boolean))];
       const sources = [...new Set(group.map(g => g.chunk_id).filter(Boolean) as string[])];
-      const excerpts = [...new Set(group.map(g => g.source_excerpt).filter(Boolean))];
       merged.push({
         ...group[0],
         status: worst,
-        requirement: requirements.join('\n'),
         suggestion: suggestions.join('\n'),
         chunk_id: sources[0] || null,
-        source_type: group.map(g => g.source_type).join(','),
-        source_excerpt: excerpts.join('\n'),
         _mergedChunkIds: sources,
         _mergedItems: group,
       } as AuditResultItem & { _mergedChunkIds?: string[]; _mergedItems?: AuditResultItem[] });
@@ -719,7 +714,7 @@ export default function CompliancePage() {
             <Table
               dataSource={mergeItemsByClause(docResult.items)}
               columns={buildItemColumns(regulationMap)}
-              rowKey={(r: AuditResultItem) => `${r.clause_number}-${r.param}`}
+              rowKey={(r: AuditResultItem) => `${r.clause_number}-${r.check_type}`}
               size="small"
               pagination={false}
               tableLayout="fixed"

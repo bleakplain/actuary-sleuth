@@ -18,14 +18,11 @@ class AuditRegulationItemResponse(BaseModel):
 class AuditResultItemResponse(BaseModel):
     clause_number: str = ""
     check_type: str = ""
-    param: str = ""
-    value: str = ""
-    requirement: str = ""
+    clause_content: str = ""
     status: str
     chunk_id: Optional[str] = None
-    source_type: str = ""
-    source_excerpt: str = ""
     suggestion: str = ""
+    conclusion: str = ""
 
 
 class ComplianceReportDataResponse(BaseModel):

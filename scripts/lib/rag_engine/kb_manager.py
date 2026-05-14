@@ -127,7 +127,7 @@ class KBManager:
         self,
         description: str = "",
     ) -> VersionMeta:
-        """创建新版本：仅管理索引，源文件保持在 settings.json 配置的目录。"""
+        """创建新版本：仅管理索引，源文件保持在环境变量配置的目录。"""
         version_id = self.next_version_id()
         version_dir = self.base_dir / version_id
         version_dir.mkdir(parents=True, exist_ok=True)
