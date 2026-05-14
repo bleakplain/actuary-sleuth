@@ -2,6 +2,7 @@
 import json
 import logging
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -206,8 +207,17 @@ class DocumentChapter:
 
 _MAX_CLAUSES_PER_SUBCHAPTER = 8
 _DEFINITIONS_CONTEXT_LIMIT = 2000
+_MAX_REGS_PER_CHAPTER = 10
+_CHAPTER_MAX_WORKERS = 2
 _NEGATIVE_MAX_WORKERS = 2
 _STATUS_PRIORITY = {"non_compliant": 3, "attention": 2, "compliant": 1}
+_CHAPTER_KEYWORDS: Dict[str, List[str]] = {
+    "1": ["被保险人", "投保人", "年龄", "资格"],
+    "3": ["合同", "犹豫", "解除", "效力", "中止", "复效"],
+    "4": ["保险费", "费率", "缴费", "宽限"],
+    "5": ["理赔", "赔偿", "给付", "时效", "诉讼时效"],
+    "6": ["告知", "如实", "说明", "隐瞒", "解除权"],
+}
 
 
 def _extract_chapter_title(first_block: str, ch_num: str) -> str:
@@ -313,6 +323,27 @@ def _extract_definitions_text(document_content: str) -> str:
     return text[:_DEFINITIONS_CONTEXT_LIMIT]
 
 
+def _select_chapter_regulations(
+    chapter: DocumentChapter,
+    regulations: List[AuditRegulationItem],
+) -> List[AuditRegulationItem]:
+    """Select most relevant regulations for a chapter, capped at _MAX_REGS_PER_CHAPTER."""
+    ch_num = chapter.chapter_key.split("_")[0]
+    keywords = _CHAPTER_KEYWORDS.get(ch_num, [])
+    if not keywords:
+        return regulations[:_MAX_REGS_PER_CHAPTER]
+    scored: List[Tuple[int, AuditRegulationItem]] = []
+    for reg in regulations:
+        score = sum(1 for kw in keywords if kw in reg.content)
+        scored.append((score, reg))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    selected = [reg for score, reg in scored if score > 0]
+    if len(selected) < _MAX_REGS_PER_CHAPTER:
+        remaining = [reg for score, reg in scored if score == 0]
+        selected.extend(remaining[:_MAX_REGS_PER_CHAPTER - len(selected)])
+    return selected[:_MAX_REGS_PER_CHAPTER]
+
+
 def _audit_single_chapter(
     chapter: DocumentChapter,
     regulations: List[AuditRegulationItem],
@@ -402,14 +433,39 @@ def check_chapter_audit(
     logger.info(f"Chapter audit: {len(regulations)} regulations -> {len(chapters)} chapters")
     all_items: List[Dict] = []
     errors: List[str] = []
+    lock = threading.Lock()
+    completed = 0
 
-    for ch in chapters:
-        items = _audit_single_chapter(ch, regulations, definitions_text, llm)
-        if items is None:
-            errors.append(f"Chapter {ch.chapter_key} ({ch.chapter_title})")
-        else:
-            all_items.extend(items)
-            logger.info(f"Chapter {ch.chapter_key} ({ch.chapter_title}): {len(items)} items")
+    def _audit_chapter_worker(ch: DocumentChapter) -> Optional[List[Dict]]:
+        nonlocal completed
+        try:
+            chapter_regs = _select_chapter_regulations(ch, regulations)
+            items = _audit_single_chapter(ch, chapter_regs, definitions_text, llm)
+            with lock:
+                completed += 1
+                logger.info(f"Chapter {completed}/{len(chapters)} {ch.chapter_key} ({ch.chapter_title}): "
+                            f"{len(items) if items else 'FAILED'} items")
+            return items
+        except Exception as e:
+            with lock:
+                completed += 1
+                errors.append(f"Chapter {ch.chapter_key} ({ch.chapter_title})")
+                logger.warning(f"Chapter worker failed: {ch.chapter_key}: {e}")
+            return None
+
+    with ThreadPoolExecutor(max_workers=_CHAPTER_MAX_WORKERS) as executor:
+        futures = {executor.submit(_audit_chapter_worker, ch): ch for ch in chapters}
+        for future in as_completed(futures):
+            try:
+                items = future.result()
+                if items is not None:
+                    all_items.extend(items)
+                else:
+                    ch = futures[future]
+                    errors.append(f"Chapter {ch.chapter_key} ({ch.chapter_title})")
+            except Exception as e:
+                logger.error(f"Chapter worker raised: {e}")
+                errors.append(str(e))
 
     deduped = _deduplicate_items(all_items)
     counts: Dict[str, int] = {"compliant": 0, "non_compliant": 0, "attention": 0}

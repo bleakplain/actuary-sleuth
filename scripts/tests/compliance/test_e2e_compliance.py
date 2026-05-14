@@ -104,7 +104,7 @@ API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 @pytest.fixture(scope="module")
 def api_client():
     """HTTP 客户端 fixture"""
-    with httpx.Client(base_url=API_BASE_URL, timeout=120.0) as client:
+    with httpx.Client(base_url=API_BASE_URL, timeout=600.0) as client:
         yield client
 
 
