@@ -81,7 +81,7 @@ scripts/
 
 → 对应 spec.md User Story 2 (P1): 用户登录
 → 对应 spec.md FR-004: 邮箱+密码登录，返回 JWT Token
-→ 对应 spec.md FR-007: 防止登录暴力破解
+→ 对应 spec.md FR-009: 防止登录暴力破解
 
 #### 实现步骤
 
@@ -921,7 +921,7 @@ def test_decode_invalid_token():
 → 对应 spec.md User Story 1 (P1): 邀请码注册
 → 对应 spec.md User Story 2 (P1): 用户登录
 → 对应 spec.md User Story 3 (P1): API 权限校验
-→ 对应 spec.md FR-001 ~ FR-009
+→ 对应 spec.md FR-001 ~ FR-011
 
 #### 实现步骤
 
@@ -938,7 +938,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from api.database import (
     create_email_token,
@@ -1181,12 +1181,16 @@ from api.database import (
     update_user_status,
     verify_user_email,
 )
+from api.dependencies import get_current_user
 from api.schemas.admin import InviteCodeCreate, InviteCodeOut, RoleUpdate, UserUpdate
 from lib.auth.password import hash_password
 from lib.auth.permissions import require_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["管理"], dependencies=[Depends(require_permission("admin"))])
+
+
+# 注: 路由级已配置 admin 权限校验，端点级无需重复添加 require_permission
 
 
 @router.get("/invite-codes", response_model=list[InviteCodeOut])
@@ -1196,7 +1200,7 @@ def get_invite_codes():
 
 
 @router.post("/invite-codes", response_model=InviteCodeOut, status_code=201)
-def create_new_invite_code(req: InviteCodeCreate, user: dict = Depends(require_permission("admin"))):
+def create_new_invite_code(req: InviteCodeCreate, user: dict = Depends(get_current_user)):
     """创建邀请码。"""
     code = uuid.uuid4().hex[:8].upper()
     expires_at = (datetime.now(timezone.utc) + timedelta(hours=req.expires_hours)).isoformat()
@@ -1223,7 +1227,7 @@ def get_users():
 
 
 @router.patch("/users/{user_id}")
-def update_user(user_id: str, req: UserUpdate, admin: dict = Depends(require_permission("admin"))):
+def update_user(user_id: str, req: UserUpdate, admin: dict = Depends(get_current_user)):
     """修改用户（状态、角色、手动激活、密码重置）。"""
     target = get_user_by_id(user_id)
     if not target:
@@ -1493,7 +1497,7 @@ def test_admin_cannot_disable_self(client, admin_token):
 → 对应 spec.md User Story 4 (P2): 密码重置
 → 对应 spec.md User Story 5 (P2): 用户管理
 → 对应 spec.md User Story 6 (P3): 角色权限管理
-→ 对应 spec.md FR-004, FR-005, FR-006, FR-010
+→ 对应 spec.md FR-006, FR-007, FR-008, FR-012
 
 #### 实现步骤
 

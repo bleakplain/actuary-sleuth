@@ -161,18 +161,18 @@ API 路由在 `api/routers/` 下，依赖注入在 `api/dependencies.py`。
 
 ### Functional Requirements
 
-- **FR-001**: 系统 MUST 支持邀请码注册（邮箱、密码、邀请码），注册后需验证邮箱，密码 bcrypt 加密存储
+- **FR-001**: 系统 MUST 支持邀请码注册（邮箱、密码、邀请码），注册后需验证邮箱，密码 argon2id 加密存储
 - **FR-002**: 系统 MUST 支持管理员生成邀请码（指定角色、有效期）
 - **FR-003**: 系统 MUST 支持邮箱验证（发送验证链接，24h 有效）
 - **FR-004**: 系统 MUST 支持邮箱 + 密码登录，返回 JWT Token
-- **FR-003**: 系统 MUST 对所有现有 API 端点进行权限校验，无权限返回 403，无 Token 返回 401
-- **FR-004**: 系统 MUST 支持通过邮箱重置密码（依赖邮件服务，提供管理员手动重置降级方案）
-- **FR-005**: 系统 MUST 支持管理员管理用户（查看、禁用/启用、修改角色）
-- **FR-006**: 系统 MUST 支持基于角色的权限控制（RBAC），单角色单用户
-- **FR-007**: 系统 MUST 防止登录暴力破解（5 次失败后锁定 15 分钟）
-- **FR-008**: 系统 MUST 不泄露用户是否存在（登录、密码重置统一错误消息）
-- **FR-009**: 系统 MUST 保护管理员自我禁用/删除（不允许操作）
-- **FR-010**: 系统 MUST 支持管理员手动激活用户（邮件服务不可用时的降级方案）
+- **FR-005**: 系统 MUST 对所有现有 API 端点进行权限校验，无权限返回 403，无 Token 返回 401
+- **FR-006**: 系统 MUST 支持通过邮箱重置密码（依赖邮件服务，提供管理员手动重置降级方案）
+- **FR-007**: 系统 MUST 支持管理员管理用户（查看、禁用/启用、修改角色）
+- **FR-008**: 系统 MUST 支持基于角色的权限控制（RBAC），单角色单用户
+- **FR-009**: 系统 MUST 防止登录暴力破解（5 次失败后锁定 15 分钟）
+- **FR-010**: 系统 MUST 不泄露用户是否存在（登录、密码重置统一错误消息）
+- **FR-011**: 系统 MUST 保护管理员自我禁用/删除（不允许操作）
+- **FR-012**: 系统 MUST 支持管理员手动激活用户（邮件服务不可用时的降级方案）
 
 ### Key Entities
 
@@ -193,7 +193,7 @@ API 路由在 `api/routers/` 下，依赖注入在 `api/dependencies.py`。
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,                    -- UUID，与现有 sessions/eval_samples 等表风格一致
     email TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,            -- bcrypt
+    password_hash TEXT NOT NULL,            -- argon2id
     display_name TEXT NOT NULL DEFAULT '',
     role_id TEXT NOT NULL REFERENCES roles(id),
     status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'active', 'disabled')),
@@ -322,7 +322,7 @@ CREATE INDEX IF NOT EXISTS idx_reset_tokens_hash ON password_reset_tokens(token_
 ## JWT 策略
 
 - **算法**: HS256
-- **密钥**: 环境变量 `JWT_SECRET_KEY`
+- **密钥**: 环境变量 `AUTH_JWT_SECRET`
 - **过期时间**: 8 小时
 - **Payload**: `{user_id, email, role_id, permissions}`
 - **Refresh Token**: 暂不实现，过期后重新登录
@@ -356,7 +356,7 @@ async def chat(req: ChatRequest, user=Depends(get_current_user)):
 
 ### 邮件服务
 
-- **首选**: SMTP（配置在 settings.json 的 `mail` 节）
+- **首选**: SMTP（配置通过环境变量 `MAIL_SMTP_*` 系列）
 - **降级**: 邮件不可用时，管理员可通过 `/api/admin/users/{id}` PATCH 直接重置用户密码
 - 密码重置 Token 存数据库（`password_reset_tokens` 表），不依赖邮件也能生成和管理
 
@@ -370,10 +370,10 @@ async def chat(req: ChatRequest, user=Depends(get_current_user)):
 
 ## Assumptions
 
-- JWT 密钥通过环境变量 `JWT_SECRET_KEY` 配置
+- JWT 密钥通过环境变量 `AUTH_JWT_SECRET` 配置
 - 初始管理员账户通过 `_migrate_db()` 自动创建（邮箱/密码从 `ADMIN_EMAIL` / `ADMIN_PASSWORD` 环境变量读取），状态直接为 active
 - 邀请码由管理员生成，8 位随机字母数字，可指定角色和有效期
-- 邮箱验证和密码重置均依赖邮件服务（SMTP，配置在 settings.json 的 `mail` 节）
+- 邮箱验证和密码重置均依赖邮件服务（SMTP，配置通过环境变量 `MAIL_SMTP_*` 系列）
 - 邮件不可用时，管理员可手动激活用户或重置密码作为降级方案
 - 暂不支持多角色（一个用户一个角色）
 - 暂不支持角色继承
