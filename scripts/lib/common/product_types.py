@@ -120,29 +120,32 @@ def get_product_config(category: ProductCategory) -> Dict:
 
 
 def classify_product(product_name: str, description: str = "") -> ProductCategory:
-    """
-    根据产品名称和描述分类产品
+    """根据产品名称和描述分类产品。
 
-    Args:
-        product_name: 产品名称
-        description: 产品描述
-
-    Returns:
-        ProductCategory: 产品类别
+    产品名称中的关键词权重远高于文档内容，避免文档中高频出现的通用词
+    （如重疾险文档中频繁出现的"意外"、"医疗"）导致误分类。
+    更长的关键词得分更高（"重大疾病" > "健康"），因为更具体。
     """
-    text = f"{product_name} {description}".lower()
+    name_lower = product_name.lower()
+    desc_lower = description[:2000].lower()
+    NAME_WEIGHT = 5
 
     best_match = ProductCategory.OTHER
-    best_score = 0
+    best_score = 0.0
 
     for category, config in PRODUCT_TYPE_CONFIGS.items():
         if category == ProductCategory.OTHER:
             continue
 
-        score = 0
+        score = 0.0
         for keyword in config["keywords"]:
-            if keyword.lower() in text:
-                score += 1
+            kw = keyword.lower()
+            # Longer keywords are more specific and deserve higher score
+            length_bonus = len(kw) / 2.0
+            if kw in name_lower:
+                score += NAME_WEIGHT * length_bonus
+            elif kw in desc_lower:
+                score += length_bonus
 
         if score > best_score:
             best_match = category

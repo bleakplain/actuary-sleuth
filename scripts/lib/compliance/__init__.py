@@ -3,17 +3,25 @@
 from .checker import (
     AuditRegulationItem,
     AuditResultItem,
-    check_negative_list,
+    CheckResult,
+    CategoryResult,
     identify_category,
     load_audit_regulations,
-    check_chapter_audit,
+    streaming_compliance_check,
+    streaming_negative_check,
+    normalize_clause_number,
+    extract_section_numbers,
 )
 
 __all__ = [
     "AuditRegulationItem",
     "AuditResultItem",
-    "check_negative_list",
+    "CheckResult",
+    "CategoryResult",
     "identify_category",
     "load_audit_regulations",
-    "check_chapter_audit",
+    "streaming_compliance_check",
+    "streaming_negative_check",
+    "normalize_clause_number",
+    "extract_section_numbers",
 ]

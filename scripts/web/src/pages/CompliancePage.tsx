@@ -1,347 +1,177 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import {
-  Card, Input, Button, Table, Tag, Typography, theme,
-  message, Tabs, Space, Descriptions, Popconfirm, Drawer, Grid,
-  Alert, Select, Collapse,
+  Card, Input, Button, Tag, Typography, theme,
+  message, Space, Descriptions, Drawer, Grid,
+  Alert, Select, Popconfirm, Spin,
 } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined,
-  HistoryOutlined, DeleteOutlined, EyeOutlined, BookOutlined,
-  FileTextOutlined, PlusOutlined, CaretRightOutlined, CloseOutlined,
-  SafetyCertificateOutlined,
+  DeleteOutlined, BookOutlined, ArrowLeftOutlined, CloseOutlined,
+  SafetyCertificateOutlined, UploadOutlined, FileTextOutlined,
 } from '@ant-design/icons';
-import type { ColumnsType } from 'antd/es/table';
 import * as complianceApi from '../api/compliance';
-import type { ComplianceReport, AuditResultItem, AuditRegulationItem, ParsedDocument, ParsedDataTable } from '../types';
-import { DRAWER_MD, DRAWER_LG } from '../constants/layout';
-import { DocumentViewer } from '../components/DocumentViewer';
+import type { ComplianceReport, AuditResultItem, AuditRegulationItem, ParsedDocument } from '../types';
+import { DRAWER_MD } from '../constants/layout';
 import PageHeader from '../components/PageHeader';
-import EmptyGuide from '../components/EmptyGuide';
 
 const { Text } = Typography;
 const { TextArea } = Input;
 
-const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
-  compliant: { color: 'success', icon: <CheckCircleOutlined />, label: '合规' },
-  non_compliant: { color: 'error', icon: <CloseCircleOutlined />, label: '不合规' },
-  attention: { color: 'warning', icon: <ExclamationCircleOutlined />, label: '需关注' },
+const STATUS_ICON: Record<string, { color: string; icon: React.ReactNode }> = {
+  non_compliant: { color: 'error', icon: <CloseCircleOutlined /> },
+  attention: { color: 'warning', icon: <ExclamationCircleOutlined /> },
+  compliant: { color: 'success', icon: <CheckCircleOutlined /> },
 };
-
-const TABLE_TYPE_LABELS: Record<string, string> = {
-  premium: '费率表',
-  appendix: '附表',
-  coverage: '保障计划表',
-  drug_list: '药品清单',
-  gene_test: '基因检测清单',
-  hospital: '医院名单',
-  other: '数据表',
-  unknown: '表格',
-};
-
-function getTableLabel(t: ParsedDataTable, index: number): string {
-  const typeLabel = TABLE_TYPE_LABELS[t.table_type] || '表格';
-  const remark = t.remark ? ` (${t.remark.slice(0, 20)})` : '';
-  return `${typeLabel} ${index + 1}${remark}`;
-}
 
 function RegulationDrawer({
-  visible,
-  regulation,
-  onClose,
-  isMobile,
+  visible, regulation, onClose, isMobile,
 }: {
-  visible: boolean;
-  regulation: AuditRegulationItem | null;
-  onClose: () => void;
-  isMobile: boolean;
+  visible: boolean; regulation: AuditRegulationItem | null; onClose: () => void; isMobile: boolean;
 }) {
   const { token } = theme.useToken();
-
   if (!regulation) return null;
-
   return (
     <Drawer
       title={<Space><BookOutlined />法规来源详情</Space>}
       placement="right"
-      size={isMobile ? '100%' : DRAWER_MD}
+      width={isMobile ? '100%' : DRAWER_MD}
       open={visible}
       onClose={onClose}
     >
       <Descriptions column={1} size="small" bordered style={{ marginBottom: 16 }}>
         <Descriptions.Item label="法规名称">{regulation.law_name}</Descriptions.Item>
         <Descriptions.Item label="条款编号">{regulation.article_number}</Descriptions.Item>
-        {regulation.doc_number && (
-          <Descriptions.Item label="文号">{regulation.doc_number}</Descriptions.Item>
-        )}
-        {regulation.issuing_authority && (
-          <Descriptions.Item label="发布机关">{regulation.issuing_authority}</Descriptions.Item>
-        )}
-        {regulation.effective_date && (
-          <Descriptions.Item label="生效日期">{regulation.effective_date}</Descriptions.Item>
-        )}
+        {regulation.doc_number && <Descriptions.Item label="文号">{regulation.doc_number}</Descriptions.Item>}
+        {regulation.issuing_authority && <Descriptions.Item label="发布机关">{regulation.issuing_authority}</Descriptions.Item>}
+        {regulation.effective_date && <Descriptions.Item label="生效日期">{regulation.effective_date}</Descriptions.Item>}
         <Descriptions.Item label="来源类型">
           <Tag color={regulation.source_type === 'category' ? 'blue' : regulation.source_type === 'negative_list' ? 'red' : 'default'}>
             {regulation.source_type === 'category' ? '险种专属' : regulation.source_type === 'general' ? '通用法规' : '负面清单'}
           </Tag>
         </Descriptions.Item>
       </Descriptions>
-
-      <div>
-        <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
-          法规原文
-        </Typography.Text>
-        <div
-          style={{
-            background: token.colorFillQuaternary,
-            border: `1px solid ${token.colorBorder}`,
-            borderRadius: 4,
-            padding: '12px',
-            maxHeight: 300,
-            overflow: 'auto',
-            whiteSpace: 'pre-wrap',
-            fontSize: token.fontSize ?? 14,
-          }}
-        >
-          {regulation.content}
-        </div>
+      <Text strong style={{ display: 'block', marginBottom: 8 }}>法规原文</Text>
+      <div style={{
+        background: token.colorFillQuaternary, border: `1px solid ${token.colorBorder}`,
+        borderRadius: 4, padding: 12, maxHeight: 300, overflow: 'auto', whiteSpace: 'pre-wrap',
+      }}>
+        {regulation.content}
       </div>
     </Drawer>
   );
 }
 
-function DocumentReviewPanel({
-  document: doc,
-  file,
-  richText,
-  onRichTextChange,
-  onFileUpload,
-  onConfirm,
-  loading,
-  selectedCategory,
-  onCategoryChange,
-  identifiedCategory,
-  categoryConfidence,
-  validCategories,
-}: {
-  document: ParsedDocument | null;
-  file: File | null;
-  richText: string;
-  onRichTextChange: (v: string) => void;
-  onFileUpload: (file: File) => void;
-  onConfirm: () => void;
-  loading: boolean;
-  selectedCategory: string;
-  onCategoryChange: (v: string) => void;
-  identifiedCategory: string | null;
-  categoryConfidence: number;
-  validCategories: string[];
-}) {
-  const { token } = theme.useToken();
-  const screens = Grid.useBreakpoint();
-  const isMobile = !screens.md;
-  const [activeKeys, setActiveKeys] = useState<string[]>(['clauses']);
-  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
-
-  const hasParsedDoc = !!doc;
-  const totalItems = doc ? doc.clauses.length + doc.data_tables.length + doc.exclusions.length + doc.notices.length + doc.health_disclosures.length + doc.rider_clauses.length : 0;
-
-  const toggleItem = (itemKey: string) => {
-    setExpandedItems(prev => ({ ...prev, [itemKey]: !prev[itemKey] }));
-  };
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) onFileUpload(file);
-  };
-
-  const renderItemContent = (item: { id: string; title: string; content: string }, categoryKey: string) => {
-    const itemKey = `${categoryKey}-${item.id}`;
-    const isExpanded = expandedItems[itemKey];
-    const hasLongContent = item.content.length > 200;
-    const displayContent = isExpanded ? item.content : item.content.slice(0, 200);
-
-    return (
-      <div
-        role={hasLongContent ? 'button' : undefined}
-        tabIndex={hasLongContent ? 0 : undefined}
-        aria-expanded={hasLongContent ? isExpanded : undefined}
-        style={{
-          border: `1px solid ${token.colorBorderSecondary}`,
-          borderRadius: 4,
-          marginBottom: 8,
-          padding: '8px 12px',
-          cursor: hasLongContent ? 'pointer' : 'default',
-          background: token.colorBgContainer,
-        }}
-        onClick={hasLongContent ? () => toggleItem(itemKey) : undefined}
-        onKeyDown={hasLongContent ? (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleItem(itemKey); } } : undefined}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text strong style={{ fontSize: token.fontSize }}>{item.title}</Text>
-          {hasLongContent && (
-            <span style={{ fontSize: token.fontSizeSM, color: token.colorPrimary }}>
-              {isExpanded ? '收起' : '展开'}
-            </span>
-          )}
-        </div>
-        <div style={{ whiteSpace: 'pre-wrap', fontSize: token.fontSizeSM, color: token.colorTextSecondary, marginTop: 8 }}>
-          {displayContent}
-          {hasLongContent && !isExpanded && '…'}
-        </div>
-      </div>
-    );
-  };
-
-  const panelItems = doc ? [
-    { key: 'clauses', label: `条款 (${doc.clauses.length})`, count: doc.clauses.length,
-      items: doc.clauses.map(c => ({ id: c.number, title: `${c.number} ${c.title}`, content: c.text || '' })) },
-    { key: 'data_tables', label: `表格 (${doc.data_tables.length})`, count: doc.data_tables.length,
-      items: doc.data_tables.map((t, i) => ({ id: `table-${i}`, title: getTableLabel(t, i), content: t.raw_text || '' })) },
-    { key: 'exclusions', label: `责任免除 (${doc.exclusions.length})`, count: doc.exclusions.length,
-      items: doc.exclusions.map((s, i) => ({ id: `excl-${i}`, title: s.title || `条款 ${i + 1}`, content: s.content || '' })) },
-    { key: 'notices', label: `投保须知 (${doc.notices.length})`, count: doc.notices.length,
-      items: doc.notices.map((s, i) => ({ id: `notice-${i}`, title: s.title || `须知 ${i + 1}`, content: s.content || '' })) },
-    { key: 'health_disclosures', label: `健康告知 (${doc.health_disclosures.length})`, count: doc.health_disclosures.length,
-      items: doc.health_disclosures.map((s, i) => ({ id: `health-${i}`, title: s.title || `告知 ${i + 1}`, content: s.content || '' })) },
-    { key: 'rider_clauses', label: `附加险条款 (${doc.rider_clauses.length})`, count: doc.rider_clauses.length,
-      items: doc.rider_clauses.map(c => ({ id: c.number, title: `${c.number} ${c.title}`, content: c.text || '' })) },
-  ].filter(p => p.count > 0) : [];
-
-  const leftContent = hasParsedDoc && file ? (
-    <DocumentViewer file={file} fileType={doc!.file_type} />
-  ) : hasParsedDoc && !file ? (
-    <div style={{ padding: '8px 12px' }}>
-      <pre style={{ whiteSpace: 'pre-wrap', fontSize: token.fontSizeSM, lineHeight: 1.6, margin: 0 }}>{doc!.combined_text}</pre>
-    </div>
-  ) : (
-    <TextArea
-      style={{ height: '100%', resize: 'none', border: 'none', borderRadius: 0 }}
-      placeholder="请输入或粘贴保险条款文档内容…"
-      aria-label="保险条款文档内容"
-      spellCheck
-      value={richText}
-      onChange={(e) => onRichTextChange(e.target.value)}
-    />
-  );
-
-  const rightContent = hasParsedDoc ? (
-    <div style={{ flex: 1, overflow: 'auto', padding: '8px 12px' }}>
-      {doc!.warnings.length > 0 && (
-        <Alert type="warning" showIcon style={{ marginBottom: 12 }} message="解析警告" description={
-          <ul style={{ margin: 0, paddingLeft: 20 }}>{doc!.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
-        } />
-      )}
-      {panelItems.length > 0 ? (
-        <Collapse
-          activeKey={activeKeys}
-          onChange={(keys) => setActiveKeys(keys as string[])}
-          expandIcon={({ isActive }) => <CaretRightOutlined rotate={isActive ? 90 : 0} />}
-          items={panelItems.map(p => ({
-            key: p.key,
-            label: p.label,
-            children: <div>{p.items.map(item => renderItemContent(item, p.key))}</div>,
-          }))}
-        />
-      ) : (
-        <EmptyGuide description="未解析到任何内容" />
-      )}
-    </div>
-  ) : (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-      <EmptyGuide description="请输入文档内容或上传文件" />
-    </div>
-  );
-
-  const hiddenFileInput = (
-    <input
-      ref={fileInputRef}
-      type="file"
-      accept=".pdf,.docx"
-      style={{ display: 'none' }}
-      onChange={handleFileSelect}
-    />
-  );
-
-  if (isMobile) {
-    return (
-      <div style={{ position: 'relative' }}>
-        {hiddenFileInput}
-        <Tabs
-          size="small"
-          items={[
-            { key: 'input', label: hasParsedDoc ? '原文' : '输入', children: leftContent },
-            { key: 'parsed', label: `解析结果 (${totalItems})`, children: rightContent },
-          ]}
-        />
-      </div>
-    );
+function renderTextWithRefs(
+  text: string,
+  chunkId: string | null,
+  onRegulationClick: (chunkId: string) => void,
+  token: ReturnType<typeof theme.useToken>['token'],
+) {
+  if (!text) return null;
+  const parts: React.ReactNode[] = [];
+  const refPattern = /\[(R\d+|NR\d+)\]/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = refPattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    if (chunkId) {
+      parts.push(
+        <a key={match.index} role="button" tabIndex={0}
+          onClick={() => onRegulationClick(chunkId)}
+          onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onRegulationClick(chunkId); } }}
+          style={{ color: token.colorPrimary, fontWeight: 500, cursor: 'pointer' }}
+        >
+          {match[0]}
+        </a>,
+      );
+    } else {
+      parts.push(match[0]);
+    }
+    lastIndex = refPattern.lastIndex;
   }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  return parts;
+}
+
+function ClauseCard({
+  item, regulationMap, onRegulationClick, token,
+}: {
+  item: AuditResultItem;
+  regulationMap: Record<string, AuditRegulationItem>;
+  onRegulationClick: (chunkId: string) => void;
+  token: ReturnType<typeof theme.useToken>['token'];
+}) {
+  const merged = (item as AuditResultItem & { _mergedChunkIds?: string[] })._mergedChunkIds;
+  const chunkIds = merged || (item.chunk_id ? [item.chunk_id] : []);
+  const regs = chunkIds.map(id => regulationMap[id]).filter(Boolean);
+  const cfg = STATUS_ICON[item.status] || STATUS_ICON.attention;
+  const borderColor = item.status === 'non_compliant'
+    ? token.colorErrorBorder
+    : item.status === 'attention'
+      ? token.colorWarningBorder
+      : token.colorBorder;
 
   return (
-    <div style={{ position: 'relative' }}>
-      {hiddenFileInput}
-      <div style={{ display: 'flex', height: 'calc(100vh - 220px)', border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 6 }}>
-        {/* 左侧：原文 */}
-        <div style={{ width: '40%', borderRight: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '8px 12px', background: token.colorFillQuaternary, borderBottom: `1px solid ${token.colorBorderSecondary}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-              <Text strong style={{ whiteSpace: 'nowrap' }}>原文</Text>
-              {hasParsedDoc && file && (
-                <Text type="secondary" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {doc!.file_name}
-                </Text>
-              )}
-            </div>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              size="small"
-              onClick={() => fileInputRef.current?.click()}
-              loading={loading}
-            >
-              上传文件
-            </Button>
-          </div>
-          <div style={{ flex: 1, overflow: 'auto' }}>
-            {leftContent}
-          </div>
-        </div>
-        {/* 右侧：解析结果 */}
-        <div style={{ width: '60%', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '8px 12px', background: token.colorFillQuaternary, borderBottom: `1px solid ${token.colorBorderSecondary}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <Text strong>解析结果</Text>
-            </div>
-            {hasParsedDoc && (
-              <Button type="primary" onClick={onConfirm} loading={loading}>确认并检查</Button>
-            )}
-          </div>
-          {/* 险种选择区域 */}
-          {hasParsedDoc && (
-            <div style={{ padding: '8px 12px', background: token.colorBgContainer, borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
-              <Space>
-                <Text strong>险种类型：</Text>
-                <Select
-                  style={{ width: 160 }}
-                  placeholder="选择险种类型"
-                  value={selectedCategory || undefined}
-                  onChange={onCategoryChange}
-                  options={validCategories.map(c => ({ label: c, value: c }))}
-                />
-                {identifiedCategory && (
-                  <Text type="secondary">
-                    识别结果：{identifiedCategory} ({Math.round(categoryConfidence * 100)}%)
-                  </Text>
-                )}
-              </Space>
-            </div>
-          )}
-          {rightContent}
-        </div>
+    <Card
+      size="small"
+      style={{ borderLeft: `3px solid ${borderColor}`, marginBottom: 12 }}
+      styles={{ body: { padding: '12px 16px' } }}
+    >
+      {/* Clause tag + content as one block */}
+      <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6, marginBottom: 8 }}>
+        <Tag color={cfg.color} icon={cfg.icon} style={{ margin: 0, verticalAlign: 'middle' }}>
+          条款 {item.clause_number}
+        </Tag>
+        <span style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
+          {item.clause_content}
+        </span>
       </div>
-    </div>
+
+      {/* Conclusion */}
+      {item.conclusion && (
+        <div style={{
+          fontSize: token.fontSizeSM, color: token.colorText,
+          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          background: token.colorFillQuaternary,
+          padding: '8px 12px', borderRadius: 4, marginBottom: 8,
+        }}>
+          {renderTextWithRefs(item.conclusion, item.chunk_id, onRegulationClick, token)}
+        </div>
+      )}
+
+      {/* Regulation source links */}
+      {regs.length > 0 && (
+        <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>依据法规：</Text>
+          {regs.map(reg => {
+            const lawShort = reg.law_name?.replace(/[《》]/g, '');
+            const label = [lawShort, reg.article_number].filter(Boolean).join(' ');
+            return (
+              <a key={reg.chunk_id} role="button" tabIndex={0}
+                onClick={() => onRegulationClick(reg.chunk_id)}
+                onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onRegulationClick(reg.chunk_id); } }}
+                style={{ fontSize: token.fontSizeSM, color: token.colorPrimary }}
+              >
+                {label}
+              </a>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Suggestion */}
+      {item.suggestion && (
+        <div style={{ marginTop: 6, fontSize: token.fontSizeSM }}>
+          <Text type="secondary">修改建议：</Text>
+          {renderTextWithRefs(item.suggestion, item.chunk_id, onRegulationClick, token)}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -349,49 +179,63 @@ export default function CompliancePage() {
   const { token } = theme.useToken();
   const screens = Grid.useBreakpoint();
   const isMobile = !screens.md;
-  const [activeTab, setActiveTab] = useState('document');
-  const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState<ComplianceReport[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [regulationDrawerVisible, setRegulationDrawerVisible] = useState(false);
-  const [selectedRegulation, setSelectedRegulation] = useState<AuditRegulationItem | null>(null);
 
-  // 文档审查状态
+  // Two states: 'input' | 'result'
+  const [view, setView] = useState<'input' | 'result'>('input');
+
+  // Input state
   const [parsing, setParsing] = useState(false);
   const [richTextContent, setRichTextContent] = useState('');
   const [parsedDocument, setParsedDocument] = useState<ParsedDocument | null>(null);
   const [productName, setProductName] = useState('');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useUnsavedChanges(uploadedFile !== null);
-  const [checkingResult, setCheckingResult] = useState<ComplianceReport | null>(null);
 
+  // Category
   const [identifiedCategory, setIdentifiedCategory] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [categoryConfidence, setCategoryConfidence] = useState<number>(0);
   const [validCategories, setValidCategories] = useState<string[]>([]);
+  const showCategorySelect = identifiedCategory && categoryConfidence < 0.7;
+
+  // Result state
+  const [checkingResult, setCheckingResult] = useState<ComplianceReport | null>(null);
+  const [streamingViolations, setStreamingViolations] = useState<AuditResultItem[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamProgress, setStreamProgress] = useState('');
+  const streamAbortRef = useRef<AbortController | null>(null);
+
+  // Regulation drawer
+  const [regulationDrawerVisible, setRegulationDrawerVisible] = useState(false);
+  const [selectedRegulation, setSelectedRegulation] = useState<AuditRegulationItem | null>(null);
+
+  // History
+  const [history, setHistory] = useState<ComplianceReport[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
-    loadHistory();
     loadCategories();
+    loadHistory();
   }, []);
 
   const loadCategories = async () => {
-    try {
-      setValidCategories(await complianceApi.fetchCategories());
-    } catch {
-      // 降级为空列表
-    }
+    try { setValidCategories(await complianceApi.fetchCategories()); } catch { /* empty */ }
   };
 
   const loadHistory = async () => {
     setHistoryLoading(true);
-    try {
-      const data = await complianceApi.fetchComplianceReports();
-      setHistory(data);
-    } finally {
-      setHistoryLoading(false);
-    }
+    try { setHistory(await complianceApi.fetchComplianceReports()); }
+    finally { setHistoryLoading(false); }
+  };
+
+  const applyParseResult = (result: ParsedDocument, name?: string) => {
+    setParsedDocument(result);
+    setProductName(name || result.file_name || '');
+    setIdentifiedCategory(result.identified_category);
+    setCategoryConfidence(result.category_confidence);
+    setSelectedCategory(result.identified_category || '');
   };
 
   const handleFileUpload = async (file: File) => {
@@ -399,142 +243,91 @@ export default function CompliancePage() {
     setUploadedFile(file);
     try {
       const result = await complianceApi.parseFile(file);
-      setParsedDocument(result);
-      setProductName(result.file_name);
-      setCheckingResult(null);
-      setIdentifiedCategory(result.identified_category);
-      setCategoryConfidence(result.category_confidence);
-      setSelectedCategory(result.identified_category || '');
+      applyParseResult(result);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      message.error(`解析失败: ${msg}`);
+      message.error(`解析失败: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setParsing(false);
     }
   };
 
-  // 富文本解析：当文本变化时实时解析
   useEffect(() => {
     if (uploadedFile || !richTextContent.trim()) return;
     const timer = setTimeout(async () => {
       setParsing(true);
       try {
         const result = await complianceApi.parseRichText(richTextContent);
-        setParsedDocument(result);
-        setProductName('');
-        setCheckingResult(null);
-        setIdentifiedCategory(result.identified_category);
-        setCategoryConfidence(result.category_confidence);
-        setSelectedCategory(result.identified_category || '');
-      } catch {
-        // 静默失败，不显示错误
-      } finally {
-        setParsing(false);
-      }
+        applyParseResult(result, '');
+      } catch { /* silent */ }
+      finally { setParsing(false); }
     }, 500);
     return () => clearTimeout(timer);
   }, [richTextContent, uploadedFile]);
 
-  const handleConfirmReview = async () => {
+  const handleStartReview = () => {
     if (!parsedDocument) return;
-    setLoading(true);
-    try {
-      const report = await complianceApi.checkDocument({
+    setStreamingViolations([]);
+    setIsStreaming(true);
+    setStreamProgress('法规审查中...');
+    setCheckingResult(null);
+    setView('result');
+
+    streamAbortRef.current = complianceApi.checkDocumentStream(
+      {
         document_content: parsedDocument.combined_text,
         product_name: productName || parsedDocument.file_name || undefined,
         category: selectedCategory || undefined,
-      });
-      setCheckingResult(report);
-      message.success('合规检查完成');
-      loadHistory();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      message.error(`检查失败: ${msg}`);
-    } finally {
-      setLoading(false);
-    }
+      },
+      {
+        onViolation: (item) => setStreamingViolations(prev => [...prev, item]),
+        onProgress: (msg) => setStreamProgress(msg),
+        onDone: (data) => {
+          setIsStreaming(false);
+          setStreamProgress('');
+          setCheckingResult({
+            id: data.report_id,
+            product_name: data.product_name,
+            category: data.category,
+            mode: 'document',
+            result: {
+              summary: data.summary,
+              items: data.items,
+              regulations: data.regulations || [],
+              regulation_sources: data.regulation_sources,
+              category: data.category,
+              negative_list_result: data.negative_list_result,
+              clause_coverage: data.clause_coverage,
+            },
+            created_at: '',
+          });
+          message.success(`审查完成，发现 ${data.summary.non_compliant} 条不合规`);
+          loadHistory();
+        },
+        onError: (err) => {
+          setIsStreaming(false);
+          setStreamProgress('');
+          message.error(`检查失败: ${err}`);
+        },
+      },
+    );
   };
 
-  const buildItemColumns = (regulationMap: Record<string, AuditRegulationItem>): ColumnsType<AuditResultItem> => {
-    const makeResizeHandle = (colIndex: number) => (
-      <div
-        onMouseDown={(e) => handleResizableHeader(colIndex, e)}
-        style={{
-          position: 'absolute', right: -2, top: 0, bottom: 0, width: 5,
-          cursor: 'col-resize', zIndex: 1,
-        }}
-      />
-    );
-    return [
-      {
-        title: (<div style={{ position: 'relative' }}>产品条款{makeResizeHandle(0)}</div>),
-        dataIndex: 'clause_content', key: 'clause_content', width: colWidths[0], ellipsis: false,
-        render: (_: string, record: AuditResultItem) => (
-          <div>
-            <Text strong>{record.clause_number}</Text>
-            <div style={{ whiteSpace: 'pre-wrap', marginTop: 2 }}>{record.clause_content}</div>
-          </div>
-        ),
-      },
-      {
-        title: (<div style={{ position: 'relative' }}>审核结论{makeResizeHandle(1)}</div>),
-        key: 'conclusion', width: colWidths[1], ellipsis: false,
-        render: (_: unknown, record: AuditResultItem) => {
-          const cfg = STATUS_CONFIG[record.status] || STATUS_CONFIG.attention;
-          const desc = record.conclusion || (record.status === 'compliant' ? '符合法规要求' : cfg.label);
-          return (
-            <div>
-              <Tag color={cfg.color} icon={cfg.icon}>{cfg.label}</Tag>
-              <div style={{ marginTop: 4, fontSize: token.fontSizeSM, color: token.colorTextSecondary, lineHeight: 1.5 }}>{desc}</div>
-            </div>
-          );
-        },
-      },
-      {
-        title: (<div style={{ position: 'relative' }}>依据的法规{makeResizeHandle(2)}</div>),
-        key: 'regulation', width: colWidths[2], ellipsis: false,
-        render: (_: unknown, record: AuditResultItem) => {
-          const merged = (record as AuditResultItem & { _mergedChunkIds?: string[] })._mergedChunkIds;
-          const chunkIds = merged || (record.chunk_id ? [record.chunk_id] : []);
-          const regs = chunkIds.map(id => regulationMap[id]).filter(Boolean);
-          if (regs.length > 0) {
-            return (
-              <div>
-                {regs.map((reg, i) => {
-                  const lawShort = reg.law_name?.replace(/[《》]/g, '');
-                  const label = [lawShort, reg.article_number].filter(Boolean).join(' ');
-                  return (
-                    <div key={reg.chunk_id} style={i > 0 ? { marginTop: 4 } : undefined}>
-                      <a role="button" tabIndex={0}
-                        onClick={() => handleRegulationClick(reg.chunk_id)}
-                        onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleRegulationClick(reg.chunk_id); } }}
-                        style={{ cursor: 'pointer' }}
-                      >
-                        {label}
-                      </a>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          }
-          return null;
-        },
-      },
-      {
-        title: '修改建议', dataIndex: 'suggestion', key: 'suggestion', width: colWidths[3],
-        render: (text: string) => text ? text.split('\n').map((line, i) => <div key={i}>{line}</div>) : '-',
-      },
-    ];
+  const handleBack = () => {
+    streamAbortRef.current?.abort();
+    setIsStreaming(false);
+    setStreamingViolations([]);
+    setStreamProgress('');
+    setCheckingResult(null);
+    setView('input');
   };
 
   const handleViewReport = async (reportId: string) => {
     try {
       const report = await complianceApi.fetchComplianceReport(reportId);
       setCheckingResult(report);
+      setView('result');
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      message.error(`加载报告失败: ${msg}`);
+      message.error(`加载报告失败: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -544,51 +337,19 @@ export default function CompliancePage() {
       message.success('删除成功');
       loadHistory();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      message.error(`删除失败: ${msg}`);
+      message.error(`删除失败: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
   const handleRegulationClick = (chunkId: string) => {
     const regulations = checkingResult?.result?.regulations;
     if (!regulations) return;
-    const regulationMap = Object.fromEntries(regulations.map(r => [r.chunk_id, r]));
-    const regulation = regulationMap[chunkId];
-    if (regulation) {
-      setSelectedRegulation(regulation);
+    const reg = Object.fromEntries(regulations.map(r => [r.chunk_id, r]))[chunkId];
+    if (reg) {
+      setSelectedRegulation(reg);
       setRegulationDrawerVisible(true);
     }
   };
-
-  const SOURCE_TYPE_LABEL: Record<string, { label: string; color: string }> = {
-    category: { label: '险种专属', color: 'blue' },
-    general: { label: '通用法规', color: 'default' },
-    negative_list: { label: '负面清单', color: 'red' },
-  };
-
-  const [colWidths, setColWidths] = useState<number[]>([280, 300, 200, 200]);
-  const resizeRef = useRef<{ colIndex: number; startX: number; startWidth: number } | null>(null);
-
-  const handleResizableHeader = useCallback((colIndex: number, e: React.MouseEvent) => {
-    e.preventDefault();
-    resizeRef.current = { colIndex, startX: e.clientX, startWidth: colWidths[colIndex] };
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!resizeRef.current) return;
-      const diff = ev.clientX - resizeRef.current.startX;
-      setColWidths(prev => {
-        const next = [...prev];
-        next[resizeRef.current!.colIndex] = Math.max(100, resizeRef.current!.startWidth + diff);
-        return next;
-      });
-    };
-    const onMouseUp = () => {
-      resizeRef.current = null;
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-    };
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  }, [colWidths]);
 
   const mergeItemsByClause = (items: AuditResultItem[]): AuditResultItem[] => {
     const groups = new Map<string, AuditResultItem[]>();
@@ -599,218 +360,277 @@ export default function CompliancePage() {
     }
     const merged: AuditResultItem[] = [];
     for (const [, group] of groups) {
-      if (group.length === 1) {
-        merged.push(group[0]);
-        continue;
-      }
+      if (group.length === 1) { merged.push(group[0]); continue; }
       const statuses = group.map(g => g.status);
       const worst = statuses.includes('non_compliant') ? 'non_compliant' : statuses.includes('attention') ? 'attention' : 'compliant';
       const suggestions = [...new Set(group.map(g => g.suggestion).filter(Boolean))];
       const sources = [...new Set(group.map(g => g.chunk_id).filter(Boolean) as string[])];
       merged.push({
-        ...group[0],
-        status: worst,
-        suggestion: suggestions.join('\n'),
+        ...group[0], status: worst, suggestion: suggestions.join('\n'),
         chunk_id: sources[0] || null,
-        _mergedChunkIds: sources,
-        _mergedItems: group,
-      } as AuditResultItem & { _mergedChunkIds?: string[]; _mergedItems?: AuditResultItem[] });
+        _mergedChunkIds: sources, _mergedItems: group,
+      } as AuditResultItem & { _mergedChunkIds?: string[] });
     }
     return merged;
   };
 
-  const renderConclusionSection = (docResult: ComplianceResult) => {
-    const s = docResult.summary;
-    const hasViolation = (s.non_compliant || 0) > 0;
-    const negResult = docResult.negative_list_result;
+  // ─── INPUT VIEW ────────────────────────────────────────────
+  const renderInputView = () => {
+    const canReview = parsedDocument && !parsing;
     return (
-      <div>
-        <div style={{ marginBottom: 8 }}>
-          {hasViolation
-            ? <Tag color="error" icon={<CloseCircleOutlined />} style={{ fontSize: 16, padding: '4px 16px' }}>审核未通过</Tag>
-            : <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 16, padding: '4px 16px' }}>审核通过</Tag>
-          }
-        </div>
-        <Space size={isMobile ? 'small' : 'middle'} wrap>
-          <Tag color="success" icon={<CheckCircleOutlined />}>合规 {s.compliant || 0}</Tag>
-          <Tag color="error" icon={<CloseCircleOutlined />}>不合规 {s.non_compliant || 0}</Tag>
-          <Tag color="warning" icon={<ExclamationCircleOutlined />}>需关注 {s.attention || 0}</Tag>
-          {negResult && (
-            <Tag color={negResult === 'violated' ? 'error' : 'success'}
-              icon={negResult === 'violated' ? <CloseCircleOutlined /> : <CheckCircleOutlined />}>
-              负面清单{negResult === 'violated' ? '违规' : '通过'}
-            </Tag>
+      <div style={{ maxWidth: 720, margin: '0 auto' }}>
+        {/* Upload area */}
+        <Card
+          style={{ marginBottom: 16, cursor: 'pointer', textAlign: 'center' }}
+          styles={{ body: { padding: isMobile ? 24 : 40 } }}
+          onClick={() => fileInputRef.current?.click()}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click(); }}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.docx"
+            style={{ display: 'none' }}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); }}
+          />
+          {uploadedFile ? (
+            <div>
+              <FileTextOutlined style={{ fontSize: 32, color: token.colorPrimary, marginBottom: 8 }} />
+              <div><Text strong>{uploadedFile.name}</Text></div>
+              <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>点击更换文件</Text>
+            </div>
+          ) : (
+            <div>
+              <UploadOutlined style={{ fontSize: 32, color: token.colorTextSecondary, marginBottom: 8 }} />
+              <div><Text>点击上传文件</Text></div>
+              <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>支持 PDF、DOCX</Text>
+            </div>
           )}
-        </Space>
+        </Card>
+
+        {/* Divider */}
+        <div style={{ textAlign: 'center', margin: '8px 0', color: token.colorTextSecondary }}>
+          <Text type="secondary">或粘贴文本</Text>
+        </div>
+
+        {/* Text input */}
+        <TextArea
+          style={{ marginBottom: 16, minHeight: 160, resize: 'vertical' }}
+          placeholder="请输入或粘贴保险条款文档内容…"
+          aria-label="保险条款文档内容"
+          spellCheck
+          value={richTextContent}
+          onChange={(e) => setRichTextContent(e.target.value)}
+          disabled={!!uploadedFile}
+        />
+
+        {/* Parsing indicator */}
+        {parsing && (
+          <div style={{ textAlign: 'center', padding: '8px 0' }}>
+            <Spin size="small" /> <Text type="secondary" style={{ marginLeft: 8 }}>正在解析文档…</Text>
+          </div>
+        )}
+
+        {/* Category selection — only show when low confidence */}
+        {showCategorySelect && (
+          <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Text>险种类型：</Text>
+            <Select
+              style={{ width: 160 }}
+              placeholder="选择险种类型"
+              value={selectedCategory || undefined}
+              onChange={setSelectedCategory}
+              options={validCategories.map(c => ({ label: c, value: c }))}
+            />
+            <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
+              自动识别：{identifiedCategory} ({Math.round(categoryConfidence * 100)}%)
+            </Text>
+          </div>
+        )}
+
+        {/* Start button */}
+        <Button
+          type="primary"
+          size="large"
+          block
+          disabled={!canReview}
+          loading={parsing}
+          onClick={handleStartReview}
+          icon={<SafetyCertificateOutlined />}
+        >
+          开始审查
+        </Button>
+
+        {/* History */}
+        {history.length > 0 && (
+          <div style={{ marginTop: 32 }}>
+            <Text strong style={{ display: 'block', marginBottom: 12, color: token.colorTextSecondary }}>
+              审查历史
+            </Text>
+            {history.slice(0, 10).map(report => {
+              const s = report.result?.summary;
+              const hasViolation = (s?.non_compliant || 0) > 0;
+              return (
+                <div
+                  key={report.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleViewReport(report.id)}
+                  onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') handleViewReport(report.id); }}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '10px 12px', marginBottom: 4, borderRadius: 6, cursor: 'pointer',
+                    background: token.colorBgContainer, border: `1px solid ${token.colorBorderSecondary}`,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {hasViolation
+                        ? <CloseCircleOutlined style={{ color: token.colorError }} />
+                        : <CheckCircleOutlined style={{ color: token.colorSuccess }} />
+                      }
+                      <Text strong ellipsis style={{ maxWidth: 200 }}>{report.product_name}</Text>
+                      <Tag style={{ margin: 0 }}>{report.category}</Tag>
+                    </div>
+                    <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
+                      {s ? `${s.non_compliant || 0} 项不合规` : '—'} · {report.created_at?.slice(0, 10)}
+                    </Text>
+                  </div>
+                  <Popconfirm title="确定删除？" onConfirm={(e) => { e?.stopPropagation(); handleDeleteReport(report.id); }}>
+                    <Button type="text" size="small" danger icon={<DeleteOutlined />}
+                      onClick={(e) => e.stopPropagation()} />
+                  </Popconfirm>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   };
 
-  const renderRegulationSourcesSection = (regulations: AuditRegulationItem[]) => {
-    const groups: Record<string, AuditRegulationItem[]> = {};
-    for (const r of regulations) {
-      const key = r.source_type || 'general';
-      (groups[key] ??= []).push(r);
-    }
-    const ordered = ['category', 'general', 'negative_list'].filter(k => groups[k]?.length);
-    const tabItems = ordered.map(type => {
-      const cfg = SOURCE_TYPE_LABEL[type] ?? { label: type, color: 'default' };
-      const items = groups[type];
-      const lawNames = [...new Set(items.map(r => r.law_name))];
-      const collapseItems = lawNames.map(name => {
-        const articles = items.filter(r => r.law_name === name);
-        return {
-          key: name,
-          label: <span>{name}（{articles.length} 条）</span>,
-          children: (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {articles.map(a => (
-                <Tag key={a.chunk_id} style={{ cursor: 'pointer' }} role="button" tabIndex={0} onClick={() => handleRegulationClick(a.chunk_id)} onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleRegulationClick(a.chunk_id); } }}>
-                  {a.article_number}
-                </Tag>
-              ))}
-            </div>
-          ),
-        };
-      });
-      return {
-        key: type,
-        label: <span><Tag color={cfg.color}>{cfg.label}</Tag> {items.length} 条</span>,
-        children: <Collapse size="small" items={collapseItems} />,
-      };
-    });
-    return <Tabs size="small" items={tabItems} />;
-  };
-
-  const renderReportDetail = () => {
-    if (!checkingResult?.result?.summary) return null;
-    const docResult = checkingResult.result;
+  // ─── RESULT VIEW ───────────────────────────────────────────
+  const renderResultView = () => {
+    const docResult = checkingResult?.result;
     const regulationMap: Record<string, AuditRegulationItem> = {};
-    for (const r of (docResult.regulations || [])) {
-      regulationMap[r.chunk_id] = r;
+    if (docResult?.regulations) {
+      for (const r of docResult.regulations) regulationMap[r.chunk_id] = r;
     }
-    const totalItems = (docResult.items || []).length;
+
+    // Streaming state
+    if (isStreaming) {
+      const merged = mergeItemsByClause(streamingViolations);
+      return (
+        <div>
+          {/* Header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <Button type="text" icon={<ArrowLeftOutlined />} onClick={handleBack}>返回</Button>
+            <Button type="text" danger icon={<CloseOutlined />} onClick={handleBack}>取消审查</Button>
+          </div>
+
+          {/* Progress */}
+          <Alert
+            type="info"
+            showIcon
+            message={streamProgress || '正在分析…'}
+            style={{ marginBottom: 16 }}
+          />
+
+          {/* Streaming violations */}
+          {merged.length > 0 ? (
+            <>
+              <Text strong style={{ display: 'block', marginBottom: 12 }}>
+                已发现 {streamingViolations.length} 项不合规
+              </Text>
+              {merged.map((item, i) => (
+                <ClauseCard
+                  key={`${item.clause_number}-${item.check_type}-${i}`}
+                  item={item}
+                  regulationMap={regulationMap}
+                  onRegulationClick={handleRegulationClick}
+                  token={token}
+                />
+              ))}
+            </>
+          ) : (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}><Text type="secondary">正在分析中…</Text></div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Final result
+    if (!docResult?.summary) return null;
+    const s = docResult.summary;
+    const hasViolation = (s.non_compliant || 0) > 0;
+    const negResult = docResult.negative_list_result;
+    const merged = mergeItemsByClause(docResult.items || []);
+    const coverage = docResult.clause_coverage;
+
     return (
-      <>
-        <Card type="inner" title="审核结论" size="small" style={{ marginBottom: 16 }}>
-          {renderConclusionSection(docResult)}
-          {docResult.clause_coverage && docResult.clause_coverage.unchecked.length > 0 && (
-            <Alert type="warning" showIcon style={{ marginTop: 12 }} message="遗漏条款提示" description={
-              <span>共 {docResult.clause_coverage.total} 个条款，已检查 {docResult.clause_coverage.checked} 个。未覆盖：
-                {docResult.clause_coverage.unchecked.map(c => <Tag key={c} style={{ marginLeft: 4 }}>{c}</Tag>)}
-              </span>
-            } />
+      <div>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <Button type="text" icon={<ArrowLeftOutlined />} onClick={handleBack}>返回</Button>
+          <Text strong>{checkingResult?.product_name}</Text>
+          <div />
+        </div>
+
+        {/* Summary card */}
+        <Card
+          style={{ marginBottom: 16, borderLeft: `3px solid ${hasViolation ? token.colorError : token.colorSuccess}` }}
+          styles={{ body: { padding: 16 } }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            {hasViolation
+              ? <Tag color="error" icon={<CloseCircleOutlined />} style={{ fontSize: 16, padding: '4px 16px' }}>审核未通过</Tag>
+              : <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 16, padding: '4px 16px' }}>审核通过</Tag>
+            }
+            <Space size={isMobile ? 'small' : 'middle'} wrap>
+              {(s.compliant || 0) > 0 && <Tag color="success" icon={<CheckCircleOutlined />}>合规 {s.compliant}</Tag>}
+              <Tag color="error" icon={<CloseCircleOutlined />}>不合规 {s.non_compliant || 0}</Tag>
+              {(s.attention || 0) > 0 && <Tag color="warning" icon={<ExclamationCircleOutlined />}>需关注 {s.attention}</Tag>}
+              {negResult && (
+                <Tag color={negResult === 'violated' ? 'error' : 'success'}
+                  icon={negResult === 'violated' ? <CloseCircleOutlined /> : <CheckCircleOutlined />}>
+                  负面清单{negResult === 'violated' ? '违规' : '通过'}
+                </Tag>
+              )}
+            </Space>
+          </div>
+          {coverage && coverage.total > 0 && (
+            <div style={{ marginTop: 8, fontSize: token.fontSizeSM, color: token.colorTextSecondary }}>
+              已审查 {coverage.checked}/{coverage.total} 条条款，发现 {coverage.flagged ?? s.non_compliant} 项不合规
+              {coverage.definition_chapter && (
+                <span>（已排除释义第{coverage.definition_chapter}章）</span>
+              )}
+            </div>
           )}
         </Card>
 
-        {docResult.regulations && docResult.regulations.length > 0 && (
-          <Card type="inner" title={`法规依据（${docResult.regulations.length} 条）`} size="small" style={{ marginBottom: 16 }}>
-            {renderRegulationSourcesSection(docResult.regulations)}
-          </Card>
-        )}
-
-        {totalItems > 0 && (
-          <Card type="inner" title={`产品条款（共 ${totalItems} 项）`} size="small">
-            <Table
-              dataSource={mergeItemsByClause(docResult.items)}
-              columns={buildItemColumns(regulationMap)}
-              rowKey={(r: AuditResultItem) => `${r.clause_number}-${r.check_type}`}
-              size="small"
-              pagination={false}
-              tableLayout="fixed"
-              rowClassName={(record: AuditResultItem) => record.status === 'non_compliant' ? 'ant-table-row-error' : ''}
-            />
-          </Card>
-        )}
-      </>
+        {/* Clause cards */}
+        {merged.map((item, i) => (
+          <ClauseCard
+            key={`${item.clause_number}-${item.check_type}-${i}`}
+            item={item}
+            regulationMap={regulationMap}
+            onRegulationClick={handleRegulationClick}
+            token={token}
+          />
+        ))}
+      </div>
     );
   };
 
   return (
     <div>
       <PageHeader icon={<SafetyCertificateOutlined />} title="合规检查助手" description="检查保险条款文档的合规性" isMobile={isMobile} />
-
-      <Tabs
-        activeKey={activeTab}
-        onChange={setActiveTab}
-        items={[
-          {
-            key: 'document',
-            label: <span><FileTextOutlined /> 条款文档审查</span>,
-            children: (
-              <div aria-live="polite">
-                <DocumentReviewPanel
-                  document={parsedDocument}
-                  file={uploadedFile}
-                  richText={richTextContent}
-                  onRichTextChange={setRichTextContent}
-                  onFileUpload={handleFileUpload}
-                  onConfirm={handleConfirmReview}
-                  loading={loading || parsing}
-                  selectedCategory={selectedCategory}
-                  onCategoryChange={setSelectedCategory}
-                  identifiedCategory={identifiedCategory}
-                  categoryConfidence={categoryConfidence}
-                  validCategories={validCategories}
-                />
-              </div>
-            ),
-          },
-          {
-            key: 'history',
-            label: <span><HistoryOutlined /> 检查历史</span>,
-            children: (
-              <div>
-                <div style={{ marginBottom: 12 }}>
-                  <Text strong style={{ fontSize: token.fontSizeHeading5 }}>审核列表</Text>
-                </div>
-                <Table
-                  dataSource={history}
-                  loading={historyLoading}
-                  rowKey="id"
-                  size="small"
-                  pagination={{ pageSize: 5, showSizeChanger: true, pageSizeOptions: ['5', '10', '20', '50'], showTotal: (total) => `共 ${total} 条` }}
-                  onRow={(record: ComplianceReport) => ({
-                    onClick: () => handleViewReport(record.id),
-                    tabIndex: 0,
-                    onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleViewReport(record.id); } },
-                    style: { cursor: 'pointer' },
-                  })}
-                  columns={[
-                    { title: 'ID', dataIndex: 'id', key: 'id', width: 100, ellipsis: true },
-                    { title: '产品名称', dataIndex: 'product_name', key: 'product_name', ellipsis: true },
-                    { title: '险种类型', dataIndex: 'category', key: 'category', width: 90 },
-                    { title: '审核时间', dataIndex: 'created_at', key: 'created_at', width: 200 },
-                    {
-                      title: '操作', key: 'action', width: 100,
-                      render: (_: unknown, record: ComplianceReport) => (
-                        <Space size="small">
-                          <Button type="link" size="small" icon={<EyeOutlined />}
-                            onClick={(e) => { e.stopPropagation(); handleViewReport(record.id); }} />
-                          <Popconfirm title="确定删除？此操作不可恢复。" onConfirm={(e) => { e?.stopPropagation(); handleDeleteReport(record.id); }}>
-                            <Button type="link" danger size="small" icon={<DeleteOutlined />}
-                              onClick={(e) => e.stopPropagation()} />
-                          </Popconfirm>
-                        </Space>
-                      ),
-                    },
-                  ]}
-                />
-                {checkingResult && (
-                  <Card
-                    style={{ marginTop: 24, borderTop: `2px solid ${token.colorPrimary}` }}
-                    title={<span style={{ fontSize: token.fontSizeHeading5 }}>审核详情 — {checkingResult.product_name || ''}</span>}
-                    extra={<Button type="text" icon={<CloseOutlined />} onClick={() => setCheckingResult(null)}>关闭</Button>}
-                  >
-                    {renderReportDetail()}
-                  </Card>
-                )}
-              </div>
-            ),
-          },
-        ]}
-      />
-
+      {view === 'input' ? renderInputView() : renderResultView()}
       <RegulationDrawer
         visible={regulationDrawerVisible}
         regulation={selectedRegulation}

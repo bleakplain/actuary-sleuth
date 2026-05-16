@@ -1,15 +1,91 @@
 import client from './client';
-import type { ComplianceReport, ParsedDocument } from '../types';
+import type { ComplianceReport, AuditResultItem, AuditRegulationItem, ParsedDocument } from '../types';
 
-export async function checkDocument(params: {
-  document_content: string;
-  product_name?: string;
-  category?: string;
-}): Promise<ComplianceReport> {
-  const { data } = await client.post('/api/compliance/check/document', params, {
-    timeout: 360000,
-  });
-  return data;
+interface DoneData {
+  report_id: string;
+  product_name: string;
+  category: string;
+  summary: { compliant: number; non_compliant: number; attention: number };
+  negative_list_result: string;
+  regulation_sources: Record<string, string[]>;
+  regulations: AuditRegulationItem[];
+  clause_coverage: {
+    total: number;
+    checked: number;
+    flagged: number;
+    unchecked: string[];
+    all_total: number;
+    definition_chapter?: string;
+    has_notices?: boolean;
+    has_health?: boolean;
+    has_exclusions?: boolean;
+    has_tables?: boolean;
+  };
+}
+
+export function checkDocumentStream(
+  params: { document_content: string; product_name?: string; category?: string },
+  callbacks: {
+    onViolation: (item: AuditResultItem) => void;
+    onProgress: (msg: string) => void;
+    onDone: (data: DoneData & { items: AuditResultItem[] }) => void;
+    onError: (err: string) => void;
+  },
+): AbortController {
+  const controller = new AbortController();
+
+  fetch('/api/compliance/check/document/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+    signal: controller.signal,
+  })
+    .then(async (res) => {
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error('No response body');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      const items: AuditResultItem[] = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          try {
+            const data = JSON.parse(line.slice(5).trim());
+            if (data.type === 'violation') {
+              const item = data.data as AuditResultItem;
+              items.push(item);
+              callbacks.onViolation(item);
+            } else if (data.type === 'progress') {
+              callbacks.onProgress(data.data);
+            } else if (data.type === 'done') {
+              callbacks.onDone({ ...data.data, items });
+            } else if (data.type === 'error') {
+              callbacks.onError(data.data);
+            }
+          } catch {
+            // skip malformed SSE lines
+          }
+        }
+      }
+    })
+    .catch((err) => {
+      if (err.name !== 'AbortError') {
+        callbacks.onError(err.message);
+      }
+    });
+
+  return controller;
 }
 
 export async function fetchComplianceReports(): Promise<ComplianceReport[]> {

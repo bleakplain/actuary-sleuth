@@ -15,6 +15,7 @@ export interface AuditResultItem {
   clause_content: string;
   status: string;
   chunk_id: string | null;
+  source_ref?: string;
   suggestion: string;
   conclusion?: string;
 }
