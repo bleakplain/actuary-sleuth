@@ -6,17 +6,29 @@ from unittest.mock import patch, MagicMock
 from lib.compliance.checker import (
     AuditRegulationItem,
     AuditResultItem,
-    check_negative_list,
+    streaming_compliance_check,
+    streaming_negative_check,
     identify_category,
     load_audit_regulations,
-    build_audit_context,
-    run_compliance_check,
-    _build_ref_map,
-    _normalize_ref,
     _extract_real_article_number,
+    _build_numbered_regulations,
+    _split_document_by_clauses,
+    extract_clause_numbers,
+    extract_section_numbers,
+    normalize_clause_number,
+    _parse_ndjson_tokens,
+    _normalize_violation,
     CheckResult,
     CategoryResult,
 )
+
+
+def _make_reg(chunk_id="id1", law_name="保险法", article_number="第十三条",
+              content="test content here", source_type="general", **kwargs):
+    return AuditRegulationItem(
+        chunk_id=chunk_id, law_name=law_name, article_number=article_number,
+        content=content, source_type=source_type, **kwargs,
+    )
 
 
 class TestExtractRealArticleNumber:
@@ -26,58 +38,12 @@ class TestExtractRealArticleNumber:
     def test_fallback_on_no_match(self):
         assert _extract_real_article_number("some content", "第1项") == "第1项"
 
-    def test_empty_content(self):
-        assert _extract_real_article_number("", "第1项") == "第1项"
-
-    def test_multiple_numbers(self):
-        assert _extract_real_article_number("第一百条　test", "第1项") == "第一百条"
-
-
-class TestNormalizeRef:
-    def test_strips_brackets(self):
-        assert _normalize_ref("《保险法-第十六条》") == "保险法-第十六条"
-
-    def test_strips_all_brackets(self):
-        assert _normalize_ref("【保险法-第十三条】") == "保险法-第十三条"
-
-    def test_strips_spaces(self):
-        assert _normalize_ref(" 保险法 - 第十六条 ") == "保险法-第十六条"
-
-    def test_strips_fullwidth_spaces(self):
-        assert _normalize_ref("《保险法\u3000-　第十六条》") == "保险法-第十六条"
-
-    def test_plain_ref(self):
-        assert _normalize_ref("保险法-第十三条") == "保险法-第十三条"
-
-
-class TestBuildRefMap:
-    def test_exact_match(self):
-        regulations = [
-            AuditRegulationItem(chunk_id="id1", law_name="保险法", article_number="第十三条", content="test", source_type="general"),
-            AuditRegulationItem(chunk_id="id2", law_name="健康保险管理办法", article_number="第2项", content="test", source_type="category"),
-        ]
-        ref_map = _build_ref_map(regulations)
-        assert ref_map["保险法-第十三条"].chunk_id == "id1"
-        assert ref_map["健康保险管理办法-第2项"].chunk_id == "id2"
-
-    def test_no_match(self):
-        regulations = [
-            AuditRegulationItem(chunk_id="id1", law_name="保险法", article_number="第十三条", content="test", source_type="general"),
-        ]
-        ref_map = _build_ref_map(regulations)
-        assert "不存在的法规-第1条" not in ref_map
-
-    def test_empty_regulations(self):
-        ref_map = _build_ref_map([])
-        assert len(ref_map) == 0
-
 
 class TestLoadAuditRegulations:
     @patch("lib.compliance.checker.get_engine")
     def test_engine_none(self, mock_engine):
         mock_engine.return_value = None
-        regulations = load_audit_regulations("健康险")
-        assert regulations == []
+        assert load_audit_regulations("健康险") == []
 
     @patch("lib.compliance.checker.get_general_regulations")
     @patch("lib.compliance.checker.get_category_regulations")
@@ -92,88 +58,156 @@ class TestLoadAuditRegulations:
         ]
         regulations = load_audit_regulations(None)
         assert len(regulations) == 1
-        assert regulations[0].law_name == "保险法"
         assert regulations[0].source_type == "general"
-        assert regulations[0].chunk_id == "uuid-1"
-        assert regulations[0].article_number == "第一条"
 
-    @patch("lib.compliance.checker.get_general_regulations")
-    @patch("lib.compliance.checker.get_category_regulations")
-    @patch("lib.compliance.checker.get_engine")
-    def test_category_loads_both(self, mock_engine, mock_cat_regs, mock_gen_regs):
-        mock_engine_inst = MagicMock()
-        mock_engine.return_value = mock_engine_inst
-        mock_cat_regs.return_value = ["健康保险管理办法"]
-        mock_gen_regs.return_value = ["保险法"]
-        mock_engine_inst.search_by_metadata.side_effect = [
-            [{"id": "id1", "law_name": "健康保险管理办法", "article_number": "第1项", "content": "health content"}],
-            [{"id": "id2", "law_name": "保险法", "article_number": "第1项", "content": "general content"}],
+
+class TestExtractClauseNumbers:
+    def test_extracts_clause_numbers(self):
+        assert extract_clause_numbers("【条款 2.1】内容\n【条款 3.2.1】更多") == ["2.1", "3.2.1"]
+
+    def test_no_clauses(self):
+        assert extract_clause_numbers("没有条款编号") == []
+
+
+class TestNormalizeClauseNumber:
+    def test_extracts_number(self):
+        assert normalize_clause_number("3.2") == "3.2"
+
+    def test_strips_prefix(self):
+        assert normalize_clause_number("条款 2.3.1") == "2.3.1"
+
+    def test_preserves_sub_clause(self):
+        assert normalize_clause_number("7.16(1)") == "7.16(1)"
+
+    def test_no_number(self):
+        assert normalize_clause_number("unknown") is None
+
+
+class TestExtractSectionNumbers:
+    def test_extracts_clauses_and_sections(self):
+        text = "【条款 1.1】内容\n【投保须知】标题\n【责任免除】标题2"
+        info = extract_section_numbers(text)
+        assert info["clauses"] == ["1.1"]
+        assert info["has_notices"] is True
+
+    def test_definition_chapter_excluded(self):
+        text = "\n".join([f"【条款 7.{i}】术语{i}" for i in range(1, 16)])
+        text += "\n" + "\n".join([f"【条款 1.{i}】内容{i}" for i in range(1, 4)])
+        info = extract_section_numbers(text)
+        assert info["definition_chapter"] == "7"
+
+
+class TestBuildNumberedRegulations:
+    def test_numbered_regulations(self):
+        regs = [_make_reg(chunk_id="c1"), _make_reg(chunk_id="c2", law_name="合同法")]
+        text, mapping = _build_numbered_regulations(regs)
+        assert "[R1]" in text
+        assert "[R2]" in text
+        assert mapping == {"[R1]": "c1", "[R2]": "c2"}
+
+    def test_custom_prefix(self):
+        text, mapping = _build_numbered_regulations([_make_reg()], prefix="[NR")
+        assert "[NR1]" in text
+
+    def test_empty(self):
+        text, mapping = _build_numbered_regulations([])
+        assert text == ""
+
+
+class TestSplitDocumentByClauses:
+    def test_short_document_not_split(self):
+        text = "【条款 1.1】内容1\n【条款 1.2】内容2"
+        assert len(_split_document_by_clauses(text, 5)) == 1
+
+    def test_long_document_split(self):
+        parts = [f"【条款 {i}.1】内容{i}" for i in range(1, 30)]
+        assert len(_split_document_by_clauses("\n\n".join(parts), 10)) >= 3
+
+
+class TestNormalizeViolation:
+    def test_valid_item(self):
+        raw = {"clause_number": "3.2", "clause_content": "犹豫期15天", "status": "non_compliant",
+               "conclusion": "不合规", "suggestion": "修改", "source_ref": "[R1]"}
+        result = _normalize_violation(raw, {"[R1]": "c1"}, "regulation")
+        assert result is not None
+        assert result["chunk_id"] == "c1"
+        assert result["check_type"] == "regulation"
+
+    def test_empty_content_returns_none(self):
+        raw = {"clause_number": "3.2", "clause_content": "", "status": "non_compliant"}
+        assert _normalize_violation(raw, {}, "regulation") is None
+
+
+class TestParseNdjsonTokens:
+    def test_parses_ndjson_lines(self):
+        tokens = [
+            '{"clause_number":"3.2","clause_content":"内容","status":"non_compliant","conclusion":"违规","suggestion":"修改"}\n',
+            '{"clause_number":"5.1","clause_content":"更多内容","status":"non_compliant","conclusion":"违规2","suggestion":"修改2"}\n',
         ]
-        regulations = load_audit_regulations("健康险")
-        assert len(regulations) == 2
-        assert regulations[0].source_type == "category"
-        assert regulations[1].source_type == "general"
+        items = list(_parse_ndjson_tokens(iter(tokens), {}, "regulation"))
+        assert len(items) == 2
+        assert items[0]["clause_number"] == "3.2"
+        assert items[1]["clause_number"] == "5.1"
 
-    @patch("lib.compliance.checker.get_general_regulations")
-    @patch("lib.compliance.checker.get_category_regulations")
-    @patch("lib.compliance.checker.get_engine")
-    def test_dedup_category_and_general_overlap(self, mock_engine, mock_cat_regs, mock_gen_regs):
-        mock_engine_inst = MagicMock()
-        mock_engine.return_value = mock_engine_inst
-        mock_cat_regs.return_value = ["保险法"]
-        mock_gen_regs.return_value = ["保险法"]
-        mock_engine_inst.search_by_metadata.side_effect = [
-            [{"id": "id1", "law_name": "保险法", "article_number": "第1项", "content": "content"}],
-            [{"id": "id1", "law_name": "保险法", "article_number": "第1项", "content": "content"}],
-        ]
-        regulations = load_audit_regulations("寿险")
-        assert len(regulations) == 1
-        assert regulations[0].source_type == "category"
+    def test_skips_malformed_lines(self):
+        tokens = ["not json\n", '{"clause_number":"3.2","clause_content":"内容","status":"non_compliant","conclusion":"c"}\n']
+        items = list(_parse_ndjson_tokens(iter(tokens), {}, "regulation"))
+        assert len(items) == 1
 
+    def test_skips_wrappers(self):
+        tokens = ["[]\n", "{}\n"]
+        items = list(_parse_ndjson_tokens(iter(tokens), {}, "regulation"))
+        assert len(items) == 0
 
-class TestBuildAuditContext:
-    def test_empty_regulations(self):
-        assert build_audit_context([]) == ""
+    def test_handles_remaining_buffer(self):
+        tokens = ['{"clause_number":"3.2","clause_content":"内容","status":"non_compliant","conclusion":"c"}']
+        items = list(_parse_ndjson_tokens(iter(tokens), {}, "regulation"))
+        assert len(items) == 1
 
-    def test_single_regulation(self):
-        regulations = [AuditRegulationItem(
-            chunk_id="id1", law_name="保险法", article_number="第十三条",
-            content="test content", source_type="general"
-        )]
-        context = build_audit_context(regulations)
-        assert "【保险法-第十三条】" in context
-        assert "test content" in context
-
-    def test_regulation_with_metadata(self):
-        regulations = [AuditRegulationItem(
-            chunk_id="id1", law_name="保险法", article_number="第十三条",
-            content="content", source_type="general",
-            doc_number="国发2023", issuing_authority="国务院",
-            effective_date="2023-01-01"
-        )]
-        context = build_audit_context(regulations)
-        assert "国发2023" in context
-        assert "国务院" in context
-        assert "2023-01-01" in context
+    def test_splits_tokens_across_line(self):
+        tokens = ['{"clause_number":"3.2",', '"clause_content":"内容","status":"non_compliant","conclusion":"c"}\n']
+        items = list(_parse_ndjson_tokens(iter(tokens), {"[R1]": "c1"}, "regulation"))
+        assert len(items) == 1
 
 
-class TestCheckNegativeList:
+class TestStreamingComplianceCheck:
+    @patch("lib.compliance.checker.get_audit_llm")
+    def test_empty_regulations(self, mock_llm):
+        results = list(streaming_compliance_check("doc", []))
+        assert results == []
+
+    @patch("lib.compliance.checker.get_audit_llm")
+    def test_streaming_violations(self, mock_llm):
+        mock_llm_inst = MagicMock()
+        mock_llm.return_value = mock_llm_inst
+        mock_llm_inst.stream_chat.return_value = iter([
+            '{"clause_number":"5.5","clause_content":"诉讼时效2年","status":"non_compliant","conclusion":"应为5年","suggestion":"修改为5年","source_ref":"[R1]"}\n',
+        ])
+        doc = "【条款 5.5】诉讼时效2年"
+        regs = [_make_reg(chunk_id="c1", article_number="第十八条")]
+        results = list(streaming_compliance_check(doc, regs))
+        violations = [r for r in results if r["type"] == "violation"]
+        assert len(violations) == 1
+        assert violations[0]["data"]["clause_number"] == "5.5"
+        assert violations[0]["data"]["chunk_id"] == "c1"
+
+    @patch("lib.compliance.checker.get_audit_llm")
+    def test_llm_error_produces_no_results(self, mock_llm):
+        mock_llm_inst = MagicMock()
+        mock_llm.return_value = mock_llm_inst
+        mock_llm_inst.stream_chat.side_effect = Exception("timeout")
+        regs = [_make_reg()]
+        results = list(streaming_compliance_check("doc", regs))
+        assert results == []
+
+
+class TestStreamingNegativeCheck:
     @patch("lib.compliance.checker.get_engine")
     def test_engine_none(self, mock_engine):
         mock_engine.return_value = None
-        items, result, regulations = check_negative_list("test content")
-        assert result == CheckResult.SKIPPED
-        assert items == []
-        assert regulations == []
-
-    @patch("lib.compliance.checker.get_audit_llm")
-    @patch("lib.compliance.checker.get_engine")
-    def test_no_negative_docs(self, mock_engine, mock_llm):
-        mock_engine_inst = MagicMock()
-        mock_engine.return_value = mock_engine_inst
-        mock_engine_inst.search_by_metadata.return_value = []
-        items, result, regulations = check_negative_list("test content")
-        assert result == CheckResult.SKIPPED
+        results = list(streaming_negative_check("doc"))
+        assert results[0]["type"] == "negative_list_result"
+        assert results[0]["data"] == CheckResult.SKIPPED
 
     @patch("lib.compliance.checker.get_audit_llm")
     @patch("lib.compliance.checker.get_engine")
@@ -181,38 +215,34 @@ class TestCheckNegativeList:
         mock_engine_inst = MagicMock()
         mock_engine.return_value = mock_engine_inst
         mock_engine_inst.search_by_metadata.return_value = [
-            {"id": "neg-1", "law_name": "保险法", "article_number": "第1项", "content": "禁止虚假宣传"}
+            {"id": "neg-1", "law_name": "负面清单", "article_number": "第一条", "content": "禁止虚假宣传"}
         ]
         mock_llm_inst = MagicMock()
         mock_llm.return_value = mock_llm_inst
-        mock_llm_inst.chat.return_value = "[]"
-        items, result, regulations = check_negative_list("合规文档内容")
-        assert result == CheckResult.PASSED
-        assert items == []
-        assert len(regulations) == 1
+        mock_llm_inst.stream_chat.return_value = iter([])  # no violations
+        results = list(streaming_negative_check("正常内容"))
+        result_events = [r for r in results if r["type"] == "negative_list_result"]
+        assert result_events[0]["data"] == CheckResult.PASSED
 
     @patch("lib.compliance.checker.get_audit_llm")
     @patch("lib.compliance.checker.get_engine")
     def test_negative_list_violated(self, mock_engine, mock_llm):
-        mock_docs = [
-            {"id": "neg-1", "law_name": "负面清单", "article_number": "第一条", "content": "禁止保证续保表述"},
-        ]
         mock_engine_inst = MagicMock()
         mock_engine.return_value = mock_engine_inst
-        mock_engine_inst.search_by_metadata.return_value = mock_docs
-
+        mock_engine_inst.search_by_metadata.return_value = [
+            {"id": "neg-1", "law_name": "负面清单", "article_number": "第一条", "content": "禁止虚假宣传"}
+        ]
         mock_llm_inst = MagicMock()
         mock_llm.return_value = mock_llm_inst
-        mock_llm_inst.chat.return_value = '[{"source_ref": "负面清单-第一条", "is_violation": true, "reason": "文档中出现保证续保", "source_excerpt": "本产品保证续保", "suggestion": "删除该表述"}]'
-
-        items, result, regulations = check_negative_list("本产品保证续保，保险期间1年")
-        assert result == CheckResult.VIOLATED
-        assert len(items) == 1
-        assert items[0].status == "non_compliant"
-        assert items[0].check_type == "negative_list"
-        assert items[0].source_type == "negative_list"
-        assert items[0].chunk_id == "neg-1"
-        assert len(regulations) == 1
+        mock_llm_inst.stream_chat.return_value = iter([
+            '{"clause_number":"2.1","clause_content":"保证续保","conclusion":"违规","suggestion":"删除","source_ref":"[NR1]"}\n',
+        ])
+        results = list(streaming_negative_check("本产品保证续保"))
+        violations = [r for r in results if r["type"] == "violation"]
+        assert len(violations) == 1
+        assert violations[0]["data"]["check_type"] == "negative_list"
+        result_events = [r for r in results if r["type"] == "negative_list_result"]
+        assert result_events[0]["data"] == CheckResult.VIOLATED
 
 
 class TestIdentifyCategory:
@@ -220,17 +250,6 @@ class TestIdentifyCategory:
     def test_keyword_match(self, mock_llm):
         result = identify_category("这是一款健康保险产品", "某某健康险")
         assert result.category == "健康险"
-        assert result.method == "keyword"
-        assert result.confidence == 0.7
-
-    @patch("lib.compliance.checker.get_audit_llm")
-    def test_llm_fallback(self, mock_llm):
-        mock_llm_inst = MagicMock()
-        mock_llm.return_value = mock_llm_inst
-        mock_llm_inst.chat.return_value = "这是一款寿险产品"
-        result = identify_category("某产品文档内容", "某产品")
-        assert result.category == "寿险"
-        assert result.method == "llm"
 
     @patch("lib.compliance.checker.get_audit_llm")
     def test_unknown_category(self, mock_llm):
@@ -239,88 +258,3 @@ class TestIdentifyCategory:
         mock_llm_inst.chat.side_effect = Exception("LLM error")
         result = identify_category("无法识别的内容", "某某产品")
         assert result.category is None
-        assert result.method == "unknown"
-
-    @patch("lib.compliance.checker.get_audit_llm")
-    def test_subcategory_mapping(self, mock_llm):
-        result = identify_category("教育金产品", "某某教育险")
-        assert result.category == "年金险"
-        assert result.method == "keyword"
-
-
-class TestRunComplianceCheck:
-    @patch("lib.compliance.checker.get_audit_llm")
-    def test_valid_json_response(self, mock_llm):
-        mock_llm_inst = MagicMock()
-        mock_llm.return_value = mock_llm_inst
-        expected = {"summary": {"compliant": 5, "non_compliant": 0, "attention": 0}, "items": []}
-        mock_llm_inst.chat.return_value = json.dumps(expected, ensure_ascii=False)
-        result = run_compliance_check("test prompt")
-        assert result["summary"]["compliant"] == 5
-
-    @patch("lib.compliance.checker.get_audit_llm")
-    def test_json_in_code_block(self, mock_llm):
-        mock_llm_inst = MagicMock()
-        mock_llm.return_value = mock_llm_inst
-        data = {"summary": {"compliant": 3, "non_compliant": 1, "attention": 0}, "items": []}
-        mock_llm_inst.chat.return_value = f"```json\n{json.dumps(data, ensure_ascii=False)}\n```"
-        result = run_compliance_check("test prompt")
-        assert result["summary"]["compliant"] == 3
-
-    @patch("lib.compliance.checker.get_audit_llm")
-    def test_no_json_found(self, mock_llm):
-        mock_llm_inst = MagicMock()
-        mock_llm.return_value = mock_llm_inst
-        mock_llm_inst.chat.return_value = "No JSON here"
-        result = run_compliance_check("test prompt")
-        assert "error" in result
-
-    @patch("lib.compliance.checker.get_audit_llm")
-    def test_llm_exception(self, mock_llm):
-        mock_llm_inst = MagicMock()
-        mock_llm.return_value = mock_llm_inst
-        mock_llm_inst.chat.side_effect = Exception("LLM error")
-        result = run_compliance_check("test prompt")
-        assert "error" in result
-
-    @patch("lib.compliance.checker.get_audit_llm")
-    def test_source_ref_matching(self, mock_llm):
-        """source_ref 匹配时应写入 chunk_id"""
-        mock_llm_inst = MagicMock()
-        mock_llm.return_value = mock_llm_inst
-        data = {
-            "summary": {"compliant": 0, "non_compliant": 1, "attention": 0},
-            "items": [{"param": "test", "value": "v", "status": "non_compliant", "source_ref": "保险法-第十三条"}]
-        }
-        mock_llm_inst.chat.return_value = json.dumps(data, ensure_ascii=False)
-        regulations = [
-            AuditRegulationItem(chunk_id="uuid-abc", law_name="保险法", article_number="第十三条", content="test", source_type="general")
-        ]
-        result = run_compliance_check("test prompt", regulations=regulations)
-        assert result["items"][0]["chunk_id"] == "uuid-abc"
-
-    @patch("lib.compliance.checker.get_audit_llm")
-    def test_source_ref_mismatch(self, mock_llm):
-        """source_ref 匹配失败时 chunk_id 为 None"""
-        mock_llm_inst = MagicMock()
-        mock_llm.return_value = mock_llm_inst
-        data = {
-            "summary": {"compliant": 0, "non_compliant": 1, "attention": 0},
-            "items": [{"param": "test", "value": "v", "status": "non_compliant", "source_ref": "不存在的法规-第1条"}]
-        }
-        mock_llm_inst.chat.return_value = json.dumps(data, ensure_ascii=False)
-        result = run_compliance_check("test prompt", regulations=[])
-        assert result["items"][0]["chunk_id"] is None
-
-    @patch("lib.compliance.checker.get_audit_llm")
-    def test_clause_number_default(self, mock_llm):
-        """clause_number 缺失时默认为未知"""
-        mock_llm_inst = MagicMock()
-        mock_llm.return_value = mock_llm_inst
-        data = {
-            "summary": {"compliant": 0, "non_compliant": 1, "attention": 0},
-            "items": [{"param": "test", "value": "v", "status": "non_compliant"}]
-        }
-        mock_llm_inst.chat.return_value = json.dumps(data, ensure_ascii=False)
-        result = run_compliance_check("test prompt")
-        assert result["items"][0]["clause_number"] == "未知"

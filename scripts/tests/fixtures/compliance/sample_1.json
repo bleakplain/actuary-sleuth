@@ -5,22 +5,19 @@
     "items": [
       {
         "clause_number": "1.1",
-        "param": "等待期",
-        "value": "90天",
+        "clause_content": "等待期为90天",
         "status": "compliant",
         "source": "[来源1]"
       },
       {
         "clause_number": "1.2",
-        "param": "免赔额",
-        "value": "0元",
+        "clause_content": "免赔额0元",
         "status": "compliant",
         "source": "[来源2]"
       },
       {
         "clause_number": "2.1",
-        "param": "保险期间",
-        "value": "1年",
+        "clause_content": "保险期间1年",
         "status": "non_compliant",
         "source": "[来源3]",
         "suggestion": "建议明确产品为短期健康保险"
@@ -32,22 +29,19 @@
     "items": [
       {
         "clause_number": "1.1",
-        "param": "等待期",
-        "value": "90天",
+        "clause_content": "等待期为90天",
         "status": "compliant",
         "source": "[来源1]"
       },
       {
         "clause_number": "1.2",
-        "param": "免赔额",
-        "value": "0元",
+        "clause_content": "免赔额0元",
         "status": "compliant",
         "source": "[来源2]"
       },
       {
         "clause_number": "2.1",
-        "param": "保险期间",
-        "value": "1年",
+        "clause_content": "保险期间1年",
         "status": "non_compliant",
         "source": "[来源3]",
         "suggestion": "建议明确产品为短期健康保险"

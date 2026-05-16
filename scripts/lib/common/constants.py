@@ -96,6 +96,8 @@ class ComplianceConstants:
     SUBCATEGORY_MAPPING: Dict[str, str] = {
         "寿险": "寿险",
         "健康险": "健康险",
+        "重疾险": "重疾险",
+        "医疗险": "医疗险",
         "意外险": "意外险",
         "年金险": "年金险",
         "车险": "财产险",

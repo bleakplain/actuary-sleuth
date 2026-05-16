@@ -15,7 +15,7 @@
 - **Do not** put LLM logic in domain modules → use `scripts/lib/llm/`
 
 ## NEVER
-- Modify `scripts/.env`, `scripts/config/settings.json` or CI secrets without approval
+- Modify `scripts/.env` or CI secrets without approval
 - Remove feature flags/constants without searching all call sites
 - Commit without running tests (`pytest scripts/tests/`)
 - Add `from lib.exceptions import *` wildcard imports
@@ -106,15 +106,13 @@ Insert into `negative_list` table (supports keyword & regex)
 1. Create client file in `lib/llm/`
 2. Implement `lib/llm/base.py` interface
 3. Register in `lib/llm/factory.py`
-4. Configure in `scripts/config/settings.json`
+4. Configure via environment variables in `scripts/.env`
 
 ### Modify report template
 Edit `lib/reporting/template.py` → `ReportGenerationTemplate` class
 
 ## Configuration
-Located at `scripts/config/settings.json`, overrideable via env vars.
-
-数据文件存储在代码仓库外部的数据根目录中，通过 settings.json 中的绝对路径配置。
+通过 `scripts/.env` 环境变量配置，所有路径均通过 `DATA_PATHS_*` 环境变量指定。
 
 ```
 <data_root>/
@@ -126,7 +124,7 @@ Located at `scripts/config/settings.json`, overrideable via env vars.
 └── tools/           ← 编译工具
 ```
 
-Worktree 创建时自动拷贝 settings.json 和 .env，各 worktree 配置独立。
+Worktree 创建时自动拷贝 .env，各 worktree 配置独立。
 
 ## Constraints Summary
 1. Business-semantic function names

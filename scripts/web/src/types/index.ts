@@ -12,14 +12,12 @@ export interface AuditRegulationItem {
 export interface AuditResultItem {
   clause_number: string;
   check_type: string;
-  param: string;
-  value: string;
-  requirement: string;
+  clause_content: string;
   status: string;
   chunk_id: string | null;
-  source_type: string;
-  source_excerpt: string;
+  source_ref?: string;
   suggestion: string;
+  conclusion?: string;
 }
 
 export interface ComplianceResult {
@@ -29,6 +27,15 @@ export interface ComplianceResult {
   regulation_sources: Record<string, string[]>;
   category: string;
   negative_list_result: string;
+  clause_coverage: {
+    total: number;
+    checked: number;
+    unchecked: string[];
+    has_notices?: boolean;
+    has_health?: boolean;
+    has_exclusions?: boolean;
+    has_tables?: boolean;
+  } | null;
 }
 
 export interface ComplianceReport {

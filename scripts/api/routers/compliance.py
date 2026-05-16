@@ -1,13 +1,16 @@
-"""合规检查路由 — 条款文档审查 + 文档解析。"""
+"""合规检查路由 — 流式条款审查 + 文档解析。"""
 
 import os
 import uuid
 import asyncio
+import json
 import logging
 import tempfile
+import threading
 from typing import Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
+from sse_starlette.sse import EventSourceResponse
 
 from api.database import get_connection, list_compliance_reports, get_compliance_report, save_compliance_report
 from api.schemas.compliance import (
@@ -18,92 +21,131 @@ from api.schemas.compliance import (
 from lib.common.constants import ComplianceConstants
 from lib.common.html_converter import html_to_docx
 from lib.compliance.checker import (
-    check_negative_list,
+    streaming_compliance_check,
+    streaming_negative_check,
     identify_category,
     load_audit_regulations,
-    build_audit_context,
-    run_compliance_check,
+    normalize_clause_number,
+    extract_section_numbers,
 )
-from lib.compliance.prompts import COMPLIANCE_PROMPT_DOCUMENT
 from lib.doc_parser import parse_product_document, DocumentParseError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/compliance", tags=["合规检查"])
 
 
-MAX_DOCUMENT_CHARS = 150_000
-
-
-def _prepare_document_content(content: str) -> str:
-    if len(content) <= MAX_DOCUMENT_CHARS:
-        return content
-    truncated = content[:MAX_DOCUMENT_CHARS]
-    last_clause = truncated.rfind("\n【条款")
-    if last_clause > 0:
-        return truncated[:last_clause]
-    return truncated
-
-
-@router.post("/check/document", response_model=ComplianceReportResponse)
-async def check_document(req: DocumentCheckRequest):
-    category = req.category
+@router.post("/check/document/stream")
+async def check_document_stream(req: DocumentCheckRequest):
+    """流式合规检查，通过 SSE 实时推送违规条款。"""
+    category: Optional[str] = req.category
     if not category:
         category, _ = await _identify_category_async(req.document_content, req.product_name or "")
 
     regulations = await asyncio.to_thread(load_audit_regulations, category)
-    context = build_audit_context(regulations)
 
     regulation_sources: Dict[str, List[str]] = {
-        "险种专属": [r.law_name for r in regulations if r.source_type == "category"],
-        "通用法规": [r.law_name for r in regulations if r.source_type == "general"],
+        "险种专属": sorted(set(r.law_name for r in regulations if r.source_type == "category")),
+        "通用法规": sorted(set(r.law_name for r in regulations if r.source_type == "general")),
     }
 
-    document_content = _prepare_document_content(req.document_content)
+    async def event_stream():
+        all_items: List[Dict] = []
+        all_regulations = list(regulations)
+        negative_list_result = "skipped"
+        loop = asyncio.get_event_loop()
+        queue: asyncio.Queue = asyncio.Queue()
 
-    prompt = COMPLIANCE_PROMPT_DOCUMENT.format(
-        document_content=document_content,
-        context=context,
-    )
+        def _producer():
+            try:
+                for event in streaming_compliance_check(req.document_content, regulations):
+                    loop.call_soon_threadsafe(queue.put_nowait, event)
+                for event in streaming_negative_check(req.document_content):
+                    loop.call_soon_threadsafe(queue.put_nowait, event)
+            except Exception as e:
+                loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "data": str(e)})
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, None)
 
-    try:
-        result = await asyncio.to_thread(run_compliance_check, prompt, regulations=regulations)
-    except Exception as e:
-        logger.error(f"Document check failed: {e}")
-        raise HTTPException(status_code=500, detail=f"条款审查失败: {e}")
+        thread = threading.Thread(target=_producer, daemon=True)
+        thread.start()
 
-    negative_items, negative_list_result, negative_regulations = await asyncio.to_thread(
-        check_negative_list, document_content
-    )
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            if event["type"] == "violation":
+                all_items.append(event["data"])
+            elif event["type"] == "negative_list_result":
+                negative_list_result = event["data"]
+                neg_regs = event.get("regulations", [])
+                if neg_regs:
+                    all_regulations.extend(neg_regs)
+                    regulation_sources["负面清单"] = sorted(set(
+                        r.get("law_name", "") for r in neg_regs if r.get("law_name")
+                    ))
+                continue
+            yield {"event": "message", "data": json.dumps(event, ensure_ascii=False)}
 
-    all_regulations = regulations + negative_regulations
-    result["regulations"] = [r.__dict__ for r in all_regulations]
-    result["regulation_sources"] = regulation_sources
-    result["category"] = category
+        # done: compute summary, coverage, save report
+        report_id = f"cr_{uuid.uuid4().hex[:8]}"
+        product_name = req.product_name or "未命名产品"
+        summary = {"non_compliant": len(all_items), "compliant": 0, "attention": 0}
 
-    if negative_items:
-        result["items"].extend([item.__dict__ for item in negative_items])
-        result["summary"]["non_compliant"] = result["summary"].get("non_compliant", 0) + len(negative_items)
-        result["regulation_sources"]["负面清单"] = [r.law_name for r in negative_regulations]
+        section_info = extract_section_numbers(req.document_content)
+        doc_clause_set = set(section_info["clauses"])
+        flagged_clause_set = set()
+        for item in all_items:
+            cn = item.get("clause_number", "")
+            if cn != "未知":
+                normalized = normalize_clause_number(cn)
+                if normalized:
+                    flagged_clause_set.add(normalized)
 
-    result["negative_list_result"] = negative_list_result
+        definition_chapter = section_info.get("definition_chapter")
+        checked_clauses = doc_clause_set
+        if definition_chapter:
+            checked_clauses = {c for c in doc_clause_set if not c.startswith(definition_chapter + ".")}
 
-    report_id = f"cr_{uuid.uuid4().hex[:8]}"
-    product_name = req.product_name or "未命名产品"
-    save_compliance_report(report_id, product_name, category or "", "document", result)
+        done_data = {
+            "report_id": report_id,
+            "product_name": product_name,
+            "category": category or "",
+            "summary": summary,
+            "negative_list_result": negative_list_result,
+            "regulation_sources": regulation_sources,
+            "regulations": [r.__dict__ if hasattr(r, '__dict__') else r for r in all_regulations],
+            "clause_coverage": {
+                "total": len(checked_clauses),
+                "checked": len(checked_clauses),
+                "flagged": len(flagged_clause_set & doc_clause_set),
+                "unchecked": [],
+                "all_total": len(section_info.get("all_clauses", doc_clause_set)),
+                "definition_chapter": definition_chapter,
+                "has_notices": section_info["has_notices"],
+                "has_health": section_info["has_health"],
+                "has_exclusions": section_info["has_exclusions"],
+                "has_tables": section_info["has_tables"],
+            },
+        }
 
-    return ComplianceReportResponse(
-        id=report_id,
-        product_name=product_name,
-        category=category or "",
-        mode="document",
-        result=result,
-        created_at="",
-    )
+        result_for_db = {
+            "summary": summary,
+            "items": all_items,
+            "regulations": [r.__dict__ if hasattr(r, '__dict__') else r for r in all_regulations],
+            "regulation_sources": regulation_sources,
+            "category": category or "",
+            "negative_list_result": negative_list_result,
+            "clause_coverage": done_data["clause_coverage"],
+        }
+        save_compliance_report(report_id, product_name, category or "", "document", result_for_db)
+
+        yield {"event": "message", "data": json.dumps({"type": "done", "data": done_data}, ensure_ascii=False)}
+
+    return EventSourceResponse(event_stream())
 
 
 @router.get("/categories")
 async def get_categories():
-    """获取有效的险种类型列表"""
     return {"categories": ComplianceConstants.VALID_CATEGORIES}
 
 
@@ -123,12 +165,13 @@ async def get_report(report_id: str):
 @router.delete("/reports/{report_id}")
 async def delete_compliance_report(report_id: str):
     with get_connection() as conn:
-        cur = conn.execute(
-            "DELETE FROM compliance_reports WHERE id = ?", (report_id,)
-        )
+        cur = conn.execute("DELETE FROM compliance_reports WHERE id = ?", (report_id,))
         if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="报告不存在")
     return {"status": "deleted"}
+
+
+# --- Document parsing ---
 
 
 def _build_combined_text(
@@ -139,7 +182,6 @@ def _build_combined_text(
     exclusions: List[ParsedSection],
     rider_clauses: List[ParsedClause],
 ) -> str:
-    """将解析结果合并为文本，用于合规检查"""
     parts = []
     for c in clauses:
         parts.append(f"【条款 {c.number}】{c.title}\n{c.text}")
@@ -160,55 +202,25 @@ def _audit_doc_to_response(audit_doc, file_type: str,
                            identified_category: Optional[str] = None,
                            category_confidence: float = 0.0,
                            combined_text: Optional[str] = None) -> ParsedDocumentResponse:
-    """将 AuditDocument 转换为 ParsedDocumentResponse
-
-    combined_text: 如已预计算则传入避免重复构建
-    """
-    clauses = [
-        ParsedClause(number=c.number, title=c.title, text=c.text)
-        for c in audit_doc.clauses
-    ]
-    tables = [
-        ParsedDataTable(
-            table_type=t.table_type.value if hasattr(t.table_type, 'value') else str(t.table_type),
-            remark=t.remark or "",
-            raw_text=t.raw_text,
-            data=[list(row) for row in t.data]
-        )
-        for t in audit_doc.tables
-    ]
-    notices = [
-        ParsedSection(title=s.title, content=s.content)
-        for s in audit_doc.notices
-    ]
-    health_disclosures = [
-        ParsedSection(title=s.title, content=s.content)
-        for s in audit_doc.health_disclosures
-    ]
-    exclusions = [
-        ParsedSection(title=s.title, content=s.content)
-        for s in audit_doc.exclusions
-    ]
-    rider_clauses = [
-        ParsedClause(number=c.number, title=c.title, text=c.text)
-        for c in audit_doc.rider_clauses
-    ]
+    clauses = [ParsedClause(number=c.number, title=c.title, text=c.text) for c in audit_doc.clauses]
+    tables = [ParsedDataTable(
+        table_type=t.table_type.value if hasattr(t.table_type, 'value') else str(t.table_type),
+        remark=t.remark or "", raw_text=t.raw_text, data=[list(row) for row in t.data],
+    ) for t in audit_doc.tables]
+    notices = [ParsedSection(title=s.title, content=s.content) for s in audit_doc.notices]
+    health = [ParsedSection(title=s.title, content=s.content) for s in audit_doc.health_disclosures]
+    exclusions = [ParsedSection(title=s.title, content=s.content) for s in audit_doc.exclusions]
+    riders = [ParsedClause(number=c.number, title=c.title, text=c.text) for c in audit_doc.rider_clauses]
 
     if combined_text is None:
-        combined_text = _build_combined_text(
-            clauses, tables, notices, health_disclosures, exclusions, rider_clauses
-        )
+        combined_text = _build_combined_text(clauses, tables, notices, health, exclusions, riders)
 
     return ParsedDocumentResponse(
         parse_id=f"pd_{uuid.uuid4().hex[:8]}",
         file_name=audit_doc.file_name,
         file_type=file_type,
-        clauses=clauses,
-        data_tables=tables,
-        notices=notices,
-        health_disclosures=health_disclosures,
-        exclusions=exclusions,
-        rider_clauses=rider_clauses,
+        clauses=clauses, data_tables=tables, notices=notices,
+        health_disclosures=health, exclusions=exclusions, rider_clauses=riders,
         warnings=list(audit_doc.warnings),
         combined_text=combined_text,
         parse_time=audit_doc.parse_time.isoformat(),
@@ -218,11 +230,8 @@ def _audit_doc_to_response(audit_doc, file_type: str,
 
 
 async def _identify_category_async(combined_text: str, product_name: str) -> Tuple[Optional[str], float]:
-    """异步执行险种识别，失败时返回 None"""
     try:
-        cr = await asyncio.to_thread(
-            identify_category, combined_text, product_name
-        )
+        cr = await asyncio.to_thread(identify_category, combined_text, product_name)
         return cr.category, cr.confidence
     except Exception as e:
         logger.warning(f"险种识别失败: {e}")
@@ -231,21 +240,19 @@ async def _identify_category_async(combined_text: str, product_name: str) -> Tup
 
 @router.post("/parse-file", response_model=ParsedDocumentResponse)
 async def parse_file(file: UploadFile = File(...)):
-    """上传并解析保险产品文档（PDF/DOCX）"""
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ComplianceConstants.ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"仅支持 PDF 和 DOCX 格式，当前: {ext}")
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-        content = await file.read()
-        tmp.write(content)
+        tmp.write(await file.read())
         tmp_path = tmp.name
 
     try:
         audit_doc = parse_product_document(tmp_path)
         combined_text = _build_combined_text(
             audit_doc.clauses, audit_doc.tables, audit_doc.notices,
-            audit_doc.health_disclosures, audit_doc.exclusions, audit_doc.rider_clauses
+            audit_doc.health_disclosures, audit_doc.exclusions, audit_doc.rider_clauses,
         )
         category, confidence = await _identify_category_async(combined_text, audit_doc.file_name)
         return _audit_doc_to_response(audit_doc, ext, category, confidence, combined_text)
@@ -260,7 +267,6 @@ async def parse_file(file: UploadFile = File(...)):
 
 @router.post("/parse-rich-text", response_model=ParsedDocumentResponse)
 async def parse_rich_text(req: RichTextParseRequest):
-    """解析富文本内容（HTML）"""
     if not req.html_content or not req.html_content.strip():
         raise HTTPException(status_code=400, detail="HTML 内容不能为空")
 
@@ -270,7 +276,7 @@ async def parse_rich_text(req: RichTextParseRequest):
         audit_doc = parse_product_document(tmp_path)
         combined_text = _build_combined_text(
             audit_doc.clauses, audit_doc.tables, audit_doc.notices,
-            audit_doc.health_disclosures, audit_doc.exclusions, audit_doc.rider_clauses
+            audit_doc.health_disclosures, audit_doc.exclusions, audit_doc.rider_clauses,
         )
         category, confidence = await _identify_category_async(combined_text, req.product_name or "")
         response = _audit_doc_to_response(audit_doc, ".html", category, confidence, combined_text)
