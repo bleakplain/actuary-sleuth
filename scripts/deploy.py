@@ -44,10 +44,19 @@ def _write_run_batch(updates: dict[str, str]) -> None:
 
 def _is_alive(pid: int) -> bool:
     try:
-        os.kill(pid, 0)
-        return True
-    except (ProcessLookupError, PermissionError):
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x100000, False, pid)
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
         return False
+    except Exception:
+        try:
+            os.kill(pid, 0)
+            return True
+        except (ProcessLookupError, PermissionError, OSError):
+            return False
 
 
 def _stop_old_service(role: str) -> None:
@@ -68,7 +77,7 @@ def _stop_old_service(role: str) -> None:
             break
         time.sleep(0.1)
     if _is_alive(pid):
-        os.kill(pid, signal.SIGKILL)
+        os.kill(pid, signal.SIGTERM)
     print(f"已停止旧{role}服务 (PID {pid})")
 
 
