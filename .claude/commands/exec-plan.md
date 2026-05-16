@@ -116,7 +116,12 @@ git push origin master
    ```bash
    cp scripts/.env .claude/worktrees/<feature-name>/scripts/.env
    ```
-5. **切换工作目录到 worktree**：
+5. **创建 node_modules 软链** — 前端依赖通过软链共享主仓库的 `node_modules`，避免每个 worktree 重复安装：
+   ```bash
+   ln -s <主仓库>/scripts/web/node_modules .claude/worktrees/<feature-name>/scripts/web/node_modules
+   ```
+   软链而不是拷贝，因为 node_modules 体积大且版本一致。
+6. **切换工作目录到 worktree**：
    ```
    后续所有操作在 .claude/worktrees/<feature-name>/ 下执行
    ```
@@ -124,7 +129,8 @@ git push origin master
 ### 前置检查（worktree 就绪后、执行任务前）
 
 1. **检查并拷贝 .env**: 确认 `scripts/.env` 存在，若不存在则从主仓库拷贝
-2. **检查数据路径可达**: 读取 .env 中 `DATA_PATHS_SQLITE_DB` 等路径，验证关键目录（db、kb）的父目录存在，如果路径不存在则提示用户检查配置，不继续执行任务
+2. **检查 node_modules 软链**: 确认 `scripts/web/node_modules` 软链存在且指向有效，若不存在则创建软链
+3. **检查数据路径可达**: 读取 .env 中 `DATA_PATHS_SQLITE_DB` 等路径，验证关键目录（db、kb）的父目录存在，如果路径不存在则提示用户检查配置，不继续执行任务
 
 ---
 

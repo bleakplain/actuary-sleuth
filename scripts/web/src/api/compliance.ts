@@ -1,5 +1,5 @@
 import client from './client';
-import type { ComplianceReport, AuditResultItem, AuditRegulationItem, ParsedDocument } from '../types';
+import type { ComplianceReport, AuditResultItem, ParsedDocument } from '../types';
 
 interface DoneData {
   report_id: string;
@@ -8,11 +8,9 @@ interface DoneData {
   summary: { compliant: number; non_compliant: number; attention: number };
   negative_list_result: string;
   regulation_sources: Record<string, string[]>;
-  regulations: AuditRegulationItem[];
   clause_coverage: {
     total: number;
     checked: number;
-    flagged: number;
     unchecked: string[];
     all_total: number;
     definition_chapter?: string;

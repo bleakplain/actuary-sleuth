@@ -62,42 +62,6 @@ function RegulationDrawer({
   );
 }
 
-function renderTextWithRefs(
-  text: string,
-  chunkId: string | null,
-  onRegulationClick: (chunkId: string) => void,
-  token: ReturnType<typeof theme.useToken>['token'],
-) {
-  if (!text) return null;
-  const parts: React.ReactNode[] = [];
-  const refPattern = /\[(R\d+|NR\d+)\]/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = refPattern.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
-    }
-    if (chunkId) {
-      parts.push(
-        <a key={match.index} role="button" tabIndex={0}
-          onClick={() => onRegulationClick(chunkId)}
-          onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onRegulationClick(chunkId); } }}
-          style={{ color: token.colorPrimary, fontWeight: 500, cursor: 'pointer' }}
-        >
-          {match[0]}
-        </a>,
-      );
-    } else {
-      parts.push(match[0]);
-    }
-    lastIndex = refPattern.lastIndex;
-  }
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
-  }
-  return parts;
-}
-
 function ClauseCard({
   item, regulationMap, onRegulationClick, token,
 }: {
@@ -122,53 +86,40 @@ function ClauseCard({
       style={{ borderLeft: `3px solid ${borderColor}`, marginBottom: 12 }}
       styles={{ body: { padding: '12px 16px' } }}
     >
-      {/* Clause tag + content as one block */}
-      <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6, marginBottom: 8 }}>
-        <Tag color={cfg.color} icon={cfg.icon} style={{ margin: 0, verticalAlign: 'middle' }}>
-          条款 {item.clause_number}
-        </Tag>
-        <span style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
-          {item.clause_content}
-        </span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <Tag color={cfg.color} icon={cfg.icon} style={{ margin: 0 }}>
+              条款 {item.clause_number}
+            </Tag>
+            {regs.map(reg => {
+              const lawShort = reg.law_name?.replace(/[《》]/g, '');
+              const label = [lawShort, reg.article_number].filter(Boolean).join(' ');
+              return (
+                <a key={reg.chunk_id} role="button" tabIndex={0}
+                  onClick={() => onRegulationClick(reg.chunk_id)}
+                  onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onRegulationClick(reg.chunk_id); } }}
+                  style={{ fontSize: token.fontSizeSM, color: token.colorPrimary }}
+                >
+                  {label}
+                </a>
+              );
+            })}
+          </div>
+          <div style={{ whiteSpace: 'pre-wrap', color: token.colorTextSecondary, fontSize: token.fontSizeSM, lineHeight: 1.6 }}>
+            {item.clause_content}
+          </div>
+        </div>
       </div>
-
-      {/* Conclusion */}
       {item.conclusion && (
-        <div style={{
-          fontSize: token.fontSizeSM, color: token.colorText,
-          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-          background: token.colorFillQuaternary,
-          padding: '8px 12px', borderRadius: 4, marginBottom: 8,
-        }}>
-          {renderTextWithRefs(item.conclusion, item.chunk_id, onRegulationClick, token)}
+        <div style={{ marginTop: 8, fontSize: token.fontSizeSM, color: token.colorText }}>
+          {item.conclusion}
         </div>
       )}
-
-      {/* Regulation source links */}
-      {regs.length > 0 && (
-        <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>依据法规：</Text>
-          {regs.map(reg => {
-            const lawShort = reg.law_name?.replace(/[《》]/g, '');
-            const label = [lawShort, reg.article_number].filter(Boolean).join(' ');
-            return (
-              <a key={reg.chunk_id} role="button" tabIndex={0}
-                onClick={() => onRegulationClick(reg.chunk_id)}
-                onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onRegulationClick(reg.chunk_id); } }}
-                style={{ fontSize: token.fontSizeSM, color: token.colorPrimary }}
-              >
-                {label}
-              </a>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Suggestion */}
       {item.suggestion && (
         <div style={{ marginTop: 6, fontSize: token.fontSizeSM }}>
           <Text type="secondary">修改建议：</Text>
-          {renderTextWithRefs(item.suggestion, item.chunk_id, onRegulationClick, token)}
+          <Text>{item.suggestion}</Text>
         </div>
       )}
     </Card>
@@ -292,7 +243,7 @@ export default function CompliancePage() {
             result: {
               summary: data.summary,
               items: data.items,
-              regulations: data.regulations || [],
+              regulations: [],
               regulation_sources: data.regulation_sources,
               category: data.category,
               negative_list_result: data.negative_list_result,
@@ -523,7 +474,7 @@ export default function CompliancePage() {
     if (isStreaming) {
       const merged = mergeItemsByClause(streamingViolations);
       return (
-        <div>
+        <div style={{ maxWidth: 800, margin: '0 auto' }}>
           {/* Header */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <Button type="text" icon={<ArrowLeftOutlined />} onClick={handleBack}>返回</Button>
@@ -573,7 +524,7 @@ export default function CompliancePage() {
     const coverage = docResult.clause_coverage;
 
     return (
-      <div>
+      <div style={{ maxWidth: 800, margin: '0 auto' }}>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <Button type="text" icon={<ArrowLeftOutlined />} onClick={handleBack}>返回</Button>
@@ -605,9 +556,9 @@ export default function CompliancePage() {
           </div>
           {coverage && coverage.total > 0 && (
             <div style={{ marginTop: 8, fontSize: token.fontSizeSM, color: token.colorTextSecondary }}>
-              已审查 {coverage.checked}/{coverage.total} 条条款，发现 {coverage.flagged ?? s.non_compliant} 项不合规
-              {coverage.definition_chapter && (
-                <span>（已排除释义第{coverage.definition_chapter}章）</span>
+              条款覆盖率：{coverage.checked}/{coverage.total}
+              {coverage.unchecked.length > 0 && (
+                <span>（未检查：{coverage.unchecked.slice(0, 10).join('、')}{coverage.unchecked.length > 10 ? '…' : ''}）</span>
               )}
             </div>
           )}
