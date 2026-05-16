@@ -1,6 +1,7 @@
 """FastAPI 共享依赖。"""
 
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
+from fastapi.security import OAuth2PasswordBearer
 
 _memory_service = None
 _ask_graph = None
@@ -44,3 +45,22 @@ def init_ask_graph():
 def get_ask_graph():
     """获取已编译的 LangGraph 工作流图。"""
     return _ask_graph
+
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+
+
+async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
+    """从 JWT 解析当前用户。返回 {user_id, email, role_id, permissions}。"""
+    if token is None:
+        raise HTTPException(status_code=401, detail="未提供认证凭据")
+    try:
+        from lib.auth.jwt import decode_token
+        payload = decode_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="无效的认证凭据")
+    from api.database import get_user_by_id
+    user = get_user_by_id(payload["user_id"])
+    if not user or user["status"] != "active":
+        raise HTTPException(status_code=401, detail="账户已被禁用")
+    return payload

@@ -4,18 +4,19 @@ import json
 import logging
 from typing import Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.schemas.feedback import (
     FeedbackCreate, FeedbackOut, FeedbackUpdate, FeedbackStats,
 )
+from lib.auth.permissions import require_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/feedback", tags=["反馈管理"])
 
 
 @router.post("/submit", response_model=FeedbackOut)
-async def submit_feedback(req: FeedbackCreate):
+async def submit_feedback(req: FeedbackCreate, user: dict = Depends(require_permission("ask"))):
     from api.database import create_feedback, get_feedback, get_connection
     with get_connection() as conn:
         row = conn.execute(
@@ -43,6 +44,7 @@ async def list_badcases(
     status: Optional[str] = Query(None),
     classified_type: Optional[str] = Query(None),
     compliance_risk: Optional[int] = Query(None),
+    user: dict = Depends(require_permission("admin")),
 ):
     from api.database import list_feedbacks
     return list_feedbacks(
@@ -53,7 +55,7 @@ async def list_badcases(
 
 
 @router.get("/badcases/{feedback_id}", response_model=FeedbackOut)
-async def get_badcase(feedback_id: str):
+async def get_badcase(feedback_id: str, user: dict = Depends(require_permission("admin"))):
     from api.database import get_feedback
     fb = get_feedback(feedback_id)
     if fb is None:
@@ -62,7 +64,7 @@ async def get_badcase(feedback_id: str):
 
 
 @router.put("/badcases/{feedback_id}", response_model=FeedbackOut)
-async def update_badcase(feedback_id: str, req: FeedbackUpdate):
+async def update_badcase(feedback_id: str, req: FeedbackUpdate, user: dict = Depends(require_permission("admin"))):
     from api.database import get_feedback, update_feedback
     existing = get_feedback(feedback_id)
     if existing is None:
@@ -74,13 +76,13 @@ async def update_badcase(feedback_id: str, req: FeedbackUpdate):
 
 
 @router.get("/stats", response_model=FeedbackStats)
-async def get_stats():
+async def get_stats(user: dict = Depends(require_permission("admin"))):
     from api.database import get_feedback_stats
     return get_feedback_stats()
 
 
 @router.post("/badcases/classify")
-async def classify_badcases():
+async def classify_badcases(user: dict = Depends(require_permission("admin"))):
     """对所有 pending 状态的 badcase 执行自动分类"""
     return await classify_pending_badcases()
 
@@ -140,7 +142,7 @@ async def classify_pending_badcases() -> Dict[str, int]:
 
 
 @router.post("/badcases/{feedback_id}/verify")
-async def verify_badcase(feedback_id: str):
+async def verify_badcase(feedback_id: str, user: dict = Depends(require_permission("admin"))):
     """重跑 badcase 的原始问题，返回当前引擎的回答用于对比"""
     from api.database import get_feedback, get_connection
 
@@ -185,7 +187,7 @@ async def verify_badcase(feedback_id: str):
 
 
 @router.post("/badcases/{feedback_id}/convert")
-async def convert_to_eval_sample(feedback_id: str, ground_truth: str = ""):
+async def convert_to_eval_sample(feedback_id: str, ground_truth: str = "", user: dict = Depends(require_permission("admin"))):
     """将 badcase 转化为评估样本"""
     from api.database import get_feedback, upsert_eval_sample, update_feedback, get_connection
 

@@ -9,7 +9,7 @@ import tempfile
 import threading
 from typing import Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sse_starlette.sse import EventSourceResponse
 
 from api.database import get_connection, list_compliance_reports, get_compliance_report, save_compliance_report
@@ -29,13 +29,14 @@ from lib.compliance.checker import (
     extract_section_numbers,
 )
 from lib.doc_parser import parse_product_document, DocumentParseError
+from lib.auth.permissions import require_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/compliance", tags=["合规检查"])
 
 
 @router.post("/check/document/stream")
-async def check_document_stream(req: DocumentCheckRequest):
+async def check_document_stream(req: DocumentCheckRequest, user: dict = Depends(require_permission("compliance"))):
     """流式合规检查，通过 SSE 实时推送违规条款。"""
     category: Optional[str] = req.category
     if not category:
@@ -145,17 +146,17 @@ async def check_document_stream(req: DocumentCheckRequest):
 
 
 @router.get("/categories")
-async def get_categories():
+async def get_categories(user: dict = Depends(require_permission("compliance"))):
     return {"categories": ComplianceConstants.VALID_CATEGORIES}
 
 
 @router.get("/reports", response_model=list[ComplianceReportResponse])
-async def list_reports():
+async def list_reports(user: dict = Depends(require_permission("compliance"))):
     return list_compliance_reports()
 
 
 @router.get("/reports/{report_id}", response_model=ComplianceReportResponse)
-async def get_report(report_id: str):
+async def get_report(report_id: str, user: dict = Depends(require_permission("compliance"))):
     report = get_compliance_report(report_id)
     if report is None:
         raise HTTPException(status_code=404, detail="报告不存在")
@@ -163,7 +164,7 @@ async def get_report(report_id: str):
 
 
 @router.delete("/reports/{report_id}")
-async def delete_compliance_report(report_id: str):
+async def delete_compliance_report(report_id: str, user: dict = Depends(require_permission("compliance"))):
     with get_connection() as conn:
         cur = conn.execute("DELETE FROM compliance_reports WHERE id = ?", (report_id,))
         if cur.rowcount == 0:
@@ -239,7 +240,7 @@ async def _identify_category_async(combined_text: str, product_name: str) -> Tup
 
 
 @router.post("/parse-file", response_model=ParsedDocumentResponse)
-async def parse_file(file: UploadFile = File(...)):
+async def parse_file(file: UploadFile = File(...), user: dict = Depends(require_permission("compliance"))):
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ComplianceConstants.ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"仅支持 PDF 和 DOCX 格式，当前: {ext}")
@@ -266,7 +267,7 @@ async def parse_file(file: UploadFile = File(...)):
 
 
 @router.post("/parse-rich-text", response_model=ParsedDocumentResponse)
-async def parse_rich_text(req: RichTextParseRequest):
+async def parse_rich_text(req: RichTextParseRequest, user: dict = Depends(require_permission("compliance"))):
     if not req.html_content or not req.html_content.strip():
         raise HTTPException(status_code=400, detail="HTML 内容不能为空")
 

@@ -6,7 +6,7 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sse_starlette.sse import EventSourceResponse
 
 from api.database import (
@@ -27,6 +27,7 @@ from api.database import (
     update_feedback,
 )
 from api.dependencies import get_rag_engine, get_memory_service, get_ask_graph
+from lib.auth.permissions import require_permission
 from api.schemas.ask import ChatRequest, SessionOut, MessageOut
 from lib.config import is_debug
 from lib.llm.trace import cleanup_trace_counters, get_llm_call_count, reset_llm_call_count, trace_span
@@ -83,9 +84,9 @@ def _build_trace_payload(root_span, trace_id: Optional[str] = None) -> dict:
 
 
 @router.post("/chat")
-async def chat(req: ChatRequest):
+async def chat(req: ChatRequest, user: dict = Depends(require_permission("ask"))):
     session_id = req.session_id or f"sess_{uuid.uuid4().hex[:8]}"
-    create_session(session_id, title=req.question[:50], user_id=req.user_id)
+    create_session(session_id, title=req.question[:50], user_id=user["user_id"])
     add_message(session_id, "user", req.question)
 
     engine = get_rag_engine()
@@ -199,7 +200,7 @@ async def chat(req: ChatRequest):
             memory_svc = get_memory_service()
             graph = get_ask_graph()
             state = AskState(
-                question=effective_question, user_id=req.user_id,
+                question=effective_question, user_id=user["user_id"],
                 session_id=session_id, search_results=[], memory_context="",
                 answer="", sources=[], citations=[], unverified_claims=[],
                 content_mismatches=[], faithfulness_score=None, error=None,
@@ -340,7 +341,7 @@ async def chat(req: ChatRequest):
 
 
 @router.get("/sessions", response_model=list[SessionOut])
-async def list_sessions(search: str = Query("", description="按标题模糊搜索")):
+async def list_sessions(search: str = Query("", description="按标题模糊搜索"), user: dict = Depends(require_permission("ask"))):
     if search:
         rows, _ = search_sessions(search=search, page=1, size=100)
         return rows
@@ -348,7 +349,7 @@ async def list_sessions(search: str = Query("", description="按标题模糊搜�
 
 
 @router.get("/sessions/{session_id}/messages", response_model=list[MessageOut])
-async def list_messages(session_id: str):
+async def list_messages(session_id: str, user: dict = Depends(require_permission("ask"))):
     msgs = get_messages(session_id)
     if not msgs:
         raise HTTPException(status_code=404, detail="对话不存在")
@@ -356,7 +357,7 @@ async def list_messages(session_id: str):
 
 
 @router.delete("/sessions/{session_id}")
-async def remove_session(session_id: str):
+async def remove_session(session_id: str, user: dict = Depends(require_permission("ask"))):
     count = delete_session(session_id)
     if count == 0:
         raise HTTPException(status_code=404, detail="对话不存在")
@@ -364,14 +365,14 @@ async def remove_session(session_id: str):
 
 
 @router.delete("/sessions")
-async def batch_remove_sessions(ids: str = Query(..., description="逗号分隔的会话 ID")):
+async def batch_remove_sessions(ids: str = Query(..., description="逗号分隔的会话 ID"), user: dict = Depends(require_permission("ask"))):
     session_ids = [sid.strip() for sid in ids.split(",") if sid.strip()]
     deleted = batch_delete_sessions(session_ids)
     return {"deleted": deleted}
 
 
 @router.get("/messages/{message_id}/trace")
-async def get_message_trace(message_id: int):
+async def get_message_trace(message_id: int, user: dict = Depends(require_permission("ask"))):
     trace = get_trace_by_message_id(message_id)
     if trace is None:
         raise HTTPException(status_code=404, detail="Trace not found")
@@ -379,7 +380,7 @@ async def get_message_trace(message_id: int):
 
 
 @router.delete("/messages/{message_id}")
-async def remove_message(message_id: int):
+async def remove_message(message_id: int, user: dict = Depends(require_permission("ask"))):
     deleted = delete_message(message_id)
     if deleted == 0:
         raise HTTPException(status_code=404, detail="消息不存在")
@@ -387,7 +388,7 @@ async def remove_message(message_id: int):
 
 
 @router.get("/sessions/{session_id}/context")
-async def get_session_context_endpoint(session_id: str):
+async def get_session_context_endpoint(session_id: str, user: dict = Depends(require_permission("ask"))):
     """获取会话上下文"""
     ctx = get_session_context(session_id)
     if ctx is None:
@@ -402,7 +403,7 @@ ALLOWED_CONTEXT_KEYS = frozenset({
 
 
 @router.put("/sessions/{session_id}/context")
-async def update_session_context_endpoint(session_id: str, context: dict):
+async def update_session_context_endpoint(session_id: str, context: dict, user: dict = Depends(require_permission("ask"))):
     """更新会话上下文（澄清选择后调用）"""
     # 输入验证：只允许白名单中的 key
     invalid_keys = set(context.keys()) - ALLOWED_CONTEXT_KEYS

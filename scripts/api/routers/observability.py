@@ -2,7 +2,7 @@
 
 from dataclasses import asdict
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.database import (
     search_traces,
@@ -21,6 +21,7 @@ from api.schemas.observability import (
 )
 from lib.common.cache import get_cache_manager
 from lib.common.cache_metrics import get_cache_trend
+from lib.auth.permissions import require_permission
 
 router = APIRouter(prefix="/api/observability", tags=["可测性"])
 
@@ -35,6 +36,7 @@ async def list_traces(
     end_date: str = Query("", description="截止日期 YYYY-MM-DD"),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
+    user: dict = Depends(require_permission("admin")),
 ):
     items, total = search_traces(
         trace_id=trace_id,
@@ -50,7 +52,7 @@ async def list_traces(
 
 
 @router.get("/traces/{trace_id}")
-async def get_trace_detail(trace_id: str):
+async def get_trace_detail(trace_id: str, user: dict = Depends(require_permission("admin"))):
     trace = get_trace_by_id(trace_id)
     if trace is None:
         raise HTTPException(status_code=404, detail="Trace not found")
@@ -58,14 +60,14 @@ async def get_trace_detail(trace_id: str):
 
 
 @router.delete("/traces")
-async def delete_traces(ids: str = Query(..., description="逗号分隔的 trace ID 列表")):
+async def delete_traces(ids: str = Query(..., description="逗号分隔的 trace ID 列表"), user: dict = Depends(require_permission("admin"))):
     trace_ids = [tid.strip() for tid in ids.split(",") if tid.strip()]
     deleted = batch_delete_traces(trace_ids)
     return {"deleted": deleted}
 
 
 @router.post("/traces/cleanup")
-async def cleanup_traces_endpoint(req: CleanupRequest):
+async def cleanup_traces_endpoint(req: CleanupRequest, user: dict = Depends(require_permission("admin"))):
     if req.preview:
         count = count_traces_for_cleanup(req.start_date, req.end_date, req.status)
         return {"count": count}
@@ -74,7 +76,7 @@ async def cleanup_traces_endpoint(req: CleanupRequest):
 
 
 @router.get("/cache/stats")
-async def get_cache_stats():
+async def get_cache_stats(user: dict = Depends(require_permission("admin"))):
     cache = get_cache_manager()
     if cache is None:
         return {"status": "not_initialized"}
@@ -100,6 +102,7 @@ async def list_cache_entries(
     scope: str = Query("", description="作用域筛选"),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
+    user: dict = Depends(require_permission("admin")),
 ):
     """获取缓存条目列表。"""
     cache = get_cache_manager()
@@ -116,6 +119,7 @@ async def list_cache_entries(
 @router.get("/cache/trend", response_model=CacheTrendResponse)
 async def get_cache_trend_data(
     range_hours: int = Query(24, ge=1, le=168, description="时间范围（小时）"),
+    user: dict = Depends(require_permission("admin")),
 ):
     """获取缓存历史趋势数据。"""
     points = get_cache_trend(range_hours)
@@ -125,7 +129,7 @@ async def get_cache_trend_data(
 
 
 @router.post("/cache/cleanup")
-async def cleanup_cache():
+async def cleanup_cache(user: dict = Depends(require_permission("admin"))):
     """清理过期缓存条目。"""
     cache = get_cache_manager()
     if cache is None:

@@ -1,9 +1,10 @@
 """记忆管理 API。"""
 import json
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from api.dependencies import get_memory_service
+from lib.auth.permissions import require_permission
 from api.schemas.memory import (
     MemoryAddRequest,
     MemoryBatchDeleteRequest,
@@ -29,7 +30,8 @@ def _to_memory_items(results, user_id: str) -> list[MemoryItem]:
 
 
 @router.get("/list", response_model=MemoryListResponse)
-def list_memories(user_id: str = "default"):
+def list_memories(user: dict = Depends(require_permission("memory"))):
+    user_id = user["user_id"]
     svc = get_memory_service()
     if not svc or not svc.available:
         return MemoryListResponse(memories=[])
@@ -37,7 +39,8 @@ def list_memories(user_id: str = "default"):
 
 
 @router.get("/search", response_model=MemoryListResponse)
-def search_memories(req: MemorySearchRequest, user_id: str = "default"):
+def search_memories(req: MemorySearchRequest, user: dict = Depends(require_permission("memory"))):
+    user_id = user["user_id"]
     svc = get_memory_service()
     if not svc or not svc.available:
         return MemoryListResponse(memories=[])
@@ -45,7 +48,7 @@ def search_memories(req: MemorySearchRequest, user_id: str = "default"):
 
 
 @router.delete("/batch")
-def batch_delete_memories(req: MemoryBatchDeleteRequest):
+def batch_delete_memories(req: MemoryBatchDeleteRequest, user: dict = Depends(require_permission("memory"))):
     svc = get_memory_service()
     if not svc or not svc.available:
         raise HTTPException(status_code=503, detail="记忆服务不可用")
@@ -56,7 +59,7 @@ def batch_delete_memories(req: MemoryBatchDeleteRequest):
 
 
 @router.delete("/{memory_id}")
-def delete_memory(memory_id: str):
+def delete_memory(memory_id: str, user: dict = Depends(require_permission("memory"))):
     svc = get_memory_service()
     if not svc or not svc.available:
         raise HTTPException(status_code=503, detail="记忆服务不可用")
@@ -67,7 +70,8 @@ def delete_memory(memory_id: str):
 
 
 @router.post("/add", response_model=MemoryItem)
-def add_memory(req: MemoryAddRequest, user_id: str = "default"):
+def add_memory(req: MemoryAddRequest, user: dict = Depends(require_permission("memory"))):
+    user_id = user["user_id"]
     svc = get_memory_service()
     if not svc or not svc.available:
         raise HTTPException(status_code=503, detail="记忆服务不可用")
@@ -82,7 +86,8 @@ def add_memory(req: MemoryAddRequest, user_id: str = "default"):
 
 
 @router.get("/profile", response_model=UserProfile | None)
-def get_profile(user_id: str = "default"):
+def get_profile(user: dict = Depends(require_permission("memory"))):
+    user_id = user["user_id"]
     svc = get_memory_service()
     if not svc:
         return None
@@ -93,7 +98,8 @@ def get_profile(user_id: str = "default"):
 
 
 @router.put("/profile", response_model=UserProfile)
-def update_profile(req: ProfileUpdateRequest, user_id: str = "default"):
+def update_profile(req: ProfileUpdateRequest, user: dict = Depends(require_permission("memory"))):
+    user_id = user["user_id"]
     svc = get_memory_service()
     if not svc:
         raise HTTPException(status_code=503, detail="记忆服务不可用")

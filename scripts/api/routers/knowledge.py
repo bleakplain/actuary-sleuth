@@ -8,12 +8,13 @@ import logging
 from typing import Dict
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from api.schemas.knowledge import (
     DocumentOut, ImportRequest, RebuildRequest, IndexStatus, TaskStatus,
     SaveDocumentRequest,
 )
+from lib.auth.permissions import require_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/kb", tags=["知识库管理"])
@@ -57,7 +58,7 @@ def _load_chunk_counts() -> dict:
 
 
 @router.get("/documents", response_model=list[DocumentOut])
-async def list_documents():
+async def list_documents(user: dict = Depends(require_permission("knowledge"))):
     reg_dir = _get_regulations_dir()
     chunk_counts = _load_chunk_counts()
     documents = []
@@ -76,7 +77,7 @@ async def list_documents():
 
 
 @router.post("/documents/import")
-async def import_documents(req: ImportRequest):
+async def import_documents(req: ImportRequest, user: dict = Depends(require_permission("admin"))):
     task_id = f"task_{uuid.uuid4().hex[:8]}"
     _tasks[task_id] = {"status": "pending", "progress": "", "result": None}
 
@@ -103,7 +104,7 @@ async def import_documents(req: ImportRequest):
 
 
 @router.post("/documents/rebuild")
-async def rebuild_index(req: RebuildRequest):
+async def rebuild_index(req: RebuildRequest, user: dict = Depends(require_permission("admin"))):
     """重建索引：创建新版本（快照当前源文件 + 重建索引）。"""
     task_id = f"task_{uuid.uuid4().hex[:8]}"
     _tasks[task_id] = {"status": "pending", "progress": "", "result": None}
@@ -139,7 +140,7 @@ async def rebuild_index(req: RebuildRequest):
 
 
 @router.get("/tasks/{task_id}", response_model=TaskStatus)
-async def get_task_status(task_id: str):
+async def get_task_status(task_id: str, user: dict = Depends(require_permission("knowledge"))):
     task = _tasks.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -152,7 +153,7 @@ async def get_task_status(task_id: str):
 
 
 @router.get("/documents/{file_path:path}/preview")
-async def preview_document(file_path: str):
+async def preview_document(file_path: str, user: dict = Depends(require_permission("knowledge"))):
     reg_dir = _get_regulations_dir()
     full_path = reg_dir.parent / file_path
     if not full_path.exists():
@@ -162,7 +163,7 @@ async def preview_document(file_path: str):
 
 
 @router.put("/documents/{file_path:path}")
-async def save_document(file_path: str, req: SaveDocumentRequest):
+async def save_document(file_path: str, req: SaveDocumentRequest, user: dict = Depends(require_permission("admin"))):
     """保存编辑后的文档内容到 references 目录。"""
     reg_dir = _get_regulations_dir()
     full_path = reg_dir.parent / file_path
@@ -173,7 +174,7 @@ async def save_document(file_path: str, req: SaveDocumentRequest):
 
 
 @router.get("/documents/{file_path:path}/chunks")
-async def list_document_chunks(file_path: str):
+async def list_document_chunks(file_path: str, user: dict = Depends(require_permission("knowledge"))):
     """返回指定文档在向量库中的所有分块，用于人工验证提取质量"""
     import lancedb
     config = _get_config()
@@ -244,7 +245,7 @@ async def list_document_chunks(file_path: str):
 
 
 @router.get("/status", response_model=IndexStatus)
-async def get_index_status():
+async def get_index_status(user: dict = Depends(require_permission("knowledge"))):
     try:
         config = _get_config()
 
