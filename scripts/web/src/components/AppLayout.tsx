@@ -9,23 +9,32 @@ import {
   ExperimentOutlined,
   SunOutlined,
   MoonOutlined,
+  LogoutOutlined,
+  SettingOutlined,
+  KeyOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { sidebarDarkTheme } from '../theme';
 import { useThemeContext } from '../App';
 import { MOBILE_NAV_HEIGHT } from '../constants/layout';
+import { useAuthStore } from '../stores/authStore';
 
 const { Sider, Content, Header } = Layout;
 const { useBreakpoint } = Grid;
 
-const menuItems = [
+const baseMenuItems = [
   { key: '/ask', icon: <MessageOutlined />, label: '法规问答' },
   { key: '/knowledge', icon: <DatabaseOutlined />, label: '知识库管理' },
   { key: '/eval', icon: <BarChartOutlined />, label: 'RAG 评估' },
   { key: '/compliance', icon: <SafetyCertificateOutlined />, label: '合规检查' },
   { key: '/feedback', icon: <DislikeOutlined />, label: '问题反馈' },
   { key: '/observability', icon: <ExperimentOutlined />, label: '可测性' },
+  { key: '/admin', icon: <SettingOutlined />, label: '系统管理', adminOnly: true },
 ];
+
+function getMenuItems(isAdmin: boolean) {
+  return baseMenuItems.filter((item) => !item.adminOnly || isAdmin).map(({ adminOnly, ...rest }) => rest);
+}
 
 function SidebarLogo({ collapsed }: { collapsed: boolean }) {
   const { token } = theme.useToken();
@@ -46,7 +55,7 @@ function SidebarLogo({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-function MobileTabBar({ selectedKey, onSelect }: { selectedKey: string; onSelect: (key: string) => void }) {
+function MobileTabBar({ selectedKey, onSelect, items }: { selectedKey: string; onSelect: (key: string) => void; items: typeof baseMenuItems }) {
   const { token } = theme.useToken();
   return (
     <div
@@ -66,7 +75,7 @@ function MobileTabBar({ selectedKey, onSelect }: { selectedKey: string; onSelect
         overflowX: 'hidden',
       }}
     >
-      {menuItems.map((item) => {
+      {items.map((item: any) => {
         const active = selectedKey === item.key;
         return (
           <div
@@ -80,11 +89,11 @@ function MobileTabBar({ selectedKey, onSelect }: { selectedKey: string; onSelect
                 e.preventDefault();
                 onSelect(item.key);
               } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-                const idx = menuItems.findIndex((m) => m.key === item.key);
+                const idx = items.findIndex((m: any) => m.key === item.key);
                 const next = e.key === 'ArrowRight'
-                  ? (idx + 1) % menuItems.length
-                  : (idx - 1 + menuItems.length) % menuItems.length;
-                const nextKey = menuItems[next].key;
+                  ? (idx + 1) % items.length
+                  : (idx - 1 + items.length) % items.length;
+                const nextKey = items[next].key;
                 onSelect(nextKey);
               }
             }}
@@ -121,7 +130,15 @@ export default function AppLayout() {
   const { token } = theme.useToken();
   const screens = useBreakpoint();
   const isMobile = !screens.md;
+  const logout = useAuthStore((s) => s.logout);
+  const user = useAuthStore((s) => s.user);
+  const handleLogout = () => {
+    logout();
+    navigate('/login', { replace: true });
+  };
 
+  const isAdmin = user?.role_id === 'admin';
+  const menuItems = getMenuItems(isAdmin);
   const selectedKey = menuItems.find((item) => location.pathname.startsWith(item.key))?.key || '/ask';
 
   if (isMobile) {
@@ -139,13 +156,29 @@ export default function AppLayout() {
           }}
         >
           <span style={{ fontSize: 15, fontWeight: token.fontWeightStrong, color: token.colorText }}>精算助手</span>
-          <Button
-            type="text"
-            icon={isDark ? <SunOutlined /> : <MoonOutlined />}
-            onClick={onToggleTheme}
-            aria-label={isDark ? '切换到浅色模式' : '切换到深色模式'}
-            style={{ marginLeft: 'auto', minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          />
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Button
+              type="text"
+              icon={<KeyOutlined />}
+              onClick={() => navigate('/change-password')}
+              aria-label="修改密码"
+              style={{ minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            />
+            <Button
+              type="text"
+              icon={<LogoutOutlined />}
+              onClick={handleLogout}
+              aria-label="退出登录"
+              style={{ minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            />
+            <Button
+              type="text"
+              icon={isDark ? <SunOutlined /> : <MoonOutlined />}
+              onClick={onToggleTheme}
+              aria-label={isDark ? '切换到浅色模式' : '切换到深色模式'}
+              style={{ minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            />
+          </div>
         </Header>
         <Content
           style={{
@@ -159,7 +192,7 @@ export default function AppLayout() {
           </main>
         </Content>
         <nav aria-label="主导航">
-          <MobileTabBar selectedKey={selectedKey} onSelect={(key) => navigate(key)} />
+          <MobileTabBar selectedKey={selectedKey} onSelect={(key) => navigate(key)} items={menuItems as any} />
         </nav>
       </Layout>
     );
@@ -196,13 +229,26 @@ export default function AppLayout() {
           }}
         >
           <span style={{ fontSize: 16, fontWeight: token.fontWeightStrong, color: token.colorText }}>精算法规知识平台</span>
-          <Button
-            type="text"
-            icon={isDark ? <SunOutlined /> : <MoonOutlined />}
-            onClick={onToggleTheme}
-            aria-label={isDark ? '切换到浅色模式' : '切换到深色模式'}
-            style={{ marginLeft: 'auto' }}
-          />
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Button
+              type="text"
+              icon={<KeyOutlined />}
+              onClick={() => navigate('/change-password')}
+              aria-label="修改密码"
+            />
+            <Button
+              type="text"
+              icon={<LogoutOutlined />}
+              onClick={handleLogout}
+              aria-label="退出登录"
+            />
+            <Button
+              type="text"
+              icon={isDark ? <SunOutlined /> : <MoonOutlined />}
+              onClick={onToggleTheme}
+              aria-label={isDark ? '切换到浅色模式' : '切换到深色模式'}
+            />
+          </div>
         </Header>
         <Content style={{ margin: 'var(--content-padding)', overflow: 'auto' }}>
           <main id="main-content">
