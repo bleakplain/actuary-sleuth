@@ -5,11 +5,12 @@ import asyncio
 import logging
 from typing import Dict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from api.schemas.kb_version import (
     VersionOut, VersionListOut, CreateVersionRequest,
 )
+from lib.auth.permissions import require_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/kb/versions", tags=["知识库版本管理"])
@@ -47,7 +48,7 @@ def reload_rag_engine(kb_mgr):
 
 
 @router.get("", response_model=VersionListOut)
-async def list_versions():
+async def list_versions(user: dict = Depends(require_permission("knowledge"))):
     kb_mgr = _get_kb_manager()
     versions = kb_mgr.list_versions()
     return VersionListOut(
@@ -57,7 +58,7 @@ async def list_versions():
 
 
 @router.post("")
-async def create_version(req: CreateVersionRequest):
+async def create_version(req: CreateVersionRequest, user: dict = Depends(require_permission("admin"))):
     """创建新版本：快照当前 references + 重建索引 + 自动激活。"""
     task_id = f"task_{uuid.uuid4().hex[:8]}"
     _tasks[task_id] = {"status": "pending", "progress": "", "result": None}
@@ -91,7 +92,7 @@ async def create_version(req: CreateVersionRequest):
 
 
 @router.post("/{version_id}/activate")
-async def activate_version(version_id: str):
+async def activate_version(version_id: str, user: dict = Depends(require_permission("admin"))):
     kb_mgr = _get_kb_manager()
     if not kb_mgr.get_version_meta(version_id):
         raise HTTPException(status_code=404, detail="版本不存在")
@@ -101,7 +102,7 @@ async def activate_version(version_id: str):
 
 
 @router.delete("/{version_id}")
-async def delete_version(version_id: str):
+async def delete_version(version_id: str, user: dict = Depends(require_permission("admin"))):
     kb_mgr = _get_kb_manager()
     if not kb_mgr.delete_version(version_id):
         raise HTTPException(status_code=400, detail="不能删除当前激活的版本")
@@ -109,7 +110,7 @@ async def delete_version(version_id: str):
 
 
 @router.get("/tasks/{task_id}")
-async def get_version_task_status(task_id: str):
+async def get_version_task_status(task_id: str, user: dict = Depends(require_permission("knowledge"))):
     task = _tasks.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="任务不存在")

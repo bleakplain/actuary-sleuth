@@ -390,6 +390,74 @@ def _migrate_db():
         if 'context_json' not in session_cols:
             conn.execute("ALTER TABLE sessions ADD COLUMN context_json TEXT DEFAULT '{}'")
 
+        # ===== Auth tables =====
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS roles (
+            id TEXT PRIMARY KEY,
+            display_name TEXT NOT NULL,
+            permissions_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            display_name TEXT NOT NULL DEFAULT '',
+            role_id TEXT NOT NULL REFERENCES roles(id),
+            status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'active', 'disabled')),
+            email_verified_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """)
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS invite_codes (
+            id TEXT PRIMARY KEY,
+            code TEXT NOT NULL UNIQUE,
+            role_id TEXT NOT NULL REFERENCES roles(id),
+            created_by TEXT NOT NULL REFERENCES users(id),
+            used_by TEXT REFERENCES users(id),
+            used_at TEXT,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """)
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_invite_codes_code ON invite_codes(code)")
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS email_verification_tokens (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id),
+            token_hash TEXT NOT NULL UNIQUE,
+            expires_at TEXT NOT NULL,
+            verified_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_email_verify_hash ON email_verification_tokens(token_hash)")
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL,
+            success INTEGER NOT NULL DEFAULT 0,
+            attempted_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_login_attempts_email ON login_attempts(email)")
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES users(id),
+            token_hash TEXT NOT NULL UNIQUE,
+            expires_at TEXT NOT NULL,
+            used_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_reset_tokens_hash ON password_reset_tokens(token_hash)")
+
 
 def create_session(session_id: str, title: str = "", user_id: str = "default") -> None:
     with get_connection() as conn:
@@ -1616,3 +1684,262 @@ def update_parsed_document_review(
             WHERE id = ?
         """, (review_status, reviewer, now, review_comment or "", doc_id))
         return cur.rowcount > 0
+
+
+# ===== Auth data access functions =====
+
+def get_user_by_email(email: str) -> Optional[Dict]:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+        return dict(row) if row else None
+
+
+def get_user_by_id(user_id: str) -> Optional[Dict]:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def create_user(email: str, password_hash: str, role_id: str, status: str = 'pending') -> str:
+    user_id = str(uuid.uuid4())
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO users (id, email, password_hash, role_id, status) VALUES (?, ?, ?, ?, ?)",
+            (user_id, email, password_hash, role_id, status),
+        )
+    return user_id
+
+
+def update_user_status(user_id: str, status: str) -> bool:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE users SET status = ?, updated_at = datetime('now') WHERE id = ?",
+            (status, user_id),
+        )
+    return cursor.rowcount > 0
+
+
+def update_user_role(user_id: str, role_id: str) -> bool:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE users SET role_id = ?, updated_at = datetime('now') WHERE id = ?",
+            (role_id, user_id),
+        )
+    return cursor.rowcount > 0
+
+
+def update_user_password(user_id: str, password_hash: str) -> bool:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
+            (password_hash, user_id),
+        )
+    return cursor.rowcount > 0
+
+
+def verify_user_email(user_id: str) -> bool:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE users SET email_verified_at = datetime('now'), status = 'active', updated_at = datetime('now') WHERE id = ?",
+            (user_id,),
+        )
+    return cursor.rowcount > 0
+
+
+def list_users() -> List[Dict]:
+    with get_connection() as conn:
+        rows = conn.execute("SELECT id, email, display_name, role_id, status, email_verified_at, created_at FROM users ORDER BY created_at DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_user_display_name(user_id: str, display_name: str) -> bool:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE users SET display_name = ?, updated_at = datetime('now') WHERE id = ?",
+            (display_name, user_id),
+        )
+    return cursor.rowcount > 0
+
+
+# ===== Role data access =====
+
+def get_role(role_id: str) -> Optional[Dict]:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM roles WHERE id = ?", (role_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def list_roles() -> List[Dict]:
+    with get_connection() as conn:
+        rows = conn.execute("SELECT * FROM roles ORDER BY id").fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_role_permissions(role_id: str, permissions: List[str]) -> bool:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE roles SET permissions_json = ? WHERE id = ?",
+            (json.dumps(permissions), role_id),
+        )
+    return cursor.rowcount > 0
+
+
+def ensure_default_roles() -> None:
+    """启动时插入 4 个预置角色（幂等）。"""
+    defaults = [
+        ('admin', '管理员', json.dumps(['ask', 'compliance', 'eval', 'knowledge', 'memory', 'admin'])),
+        ('actuary', '精算师', json.dumps(['ask', 'compliance', 'memory'])),
+        ('compliance', '合规专员', json.dumps(['ask', 'compliance', 'memory'])),
+        ('viewer', '查看者', json.dumps(['ask'])),
+    ]
+    with get_connection() as conn:
+        for role_id, display_name, perms in defaults:
+            conn.execute(
+                "INSERT OR IGNORE INTO roles (id, display_name, permissions_json) VALUES (?, ?, ?)",
+                (role_id, display_name, perms),
+            )
+
+
+def ensure_default_admin() -> None:
+    """若 users 表为空，从环境变量创建默认管理员。"""
+    import os
+    from lib.auth.password import hash_password
+    with get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    if count > 0:
+        return
+    email = os.getenv('ADMIN_EMAIL', 'admin@example.com')
+    password = os.getenv('ADMIN_PASSWORD', '')
+    if not password:
+        logger.warning("ADMIN_PASSWORD 未设置，跳过默认管理员创建")
+        return
+    user_id = create_user(email, hash_password(password), 'admin', status='active')
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE users SET email_verified_at = datetime('now') WHERE id = ?",
+            (user_id,),
+        )
+    logger.info(f"默认管理员已创建: {email}")
+
+
+# ===== Invite code data access =====
+
+def create_invite_code(code: str, role_id: str, created_by: str, expires_at: str) -> str:
+    code_id = str(uuid.uuid4())
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO invite_codes (id, code, role_id, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+            (code_id, code, role_id, created_by, expires_at),
+        )
+    return code_id
+
+
+def get_invite_code_by_code(code: str) -> Optional[Dict]:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM invite_codes WHERE code = ?", (code,)).fetchone()
+        return dict(row) if row else None
+
+
+def use_invite_code(code_id: str, used_by: str) -> bool:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE invite_codes SET used_by = ?, used_at = datetime('now') WHERE id = ? AND used_by IS NULL",
+            (used_by, code_id),
+        )
+    return cursor.rowcount > 0
+
+
+def list_invite_codes() -> List[Dict]:
+    with get_connection() as conn:
+        rows = conn.execute("SELECT * FROM invite_codes ORDER BY created_at DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def disable_invite_code(code_id: str) -> bool:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE invite_codes SET expires_at = datetime('now') WHERE id = ? AND used_by IS NULL",
+            (code_id,),
+        )
+    return cursor.rowcount > 0
+
+
+# ===== Email verification token data access =====
+
+def create_email_token(user_id: str, token_hash: str, expires_at: str) -> str:
+    token_id = str(uuid.uuid4())
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO email_verification_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
+            (token_id, user_id, token_hash, expires_at),
+        )
+    return token_id
+
+
+def get_email_token_by_hash(token_hash: str) -> Optional[Dict]:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM email_verification_tokens WHERE token_hash = ?", (token_hash,)).fetchone()
+        return dict(row) if row else None
+
+
+def verify_email_token(token_hash: str) -> bool:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE email_verification_tokens SET verified_at = datetime('now') WHERE token_hash = ? AND verified_at IS NULL",
+            (token_hash,),
+        )
+    return cursor.rowcount > 0
+
+
+def invalidate_pending_email_tokens(user_id: str) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "DELETE FROM email_verification_tokens WHERE user_id = ? AND verified_at IS NULL",
+            (user_id,),
+        )
+
+
+# ===== Password reset token data access =====
+
+def create_reset_token(user_id: str, token_hash: str, expires_at: str) -> str:
+    token_id = str(uuid.uuid4())
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
+            (token_id, user_id, token_hash, expires_at),
+        )
+    return token_id
+
+
+def get_reset_token_by_hash(token_hash: str) -> Optional[Dict]:
+    with get_connection() as conn:
+        row = conn.execute("SELECT * FROM password_reset_tokens WHERE token_hash = ?", (token_hash,)).fetchone()
+        return dict(row) if row else None
+
+
+def use_reset_token(token_hash: str) -> bool:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE password_reset_tokens SET used_at = datetime('now') WHERE token_hash = ? AND used_at IS NULL",
+            (token_hash,),
+        )
+    return cursor.rowcount > 0
+
+
+# ===== Login attempt data access =====
+
+def record_login_attempt(email: str, success: bool) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO login_attempts (email, success) VALUES (?, ?)",
+            (email, 1 if success else 0),
+        )
+
+
+def get_recent_failed_attempts(email: str, minutes: int = 15) -> int:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM login_attempts WHERE email = ? AND success = 0 AND attempted_at > datetime('now', ?)",
+            (email, f'-{minutes} minutes'),
+        ).fetchone()
+    return row[0]

@@ -104,6 +104,62 @@ class RerankConfig:
         return self._config.get('quantized', False)
 
 
+class AuthConfig:
+
+    def __init__(self, config_dict: Dict[str, Any]):
+        self._config = config_dict.get('auth', {})
+
+    @property
+    def jwt_secret(self) -> str:
+        return self._config.get('jwt_secret', '')
+
+    @property
+    def jwt_algorithm(self) -> str:
+        return self._config.get('jwt_algorithm', 'HS256')
+
+    @property
+    def access_token_expire_minutes(self) -> int:
+        return self._config.get('access_token_expire_minutes', 480)
+
+    @property
+    def max_login_attempts(self) -> int:
+        return self._config.get('max_login_attempts', 5)
+
+    @property
+    def lockout_minutes(self) -> int:
+        return self._config.get('lockout_minutes', 15)
+
+
+class MailConfig:
+
+    def __init__(self, config_dict: Dict[str, Any]):
+        self._config = config_dict.get('mail', {})
+
+    @property
+    def smtp_host(self) -> str:
+        return self._config.get('smtp_host', '')
+
+    @property
+    def smtp_port(self) -> int:
+        return self._config.get('smtp_port', 465)
+
+    @property
+    def smtp_user(self) -> str:
+        return self._config.get('smtp_user', '')
+
+    @property
+    def smtp_password(self) -> str:
+        return self._config.get('smtp_password', '')
+
+    @property
+    def from_address(self) -> str:
+        return self._config.get('from_address', '')
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.smtp_host and self.smtp_user)
+
+
 class OllamaConfig:
 
     def __init__(self, config_dict: Dict[str, Any]):
@@ -375,6 +431,22 @@ class Config:
                 'max_length': int(os.getenv('RERANKER_MAX_LENGTH', '512')),
                 'quantized': os.getenv('RERANKER_QUANTIZED', 'false').lower() == 'true',
             },
+            # auth
+            'auth': {
+                'jwt_secret': os.getenv('AUTH_JWT_SECRET', ''),
+                'jwt_algorithm': os.getenv('AUTH_JWT_ALGORITHM', 'HS256'),
+                'access_token_expire_minutes': int(os.getenv('AUTH_ACCESS_TOKEN_EXPIRE_MINUTES', '480')),
+                'max_login_attempts': int(os.getenv('AUTH_MAX_LOGIN_ATTEMPTS', '5')),
+                'lockout_minutes': int(os.getenv('AUTH_LOCKOUT_MINUTES', '15')),
+            },
+            # mail
+            'mail': {
+                'smtp_host': os.getenv('MAIL_SMTP_HOST', ''),
+                'smtp_port': int(os.getenv('MAIL_SMTP_PORT', '465')),
+                'smtp_user': os.getenv('MAIL_SMTP_USER', ''),
+                'smtp_password': os.getenv('MAIL_SMTP_PASSWORD', ''),
+                'from_address': os.getenv('MAIL_FROM_ADDRESS', ''),
+            },
         }
 
     def _init_nested_configs(self) -> None:
@@ -386,6 +458,8 @@ class Config:
         self._data_paths = DatabaseConfig(self._config)
         self._memory = MemoryConfig(self._config)
         self._rerank = RerankConfig(self._config)
+        self._auth = AuthConfig(self._config)
+        self._mail = MailConfig(self._config)
 
     @property
     def feishu(self) -> FeishuConfig:
@@ -402,6 +476,14 @@ class Config:
     @property
     def rerank(self) -> RerankConfig:
         return self._rerank
+
+    @property
+    def auth(self) -> AuthConfig:
+        return self._auth
+
+    @property
+    def mail(self) -> MailConfig:
+        return self._mail
 
     @property
     def sqlite_db_path(self) -> str:
@@ -546,3 +628,9 @@ def get_memory_config() -> MemoryConfig:
 
 def get_rerank_config() -> RerankConfig:
     return _get_config().rerank
+
+def get_auth_config() -> AuthConfig:
+    return _get_config().auth
+
+def get_mail_config() -> MailConfig:
+    return _get_config().mail

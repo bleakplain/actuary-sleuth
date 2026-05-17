@@ -33,6 +33,13 @@ client.interceptors.response.use(
   (err) => {
     if (!axios.isAxiosError(err)) return Promise.reject(err);
     const status = err.response?.status ?? 0;
+    if (status === 401) {
+      localStorage.removeItem('auth_token');
+      delete axios.defaults.headers.common['Authorization'];
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
     const detail = err.response?.data?.detail || err.message || '请求失败，请检查网络后重试';
     throw new ApiError(status, detail, err.response?.data);
   },

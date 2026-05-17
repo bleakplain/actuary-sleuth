@@ -6,7 +6,7 @@ import logging
 from dataclasses import replace
 from typing import Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse, Response
 
 from api.schemas.eval import (
@@ -38,6 +38,7 @@ from lib.eval import RetrievalEvaluator, GenerationEvaluator, load_eval_dataset
 from lib.eval.rating import generate_eval_summary
 from lib.eval.validator import validate_dataset
 from lib.llm import LLMClientFactory
+from lib.auth.permissions import require_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/eval", tags=["评估管理"])
@@ -64,6 +65,7 @@ async def list_eval_samples(
     difficulty: Optional[str] = Query(None),
     topic: Optional[str] = Query(None),
     review_status: Optional[str] = Query(None, pattern="^(pending|approved)$"),
+    user: dict = Depends(require_permission("eval")),
 ):
     return get_eval_samples(
         question_type=question_type,
@@ -74,7 +76,7 @@ async def list_eval_samples(
 
 
 @router.post("/dataset/samples", response_model=EvalSampleOut)
-async def create_eval_sample(sample: EvalSampleCreate):
+async def create_eval_sample(sample: EvalSampleCreate, user: dict = Depends(require_permission("eval"))):
     upsert_eval_sample(sample.model_dump())
     result = get_eval_sample(sample.id)
     if result is None:
@@ -83,7 +85,7 @@ async def create_eval_sample(sample: EvalSampleCreate):
 
 
 @router.put("/dataset/samples/{sample_id}", response_model=EvalSampleOut)
-async def update_eval_sample(sample_id: str, sample: EvalSampleCreate):
+async def update_eval_sample(sample_id: str, sample: EvalSampleCreate, user: dict = Depends(require_permission("eval"))):
     existing = get_eval_sample(sample_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="样本不存在")
@@ -97,32 +99,32 @@ async def update_eval_sample(sample_id: str, sample: EvalSampleCreate):
 
 
 @router.delete("/dataset/samples/{sample_id}")
-async def remove_eval_sample(sample_id: str):
+async def remove_eval_sample(sample_id: str, user: dict = Depends(require_permission("eval"))):
     if not delete_eval_sample(sample_id):
         raise HTTPException(status_code=404, detail="样本不存在")
     return {"deleted": True}
 
 
 @router.post("/dataset/import")
-async def import_dataset(req: ImportSamplesRequest):
+async def import_dataset(req: ImportSamplesRequest, user: dict = Depends(require_permission("eval"))):
     samples = [s.model_dump() for s in req.samples]
     count = import_eval_samples(samples)
     return {"imported": count, "total": len(samples), "skipped": len(samples) - count}
 
 
 @router.post("/dataset/snapshots")
-async def add_snapshot(req: SnapshotCreate):
+async def add_snapshot(req: SnapshotCreate, user: dict = Depends(require_permission("eval"))):
     snap_id = create_snapshot(req.name, req.description)
     return {"snapshot_id": snap_id, "name": req.name}
 
 
 @router.get("/dataset/snapshots")
-async def list_snapshots():
+async def list_snapshots(user: dict = Depends(require_permission("eval"))):
     return get_snapshots()
 
 
 @router.post("/dataset/snapshots/{snapshot_id}/restore")
-async def apply_snapshot(snapshot_id: str):
+async def apply_snapshot(snapshot_id: str, user: dict = Depends(require_permission("eval"))):
     snap_ids = [s["id"] for s in get_snapshots()]
     if snapshot_id not in snap_ids:
         raise HTTPException(status_code=404, detail="快照不存在")
@@ -131,7 +133,7 @@ async def apply_snapshot(snapshot_id: str):
 
 
 @router.delete("/dataset/snapshots/{snapshot_id}")
-async def delete_snapshot(snapshot_id: str):
+async def delete_snapshot(snapshot_id: str, user: dict = Depends(require_permission("eval"))):
     if not remove_snapshot(snapshot_id):
         raise HTTPException(
             status_code=400,
@@ -172,7 +174,7 @@ def _load_config(config_id: int):
 
 
 @router.post("/evaluations")
-async def create_evaluation(req: EvaluationRequest):
+async def create_evaluation(req: EvaluationRequest, user: dict = Depends(require_permission("eval"))):
     evaluation_id = f"eval_{uuid.uuid4().hex[:8]}"
 
     config, config_version = _load_config(req.config_id)
@@ -309,7 +311,7 @@ def _run_eval_sync(
 
 
 @router.get("/evaluations/{evaluation_id}/status")
-async def get_evaluation_status(evaluation_id: str):
+async def get_evaluation_status(evaluation_id: str, user: dict = Depends(require_permission("eval"))):
     run = get_evaluation(evaluation_id)
     if run is None:
         raise HTTPException(status_code=404, detail="评估运行不存在")
@@ -327,7 +329,7 @@ async def get_evaluation_status(evaluation_id: str):
 
 
 @router.get("/evaluations/{evaluation_id}/report")
-async def get_evaluation_report(evaluation_id: str):
+async def get_evaluation_report(evaluation_id: str, user: dict = Depends(require_permission("eval"))):
     run = get_evaluation(evaluation_id)
     if run is None:
         raise HTTPException(status_code=404, detail="评估运行不存在")
@@ -337,7 +339,7 @@ async def get_evaluation_report(evaluation_id: str):
 
 
 @router.post("/evaluations/{evaluation_id}/cancel")
-async def cancel_evaluation(evaluation_id: str):
+async def cancel_evaluation(evaluation_id: str, user: dict = Depends(require_permission("eval"))):
     run = get_evaluation(evaluation_id)
     if run is None:
         raise HTTPException(status_code=404, detail="评估运行不存在")
@@ -348,7 +350,7 @@ async def cancel_evaluation(evaluation_id: str):
 
 
 @router.get("/evaluations/{evaluation_id}/details")
-async def get_evaluation_details(evaluation_id: str):
+async def get_evaluation_details(evaluation_id: str, user: dict = Depends(require_permission("eval"))):
     run = get_evaluation(evaluation_id)
     if run is None:
         raise HTTPException(status_code=404, detail="评估运行不存在")
@@ -363,12 +365,12 @@ async def get_evaluation_details(evaluation_id: str):
 
 
 @router.get("/evaluations")
-async def list_evaluations():
+async def list_evaluations(user: dict = Depends(require_permission("eval"))):
     return get_evaluations()
 
 
 @router.delete("/evaluations")
-async def remove_evaluations(ids: str = Query(..., description="逗号分隔的评测ID列表")):
+async def remove_evaluations(ids: str = Query(..., description="逗号分隔的评测ID列表"), user: dict = Depends(require_permission("eval"))):
     evaluation_ids = [eid.strip() for eid in ids.split(",") if eid.strip()]
     if not evaluation_ids:
         raise HTTPException(status_code=400, detail="未提供有效的评测ID")
@@ -380,12 +382,13 @@ async def remove_evaluations(ids: str = Query(..., description="逗号分隔的�
 async def get_evaluation_trends(
     metric: str = Query(..., description="指标名，如 retrieval.precision_at_k"),
     limit: int = Query(20, ge=1, le=50),
+    user: dict = Depends(require_permission("eval")),
 ):
     return fetch_evaluation_trends(metric, limit)
 
 
 @router.post("/evaluations/compare")
-async def compare_evaluations(req: CompareRequest):
+async def compare_evaluations(req: CompareRequest, user: dict = Depends(require_permission("eval"))):
     baseline = get_evaluation(req.baseline_id)
     compare = get_evaluation(req.compare_id)
     if baseline is None or compare is None:
@@ -432,7 +435,7 @@ async def compare_evaluations(req: CompareRequest):
 
 
 @router.get("/evaluations/{evaluation_id}/export")
-async def export_evaluation_report(evaluation_id: str, format: str = "json"):
+async def export_evaluation_report(evaluation_id: str, format: str = "json", user: dict = Depends(require_permission("eval"))):
     run = get_evaluation(evaluation_id)
     if run is None:
         raise HTTPException(status_code=404, detail="评估运行不存在")
@@ -472,12 +475,12 @@ async def export_evaluation_report(evaluation_id: str, format: str = "json"):
 
 
 @router.get("/configs")
-async def list_eval_configs():
+async def list_eval_configs(user: dict = Depends(require_permission("eval"))):
     return get_eval_configs()
 
 
 @router.get("/configs/active")
-async def get_active_eval_config():
+async def get_active_eval_config(user: dict = Depends(require_permission("eval"))):
     cfg = get_active_config()
     if cfg is None:
         raise HTTPException(status_code=404, detail="无激活的评测配置")
@@ -485,13 +488,13 @@ async def get_active_eval_config():
 
 
 @router.post("/configs")
-async def add_eval_config(req: EvalConfigCreate):
+async def add_eval_config(req: EvalConfigCreate, user: dict = Depends(require_permission("eval"))):
     config_id, version = insert_eval_config(req.description, req.to_config_dict())
     return {"id": config_id, "version": version}
 
 
 @router.delete("/configs/{config_id}")
-async def delete_eval_config(config_id: int):
+async def delete_eval_config(config_id: int, user: dict = Depends(require_permission("eval"))):
     if not remove_eval_config(config_id):
         raise HTTPException(
             status_code=400,
@@ -500,7 +503,7 @@ async def delete_eval_config(config_id: int):
 
 
 @router.get("/configs/{config_id}")
-async def get_single_eval_config(config_id: int):
+async def get_single_eval_config(config_id: int, user: dict = Depends(require_permission("eval"))):
     cfg = get_eval_config(config_id)
     if cfg is None:
         raise HTTPException(status_code=404, detail="配置不存在")
@@ -508,7 +511,7 @@ async def get_single_eval_config(config_id: int):
 
 
 @router.post("/configs/{config_id}/activate")
-async def activate_config(config_id: int):
+async def activate_config(config_id: int, user: dict = Depends(require_permission("eval"))):
     cfg = get_eval_config(config_id)
     if cfg is None:
         raise HTTPException(status_code=404, detail="配置不存在")
@@ -521,7 +524,7 @@ async def activate_config(config_id: int):
 
 
 @router.get("/dataset/audit")
-async def audit_dataset():
+async def audit_dataset(user: dict = Depends(require_permission("eval"))):
     samples_data = get_eval_samples()
     samples = [EvalSample.from_dict(s) for s in samples_data]
     report = validate_dataset(samples)
@@ -532,7 +535,7 @@ async def audit_dataset():
 
 
 @router.post("/human-reviews")
-async def create_human_review(req: HumanReviewCreate):
+async def create_human_review(req: HumanReviewCreate, user: dict = Depends(require_permission("eval"))):
     review_id = insert_human_review(
         evaluation_id=req.evaluation_id,
         sample_id=req.sample_id,
@@ -546,7 +549,7 @@ async def create_human_review(req: HumanReviewCreate):
 
 
 @router.get("/human-reviews/{evaluation_id}")
-async def list_human_reviews(evaluation_id: str):
+async def list_human_reviews(evaluation_id: str, user: dict = Depends(require_permission("eval"))):
     reviews = get_human_reviews(evaluation_id)
     stats = get_human_review_stats(evaluation_id)
     return {"reviews": reviews, "stats": stats}
@@ -556,7 +559,7 @@ async def list_human_reviews(evaluation_id: str):
 
 
 @router.patch("/dataset/samples/{sample_id}/review", response_model=EvalSampleOut)
-async def approve_sample(sample_id: str, req: ReviewSampleRequest):
+async def approve_sample(sample_id: str, req: ReviewSampleRequest, user: dict = Depends(require_permission("eval"))):
     existing = get_eval_sample(sample_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="样本不存在")
@@ -571,12 +574,12 @@ async def approve_sample(sample_id: str, req: ReviewSampleRequest):
 
 
 @router.get("/dataset/review-stats")
-async def review_stats():
+async def review_stats(user: dict = Depends(require_permission("eval"))):
     return get_review_stats()
 
 
 @router.post("/dataset/kb-search", response_model=list[KbSearchResult])
-async def search_knowledge_base(req: KbSearchRequest):
+async def search_knowledge_base(req: KbSearchRequest, user: dict = Depends(require_permission("eval"))):
     try:
         from api.dependencies import get_rag_engine
         engine = get_rag_engine()

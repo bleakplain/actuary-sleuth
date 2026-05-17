@@ -54,6 +54,11 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("数据库初始化完成")
 
+    from api.database import ensure_default_roles, ensure_default_admin
+    ensure_default_roles()
+    ensure_default_admin()
+    logger.info("认证初始化完成")
+
     from api.dependencies import init_memory_service
     init_memory_service()
 
@@ -169,7 +174,10 @@ app.add_middleware(
 )
 
 from api.routers import ask, knowledge, eval as eval_router, compliance, kb_version, feedback, observability
+from api.routers import auth, admin as admin_router
 from api.routers.memory import router as memory_router
+app.include_router(auth.router)
+app.include_router(admin_router.router)
 app.include_router(ask.router)
 app.include_router(knowledge.router)
 app.include_router(eval_router.router)
