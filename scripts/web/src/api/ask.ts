@@ -59,10 +59,13 @@ export function chatSSE(
   const controller = new AbortController();
   const baseUrl = getBaseUrl();
   const url = `${baseUrl}/api/ask/chat`;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = localStorage.getItem('auth_token');
+  if (token) headers['Authorization'] = `Bearer ${token}`;
 
   fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(req),
     signal: controller.signal,
   })
