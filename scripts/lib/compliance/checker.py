@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 
 _CLAUSE_NUM_RE = re.compile(r'(\d+(?:\.\d+)*(?:\(\d+\))?)')
 _TEMPLATE_OVERHEAD = 600
-_MAX_CLAUSES_PER_BATCH = 25
 
 
 class CheckResult:
@@ -200,20 +199,24 @@ def _build_numbered_regulations(
     return "\n\n".join(parts), ref_to_chunk
 
 
-def _split_document_by_clauses(document_content: str, max_clauses: int) -> List[str]:
+def _split_document_by_clauses(document_content: str, budget: int) -> List[str]:
     markers = list(re.finditer(r'【[^】]+】', document_content))
     if not markers:
         return [document_content]
     clause_positions = [m.start() for m in markers if re.match(r'【(?:附加险)?条款\s+\d+', m.group(0))]
-    if not clause_positions or len(clause_positions) <= max_clauses:
+    if not clause_positions:
+        return [document_content]
+    prefix_len = clause_positions[0]
+    avg_clause_len = (len(document_content) - prefix_len) / len(clause_positions) if clause_positions else 500
+    max_clauses = max(50, int(budget / avg_clause_len))
+    if len(clause_positions) <= max_clauses:
         return [document_content]
     batches = []
     for i in range(0, len(clause_positions), max_clauses):
         start = clause_positions[i]
         end = clause_positions[i + max_clauses] if i + max_clauses < len(clause_positions) else len(document_content)
         batches.append(document_content[start:end].strip())
-    if clause_positions[0] > 0:
-        batches[0] = document_content[:clause_positions[0]] + batches[0]
+    batches[0] = document_content[:prefix_len] + batches[0]
     return batches
 
 
@@ -291,7 +294,7 @@ def streaming_compliance_check(
     if len(document_content) <= budget:
         batches = [document_content]
     else:
-        batches = _split_document_by_clauses(document_content, _MAX_CLAUSES_PER_BATCH)
+        batches = _split_document_by_clauses(document_content, budget)
         logger.info(f"文档分为 {len(batches)} 批审查")
     for i, batch_doc in enumerate(batches):
         if len(batches) > 1:

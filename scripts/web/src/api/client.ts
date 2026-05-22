@@ -23,9 +23,19 @@ export class ApiError extends Error {
   }
 }
 
+const TOKEN_KEY = 'auth_token';
+
 const client = axios.create({
   timeout: 120000,
   headers: { 'Content-Type': 'application/json' },
+});
+
+client.interceptors.request.use((config) => {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 client.interceptors.response.use(

@@ -31,10 +31,13 @@ export function checkDocumentStream(
   },
 ): AbortController {
   const controller = new AbortController();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = localStorage.getItem('auth_token');
+  if (token) headers['Authorization'] = `Bearer ${token}`;
 
   fetch('/api/compliance/check/document/stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(params),
     signal: controller.signal,
   })
