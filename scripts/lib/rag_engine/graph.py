@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import operator
+import re
 from dataclasses import dataclass
 from typing import Annotated, Any, Dict, List, Literal, Optional
 
@@ -22,6 +23,8 @@ from lib.llm.trace import trace_span
 from lib.memory.triggers import should_retrieve_memory
 from lib.memory.compression import compress_memory_context
 from lib.rag_engine.attribution import parse_citations
+from lib.rag_engine.intent import classify_intent
+from lib.rag_engine.registry import RegulationRegistry, format_registry_context
 from lib.rag_engine.rag_engine import _SYSTEM_PROMPT, RAGEngine
 
 logger = logging.getLogger(__name__)
@@ -30,6 +33,64 @@ _clarification_mw = ClarificationMiddleware()
 _context_mw = SessionContextMiddleware()
 _loop_mw = LoopDetectionMiddleware()
 _limit_mw = IterationLimitMiddleware()
+
+_CN_NUM = {'零': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+           '六': 6, '七': 7, '八': 8, '九': 9, '十': 10, '百': 100}
+_ARTICLE_RE = re.compile(r'第([一二三四五六七八九十百零]+)条')
+_BRACKET_RE = re.compile(r'[（(]([一二三四五六七八九十百零\d]+)[）)]')
+
+
+def _cn_to_int(s: str) -> int:
+    """中文数字转阿拉伯数字（支持到百位）。"""
+    if s in _CN_NUM:
+        return _CN_NUM[s]
+    result = 0
+    current = 0
+    for ch in s:
+        v = _CN_NUM.get(ch, 0)
+        if v >= 10:
+            if current == 0:
+                current = 1
+            result += current * v
+            current = 0
+        else:
+            current = v
+    return result + current
+
+
+def _actual_articles(content: str) -> str:
+    """从内容文本中提取实际出现的条款号，返回显示用字符串。"""
+    nums: set[int] = set()
+    for m in _ARTICLE_RE.finditer(content):
+        nums.add(_cn_to_int(m.group(1)))
+    for m in _BRACKET_RE.finditer(content):
+        s = m.group(1)
+        nums.add(int(s) if s.isdigit() else _cn_to_int(s))
+    if not nums:
+        return ""
+    sorted_nums = sorted(nums)
+    parts: List[str] = []
+    start = end = sorted_nums[0]
+    for n in sorted_nums[1:]:
+        if n == end + 1:
+            end = n
+        else:
+            parts.append(f"第{start}条" if start == end else f"第{start}-{end}条")
+            start = end = n
+    parts.append(f"第{start}条" if start == end else f"第{start}-{end}条")
+    return ", ".join(parts)
+
+
+def _fix_source_display(sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """修正 source 的 article_number 为内容中实际出现的条款号。"""
+    fixed = []
+    for s in sources:
+        content = s.get("content", "")
+        actual = _actual_articles(content)
+        if actual:
+            s = {**s, "article_number": actual}
+        fixed.append(s)
+    return fixed
 
 
 def merge_session_context(left: Dict[str, Any], right: Dict[str, Any]) -> Dict[str, Any]:
@@ -56,6 +117,7 @@ class AskState(TypedDict):
     session_id: str
     search_results: List[Dict[str, Any]]
     memory_context: str
+    registry_context: str
     answer: str
     sources: List[Dict[str, Any]]
     citations: List[Dict[str, str]]
@@ -191,19 +253,61 @@ def rag_search(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
         return {"search_results": results}
 
 
+def registry_search(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
+    """元数据查询路径：从法规注册表获取信息，不走 chunk 检索。"""
+    engine = runtime.context.rag_engine
+    question = state["question"]
+    intent, law_name = classify_intent(question)
+
+    registry = RegulationRegistry(engine.config.vector_db_path)
+    context = format_registry_context(intent, registry, law_name)
+
+    with trace_span("registry_search", "registry") as span:
+        span.input = {"question": question, "intent": intent, "law_name": law_name}
+        span.output = {"context_length": len(context)}
+        return {
+            "registry_context": context,
+            "search_results": [],
+        }
+
+
+_REGISTRY_PROMPT_TEMPLATE = """## 法规库概况
+
+{context}
+
+## 用户问题
+
+{question}
+
+## 重要提醒
+请仅依据上方提供的法规库概况回答。直接陈述事实，不需要标注来源编号。
+- 如果用户问"有哪些法规"或要求列清单，**逐个列出法规名称**，不要只说分类。
+- 如果概况中没有相关信息，请说明"提供的法规库概况中未找到相关信息"。"""
+
+
 def generate(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
     engine = runtime.context.rag_engine
     llm = runtime.context.llm_client
+    registry_ctx = state.get("registry_context") or ""
+    is_registry_mode = bool(registry_ctx)
+
     with trace_span("graph_generate", "llm", model=getattr(llm, 'model', '')) as span:
         span.input = {
             "question": state["question"],
             "context_chunk_count": len(state["search_results"]),
             "has_memory_context": bool(state.get("memory_context")),
+            "is_registry_mode": is_registry_mode,
         }
 
-        user_prompt, included_count = RAGEngine._build_qa_prompt(
-            engine.config.generation, state["question"], state["search_results"]
-        )
+        if is_registry_mode:
+            user_prompt = _REGISTRY_PROMPT_TEMPLATE.format(
+                context=registry_ctx, question=state["question"]
+            )
+            included_count = 0
+        else:
+            user_prompt, included_count = RAGEngine._build_qa_prompt(
+                engine.config.generation, state["question"], state["search_results"]
+            )
         messages = [
             {"role": "system", "content": _SYSTEM_PROMPT},
         ]
@@ -217,6 +321,7 @@ def generate(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
                 "system_prompt": _SYSTEM_PROMPT,
                 "user_prompt": user_prompt,
                 "has_memory_context": bool(state.get("memory_context")),
+                "is_registry_mode": is_registry_mode,
             }
             messages.append({"role": "user", "content": user_prompt})
             answer = llm.chat(messages)
@@ -228,7 +333,7 @@ def generate(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
 
         result: Dict[str, Any] = {
             "answer": answer_str,
-            "sources": state["search_results"],
+            "sources": _fix_source_display(state["search_results"]) if not is_registry_mode else [],
             "citations": [
                 {"source_idx": c.source_idx, "law_name": c.law_name, "article_number": c.article_number, "content": c.content}
                 for c in attribution.citations
@@ -293,10 +398,19 @@ def save_session_context(state: AskState) -> dict:
 
 
 def route_by_action(state: AskState) -> str:
-    """根据 next_action 路由"""
+    """根据 next_action 路由。
+
+    clarify 优先；其次 catalog/count/metadata 类问题走注册表；默认走 search。
+    无 question 时退回 search，保持向后兼容。
+    """
     action = state.get("next_action", "search")
     if action == "clarify":
         return "clarify"
+    question = state.get("question", "")
+    if question:
+        intent, _ = classify_intent(question)
+        if intent in ("catalog", "count", "metadata"):
+            return "registry"
     return "search"
 
 
@@ -308,6 +422,7 @@ def create_ask_graph():
     graph.add_node("parallel_retrieval_entry", lambda state: {})
     graph.add_node("retrieve_memory", retrieve_memory)
     graph.add_node("rag_search", rag_search)
+    graph.add_node("registry_search", registry_search)
     graph.add_node("generate", generate)
     graph.add_node("extract_memory", extract_memory)
     graph.add_node("update_user_profile", update_user_profile)
@@ -319,8 +434,10 @@ def create_ask_graph():
     graph.add_conditional_edges(
         "clarify_user_query",
         route_by_action,
-        {"clarify": END, "search": "parallel_retrieval_entry"}
+        {"clarify": END, "search": "parallel_retrieval_entry", "registry": "registry_search"}
     )
+
+    graph.add_edge("registry_search", "generate")
 
     graph.add_edge("parallel_retrieval_entry", "retrieve_memory")
     graph.add_edge("parallel_retrieval_entry", "rag_search")

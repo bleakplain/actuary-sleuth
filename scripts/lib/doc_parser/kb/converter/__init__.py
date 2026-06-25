@@ -6,5 +6,6 @@
 每个 sheet 按法规粒度拆分，提取元数据标签，处理内嵌表格图片。
 """
 from .excel_to_md import convert_excel_to_markdown
+from .docx_to_md import convert_docx_to_markdown
 
-__all__ = ['convert_excel_to_markdown']
+__all__ = ['convert_excel_to_markdown', 'convert_docx_to_markdown']

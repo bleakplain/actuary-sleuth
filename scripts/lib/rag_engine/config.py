@@ -120,7 +120,7 @@ class RAGConfig:
 
     regulations_dir: str = ""
     vector_db_path: Optional[str] = None
-    top_k_results: int = 5
+    top_k_results: int = 10
     enable_streaming: bool = False
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     rerank: RerankConfig = field(default_factory=RerankConfig)
