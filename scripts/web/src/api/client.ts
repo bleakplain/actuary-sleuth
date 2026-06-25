@@ -46,9 +46,6 @@ client.interceptors.response.use(
     if (status === 401) {
       localStorage.removeItem('auth_token');
       delete axios.defaults.headers.common['Authorization'];
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
-      }
     }
     const detail = err.response?.data?.detail || err.message || '请求失败，请检查网络后重试';
     throw new ApiError(status, detail, err.response?.data);

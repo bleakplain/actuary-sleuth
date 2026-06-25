@@ -134,7 +134,7 @@ export default function AppLayout() {
   const user = useAuthStore((s) => s.user);
   const handleLogout = () => {
     logout();
-    navigate('/login', { replace: true });
+    navigate('/', { replace: true });
   };
 
   const isAdmin = user?.role_id === 'admin';

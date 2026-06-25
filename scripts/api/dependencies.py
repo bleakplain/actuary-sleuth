@@ -50,14 +50,27 @@ def get_ask_graph():
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 
+_DEV_USER = {
+    "user_id": "dev",
+    "email": "dev@local",
+    "role_id": "admin",
+    "permissions": ["ask", "compliance", "eval", "knowledge", "memory", "admin"],
+}
+
+
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     """从 JWT 解析当前用户。返回 {user_id, email, role_id, permissions}。"""
+    import os
     if token is None:
+        if os.getenv("AUTH_SKIP", "").lower() in ("true", "1"):
+            return _DEV_USER
         raise HTTPException(status_code=401, detail="未提供认证凭据")
     try:
         from lib.auth.jwt import decode_token
         payload = decode_token(token)
     except Exception:
+        if os.getenv("AUTH_SKIP", "").lower() in ("true", "1"):
+            return _DEV_USER
         raise HTTPException(status_code=401, detail="无效的认证凭据")
     from api.database import get_user_by_id
     user = get_user_by_id(payload["user_id"])

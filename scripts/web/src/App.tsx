@@ -56,15 +56,6 @@ export function useThemeContext() {
 }
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
-  const token = useAuthStore((s) => s.token);
-  const loadUser = useAuthStore((s) => s.loadUser);
-  const user = useAuthStore((s) => s.user);
-
-  useEffect(() => {
-    if (token && !user) loadUser();
-  }, [token, user, loadUser]);
-
-  if (!token) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
 

@@ -102,7 +102,7 @@ export const useAskStore = create<AskState>((set, get) => ({
 
     let fullAnswer = '';
     const controller = askApi.chatSSE(
-      { question, session_id: currentSessionId || undefined, debug: get().debugMode },
+      { question, session_id: currentSessionId || undefined, debug: get().debugMode, skip_clarify: true },
       {
         onToken: (token) => {
           if (get().requestSequence !== currentSequence) return;

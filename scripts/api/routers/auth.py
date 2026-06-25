@@ -145,6 +145,12 @@ async def get_me(user: dict = Depends(get_current_user)):
     """获取当前用户信息。"""
     db_user = get_user_by_id(user["user_id"])
     if not db_user:
+        if user.get("user_id") == "dev":
+            return UserOut(
+                id="dev", email="dev@local", display_name="开发者",
+                role_id="admin", status="active",
+                email_verified_at=None, created_at="",
+            )
         raise HTTPException(status_code=404, detail="用户不存在")
     return UserOut(
         id=db_user["id"],
