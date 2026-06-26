@@ -44,11 +44,12 @@ lib/rag_engine/data/eval_dataset.json
 # Runtime state (PID, port)
 .run
 
-# Data (stored externally, configured via settings.json)
-data/
-references/
-kb/
-eval/
+# Data root (stored externally, configured via settings.json) —
+# 锚定仓库根，避免误伤 scripts/lib/<pkg>/data、scripts/lib/<pkg>/kb 等
+/data/
+/references/
+/kb/
+/eval/
 
 # Claude worktrees
 .claude/worktrees/

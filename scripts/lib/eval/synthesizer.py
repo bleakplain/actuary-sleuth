@@ -123,7 +123,7 @@ class SynthQA:
             return []
 
     def _parse_response(self, response: str) -> List[Dict]:
-        from lib.doc_parser.kb.converter.excel_to_md import extract_json_array
+        from lib.common.json_utils import extract_json_array
 
         json_str = extract_json_array(response)
         if json_str is None:

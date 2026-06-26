@@ -382,12 +382,6 @@ def _simplify_negative_list_name(name: str) -> tuple:
     return (clean, extra)
 
 
-def extract_json_array(text: str) -> Optional[str]:
-    """从 LLM 返回文本中提取 JSON 数组（已迁移至 lib.common.json_utils）"""
-    from lib.common.json_utils import extract_json_array as _extract
-    return _extract(text)
-
-
 def parse_regulation_names(
     regulations: List[str],
 ) -> Dict[str, dict]:
@@ -428,6 +422,7 @@ def parse_regulation_names(
 法规列表：
 {numbered_list}"""
 
+    from lib.common.json_utils import extract_json_array
     from lib.llm import LLMClientFactory
     llm = LLMClientFactory.create_name_parser_llm()
     try:
