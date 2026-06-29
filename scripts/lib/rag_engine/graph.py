@@ -141,10 +141,10 @@ class GraphContext:
 
 
 def load_session_context(state: AskState) -> dict:
-    """加载会话上下文、循环检测、对话历史。
+    """加载会话上下文、循环检测、话题提取、对话历史。
 
-    澄清步骤已移除，本节点承接原 clarify_user_query 的循环检测职责；
-    话题提取由 SessionContextMiddleware.after_invoke 在 save_session_context 完成。
+    澄清步骤已移除，本节点承接原 clarify_user_query 的循环检测和话题提取职责，
+    保证 retrieve_memory 同轮内能拿到 current_topic 触发 topic-continuation 记忆召回。
     """
     result = _context_mw.before_invoke(state)
     ctx = result.get("session_context", {})
@@ -153,6 +153,12 @@ def load_session_context(state: AskState) -> dict:
     loop_detected = loop_result.get("loop_detected")
     loop_hint = loop_result.get("loop_hint")
     ctx = loop_result.get("session_context", ctx)
+
+    # 同步提取话题，让本轮 retrieve_memory 即可使用（原本由 clarify_user_query 提供）
+    from lib.common.middleware import _extract_topic
+    topic = _extract_topic(state["question"])
+    if topic:
+        ctx["current_topic"] = topic
 
     from api.database import get_messages
     history = get_messages(state.get("session_id", ""))

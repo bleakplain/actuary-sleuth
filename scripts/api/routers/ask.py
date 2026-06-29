@@ -377,7 +377,7 @@ ALLOWED_CONTEXT_KEYS = frozenset({
 
 @router.put("/sessions/{session_id}/context")
 async def update_session_context_endpoint(session_id: str, context: dict, user: dict = Depends(require_permission("ask"))):
-    """更新会话上下文（澄清选择后调用）"""
+    """更新会话上下文（外部写入 product_type / focus_area 等白名单字段）"""
     # 输入验证：只允许白名单中的 key
     invalid_keys = set(context.keys()) - ALLOWED_CONTEXT_KEYS
     if invalid_keys:

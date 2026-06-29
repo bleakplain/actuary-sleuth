@@ -40,8 +40,3 @@ class SessionOut(BaseModel):
     title: str
     created_at: str
     message_count: int = 0
-
-
-class ChatSSEEvent(BaseModel):
-    type: str
-    data: Optional[object] = None

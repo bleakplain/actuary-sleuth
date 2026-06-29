@@ -167,9 +167,8 @@ def make_test_cases() -> List[TestCase]:
             msgs.append(f"{qid}:{r['answer_len']}字,关键词{kw}")
         return True, " | ".join(msgs)
 
-    # ==================== Session 2: 多轮对话-澄清（已移除澄清步骤，仅留追问流程） ====================
-    def action_clarify(runner: TestRunner) -> dict:
-        # 澄清步骤已删除；保留这个用例为普通多轮对话，避免 TestCase 引用悬空
+    # ==================== Session 2: 多轮连续对话 ====================
+    def action_multi_turn(runner: TestRunner) -> dict:
         results = {}
         r1 = runner.chat("保险怎么买")
         results["turn1"] = {"has_answer": bool(r1.get("answer"))}
@@ -177,7 +176,7 @@ def make_test_cases() -> List[TestCase]:
         results["turn2"] = {"has_answer": bool(r2.get("answer"))}
         return results
 
-    def expect_clarify(results: dict) -> tuple[bool, str]:
+    def expect_multi_turn(results: dict) -> tuple[bool, str]:
         if results["turn1"]["has_answer"] and results["turn2"]["has_answer"]:
             return True, "多轮连续对话均返回答案"
         return False, "存在未回答的轮次"
@@ -400,7 +399,7 @@ def make_test_cases() -> List[TestCase]:
     # ==================== 组装测试用例 ====================
     return [
         TestCase("SESSION-01", "单轮问答", "保险问题问答准确性", action_single_turn, expect_single_turn),
-        TestCase("SESSION-02", "多轮对话", "连续问答", action_clarify, expect_clarify),
+        TestCase("SESSION-02", "多轮对话", "连续问答", action_multi_turn, expect_multi_turn),
         TestCase("SESSION-03", "多轮对话", "追问细节", action_follow_up, expect_follow_up),
         TestCase("SESSION-04", "多轮对话", "纠错处理", action_correction, expect_correction),
         TestCase("SESSION-05", "多轮对话", "话题切换", action_topic_switch, expect_topic_switch),
