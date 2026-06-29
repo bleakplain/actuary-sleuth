@@ -28,54 +28,6 @@ class TestSessionContextMiddleware:
         assert mw._extract_product_type("等待期") is None
 
 
-class TestClarificationMiddleware:
-    def test_needs_clarification_without_product_type(self):
-        """验证无险种类型时触发澄清"""
-        from lib.common.middleware import ClarificationMiddleware
-
-        mw = ClarificationMiddleware()
-        state = {
-            "question": "等待期是多少？",
-            "session_context": {},
-            "skip_clarify": False,
-        }
-
-        result = mw.before_invoke(state)
-
-        assert result["next_action"] == "clarify"
-        assert "clarification_message" in result
-
-    def test_skip_clarify_flag(self):
-        """验证 skip_clarify 跳过检测"""
-        from lib.common.middleware import ClarificationMiddleware
-
-        mw = ClarificationMiddleware()
-        state = {
-            "question": "等待期是多少？",
-            "session_context": {},
-            "skip_clarify": True,
-        }
-
-        result = mw.before_invoke(state)
-
-        assert result["next_action"] == "search"
-
-    def test_no_clarification_with_product_type(self):
-        """验证有险种类型时无需澄清"""
-        from lib.common.middleware import ClarificationMiddleware
-
-        mw = ClarificationMiddleware()
-        state = {
-            "question": "等待期是多少？",
-            "session_context": {"product_type": "重疾险"},
-            "skip_clarify": False,
-        }
-
-        result = mw.before_invoke(state)
-
-        assert result["next_action"] == "search"
-
-
 class TestLoopDetectionMiddleware:
     def test_detects_loop(self):
         """验证循环检测"""

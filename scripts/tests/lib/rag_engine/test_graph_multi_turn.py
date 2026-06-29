@@ -48,80 +48,80 @@ def test_route_by_action():
     """验证 route_by_action 路由"""
     from lib.rag_engine.graph import route_by_action
 
-    assert route_by_action({"next_action": "clarify"}) == "clarify"
-    assert route_by_action({"next_action": "search"}) == "search"
     assert route_by_action({}) == "search"
+    assert route_by_action({"question": "有哪些法规"}) == "registry"
+    assert route_by_action({"question": "重疾险的等待期多长"}) == "search"
 
 
 def test_ask_state_fields():
-    """验证 AskState 包含新字段"""
+    """验证 AskState 包含核心字段（已去除 clarify 相关）"""
     from lib.rag_engine.graph import AskState
     import typing
 
     hints = typing.get_type_hints(AskState)
     assert "session_context" in hints
-    assert "skip_clarify" in hints
     assert "next_action" in hints
-    assert "clarification_message" in hints
     assert "loop_detected" in hints
+    assert "skip_clarify" not in hints
+    assert "clarification_message" not in hints
 
 
 def test_graph_structure():
-    """验证 graph 节点结构"""
+    """验证 graph 节点结构（已去除 clarify_user_query）"""
     from lib.rag_engine.graph import create_ask_graph
 
     graph = create_ask_graph()
     nodes = list(graph.nodes.keys())
 
     assert "load_session_context" in nodes
-    assert "clarify_user_query" in nodes
     assert "parallel_retrieval_entry" in nodes
     assert "save_session_context" in nodes
+    assert "clarify_user_query" not in nodes
 
 
-def test_loop_detection_in_clarify():
-    """验证循环检测在 clarify 节点执行"""
-    from lib.rag_engine.graph import clarify_user_query
+def test_loop_detection_in_load_session():
+    """验证循环检测在 load_session_context 执行"""
+    from unittest.mock import patch
+    from lib.rag_engine.graph import load_session_context
     import hashlib
 
-    # 计算 "测试问题" 的 hash
     normalized = "测试问题".strip().lower()
     question_hash = hashlib.md5(normalized.encode()).hexdigest()[:8]
+    preloaded_ctx = {"query_history": [question_hash, question_hash, question_hash]}
 
-    # 模拟循环状态：最近 3 条都是相同问题
     state = {
         "question": "测试问题",
-        "session_context": {
-            "query_history": [question_hash, question_hash, question_hash]
-        },
+        "session_context": preloaded_ctx,
         "user_id": "test",
         "session_id": "test_session",
     }
 
-    result = clarify_user_query(state)
+    # mock SessionContextMiddleware.before_invoke 跳过 DB 加载，保留测试输入
+    with patch("lib.rag_engine.graph._context_mw") as mock_ctx_mw:
+        mock_ctx_mw.before_invoke.return_value = {"session_context": preloaded_ctx}
+        result = load_session_context(state)
 
     assert result.get("loop_detected") is True
     assert "loop_hint" in result
-    assert result.get("next_action") == "search"
 
 
 def test_no_loop_normal_flow():
     """验证正常流程不触发循环检测"""
-    from lib.rag_engine.graph import clarify_user_query
+    from unittest.mock import patch
+    from lib.rag_engine.graph import load_session_context
 
+    preloaded_ctx = {"query_history": ["a", "b", "c"]}
     state = {
         "question": "新问题",
-        "session_context": {
-            "query_history": ["a", "b", "c"]
-        },
+        "session_context": preloaded_ctx,
         "user_id": "test",
         "session_id": "test_session",
-        "skip_clarify": True,
     }
 
-    result = clarify_user_query(state)
+    with patch("lib.rag_engine.graph._context_mw") as mock_ctx_mw:
+        mock_ctx_mw.before_invoke.return_value = {"session_context": preloaded_ctx}
+        result = load_session_context(state)
 
-    # 不应该检测到循环
     assert result.get("loop_detected") is None
 
 
@@ -135,8 +135,8 @@ if __name__ == "__main__":
     test_graph_structure()
     print("test_graph_structure passed")
 
-    test_loop_detection_in_clarify()
-    print("test_loop_detection_in_clarify passed")
+    test_loop_detection_in_load_session()
+    print("test_loop_detection_in_load_session passed")
 
     test_no_loop_normal_flow()
     print("test_no_loop_normal_flow passed")

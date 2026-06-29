@@ -38,10 +38,6 @@ export default function MessageBubble({ message, streaming, onCitationClick, isM
     }
   };
 
-  const handleClarifyOption = (option: string) => {
-    sendMessage(option, 'qa');
-  };
-
   if (message.role === 'user') {
     const showDelete = isMobile || hovered;
     return (
@@ -148,24 +144,6 @@ export default function MessageBubble({ message, streaming, onCitationClick, isM
                 </div>
               </ClickableDiv>
             ))}
-          </div>
-        ) : message.needsClarification ? (
-          <div>
-            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>{content}</ReactMarkdown>
-            {message.clarificationOptions && message.clarificationOptions.length > 0 && (
-              <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {message.clarificationOptions.map((option, i) => (
-                  <Button
-                    key={i}
-                    size="small"
-                    onClick={() => handleClarifyOption(option)}
-                    style={{ borderRadius: 16 }}
-                  >
-                    {option}
-                  </Button>
-                ))}
-              </div>
-            )}
           </div>
         ) : content ? (
           <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>{content}</ReactMarkdown>

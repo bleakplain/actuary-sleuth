@@ -33,14 +33,6 @@ export async function batchDeleteSessions(ids: string[]): Promise<{ deleted: num
   return data;
 }
 
-interface ClarifyData {
-  session_id: string;
-  message: string;
-  options: string[];
-  session_context: Record<string, unknown>;
-  original_question: string;
-}
-
 // 获取 API 基础 URL（从 axios client 配置中）
 function getBaseUrl(): string {
   // 使用相对路径，由 Vite proxy 处理
@@ -48,12 +40,11 @@ function getBaseUrl(): string {
 }
 
 export function chatSSE(
-  req: { question: string; session_id?: string; debug?: boolean; skip_clarify?: boolean },
+  req: { question: string; session_id?: string; debug?: boolean },
   callbacks: {
     onToken: (token: string) => void;
     onDone: (data: ChatDoneData) => void;
     onError: (err: string) => void;
-    onClarify?: (data: ClarifyData) => void;
   },
 ): AbortController {
   const controller = new AbortController();
@@ -94,10 +85,7 @@ export function chatSSE(
             try {
               const rawData = line.slice(5).trim();
               const data = JSON.parse(rawData);
-              if (currentEvent === 'clarify') {
-                callbacks.onClarify?.(data);
-                callbacks.onDone({ session_id: data.session_id, citations: [], sources: [] });
-              } else if (data.type === 'token') {
+              if (data.type === 'token') {
                 callbacks.onToken(data.data);
               } else if (data.type === 'done') {
                 callbacks.onDone(data.data);

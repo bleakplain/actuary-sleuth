@@ -7,7 +7,6 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = Field(None, description="会话 ID，为空则新建会话")
     debug: Optional[bool] = Field(None, description="是否记录 trace 调试信息，默认读取配置")
     user_id: str = Field("default", description="用户 ID，用于记忆隔离")
-    skip_clarify: bool = Field(False, description="跳过澄清检测，直接检索")
 
 
 class CitationOut(BaseModel):

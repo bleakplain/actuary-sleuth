@@ -40,7 +40,6 @@ from .middleware import (
     PerformanceMiddleware,
     MiddlewareChain,
     SessionContextMiddleware,
-    ClarificationMiddleware,
     LoopDetectionMiddleware,
     IterationLimitMiddleware,
 )
@@ -99,7 +98,6 @@ __all__ = [
     'PerformanceMiddleware',
     'MiddlewareChain',
     'SessionContextMiddleware',
-    'ClarificationMiddleware',
     'LoopDetectionMiddleware',
     'IterationLimitMiddleware',
 ]

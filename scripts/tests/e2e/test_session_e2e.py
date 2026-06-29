@@ -64,13 +64,6 @@ class TestRunner:
                             done_data = event_data.get("data", {})
                         elif event_data.get("type") == "error":
                             return {"error": event_data.get("data"), "events": events}
-                        elif event_data.get("type") == "clarify":
-                            return {
-                                "clarify": True,
-                                "clarify_message": event_data.get("data", {}).get("message"),
-                                "clarify_options": event_data.get("data", {}).get("options", []),
-                                "session_id": event_data.get("data", {}).get("session_id"),
-                            }
                     except json.JSONDecodeError:
                         pass
 
@@ -174,36 +167,20 @@ def make_test_cases() -> List[TestCase]:
             msgs.append(f"{qid}:{r['answer_len']}字,关键词{kw}")
         return True, " | ".join(msgs)
 
-    # ==================== Session 2: 多轮对话-澄清 ====================
+    # ==================== Session 2: 多轮对话-澄清（已移除澄清步骤，仅留追问流程） ====================
     def action_clarify(runner: TestRunner) -> dict:
+        # 澄清步骤已删除；保留这个用例为普通多轮对话，避免 TestCase 引用悬空
         results = {}
-        # 轮次1: 模糊问题触发澄清
         r1 = runner.chat("保险怎么买")
-        results["turn1"] = {
-            "clarify": r1.get("clarify", False),
-            "has_options": len(r1.get("clarify_options", [])) > 0,
-        }
-        # 轮次2: 选择后回答
-        if r1.get("clarify_options"):
-            option = r1["clarify_options"][0] if isinstance(r1["clarify_options"][0], str) else r1["clarify_options"][0].get("text", "重疾险")
-            r2 = runner.chat(option)
-            results["turn2"] = {"has_answer": bool(r2.get("answer"))}
-        else:
-            # 未触发澄清，直接回答
-            results["turn2"] = {"has_answer": True, "note": "未触发澄清"}
-        # 轮次3: 追问
-        r3 = runner.chat("有什么推荐")
-        results["turn3"] = {
-            "has_answer": bool(r3.get("answer")),
-            "session_context": r3.get("session_context", {}),
-        }
+        results["turn1"] = {"has_answer": bool(r1.get("answer"))}
+        r2 = runner.chat("重疾险怎么买")
+        results["turn2"] = {"has_answer": bool(r2.get("answer"))}
         return results
 
     def expect_clarify(results: dict) -> tuple[bool, str]:
-        t1 = results["turn1"]
-        if t1["clarify"]:
-            return True, f"澄清触发,选项{len(results.get('turn1',{}).get('clarify_options',[]))}个,后续回答{results['turn2']['has_answer']}"
-        return True, f"未触发澄清,直接回答{results['turn2']['has_answer']}"
+        if results["turn1"]["has_answer"] and results["turn2"]["has_answer"]:
+            return True, "多轮连续对话均返回答案"
+        return False, "存在未回答的轮次"
 
     # ==================== Session 3: 多轮对话-追问 ====================
     def action_follow_up(runner: TestRunner) -> dict:
@@ -423,7 +400,7 @@ def make_test_cases() -> List[TestCase]:
     # ==================== 组装测试用例 ====================
     return [
         TestCase("SESSION-01", "单轮问答", "保险问题问答准确性", action_single_turn, expect_single_turn),
-        TestCase("SESSION-02", "多轮对话", "澄清流程", action_clarify, expect_clarify),
+        TestCase("SESSION-02", "多轮对话", "连续问答", action_clarify, expect_clarify),
         TestCase("SESSION-03", "多轮对话", "追问细节", action_follow_up, expect_follow_up),
         TestCase("SESSION-04", "多轮对话", "纠错处理", action_correction, expect_correction),
         TestCase("SESSION-05", "多轮对话", "话题切换", action_topic_switch, expect_topic_switch),

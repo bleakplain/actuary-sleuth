@@ -50,9 +50,8 @@ def _make_base_state(**kwargs):
         "search_results": [], "memory_context": "", "answer": "", "sources": [],
         "citations": [], "unverified_claims": [], "content_mismatches": [],
         "faithfulness_score": None, "error": None,
-        "messages": [], "session_context": {}, "skip_clarify": True,
+        "messages": [], "session_context": {},
         "iteration_count": 0, "next_action": "search",
-        "clarification_message": None, "clarification_options": None,
         "loop_detected": None, "loop_hint": None,
     }
     base.update(kwargs)

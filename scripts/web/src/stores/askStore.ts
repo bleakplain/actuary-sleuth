@@ -102,7 +102,7 @@ export const useAskStore = create<AskState>((set, get) => ({
 
     let fullAnswer = '';
     const controller = askApi.chatSSE(
-      { question, session_id: currentSessionId || undefined, debug: get().debugMode, skip_clarify: true },
+      { question, session_id: currentSessionId || undefined, debug: get().debugMode },
       {
         onToken: (token) => {
           if (get().requestSequence !== currentSequence) return;
@@ -139,23 +139,6 @@ export const useAskStore = create<AskState>((set, get) => ({
           set((s) => ({
             messages: s.messages.map((m) =>
               m.id === assistantMsg.id ? { ...m, content: `错误: ${err}` } : m,
-            ),
-            streaming: false,
-            abortController: null,
-          }));
-        },
-        onClarify: (clarifyData) => {
-          if (get().requestSequence !== currentSequence) return;
-          set((s) => ({
-            messages: s.messages.map((m) =>
-              m.id === assistantMsg.id
-                ? {
-                    ...m,
-                    content: clarifyData.message,
-                    clarificationOptions: clarifyData.options,
-                    needsClarification: true,
-                  }
-                : m,
             ),
             streaming: false,
             abortController: null,

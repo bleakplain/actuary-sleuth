@@ -14,7 +14,6 @@ from langgraph.runtime import Runtime
 
 from lib.common.middleware import (
     SessionContextMiddleware,
-    ClarificationMiddleware,
     LoopDetectionMiddleware,
     IterationLimitMiddleware,
     MAX_ENTITIES,
@@ -29,7 +28,6 @@ from lib.rag_engine.rag_engine import _SYSTEM_PROMPT, RAGEngine
 
 logger = logging.getLogger(__name__)
 
-_clarification_mw = ClarificationMiddleware()
 _context_mw = SessionContextMiddleware()
 _loop_mw = LoopDetectionMiddleware()
 _limit_mw = IterationLimitMiddleware()
@@ -127,11 +125,8 @@ class AskState(TypedDict):
     error: Optional[str]
     messages: Annotated[List[Dict[str, str]], operator.add]
     session_context: Annotated[Dict[str, Any], merge_session_context]
-    skip_clarify: bool
     iteration_count: int
-    next_action: Literal["clarify", "search", "generate", "end"]
-    clarification_message: Optional[str]
-    clarification_options: Optional[List[str]]
+    next_action: Literal["search", "registry", "generate", "end"]
     loop_detected: Optional[bool]
     loop_hint: Optional[str]
 
@@ -146,44 +141,28 @@ class GraphContext:
 
 
 def load_session_context(state: AskState) -> dict:
-    """加载会话上下文和对话历史"""
+    """加载会话上下文、循环检测、对话历史。
+
+    澄清步骤已移除，本节点承接原 clarify_user_query 的循环检测职责；
+    话题提取由 SessionContextMiddleware.after_invoke 在 save_session_context 完成。
+    """
     result = _context_mw.before_invoke(state)
+    ctx = result.get("session_context", {})
+
+    loop_result = _loop_mw.after_invoke(ctx, state["question"])
+    loop_detected = loop_result.get("loop_detected")
+    loop_hint = loop_result.get("loop_hint")
+    ctx = loop_result.get("session_context", ctx)
+
     from api.database import get_messages
     history = get_messages(state.get("session_id", ""))
     messages = [{"role": m["role"], "content": m["content"]} for m in history]
-    return {"session_context": result.get("session_context", {}), "messages": messages}
-
-
-def clarify_user_query(state: AskState) -> dict:
-    """澄清检测 + 循环检测"""
-    # 先检测循环（在处理之前检测）
-    ctx = state.get("session_context", {})
-    loop_result = _loop_mw.after_invoke(ctx, state["question"])
-
-    # 如果检测到循环，直接返回 search 并附带提示
-    if loop_result.get("loop_detected"):
-        return {
-            "next_action": "search",
-            "loop_detected": True,
-            "loop_hint": loop_result.get("loop_hint"),
-            "session_context": loop_result.get("session_context", ctx),
-        }
-
-    # 正常澄清检测
-    result = _clarification_mw.before_invoke(state)
-
-    # 提取 topic 并保存到 session_context（用于后续恢复）
-    from lib.common.middleware import _extract_topic
-    topic = _extract_topic(state["question"])
-    updated_ctx = result.get("session_context", {})
-    if topic:
-        updated_ctx["current_topic"] = topic
 
     return {
-        "next_action": result.get("next_action", "search"),
-        "clarification_message": result.get("clarification_message"),
-        "clarification_options": result.get("clarification_options"),
-        "session_context": updated_ctx,
+        "session_context": ctx,
+        "messages": messages,
+        "loop_detected": loop_detected,
+        "loop_hint": loop_hint,
     }
 
 
@@ -347,7 +326,7 @@ def generate(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
     ctx_result = _context_mw.after_invoke(state)
     merged_ctx = ctx_result.get("session_context", {})
 
-    # Update session_context (loop detection already done in clarify_user_query)
+    # Update session_context (loop detection done in load_session_context)
     result["session_context"] = merged_ctx
 
     limit_result = _limit_mw.after_invoke(state.get("iteration_count", 0))
@@ -398,14 +377,7 @@ def save_session_context(state: AskState) -> dict:
 
 
 def route_by_action(state: AskState) -> str:
-    """根据 next_action 路由。
-
-    clarify 优先；其次 catalog/count/metadata 类问题走注册表；默认走 search。
-    无 question 时退回 search，保持向后兼容。
-    """
-    action = state.get("next_action", "search")
-    if action == "clarify":
-        return "clarify"
+    """根据意图路由：catalog/count/metadata 类走注册表，其他走 search。"""
     question = state.get("question", "")
     if question:
         intent, _ = classify_intent(question)
@@ -418,7 +390,6 @@ def create_ask_graph():
     """创建审核问答工作流图（多轮对话增强版）。"""
     graph = StateGraph(AskState, context_schema=GraphContext)
     graph.add_node("load_session_context", load_session_context)
-    graph.add_node("clarify_user_query", clarify_user_query)
     graph.add_node("parallel_retrieval_entry", lambda state: {})
     graph.add_node("retrieve_memory", retrieve_memory)
     graph.add_node("rag_search", rag_search)
@@ -429,12 +400,11 @@ def create_ask_graph():
     graph.add_node("save_session_context", save_session_context)
 
     graph.add_edge(START, "load_session_context")
-    graph.add_edge("load_session_context", "clarify_user_query")
 
     graph.add_conditional_edges(
-        "clarify_user_query",
+        "load_session_context",
         route_by_action,
-        {"clarify": END, "search": "parallel_retrieval_entry", "registry": "registry_search"}
+        {"search": "parallel_retrieval_entry", "registry": "registry_search"}
     )
 
     graph.add_edge("registry_search", "generate")

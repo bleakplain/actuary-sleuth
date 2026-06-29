@@ -107,16 +107,12 @@ async def chat(req: ChatRequest, user: dict = Depends(require_permission("ask"))
 
             cache = get_cache_manager()
 
-            # 检查是否是澄清选项，生成澄清后的问题
-            from lib.common.middleware import ClarificationMiddleware
             old_ctx = get_session_context(session_id) or {}
-            clarify_mw = ClarificationMiddleware()
-            effective_question = clarify_mw._build_clarified_question(req.question, old_ctx)
+            effective_question = req.question
 
             if cache:
-                # 优先使用澄清后的问题查询缓存
-                cache_question = effective_question if effective_question != req.question else req.question
-                cached = cache.get("generation", cache_question)
+                # 优先使用问题查询缓存
+                cached = cache.get("generation", effective_question)
 
                 if cached is not None:
                     # 缓存命中时仍需处理 session context 和 loop detection
@@ -204,9 +200,8 @@ async def chat(req: ChatRequest, user: dict = Depends(require_permission("ask"))
                 session_id=session_id, search_results=[], memory_context="",
                 answer="", sources=[], citations=[], unverified_claims=[],
                 content_mismatches=[], faithfulness_score=None, error=None,
-                messages=[], session_context=old_ctx, skip_clarify=req.skip_clarify,
+                messages=[], session_context=old_ctx,
                 iteration_count=0, next_action="search",
-                clarification_message=None, clarification_options=None,
                 loop_detected=None, loop_hint=None,
             )
             context = GraphContext(
@@ -214,28 +209,6 @@ async def chat(req: ChatRequest, user: dict = Depends(require_permission("ask"))
                 memory_service=memory_svc,
             )
             result = await asyncio.to_thread(graph.invoke, state, context=context)
-
-            # 检查是否需要澄清
-            if result.get("next_action") == "clarify":
-                # 保存上下文，以便用户选择澄清选项后可以恢复
-                ctx = result.get("session_context", {})
-                options = result.get("clarification_options", [])
-                if options:
-                    ctx["clarification_options"] = options
-                if ctx:
-                    save_session_context(session_id, ctx)
-
-                yield {
-                    "event": "clarify",
-                    "data": json.dumps({
-                        "session_id": session_id,
-                        "message": result.get("clarification_message", ""),
-                        "options": result.get("clarification_options", []),
-                        "session_context": ctx,
-                        "original_question": req.question,
-                    }, ensure_ascii=False)
-                }
-                return
 
             if cache:
                 cache.set("generation", req.question, result)
