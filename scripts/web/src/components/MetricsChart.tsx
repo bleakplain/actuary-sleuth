@@ -18,7 +18,7 @@ interface Props {
   k?: number;
 }
 
-export function formatMetric(value: number | undefined): string {
+export function formatMetric(value: number | null | undefined): string {
   if (value === undefined || value === null) return '-';
   return (value * 100).toFixed(1) + '%';
 }

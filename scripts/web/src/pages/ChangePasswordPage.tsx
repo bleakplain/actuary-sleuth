@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Form, Input, Button, Card, Typography, message, theme } from 'antd';
+import { Form, Input, Button, Card, Typography, message } from 'antd';
 import { LockOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import client from '../api/client';
@@ -7,7 +7,6 @@ import client from '../api/client';
 export default function ChangePasswordPage() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const { token: themeToken } = theme.useToken();
 
   const onFinish = async (values: { old_password: string; new_password: string }) => {
     setLoading(true);

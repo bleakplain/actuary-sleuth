@@ -44,7 +44,7 @@ export default function ResetPasswordPage() {
         </Typography.Title>
         {!token ? (
           <>
-            <Typography.Paragraph type="error" style={{ textAlign: 'center' }}>
+            <Typography.Paragraph type="danger" style={{ textAlign: 'center' }}>
               重置链接无效，缺少验证令牌。
             </Typography.Paragraph>
             <div style={{ textAlign: 'center' }}>

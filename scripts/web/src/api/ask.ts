@@ -68,7 +68,6 @@ export function chatSSE(
       if (!reader) throw new Error('No response body');
       const decoder = new TextDecoder();
       let buffer = '';
-      let currentEvent = 'message';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -79,9 +78,7 @@ export function chatSSE(
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (line.startsWith('event:')) {
-            currentEvent = line.slice(6).trim();
-          } else if (line.startsWith('data:')) {
+          if (line.startsWith('data:')) {
             try {
               const rawData = line.slice(5).trim();
               const data = JSON.parse(rawData);
@@ -92,7 +89,6 @@ export function chatSSE(
               } else if (data.type === 'error') {
                 callbacks.onError(data.data);
               }
-              currentEvent = 'message';
             } catch (parseErr) {
               // 记录解析错误以便调试，但不中断流
               if (import.meta.env.DEV) {

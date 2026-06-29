@@ -164,7 +164,6 @@ export default function CompliancePage() {
 
   // History
   const [history, setHistory] = useState<ComplianceReport[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
     loadCategories();
@@ -176,9 +175,7 @@ export default function CompliancePage() {
   };
 
   const loadHistory = async () => {
-    setHistoryLoading(true);
-    try { setHistory(await complianceApi.fetchComplianceReports()); }
-    finally { setHistoryLoading(false); }
+    try { setHistory(await complianceApi.fetchComplianceReports()); } catch { /* empty */ }
   };
 
   const applyParseResult = (result: ParsedDocument, name?: string) => {

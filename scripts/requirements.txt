@@ -29,3 +29,6 @@ python-multipart>=0.0.6
 PyJWT>=2.9.0
 argon2-cffi>=23.1.0
 aiosmtplib>=3.0.0
+
+# Memory service
+mem0ai>=0.1.0

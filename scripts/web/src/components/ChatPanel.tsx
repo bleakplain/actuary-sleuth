@@ -20,7 +20,7 @@ export default function ChatPanel() {
   const [input, setInput] = React.useState('');
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<any>(null);
   const {
     messages,
     streaming,

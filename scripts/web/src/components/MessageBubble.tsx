@@ -28,7 +28,7 @@ interface Props {
 
 export default function MessageBubble({ message, streaming, onCitationClick, isMobile }: Props) {
   const { token } = theme.useToken();
-  const { activeTraceMessageId, openTrace, debugMode, deleteMessage, sendMessage } = useAskStore();
+  const { activeTraceMessageId, openTrace, debugMode, deleteMessage } = useAskStore();
   const [hovered, setHovered] = useState(false);
 
   const handleCitationClick = (citation: Citation) => {

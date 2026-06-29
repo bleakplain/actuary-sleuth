@@ -60,8 +60,5 @@ class LLMClientFactory:
         elif cfg.provider == 'ollama':
             return OllamaClient(host=cfg.base_url, model=cfg.model, timeout=cfg.timeout, max_tokens=cfg.max_tokens)
 
-        elif cfg.provider == 'minmax':
-            return MinimaxClient(api_key=cfg.api_key, model=cfg.model, base_url=cfg.base_url, timeout=cfg.timeout)
-
         else:
             raise ValueError(f"Unsupported LLM provider: {cfg.provider}")

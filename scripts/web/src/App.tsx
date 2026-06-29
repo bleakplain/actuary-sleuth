@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, type ComponentType } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { lazy, Suspense, type ComponentType } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ConfigProvider, Skeleton } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { appTheme, darkTheme } from './theme';
@@ -8,7 +8,6 @@ import PageErrorBoundary from './components/PageErrorBoundary';
 import SkipLink from './components/SkipLink';
 import AppLayout from './components/AppLayout';
 import { createContext, useContext } from 'react';
-import { useAuthStore } from './stores/authStore';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';

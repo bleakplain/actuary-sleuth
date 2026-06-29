@@ -212,32 +212,6 @@ class ZhipuConfig:
         return self._config.get('max_tokens', 20000)
 
 
-class MinimaxConfig:
-
-    def __init__(self, config_dict: Dict[str, Any]):
-        self._config = config_dict.get('minmax', {})
-
-    @property
-    def base_url(self) -> str:
-        return self._config.get('base_url', 'https://api.minimaxi.com/v1')
-
-    @property
-    def api_key(self) -> str:
-        return self._config.get('api_key', '')
-
-    @property
-    def temperature(self) -> float:
-        return self._config.get('temperature', 0.1)
-
-    @property
-    def timeout(self) -> int:
-        return self._config.get('timeout', 30)
-
-    @property
-    def max_tokens(self) -> int:
-        return self._config.get('max_tokens', 16384)
-
-
 class DatabaseConfig:
 
     def __init__(self, config_dict: Dict[str, Any]):
@@ -276,13 +250,10 @@ class LLMConfig:
         self._config = config_dict.get('llm', {})
         self._ollama = OllamaConfig(config_dict)
         self._zhipu = ZhipuConfig(config_dict)
-        self._minimax = MinimaxConfig(config_dict)
 
     def _provider(self, provider: str):
         if provider == 'ollama':
             return self._ollama
-        elif provider == 'minmax':
-            return self._minimax
         elif provider == 'zhipu':
             return self._zhipu
         raise ValueError(f"Unsupported LLM provider: {provider}")
@@ -359,14 +330,6 @@ class Config:
                 'temperature': float(os.getenv('ZHIPU_TEMPERATURE', '0.1')),
                 'max_tokens': int(os.getenv('ZHIPU_MAX_TOKENS', '16384')),
                 'api_key': os.getenv('ZHIPU_API_KEY', ''),
-            },
-            # minmax
-            'minmax': {
-                'base_url': os.getenv('MINMAX_BASE_URL', 'https://api.minimaxi.com/v1'),
-                'timeout': int(os.getenv('MINMAX_TIMEOUT', '60')),
-                'temperature': float(os.getenv('MINMAX_TEMPERATURE', '0.1')),
-                'max_tokens': int(os.getenv('MINMAX_MAX_TOKENS', '16384')),
-                'api_key': os.getenv('MinMax_API_KEY', ''),
             },
             # llm
             'llm': {
@@ -453,7 +416,6 @@ class Config:
         self._feishu = FeishuConfig(self._config)
         self._ollama = OllamaConfig(self._config)
         self._zhipu = ZhipuConfig(self._config)
-        self._minimax = MinimaxConfig(self._config)
         self._llm = LLMConfig(self._config)
         self._data_paths = DatabaseConfig(self._config)
         self._memory = MemoryConfig(self._config)
