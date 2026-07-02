@@ -271,10 +271,19 @@ _REGISTRY_PROMPT_TEMPLATE = """## 法规库概况
 
 
 def generate(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
+    """生成回答节点。
+
+    三种路径：
+    - catalog/count 意图：注册表文本已是结构化答案，直接返回，跳过 LLM（避免长文本生成超时）
+    - metadata 意图：保留 LLM 路径，做语言化润色（输出短，无超时风险）
+    - content 意图：常规 RAG，LLM 基于检索片段生成
+    """
     engine = runtime.context.rag_engine
     llm = runtime.context.llm_client
     registry_ctx = state.get("registry_context") or ""
+    intent, _ = classify_intent(state["question"])
     is_registry_mode = bool(registry_ctx)
+    skip_llm = is_registry_mode and intent in ("catalog", "count")
 
     with trace_span("graph_generate", "llm", model=getattr(llm, 'model', '')) as span:
         span.input = {
@@ -282,36 +291,41 @@ def generate(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
             "context_chunk_count": len(state["search_results"]),
             "has_memory_context": bool(state.get("memory_context")),
             "is_registry_mode": is_registry_mode,
+            "skip_llm": skip_llm,
         }
 
-        if is_registry_mode:
-            user_prompt = _REGISTRY_PROMPT_TEMPLATE.format(
-                context=registry_ctx, question=state["question"]
-            )
+        if skip_llm:
+            answer_str = registry_ctx
             included_count = 0
         else:
-            user_prompt, included_count = RAGEngine._build_qa_prompt(
-                engine.config.generation, state["question"], state["search_results"]
-            )
-        messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-        ]
-        if state.get("memory_context"):
-            messages.append({"role": "system", "content": f"【用户历史信息】\n{state['memory_context']}"})
+            if is_registry_mode:
+                user_prompt = _REGISTRY_PROMPT_TEMPLATE.format(
+                    context=registry_ctx, question=state["question"]
+                )
+                included_count = 0
+            else:
+                user_prompt, included_count = RAGEngine._build_qa_prompt(
+                    engine.config.generation, state["question"], state["search_results"]
+                )
+            messages = [
+                {"role": "system", "content": _SYSTEM_PROMPT},
+            ]
+            if state.get("memory_context"):
+                messages.append({"role": "system", "content": f"【用户历史信息】\n{state['memory_context']}"})
 
-        with trace_span("llm_generate", "llm", model=getattr(llm, 'model', '')) as inner:
-            inner.input = {
-                "question": state["question"],
-                "context_chunk_count": len(state["search_results"]),
-                "system_prompt": _SYSTEM_PROMPT,
-                "user_prompt": user_prompt,
-                "has_memory_context": bool(state.get("memory_context")),
-                "is_registry_mode": is_registry_mode,
-            }
-            messages.append({"role": "user", "content": user_prompt})
-            answer = llm.chat(messages)
-            answer_str = str(answer)
-            inner.output = {"answer_length": len(answer_str), "answer": answer_str}
+            with trace_span("llm_generate", "llm", model=getattr(llm, 'model', '')) as inner:
+                inner.input = {
+                    "question": state["question"],
+                    "context_chunk_count": len(state["search_results"]),
+                    "system_prompt": _SYSTEM_PROMPT,
+                    "user_prompt": user_prompt,
+                    "has_memory_context": bool(state.get("memory_context")),
+                    "is_registry_mode": is_registry_mode,
+                }
+                messages.append({"role": "user", "content": user_prompt})
+                answer = llm.chat(messages)
+                answer_str = str(answer)
+                inner.output = {"answer_length": len(answer_str), "answer": answer_str}
 
         included_sources = state["search_results"][:included_count] if state["search_results"] else []
         attribution = parse_citations(answer_str, included_sources)
@@ -326,7 +340,7 @@ def generate(state: AskState, *, runtime: Runtime[GraphContext]) -> dict:
             "unverified_claims": attribution.unverified_claims,
             "content_mismatches": attribution.content_mismatches,
         }
-        span.output = {"answer_length": len(answer_str), "citation_count": len(attribution.citations)}
+        span.output = {"answer_length": len(answer_str), "citation_count": len(attribution.citations), "skip_llm": skip_llm}
 
     # Extract entities and topics from conversation
     ctx_result = _context_mw.after_invoke(state)
