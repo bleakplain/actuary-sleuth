@@ -36,7 +36,7 @@ def test_streaming_negative_violation():
             results = list(streaming_negative_check("本产品保证续保"))
             violations = [r for r in results if r["type"] == "violation"]
             assert len(violations) == 1
-            assert violations[0]["data"]["chunk_id"] == "neg-1"
+            assert violations[0]["data"].chunk_id == "neg-1"
             result_events = [r for r in results if r["type"] == "negative_list_result"]
             assert result_events[0]["data"] == CheckResult.VIOLATED
 

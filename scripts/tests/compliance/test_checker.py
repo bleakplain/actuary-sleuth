@@ -42,23 +42,25 @@ class TestExtractRealArticleNumber:
 class TestLoadAuditRegulations:
     @patch("lib.compliance.checker.get_engine")
     def test_engine_none(self, mock_engine):
+        import lib.compliance.checker as mod
+        mod._regulation_cache.clear()
         mock_engine.return_value = None
         assert load_audit_regulations("健康险") == []
 
-    @patch("lib.compliance.checker.get_general_regulations")
-    @patch("lib.compliance.checker.get_category_regulations")
-    @patch("lib.compliance.checker.get_engine")
-    def test_category_none_loads_general(self, mock_engine, mock_cat_regs, mock_gen_regs):
+    @patch("lib.compliance.checker.ComplianceConstants")
+    def test_category_none_loads_general(self, mock_cc):
+        import lib.compliance.checker as mod
+        mod._regulation_cache.clear()
         mock_engine_inst = MagicMock()
-        mock_engine.return_value = mock_engine_inst
-        mock_cat_regs.return_value = []
-        mock_gen_regs.return_value = ["保险法"]
-        mock_engine_inst.search_by_metadata.return_value = [
-            {"id": "uuid-1", "law_name": "保险法", "article_number": "第1项", "content": "第一条　test"}
-        ]
-        regulations = load_audit_regulations(None)
-        assert len(regulations) == 1
-        assert regulations[0].source_type == "general"
+        with patch("lib.compliance.checker.get_engine", return_value=mock_engine_inst):
+            mock_cc.CATEGORY_REGULATION_REGISTRY = {}
+            mock_cc.GENERAL_REGULATIONS = ["保险法"]
+            mock_engine_inst.search_by_metadata.return_value = [
+                {"id": "uuid-1", "law_name": "保险法", "article_number": "第1项", "content": "第一条　test"}
+            ]
+            regulations = load_audit_regulations(None)
+            assert len(regulations) == 1
+            assert regulations[0].source_type == "general"
 
 
 class TestExtractClauseNumbers:
@@ -120,8 +122,10 @@ class TestSplitDocumentByClauses:
         assert len(_split_document_by_clauses(text, 5)) == 1
 
     def test_long_document_split(self):
-        parts = [f"【条款 {i}.1】内容{i}" for i in range(1, 30)]
-        assert len(_split_document_by_clauses("\n\n".join(parts), 10)) >= 3
+        # 每条条款很长（500 字符），budget 较小，触发分批
+        parts = [f"【条款 {i}.1】{'x' * 500}" for i in range(1, 120)]
+        result = _split_document_by_clauses("\n\n".join(parts), 10000)
+        assert len(result) >= 2
 
 
 class TestNormalizeViolation:
@@ -130,12 +134,37 @@ class TestNormalizeViolation:
                "conclusion": "不合规", "suggestion": "修改", "source_ref": "[R1]"}
         result = _normalize_violation(raw, {"[R1]": "c1"}, "regulation")
         assert result is not None
-        assert result["chunk_id"] == "c1"
-        assert result["check_type"] == "regulation"
+        assert isinstance(result, AuditResultItem)
+        assert result.chunk_id == "c1"
+        assert result.check_type == "regulation"
+        assert result.source_ref == "[R1]"
 
     def test_empty_content_returns_none(self):
         raw = {"clause_number": "3.2", "clause_content": "", "status": "non_compliant"}
         assert _normalize_violation(raw, {}, "regulation") is None
+
+    def test_invalid_source_ref_cleared(self):
+        raw = {"clause_number": "3.2", "clause_content": "内容", "source_ref": "[R99]"}
+        result = _normalize_violation(raw, {"[R1]": "c1"}, "regulation")
+        assert result.chunk_id is None
+        assert result.source_ref == ""
+
+    def test_malformed_source_ref_cleared(self):
+        raw = {"clause_number": "3.2", "clause_content": "内容", "source_ref": "R1"}
+        result = _normalize_violation(raw, {"[R1]": "c1"}, "regulation")
+        assert result.source_ref == ""
+
+    def test_no_source_ref(self):
+        raw = {"clause_content": "内容"}
+        result = _normalize_violation(raw, {"[R1]": "c1"}, "regulation")
+        assert result.source_ref == ""
+        assert result.chunk_id is None
+
+    def test_negative_list_source_ref(self):
+        raw = {"clause_content": "违规内容", "source_ref": "[NR1]"}
+        result = _normalize_violation(raw, {"[NR1]": "neg-1"}, "negative_list")
+        assert result.chunk_id == "neg-1"
+        assert result.source_ref == "[NR1]"
 
 
 class TestParseNdjsonTokens:
@@ -146,8 +175,9 @@ class TestParseNdjsonTokens:
         ]
         items = list(_parse_ndjson_tokens(iter(tokens), {}, "regulation"))
         assert len(items) == 2
-        assert items[0]["clause_number"] == "3.2"
-        assert items[1]["clause_number"] == "5.1"
+        assert items[0].clause_number == "3.2"
+        assert items[1].clause_number == "5.1"
+        assert all(isinstance(i, AuditResultItem) for i in items)
 
     def test_skips_malformed_lines(self):
         tokens = ["not json\n", '{"clause_number":"3.2","clause_content":"内容","status":"non_compliant","conclusion":"c"}\n']
@@ -188,17 +218,18 @@ class TestStreamingComplianceCheck:
         results = list(streaming_compliance_check(doc, regs))
         violations = [r for r in results if r["type"] == "violation"]
         assert len(violations) == 1
-        assert violations[0]["data"]["clause_number"] == "5.5"
-        assert violations[0]["data"]["chunk_id"] == "c1"
+        assert violations[0]["data"].clause_number == "5.5"
+        assert violations[0]["data"].chunk_id == "c1"
 
     @patch("lib.compliance.checker.get_audit_llm")
-    def test_llm_error_produces_no_results(self, mock_llm):
+    def test_llm_error_yields_progress(self, mock_llm):
         mock_llm_inst = MagicMock()
         mock_llm.return_value = mock_llm_inst
         mock_llm_inst.stream_chat.side_effect = Exception("timeout")
         regs = [_make_reg()]
         results = list(streaming_compliance_check("doc", regs))
-        assert results == []
+        progress = [r for r in results if r["type"] == "progress" and "失败" in r["data"]]
+        assert len(progress) == 1
 
 
 class TestStreamingNegativeCheck:
@@ -219,7 +250,7 @@ class TestStreamingNegativeCheck:
         ]
         mock_llm_inst = MagicMock()
         mock_llm.return_value = mock_llm_inst
-        mock_llm_inst.stream_chat.return_value = iter([])  # no violations
+        mock_llm_inst.stream_chat.return_value = iter([])
         results = list(streaming_negative_check("正常内容"))
         result_events = [r for r in results if r["type"] == "negative_list_result"]
         assert result_events[0]["data"] == CheckResult.PASSED
@@ -240,7 +271,7 @@ class TestStreamingNegativeCheck:
         results = list(streaming_negative_check("本产品保证续保"))
         violations = [r for r in results if r["type"] == "violation"]
         assert len(violations) == 1
-        assert violations[0]["data"]["check_type"] == "negative_list"
+        assert violations[0]["data"].check_type == "negative_list"
         result_events = [r for r in results if r["type"] == "negative_list_result"]
         assert result_events[0]["data"] == CheckResult.VIOLATED
 
@@ -258,3 +289,22 @@ class TestIdentifyCategory:
         mock_llm_inst.chat.side_effect = Exception("LLM error")
         result = identify_category("无法识别的内容", "某某产品")
         assert result.category is None
+
+
+class TestRegulationCache:
+    @patch("lib.compliance.checker.ComplianceConstants")
+    def test_cache_returns_same_result(self, mock_cc):
+        import lib.compliance.checker as mod
+        mod._regulation_cache.clear()
+        mock_engine_inst = MagicMock()
+        with patch("lib.compliance.checker.get_engine", return_value=mock_engine_inst):
+            mock_cc.CATEGORY_REGULATION_REGISTRY = {}
+            mock_cc.GENERAL_REGULATIONS = ["保险法"]
+            mock_engine_inst.search_by_metadata.return_value = [
+                {"id": "u1", "law_name": "保险法", "article_number": "第一条", "content": "内容"}
+            ]
+            r1 = mod.load_audit_regulations(None)
+            r2 = mod.load_audit_regulations(None)
+            assert r1 is r2
+            assert mock_engine_inst.search_by_metadata.call_count == 1
+        mod._regulation_cache.clear()

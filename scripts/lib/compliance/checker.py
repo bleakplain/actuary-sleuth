@@ -2,16 +2,23 @@
 import json
 import logging
 import re
+import threading
 from dataclasses import dataclass
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
 from lib.common.constants import ComplianceConstants
 from lib.common.product_types import ProductCategory, classify_product
-from lib.common.regulation_registry import (
-    get_category_regulations,
-    get_general_regulations,
-    VALID_CATEGORIES,
-)
+from lib.compliance.rule_engine import check_rules as _check_rules, ProductMetadata
+
+VALID_CATEGORIES = ComplianceConstants.VALID_CATEGORIES
+
+
+def _get_category_regulations(category: str) -> List[str]:
+    return ComplianceConstants.CATEGORY_REGULATION_REGISTRY.get(category, [])
+
+
+def _get_general_regulations() -> List[str]:
+    return ComplianceConstants.GENERAL_REGULATIONS.copy()
 from lib.llm import get_audit_llm
 from lib.llm.base import BaseLLMClient
 from lib.rag_engine import get_engine
@@ -23,7 +30,12 @@ from lib.compliance.prompts import (
 logger = logging.getLogger(__name__)
 
 _CLAUSE_NUM_RE = re.compile(r'(\d+(?:\.\d+)*(?:\(\d+\))?)')
+_SOURCE_REF_RE = re.compile(r'^\[(?:R|NR)\d+\]$')
 _TEMPLATE_OVERHEAD = 600
+
+# 法规加载缓存：category → List[AuditRegulationItem]
+_regulation_cache: Dict[Optional[str], List[AuditRegulationItem]] = {}
+_regulation_cache_lock = threading.Lock()
 
 
 class CheckResult:
@@ -60,6 +72,7 @@ class AuditResultItem:
     chunk_id: Optional[str]
     suggestion: str
     conclusion: str = ""
+    source_ref: str = ""
 
 
 # --- Document helpers ---
@@ -146,6 +159,9 @@ def _load_regulation_chunks(
 
 
 def load_audit_regulations(category: Optional[str]) -> List[AuditRegulationItem]:
+    with _regulation_cache_lock:
+        if category in _regulation_cache:
+            return _regulation_cache[category]
     engine = get_engine()
     if engine is None:
         logger.warning("RAG 引擎未初始化")
@@ -153,10 +169,12 @@ def load_audit_regulations(category: Optional[str]) -> List[AuditRegulationItem]
     all_results: List[Tuple[Dict, str]] = []
     seen_keys: set = set()
     if category:
-        _load_regulation_chunks(engine, get_category_regulations(category), seen_keys, all_results, "category")
-    _load_regulation_chunks(engine, get_general_regulations(), seen_keys, all_results, "general")
+        _load_regulation_chunks(engine, _get_category_regulations(category), seen_keys, all_results, "category")
+    _load_regulation_chunks(engine, _get_general_regulations(), seen_keys, all_results, "general")
     regulations = [_build_regulation_item(r, st) for r, st in all_results]
     logger.info(f"加载法规: 共 {len(regulations)} 条")
+    with _regulation_cache_lock:
+        _regulation_cache[category] = regulations
     return regulations
 
 
@@ -223,30 +241,35 @@ def _split_document_by_clauses(document_content: str, budget: int) -> List[str]:
 # --- NDJSON stream parser ---
 
 
-def _normalize_violation(raw: Dict, ref_to_chunk: Dict[str, str], check_type: str) -> Optional[Dict]:
+def _normalize_violation(raw: Dict, ref_to_chunk: Dict[str, str], check_type: str) -> Optional[AuditResultItem]:
     clause_content = raw.get("clause_content", "")
     if not clause_content:
         return None
     raw_cn = raw.get("clause_number", "")
     normalized = normalize_clause_number(raw_cn) if raw_cn else None
     source_ref = raw.get("source_ref", "")
-    return {
-        "clause_number": normalized or "未知",
-        "check_type": check_type,
-        "clause_content": clause_content,
-        "status": raw.get("status", "non_compliant"),
-        "chunk_id": ref_to_chunk.get(source_ref) if source_ref else None,
-        "source_ref": source_ref,
-        "suggestion": raw.get("suggestion", ""),
-        "conclusion": raw.get("conclusion", ""),
-    }
+    chunk_id = None
+    if source_ref and _SOURCE_REF_RE.match(source_ref) and source_ref in ref_to_chunk:
+        chunk_id = ref_to_chunk[source_ref]
+    else:
+        source_ref = ""
+    return AuditResultItem(
+        clause_number=normalized or "未知",
+        check_type=check_type,
+        clause_content=clause_content,
+        status=raw.get("status", "non_compliant"),
+        chunk_id=chunk_id,
+        source_ref=source_ref,
+        suggestion=raw.get("suggestion", ""),
+        conclusion=raw.get("conclusion", ""),
+    )
 
 
 def _parse_ndjson_tokens(
     token_iter: Any,
     ref_to_chunk: Dict[str, str],
     check_type: str,
-) -> Generator[Dict, None, None]:
+) -> Generator[AuditResultItem, None, None]:
     buffer = ""
     for token in token_iter:
         buffer += token
@@ -281,11 +304,20 @@ def _parse_ndjson_tokens(
 def streaming_compliance_check(
     document_content: str,
     regulations: List[AuditRegulationItem],
+    category: Optional[str] = None,
+    product_metadata: Optional[ProductMetadata] = None,
 ) -> Generator[Dict, None, None]:
     """Yield regulation audit violations as they stream from LLM.
 
     Yields: {"type": "violation"|"progress", "data": dict|string}
     """
+    # Phase 1: 确定性规则检查
+    if category:
+        yield {"type": "progress", "data": "确定性规则检查中..."}
+        for v in _check_rules(document_content, category, product_metadata):
+            yield {"type": "violation", "data": v}
+
+    # Phase 2: LLM 语义审查
     if not regulations:
         return
     regs_text, ref_to_chunk = _build_numbered_regulations(regulations)
@@ -313,6 +345,7 @@ def streaming_compliance_check(
             logger.info(f"法规审查批次 {i + 1}/{len(batches)}: {count} 条违规")
         except Exception as e:
             logger.warning(f"Streaming audit batch {i + 1} failed: {e}")
+            yield {"type": "progress", "data": f"⚠ 法规审查批次 {i + 1}/{len(batches)} 失败"}
 
 
 def streaming_negative_check(

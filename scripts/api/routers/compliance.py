@@ -7,7 +7,7 @@ import json
 import logging
 import tempfile
 import threading
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sse_starlette.sse import EventSourceResponse
@@ -21,6 +21,7 @@ from api.schemas.compliance import (
 from lib.common.constants import ComplianceConstants
 from lib.common.html_converter import html_to_docx
 from lib.compliance.checker import (
+    AuditResultItem,
     streaming_compliance_check,
     streaming_negative_check,
     identify_category,
@@ -28,6 +29,7 @@ from lib.compliance.checker import (
     normalize_clause_number,
     extract_section_numbers,
 )
+from lib.compliance.rule_engine import RuleViolation, ProductMetadata
 from lib.doc_parser import parse_product_document, DocumentParseError
 from lib.auth.permissions import require_permission
 
@@ -50,15 +52,18 @@ async def check_document_stream(req: DocumentCheckRequest, user: dict = Depends(
     }
 
     async def event_stream():
-        all_items: List[Dict] = []
+        all_items: List[Union[AuditResultItem, RuleViolation]] = []
         all_regulations = list(regulations)
         negative_list_result = "skipped"
         loop = asyncio.get_event_loop()
         queue: asyncio.Queue = asyncio.Queue()
 
+        # 构建产品元数据（当前仅 category，后续可从前端/解析结果补充更多维度）
+        product_meta = ProductMetadata(category=category)
+
         def _producer():
             try:
-                for event in streaming_compliance_check(req.document_content, regulations):
+                for event in streaming_compliance_check(req.document_content, regulations, category, product_meta):
                     loop.call_soon_threadsafe(queue.put_nowait, event)
                 for event in streaming_negative_check(req.document_content):
                     loop.call_soon_threadsafe(queue.put_nowait, event)
@@ -76,6 +81,10 @@ async def check_document_stream(req: DocumentCheckRequest, user: dict = Depends(
                 break
             if event["type"] == "violation":
                 all_items.append(event["data"])
+                yield {"event": "message", "data": json.dumps(
+                    {"type": "violation", "data": event["data"].__dict__}, ensure_ascii=False
+                )}
+                continue
             elif event["type"] == "negative_list_result":
                 negative_list_result = event["data"]
                 neg_regs = event.get("regulations", [])
@@ -96,7 +105,7 @@ async def check_document_stream(req: DocumentCheckRequest, user: dict = Depends(
         doc_clause_set = set(section_info["clauses"])
         flagged_clause_set = set()
         for item in all_items:
-            cn = item.get("clause_number", "")
+            cn = item.clause_number
             if cn != "未知":
                 normalized = normalize_clause_number(cn)
                 if normalized:
@@ -131,7 +140,7 @@ async def check_document_stream(req: DocumentCheckRequest, user: dict = Depends(
 
         result_for_db = {
             "summary": summary,
-            "items": all_items,
+            "items": [item.__dict__ for item in all_items],
             "regulations": [r.__dict__ if hasattr(r, '__dict__') else r for r in all_regulations],
             "regulation_sources": regulation_sources,
             "category": category or "",
