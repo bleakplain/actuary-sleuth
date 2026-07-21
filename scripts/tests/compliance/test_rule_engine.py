@@ -79,14 +79,24 @@ class TestCheckRules:
 
     def test_hesitation_period_violation(self):
         doc = "【条款 4.1】犹豫期\n犹豫期为7天"
-        violations = check_rules(doc, "健康险")
-        hes_v = [v for v in violations if v.rule_id in ("hesitation_period_min_15", "health_hesitation_min_15")]
+        meta = ProductMetadata(category="健康险", insurance_term="长期")
+        violations = check_rules(doc, "健康险", meta)
+        hes_v = [v for v in violations if v.rule_id in ("hesitation_period_min_15", "health_hesitation_min_15", "life_hesitation_min_15")]
         assert len(hes_v) >= 1
 
     def test_hesitation_period_compliant(self):
         doc = "【条款 4.1】犹豫期\n犹豫期为15天"
-        violations = check_rules(doc, "健康险")
-        hes_v = [v for v in violations if v.rule_id in ("hesitation_period_min_15", "health_hesitation_min_15")]
+        meta = ProductMetadata(category="健康险", insurance_term="长期")
+        violations = check_rules(doc, "健康险", meta)
+        hes_v = [v for v in violations if v.rule_id in ("hesitation_period_min_15", "health_hesitation_min_15", "life_hesitation_min_15")]
+        assert len(hes_v) == 0
+
+    def test_hesitation_period_short_health_not_applied(self):
+        # 短期健康险不应触发长期健康险的犹豫期规则
+        doc = "【条款 4.1】犹豫期\n犹豫期为7天"
+        meta = ProductMetadata(category="健康险", insurance_term="短期")
+        violations = check_rules(doc, "健康险", meta)
+        hes_v = [v for v in violations if v.rule_id == "health_hesitation_min_15"]
         assert len(hes_v) == 0
 
     def test_hesitation_period_applies_all_categories(self):
@@ -102,7 +112,8 @@ class TestCheckRules:
 
     def test_multiple_violations(self):
         doc = "【条款 3.1】等待期\n等待期为270天\n\n【条款 4.1】犹豫期\n犹豫期为7天"
-        violations = check_rules(doc, "健康险")
+        meta = ProductMetadata(category="健康险", insurance_term="长期")
+        violations = check_rules(doc, "健康险", meta)
         rules = {v.rule_id for v in violations}
         assert "health_wait_period_max_180" in rules
         assert "health_hesitation_min_15" in rules
@@ -190,14 +201,9 @@ class TestProhibitedClause:
         v = [v for v in violations if v.rule_id == "dividend_no_guarantee_rate"]
         assert len(v) == 0
 
-    def test_internet_annuity_no_guarantee_rate_violation(self):
+    def test_internet_annuity_no_guarantee_rate_removed(self):
+        # 该规则已删除（项目内法规无此要求）
         doc = "【条款 3.1】保险费\n本产品保证利率为2.5%"
-        violations = check_rules(doc, "年金险")
-        v = [v for v in violations if v.rule_id == "internet_annuity_no_guarantee_rate"]
-        assert len(v) == 1
-
-    def test_internet_annuity_no_guarantee_rate_compliant(self):
-        doc = "【条款 3.1】保险费\n本产品结算利率随市场变动"
         violations = check_rules(doc, "年金险")
         v = [v for v in violations if v.rule_id == "internet_annuity_no_guarantee_rate"]
         assert len(v) == 0
@@ -254,11 +260,12 @@ class TestFieldPresence:
         v = [v for v in violations if v.rule_id == "life_must_have_cash_value"]
         assert len(v) == 0
 
-    def test_health_must_have_waiting_period_disclosure_violation(self):
+    def test_health_must_have_waiting_period_disclosure_removed(self):
+        # 该规则已删除（法规仅规定上限，未强制必须设置）
         doc = "【条款 1.1】保险责任\n本产品承担疾病给付责任"
         violations = check_rules(doc, "健康险")
         v = [v for v in violations if v.rule_id == "health_must_have_waiting_period_disclosure"]
-        assert len(v) == 1
+        assert len(v) == 0
 
     def test_health_long_term_renewal_clause_violation(self):
         doc = "【条款 1.1】保险责任\n本产品承担疾病给付责任"
@@ -304,14 +311,9 @@ class TestNumericSpecificRules:
         v = [v for v in violations if v.rule_id == "ci_mild_pay_ratio_max_30"]
         assert len(v) == 0
 
-    def test_ci_moderate_pay_ratio_max_60_violation(self):
+    def test_ci_moderate_pay_ratio_max_60_removed(self):
+        # 该规则已删除（2020版规范无中症60%的强制条款）
         doc = "【条款 2.2】中症\n中度疾病给付比例为基本保险金额的70%"
-        violations = check_rules(doc, "重疾险")
-        v = [v for v in violations if v.rule_id == "ci_moderate_pay_ratio_max_60"]
-        assert len(v) == 1
-
-    def test_ci_moderate_pay_ratio_max_60_compliant(self):
-        doc = "【条款 2.2】中症\n中度疾病给付比例为基本保险金额的50%"
         violations = check_rules(doc, "重疾险")
         v = [v for v in violations if v.rule_id == "ci_moderate_pay_ratio_max_60"]
         assert len(v) == 0
@@ -328,62 +330,78 @@ class TestNumericSpecificRules:
         v = [v for v in violations if v.rule_id == "grace_period_min_60"]
         assert len(v) == 0
 
-    def test_long_medical_rate_adjust_interval_violation(self):
-        doc = "【条款 3.1】费率调整\n费率调整间隔为2年"
+    def test_long_medical_rate_adjust_first_interval_3y_violation(self):
+        doc = "【条款 3.1】首次费率调整\n首次费率调整时间为上市后2年"
         meta = ProductMetadata(category="医疗险", insurance_term="长期")
         violations = check_rules(doc, "医疗险", meta)
-        v = [v for v in violations if v.rule_id == "long_medical_rate_adjust_interval"]
+        v = [v for v in violations if v.rule_id == "long_medical_rate_adjust_first_interval_3y"]
         assert len(v) == 1
 
-    def test_long_medical_rate_adjust_interval_compliant(self):
-        doc = "【条款 3.1】费率调整\n费率调整间隔为3年"
+    def test_long_medical_rate_adjust_first_interval_3y_compliant(self):
+        doc = "【条款 3.1】首次费率调整\n首次费率调整时间为上市后3年"
         meta = ProductMetadata(category="医疗险", insurance_term="长期")
         violations = check_rules(doc, "医疗险", meta)
-        v = [v for v in violations if v.rule_id == "long_medical_rate_adjust_interval"]
+        v = [v for v in violations if v.rule_id == "long_medical_rate_adjust_first_interval_3y"]
         assert len(v) == 0
 
-    def test_long_medical_rate_adjust_interval_not_long_term(self):
-        doc = "【条款 3.1】费率调整\n费率调整间隔为2年"
+    def test_long_medical_rate_adjust_subsequent_interval_1y_violation(self):
+        # 法规要求 ≥1年，"间隔为0年"（即随时调整）触发违规
+        # 注：数值提取按单位独立比较，不跨单位换算
+        doc = "【条款 3.1】费率调整间隔\n费率调整间隔为0年"
+        meta = ProductMetadata(category="医疗险", insurance_term="长期")
+        violations = check_rules(doc, "医疗险", meta)
+        v = [v for v in violations if v.rule_id == "long_medical_rate_adjust_subsequent_interval_1y"]
+        assert len(v) == 1
+
+    def test_long_medical_rate_adjust_not_long_term(self):
+        doc = "【条款 3.1】费率调整间隔\n费率调整间隔为2年"
         # 短期医疗险不应触发长期费率调整规则
         meta = ProductMetadata(category="医疗险", insurance_term="短期")
         violations = check_rules(doc, "医疗险", meta)
-        v = [v for v in violations if v.rule_id == "long_medical_rate_adjust_interval"]
-        assert len(v) == 0
+        v1 = [v for v in violations if v.rule_id == "long_medical_rate_adjust_first_interval_3y"]
+        v2 = [v for v in violations if v.rule_id == "long_medical_rate_adjust_subsequent_interval_1y"]
+        assert len(v1) == 0
+        assert len(v2) == 0
 
-    def test_insurance_law_limitation_2y_violation(self):
-        doc = "【条款 6.1】诉讼时效\n诉讼时效为1年"
+    def test_insurance_law_limitation_life_violation(self):
+        # 人寿保险诉讼时效不得少于5年（保险法第二十六条）
+        doc = "【条款 6.1】诉讼时效\n诉讼时效为3年"
         violations = check_rules(doc, "寿险")
-        v = [v for v in violations if v.rule_id == "insurance_law_limitation_2y"]
+        v = [v for v in violations if v.rule_id == "insurance_law_limitation_5y_life"]
         assert len(v) == 1
 
-    def test_insurance_law_limitation_2y_compliant(self):
+    def test_insurance_law_limitation_life_compliant(self):
         doc = "【条款 6.1】诉讼时效\n诉讼时效为5年"
         violations = check_rules(doc, "寿险")
-        v = [v for v in violations if v.rule_id == "insurance_law_limitation_2y"]
+        v = [v for v in violations if v.rule_id == "insurance_law_limitation_5y_life"]
         assert len(v) == 0
 
-    def test_insurance_law_limitation_5y_nonlife_violation(self):
-        doc = "【条款 6.1】诉讼时效\n诉讼时效为3年"
+    def test_insurance_law_limitation_nonlife_violation(self):
+        # 非人寿保险诉讼时效不得少于2年
+        doc = "【条款 6.1】诉讼时效\n诉讼时效为1年"
         violations = check_rules(doc, "健康险")
-        v = [v for v in violations if v.rule_id == "insurance_law_limitation_5y_nonlife"]
+        v = [v for v in violations if v.rule_id == "insurance_law_limitation_2y_nonlife"]
         assert len(v) == 1
 
-    def test_tax_health_deductible_limit_violation(self):
+    def test_tax_health_deductible_limit_removed(self):
+        # 该规则已删除（法规无"免赔额≤2万"要求，方向相反）
         doc = "【条款 3.1】免赔额\n免赔额为3万"
         violations = check_rules(doc, "健康险")
         v = [v for v in violations if v.rule_id == "tax_health_deductible_limit"]
+        assert len(v) == 0
+
+    def test_design_first_survival_payment_after_5y_violation(self):
+        doc = "【条款 2.1】首次生存保险金给付\n首次生存保险金给付为保单生效后3年"
+        meta = ProductMetadata(category="寿险", insurance_term="长期")
+        violations = check_rules(doc, "寿险", meta)
+        v = [v for v in violations if v.rule_id == "design_first_survival_payment_after_5y"]
         assert len(v) == 1
 
-    def test_design_no_return_premium_rapidly_violation(self):
-        doc = "【条款 2.1】满期给付\n满期给付期限为2年"
-        violations = check_rules(doc, "寿险")
-        v = [v for v in violations if v.rule_id == "design_no_return_premium_rapidly"]
-        assert len(v) == 1
-
-    def test_design_no_return_premium_rapidly_compliant(self):
-        doc = "【条款 2.1】满期给付\n满期给付期限为5年"
-        violations = check_rules(doc, "寿险")
-        v = [v for v in violations if v.rule_id == "design_no_return_premium_rapidly"]
+    def test_design_first_survival_payment_after_5y_compliant(self):
+        doc = "【条款 2.1】首次生存保险金给付\n首次生存保险金给付为保单生效后5年"
+        meta = ProductMetadata(category="寿险", insurance_term="长期")
+        violations = check_rules(doc, "寿险", meta)
+        v = [v for v in violations if v.rule_id == "design_first_survival_payment_after_5y"]
         assert len(v) == 0
 
 

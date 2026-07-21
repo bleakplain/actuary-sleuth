@@ -86,13 +86,14 @@ RULES: List[ComplianceRule] = [
         operator=">=",
         threshold=15,
         applicable_categories=["健康险", "医疗险", "重疾险"],
+        applicable_insurance_terms=["长期"],
         severity="high",
-        description="健康保险犹豫期不得少于15天",
+        description="长期健康保险产品的犹豫期不得少于15天",
     ),
     ComplianceRule(
         rule_id="health_must_have_preexisting",
-        regulation_source="《健康保险管理办法》2019年第3号",
-        article_number="第二十一条",
+        regulation_source="《关于健康保险产品等待期及既往症表述有关事项的通知》电子报备系统通知公告2022-7-27",
+        article_number="第二项",
         target_field="既往症",
         check_type="field_presence",
         operator="must_exist",
@@ -100,18 +101,6 @@ RULES: List[ComplianceRule] = [
         applicable_categories=["健康险", "医疗险"],
         severity="high",
         description="健康保险应当对既往症进行定义和说明",
-    ),
-    ComplianceRule(
-        rule_id="health_must_have_waiting_period_disclosure",
-        regulation_source="《健康保险管理办法》2019年第3号",
-        article_number="第二十七条",
-        target_field="等待期",
-        check_type="field_presence",
-        operator="must_exist",
-        threshold=None,
-        applicable_categories=["健康险", "医疗险", "重疾险"],
-        severity="medium",
-        description="健康保险应当在条款中约定等待期",
     ),
 
     # === 银保监办发〔2021〕7号 — 短期健康保险 ===
@@ -156,29 +145,32 @@ RULES: List[ComplianceRule] = [
     ),
 
     # === 《保险法》（2015年修订）===
+    # 第二十六条原文：
+    #   人寿保险以外的其他保险...诉讼时效期间为二年...
+    #   人寿保险...诉讼时效期间为五年...
     ComplianceRule(
-        rule_id="insurance_law_limitation_2y",
-        regulation_source="《保险法》2015年修订",
-        article_number="第二十六条",
-        target_field="诉讼时效",
-        check_type="numeric_comparison",
-        operator=">=",
-        threshold=2,
-        applicable_categories=["寿险", "年金险"],
-        severity="high",
-        description="人寿保险的诉讼时效不得少于2年",
-    ),
-    ComplianceRule(
-        rule_id="insurance_law_limitation_5y_nonlife",
+        rule_id="insurance_law_limitation_5y_life",
         regulation_source="《保险法》2015年修订",
         article_number="第二十六条",
         target_field="诉讼时效",
         check_type="numeric_comparison",
         operator=">=",
         threshold=5,
+        applicable_categories=["寿险", "年金险"],
+        severity="high",
+        description="人寿保险的诉讼时效不得少于5年",
+    ),
+    ComplianceRule(
+        rule_id="insurance_law_limitation_2y_nonlife",
+        regulation_source="《保险法》2015年修订",
+        article_number="第二十六条",
+        target_field="诉讼时效",
+        check_type="numeric_comparison",
+        operator=">=",
+        threshold=2,
         applicable_categories=["健康险", "医疗险", "意外险"],
         severity="high",
-        description="非人寿保险的诉讼时效不得少于5年",
+        description="非人寿保险的诉讼时效不得少于2年",
     ),
 
     # === 保监发〔2015〕90号 — 未成年人身故保额 ===
@@ -209,16 +201,17 @@ RULES: List[ComplianceRule] = [
 
     # === 保监人身险〔2017〕134号 — 产品开发设计 ===
     ComplianceRule(
-        rule_id="design_no_return_premium_rapidly",
+        rule_id="design_first_survival_payment_after_5y",
         regulation_source="《关于规范人身保险公司产品开发设计行为的通知》保监人身险〔2017〕134号",
-        article_number="第一条",
-        target_field="满期给付",
+        article_number="第一项",
+        target_field="首次生存保险金给付",
         check_type="numeric_comparison",
         operator=">=",
-        threshold=3,
+        threshold=5,
         applicable_categories=["寿险", "年金险"],
+        applicable_insurance_terms=["长期"],
         severity="high",
-        description="两全保险的满期给付期限不得少于3年",
+        description="两全保险、年金保险的首次生存保险金给付应在保单生效满5年之后",
     ),
     ComplianceRule(
         rule_id="design_no_death_main_health",
@@ -235,16 +228,29 @@ RULES: List[ComplianceRule] = [
 
     # === 银保监办发〔2020〕27号 — 长期医疗保险费率调整 ===
     ComplianceRule(
-        rule_id="long_medical_rate_adjust_interval",
+        rule_id="long_medical_rate_adjust_first_interval_3y",
         regulation_source="《关于长期医疗保险产品费率调整有关问题的通知》银保监办发〔2020〕27号",
-        article_number="第二条",
-        target_field="费率调整",
+        article_number="第二项",
+        target_field="首次费率调整",
         check_type="numeric_comparison",
         operator=">=",
         threshold=3,
         applicable_categories=["医疗险"],
         severity="high",
-        description="长期医疗保险的费率调整间隔不得少于3年",
+        description="长期医疗保险产品首次费率调整时间应当不早于产品上市销售之日起满3年",
+        applicable_insurance_terms=["长期"],
+    ),
+    ComplianceRule(
+        rule_id="long_medical_rate_adjust_subsequent_interval_1y",
+        regulation_source="《关于长期医疗保险产品费率调整有关问题的通知》银保监办发〔2020〕27号",
+        article_number="第二项",
+        target_field="费率调整间隔",
+        check_type="numeric_comparison",
+        operator=">=",
+        threshold=1,
+        applicable_categories=["医疗险"],
+        severity="high",
+        description="长期医疗保险产品每次费率调整的时间间隔不得短于1年",
         applicable_insurance_terms=["长期"],
     ),
 
@@ -252,26 +258,14 @@ RULES: List[ComplianceRule] = [
     ComplianceRule(
         rule_id="ci_mild_pay_ratio_max_30",
         regulation_source="《重大疾病保险的疾病定义使用规范（2020年修订版）》",
-        article_number="第二章",
+        article_number="第二项",
         target_field="轻症",
         check_type="numeric_comparison",
         operator="<=",
         threshold=30,
         applicable_categories=["重疾险"],
         severity="high",
-        description="轻度疾病保险金额不得超过基本保险金额的30%",
-    ),
-    ComplianceRule(
-        rule_id="ci_moderate_pay_ratio_max_60",
-        regulation_source="《重大疾病保险的疾病定义使用规范（2020年修订版）》",
-        article_number="第二章",
-        target_field="中症",
-        check_type="numeric_comparison",
-        operator="<=",
-        threshold=60,
-        applicable_categories=["重疾险"],
-        severity="high",
-        description="中度疾病保险金额不得超过基本保险金额的60%",
+        description="轻度疾病累计保险金额不应高于相应重度疾病累计保险金额的30%",
     ),
 
     # === 普通型人身保险精算规定 ===
@@ -303,15 +297,15 @@ RULES: List[ComplianceRule] = [
     # === 分红保险精算规定 ===
     ComplianceRule(
         rule_id="dividend_must_state_undetermined",
-        regulation_source="《分红保险精算规定》保监发〔2015〕93号",
-        article_number="第四条",
+        regulation_source="《关于推进分红型人身保险费率政策改革有关事项的通知》保监发〔2015〕93号",
+        article_number="第二项",
         target_field="红利",
         check_type="required_text",
         operator="must_contain",
-        threshold=r"红利.*不确定|分红.*不确定|红利是不确定的|红利非保证",
+        threshold=r"红利.*不确定|分红.*不确定|红利是不确定的|红利非保证|红利水平是不保证的|红利.*不保证|分红.*不保证",
         applicable_categories=["分红险"],
         severity="high",
-        description="分红保险应当明确说明红利是不确定的",
+        description="分红保险应当用醒目字体标明保单的红利水平是不保证的，在某些年度红利可能为零",
     ),
     ComplianceRule(
         rule_id="dividend_no_guarantee_rate",
@@ -341,18 +335,9 @@ RULES: List[ComplianceRule] = [
     ),
 
     # === 互联网保险 ===
-    ComplianceRule(
-        rule_id="internet_annuity_no_guarantee_rate",
-        regulation_source="《关于进一步规范保险机构互联网人身保险业务有关事项的通知》银保监办发〔2021〕108号",
-        article_number="第二条",
-        target_field="保险费",
-        check_type="prohibited_clause",
-        operator="must_not_contain",
-        threshold=r"保证利率|保底利率|最低利率|保证收益",
-        applicable_categories=["年金险"],
-        severity="high",
-        description="互联网年金保险不得包含保证利率表述",
-    ),
+    # 原规则 internet_annuity_no_guarantee_rate 声称"互联网年金保险不得包含保证利率表述"，
+    # 但项目内《关于进一步规范保险机构互联网人身保险业务有关事项的通知》文件中
+    # 没有此条款。该规则已删除。如需恢复，需先在法规库中找到准确出处。
 
     # === 宽限期（通用）===
     ComplianceRule(
@@ -383,18 +368,9 @@ RULES: List[ComplianceRule] = [
     ),
 
     # === 税优健康险 ===
-    ComplianceRule(
-        rule_id="tax_health_deductible_limit",
-        regulation_source="《关于适用商业健康保险个人所得税优惠政策产品有关事项的通知》金规〔2023〕2号",
-        article_number="第二条",
-        target_field="免赔额",
-        check_type="numeric_comparison",
-        operator="<=",
-        threshold=2,
-        applicable_categories=["健康险", "医疗险"],
-        severity="medium",
-        description="税优健康保险的免赔额不得超过2万",
-    ),
+    # 原规则 tax_health_deductible_limit 误把"免赔额≤2万"挂在金规〔2023〕2号下。
+    # 实际该法规要求"至少包含免赔额为0的方案"，方向相反。该规则已删除。
+    # 如需对税优健康险免赔额做检查，应改写为 required_text 检查"包含免赔额为0的方案"。
 ]
 
 
