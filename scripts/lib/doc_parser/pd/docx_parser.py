@@ -14,6 +14,7 @@ from docx.table import Table
 import re
 
 from ..models import Clause, DataTable, AuditDocument, DocumentParseError, SectionType, TableType
+from .product_name_recognizer import recognize_product_name
 from .section_detector import SectionDetector
 from .table_classifier import TableClassifier
 from .utils import split_title_and_content, add_section
@@ -47,6 +48,11 @@ class DocxParser:
 
         warnings: List[str] = []
 
+        # 产品名识别（在条款解析之前，从封面/目录段落提取）
+        paragraph_texts = [p.text for p in doc.paragraphs]
+        recognition = recognize_product_name(paragraph_texts)
+        warnings.extend(recognition.warnings)
+
         clauses = self._extract_clauses(doc.tables, warnings)
         if len(clauses) < 5:
             para_clauses = self._extract_clauses_from_paragraphs(doc.paragraphs, warnings)
@@ -64,6 +70,12 @@ class DocxParser:
             health_disclosures=sections['health_disclosures'],
             exclusions=sections['exclusions'],
             rider_clauses=sections['rider_clauses'],
+            product_name=recognition.product_name,
+            is_rider=recognition.is_rider,
+            group_or_individual=recognition.group_or_individual,
+            duration_type=recognition.duration_type,
+            design_type=recognition.design_type,
+            naming_warnings=recognition.warnings,
             parse_time=datetime.now(),
             warnings=warnings,
         )

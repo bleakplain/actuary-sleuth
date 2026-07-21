@@ -180,7 +180,8 @@ export default function CompliancePage() {
 
   const applyParseResult = (result: ParsedDocument, name?: string) => {
     setParsedDocument(result);
-    setProductName(name || result.file_name || '');
+    // 优先用后端识别出的产品名；其次用户传入的 name（富文本场景）；最后回退 file_name
+    setProductName(result.product_name || name || result.file_name || '');
     setIdentifiedCategory(result.identified_category);
     setCategoryConfidence(result.category_confidence);
     setSelectedCategory(result.identified_category || '');
@@ -560,6 +561,27 @@ export default function CompliancePage() {
             </div>
           )}
         </Card>
+
+        {/* 产品命名检查（仅当前会话解析阶段有 naming_warnings 时展示） */}
+        {parsedDocument?.naming_warnings && parsedDocument.naming_warnings.length > 0 && (
+          <Card
+            size="small"
+            style={{ marginBottom: 16, borderLeft: `3px solid ${token.colorWarning}` }}
+            title={<Space size={4}><ExclamationCircleOutlined style={{ color: token.colorWarning }} /><span>产品命名检查</span></Space>}
+          >
+            <ul style={{ margin: 0, paddingLeft: 20 }}>
+              {parsedDocument.naming_warnings.map((w, i) => (
+                <li key={i} style={{ color: token.colorTextSecondary, marginBottom: 4 }}>{w}</li>
+              ))}
+            </ul>
+            {parsedDocument.product_name && (
+              <div style={{ marginTop: 8, fontSize: token.fontSizeSM, color: token.colorTextTertiary }}>
+                识别产品名：{parsedDocument.product_name}
+                {parsedDocument.is_rider && <Tag color="blue" style={{ marginLeft: 8 }}>附加险</Tag>}
+              </div>
+            )}
+          </Card>
+        )}
 
         {/* Clause cards */}
         {merged.map((item, i) => (

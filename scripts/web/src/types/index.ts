@@ -80,6 +80,12 @@ export interface ParsedDocument {
   parse_time: string;
   identified_category: string | null;
   category_confidence: number;
+  product_name?: string | null;
+  is_rider?: boolean;
+  group_or_individual?: string | null;
+  duration_type?: string | null;
+  design_type?: string | null;
+  naming_warnings?: string[];
 }
 
 // ===== 法规问答（ask） =====

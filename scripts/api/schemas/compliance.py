@@ -84,6 +84,14 @@ class ParsedDocumentResponse(BaseModel):
     parse_time: str = ""
     identified_category: Optional[str] = None
     category_confidence: float = 0.0
+    # 产品名识别结果（从文档正文提取，区别于 file_name）
+    product_name: Optional[str] = None
+    is_rider: bool = False
+    # 结构化标签维度（供前端展示与后续标签化法规筛选）
+    group_or_individual: Optional[str] = None
+    duration_type: Optional[str] = None
+    design_type: Optional[str] = None
+    naming_warnings: List[str] = []
 
 
 class RichTextParseRequest(BaseModel):

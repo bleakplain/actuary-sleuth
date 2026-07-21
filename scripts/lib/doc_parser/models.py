@@ -215,6 +215,16 @@ class AuditDocument:
     exclusions: List[DocumentSection] = field(default_factory=list)
     rider_clauses: List[Clause] = field(default_factory=list)
 
+    # 产品名识别结果：从文档正文识别出的产品全名（如"人保健康欣好孕互联网医疗保险条款"）。
+    # 识别失败时为 None，调用方应回退到 file_name 并提示用户手动填写。
+    product_name: Optional[str] = None
+    is_rider: bool = False              # 是否附加险（产品名中含"附加"且位于"保险"之前）
+    # 结构化标签维度（从产品名提取，供后续标签化法规筛选使用）
+    group_or_individual: Optional[str] = None  # 投保对象标签：团体/个人
+    duration_type: Optional[str] = None        # 保险期限标签：终身/定期
+    design_type: Optional[str] = None          # 设计类型：普通型/分红型/万能型等
+    naming_warnings: List[str] = field(default_factory=list)  # 命名合规校验警告
+
     parse_time: datetime = field(default_factory=datetime.now)
     warnings: List[str] = field(default_factory=list)
 

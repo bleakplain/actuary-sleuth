@@ -236,6 +236,12 @@ def _audit_doc_to_response(audit_doc, file_type: str,
         parse_time=audit_doc.parse_time.isoformat(),
         identified_category=identified_category,
         category_confidence=category_confidence,
+        product_name=audit_doc.product_name,
+        is_rider=audit_doc.is_rider,
+        group_or_individual=audit_doc.group_or_individual,
+        duration_type=audit_doc.duration_type,
+        design_type=audit_doc.design_type,
+        naming_warnings=list(audit_doc.naming_warnings),
     )
 
 
@@ -264,7 +270,9 @@ async def parse_file(file: UploadFile = File(...), user: dict = Depends(require_
             audit_doc.clauses, audit_doc.tables, audit_doc.notices,
             audit_doc.health_disclosures, audit_doc.exclusions, audit_doc.rider_clauses,
         )
-        category, confidence = await _identify_category_async(combined_text, audit_doc.file_name)
+        # 识别出的产品名优先，识别失败回退到文件名
+        category_name = audit_doc.product_name or audit_doc.file_name
+        category, confidence = await _identify_category_async(combined_text, category_name)
         return _audit_doc_to_response(audit_doc, ext, category, confidence, combined_text)
     except DocumentParseError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -288,7 +296,9 @@ async def parse_rich_text(req: RichTextParseRequest, user: dict = Depends(requir
             audit_doc.clauses, audit_doc.tables, audit_doc.notices,
             audit_doc.health_disclosures, audit_doc.exclusions, audit_doc.rider_clauses,
         )
-        category, confidence = await _identify_category_async(combined_text, req.product_name or "")
+        # 识别出的产品名优先，其次用户传入的 product_name，最后回退到 file_name
+        category_name = audit_doc.product_name or req.product_name or audit_doc.file_name
+        category, confidence = await _identify_category_async(combined_text, category_name)
         response = _audit_doc_to_response(audit_doc, ".html", category, confidence, combined_text)
         if req.product_name:
             response.file_name = req.product_name
