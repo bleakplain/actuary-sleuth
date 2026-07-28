@@ -616,3 +616,28 @@ def test_new_production_modules_do_not_import_legacy_rule_engine() -> None:
         rendered = " ".join(ast.unparse(node) for node in imports)
         assert "rule_engine" not in rendered
         assert "lib.compliance.checker" not in rendered
+
+
+def test_pipeline_request_domain_module_has_no_http_dependencies() -> None:
+    module_path = (
+        Path(__file__).parents[2]
+        / "lib"
+        / "compliance"
+        / "pipeline_request.py"
+    )
+    tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    imported_modules = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    } | {
+        node.module or ""
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+    }
+
+    assert not any(
+        module == "fastapi" or module.startswith("api.")
+        for module in imported_modules
+    )

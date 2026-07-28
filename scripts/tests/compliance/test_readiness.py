@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from lib.compliance.readiness import (
 )
 
 FIXTURE_DIR = Path(__file__).parents[1] / "fixtures" / "compliance_audit" / "v1"
+SCRIPTS_DIR = Path(__file__).parents[2]
 KB_ROOT = Path("/Users/plain/work/actuary-assets/kb")
 REFERENCES_DIR = KB_ROOT / "references"
 PRODUCTS_DIR = Path("/Users/plain/work/actuary-assets/products")
@@ -149,3 +151,22 @@ def test_live_readiness_matches_frozen_phase0_report() -> None:
     )
 
     assert actual.to_dict() == expected
+
+
+def test_readiness_library_does_not_contain_cli_entrypoint() -> None:
+    source = (
+        SCRIPTS_DIR / "lib" / "compliance" / "readiness.py"
+    ).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imported_modules = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    function_names = {
+        node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+    }
+
+    assert "argparse" not in imported_modules
+    assert "main" not in function_names

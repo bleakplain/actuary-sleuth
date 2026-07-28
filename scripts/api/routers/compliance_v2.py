@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 import uuid
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from enum import Enum
 from typing import (
     Any,
@@ -25,39 +25,32 @@ from sse_starlette.sse import EventSourceResponse
 
 from api.database import save_compliance_report
 from api.schemas.compliance import DocumentCheckRequest
-from lib.auth.parse_attestation import (
-    ParseAttestationError,
-    verify_parse_attestation,
-)
 from lib.auth.permissions import require_permission
 from lib.common.compliance_audit import (
-    AuditClauseSnapshot,
     AuditStatus,
     ComplianceConclusion,
     RegulationAuditDecision,
     RegulationDecisionStatus,
 )
 from lib.common.constants import ComplianceConstants
-from lib.common.product_tags import ProductTags
 from lib.compliance.audit_pipeline import (
     AuditPipelineRequest,
     AuditPipelineResult,
     RegulationAuditRecord,
     run_audit_pipeline,
 )
+from lib.compliance.pipeline_request import (
+    InvalidPipelineRequestError,
+    ParsedAuditBlockInput,
+    PipelineRequestConflictError,
+    PipelineRequestInput,
+    build_audit_pipeline_request,
+)
 from lib.compliance.regulation_retrieval import (
     AuditRegulationItem,
     RegulationRetrievalOutcome,
     infer_category_from_product_tags,
 )
-from lib.doc_parser.models import (
-    calculate_audit_input_fingerprint,
-    calculate_clause_ids,
-    calculate_document_fingerprint,
-    render_audit_document_text,
-)
-from lib.doc_parser.pd.clause_tagger import tag_clause_topics
-from lib.doc_parser.pd.product_tagging import build_product_tags
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/compliance", tags=["合规检查候选主链"])
@@ -362,118 +355,36 @@ def _pipeline_request(
     user_subject: str = "",
 ) -> AuditPipelineRequest:
     try:
-        verify_parse_attestation(
-            req.parse_attestation,
-            req.parse_id,
-            req.document_fingerprint,
-            req.audit_input_fingerprint,
-            req.product_name_source,
-            tuple(req.parse_warnings),
+        return build_audit_pipeline_request(
+            PipelineRequestInput(
+                document_content=req.document_content,
+                parse_id=req.parse_id,
+                parse_attestation=req.parse_attestation,
+                document_fingerprint=req.document_fingerprint,
+                audit_input_fingerprint=req.audit_input_fingerprint,
+                product_name=req.product_name,
+                product_name_source=req.product_name_source,
+                parse_warnings=tuple(req.parse_warnings),
+                category=req.category,
+                audit_blocks=tuple(
+                    ParsedAuditBlockInput(
+                        clause_id=block.clause_id,
+                        block_type=block.block_type,
+                        source_index=block.source_index,
+                        number=block.number,
+                        title=block.title,
+                        content=block.content,
+                    )
+                    for block in req.audit_blocks
+                ),
+                product_tags=req.product_tags,
+            ),
             user_subject,
         )
-    except ParseAttestationError as exc:
+    except InvalidPipelineRequestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PipelineRequestConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if not req.audit_blocks:
-        raise HTTPException(
-            status_code=400,
-            detail="候选审核主链需要先调用文档解析接口并提交 audit_blocks",
-        )
-    ids = [block.clause_id for block in req.audit_blocks]
-    if len(ids) != len(set(ids)):
-        raise HTTPException(status_code=400, detail="audit_blocks 包含重复 clause_id")
-    if not req.document_fingerprint:
-        raise HTTPException(status_code=400, detail="缺少 document_fingerprint")
-    calculated_fingerprint = calculate_document_fingerprint(
-        (
-            block.block_type,
-            block.number,
-            block.title,
-            block.content,
-        )
-        for block in req.audit_blocks
-    )
-    if calculated_fingerprint != req.document_fingerprint:
-        raise HTTPException(
-            status_code=409,
-            detail="audit_blocks 与解析时的 document_fingerprint 不一致，请重新解析",
-        )
-    expected_input_fingerprint = calculate_audit_input_fingerprint(
-        calculated_fingerprint,
-        req.product_name,
-    )
-    if req.audit_input_fingerprint != expected_input_fingerprint:
-        raise HTTPException(
-            status_code=409,
-            detail="产品名称与解析时的审核输入指纹不一致，请重新解析",
-        )
-    expected_clause_ids = calculate_clause_ids(
-        (
-            block.block_type,
-            block.number,
-            block.title,
-            block.content,
-        )
-        for block in req.audit_blocks
-    )
-    if tuple(ids) != expected_clause_ids:
-        raise HTTPException(
-            status_code=409,
-            detail="clause_id 与审核块原文不一致，请重新解析",
-        )
-    rendered_document = render_audit_document_text(
-        (
-            block.block_type,
-            block.source_index,
-            block.number,
-            block.title,
-            block.content,
-        )
-        for block in req.audit_blocks
-    )
-    if rendered_document != req.document_content:
-        raise HTTPException(
-            status_code=409,
-            detail="document_content 与完整审核块集合不一致，请重新解析",
-        )
-    # HTTP 请求是不可信边界；适用性过滤使用服务端从绑定原文重建的唯一事实。
-    product_tags = build_product_tags(
-        req.product_name or None,
-        req.document_content,
-        product_name_source=req.product_name_source,
-        complete_document=True,
-    )
-    submitted_tags = ProductTags.from_dict(req.product_tags)
-    if replace(submitted_tags, evidence=(), warnings=()) != replace(
-        product_tags,
-        evidence=(),
-        warnings=(),
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail="产品标签与绑定的产品名称及条款原文不一致，请重新解析",
-        )
-    clauses = tuple(
-        AuditClauseSnapshot(
-            clause_id=block.clause_id,
-            number=block.number,
-            title=block.title,
-            text=block.content,
-            block_type=block.block_type,
-            topics=tag_clause_topics(block.title, block.content),
-        )
-        for block in req.audit_blocks
-    )
-    return AuditPipelineRequest(
-        product_name=req.product_name or "未命名产品",
-        document_content=req.document_content,
-        product_tags=product_tags,
-        clauses=clauses,
-        category=req.category or infer_category_from_product_tags(product_tags),
-        document_fingerprint=req.document_fingerprint,
-        audit_input_fingerprint=req.audit_input_fingerprint,
-        product_name_source=req.product_name_source,
-        parse_warnings=tuple(req.parse_warnings),
-    )
 
 
 @router.post("/check/document/v2/stream")
