@@ -4,6 +4,7 @@ import logging
 import re
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
 from lib.common.constants import ComplianceConstants
@@ -19,6 +20,7 @@ from lib.compliance.prompts import (
     STREAMING_AUDIT_PROMPT,
     STREAMING_NEGATIVE_LIST_PROMPT,
 )
+from lib.compliance.regulation_units import RegulationUnit, aggregate_regulation_units
 from lib.compliance.rule_engine import check_rules as _check_rules, ProductMetadata
 from lib.llm import get_audit_llm
 from lib.llm.base import BaseLLMClient
@@ -129,13 +131,41 @@ class AuditRegulationItem:
     matched_topics: Tuple[str, ...] = ()
     fallback_layer: str = ""
     retrieval_sources: Tuple[str, ...] = ()
+    kb_version: str = ""
+    source_file: str = ""
+    section_path: str = ""
+    chunk_index: Optional[int] = None
+    regulation_unit_id: str = ""
+    chunk_ids: Tuple[str, ...] = ()
+    regulation_topics: Tuple[str, ...] = ()
+    indeterminate_dimensions: Tuple[str, ...] = ()
+    excluded_by: Tuple[str, ...] = ()
+    applicability_reasons: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RegulationRetrievalCoverage:
+    rag_available: bool
+    catalog_available: bool
+    semantic_available: bool
+    registered_available: bool
+    category_resolution: str
+    complete_candidate_freeze: bool
+    catalog_candidate_count: int = 0
+    semantic_candidate_count: int = 0
+    registered_candidate_count: int = 0
+    uncovered_scopes: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class RegulationRetrievalOutcome:
     regulations: Tuple[AuditRegulationItem, ...]
+    regulation_units: Tuple[RegulationUnit, ...] = ()
     degraded: bool = False
     warnings: Tuple[str, ...] = ()
+    coverage: Optional[RegulationRetrievalCoverage] = None
+    candidate_count: int = 0
+    excluded_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -202,7 +232,46 @@ def _extract_real_article_number(content: str, fallback: str) -> str:
     return f"第{match.group(1)}条" if match else fallback
 
 
+def _candidate_metadata(doc: Dict[str, Any]) -> Dict[str, Any]:
+    metadata = doc.get("metadata")
+    return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+def _candidate_value(doc: Dict[str, Any], key: str, default: Any = "") -> Any:
+    value = doc.get(key)
+    if value not in (None, ""):
+        return value
+    return _candidate_metadata(doc).get(key, default)
+
+
+def _candidate_chunk_index(doc: Dict[str, Any]) -> Optional[int]:
+    for key in ("chunk_index", "chunk_id"):
+        value = _candidate_value(doc, key, None)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.strip().isdigit():
+            return int(value.strip())
+    return None
+
+
+def _tuple_values(value: Any) -> Tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        normalized = value.replace("，", ",").replace("、", ",").replace("\n", ",")
+        return tuple(part.strip() for part in normalized.split(",") if part.strip())
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return tuple(str(part).strip() for part in value if str(part).strip())
+    return (str(value).strip(),) if str(value).strip() else ()
+
+
 def _build_regulation_item(doc: Dict, source_type: str) -> AuditRegulationItem:
+    metadata = _candidate_metadata(doc)
+    regulation_topics = doc.get("regulation_topics")
+    if regulation_topics is None:
+        regulation_topics = metadata.get("条款主题")
     return AuditRegulationItem(
         chunk_id=doc.get("id") or "",
         law_name=doc.get("law_name") or "",
@@ -217,6 +286,16 @@ def _build_regulation_item(doc: Dict, source_type: str) -> AuditRegulationItem:
         matched_topics=tuple(doc.get("matched_topics", ())),
         fallback_layer=doc.get("fallback_layer", ""),
         retrieval_sources=tuple(doc.get("retrieval_sources", ())),
+        kb_version=str(_candidate_value(doc, "kb_version", "")),
+        source_file=str(_candidate_value(doc, "source_file", "")),
+        section_path=str(_candidate_value(doc, "section_path", "")),
+        chunk_index=_candidate_chunk_index(doc),
+        regulation_unit_id=str(doc.get("regulation_unit_id", "")),
+        chunk_ids=tuple(doc.get("chunk_ids", ())),
+        regulation_topics=_tuple_values(regulation_topics),
+        indeterminate_dimensions=tuple(doc.get("indeterminate_dimensions", ())),
+        excluded_by=tuple(doc.get("excluded_by", ())),
+        applicability_reasons=tuple(doc.get("applicability_reasons", ())),
     )
 
 
@@ -257,6 +336,67 @@ def _merge_registered_candidates(
     return list(merged.values())
 
 
+def _resolve_kb_version(
+    engine: Any,
+    candidates: List[Dict[str, Any]],
+) -> str:
+    for candidate in candidates:
+        version = _candidate_value(candidate, "kb_version", "")
+        if version:
+            return str(version)
+    config = getattr(engine, "config", None)
+    vector_db_path = getattr(config, "vector_db_path", None)
+    if isinstance(vector_db_path, str) and vector_db_path:
+        path = Path(vector_db_path)
+        return path.parent.name if path.name == "lancedb" else path.name
+    return ""
+
+
+def _merge_retrieval_candidates(
+    catalog: List[Dict[str, Any]],
+    semantic: List[Dict[str, Any]],
+    registered: List[Tuple[Dict[str, Any], str]],
+    kb_version: str,
+) -> List[Dict[str, Any]]:
+    merged: Dict[str, Dict[str, Any]] = {}
+    source_priority = {"catalog": 0, "semantic": 1, "general": 2, "category": 3}
+
+    def add(candidate: Dict[str, Any], source_type: str) -> None:
+        identity = get_candidate_identity(candidate)
+        incoming = dict(candidate)
+        incoming_sources = set(incoming.get("retrieval_sources", ()))
+        current = merged.get(identity)
+        if current is None:
+            incoming["_source_type"] = source_type
+            incoming["retrieval_sources"] = sorted(incoming_sources)
+            incoming["kb_version"] = (
+                str(_candidate_value(incoming, "kb_version", "")) or kb_version
+            )
+            merged[identity] = incoming
+            return
+        sources = set(current.get("retrieval_sources", ()))
+        sources.update(incoming_sources)
+        current["retrieval_sources"] = sorted(sources)
+        incoming_score = incoming.get("score")
+        current_score = current.get("score")
+        if isinstance(incoming_score, (int, float)) and (
+            not isinstance(current_score, (int, float))
+            or incoming_score > current_score
+        ):
+            current["score"] = incoming_score
+        current_type = str(current.get("_source_type", "catalog"))
+        if source_priority[source_type] > source_priority.get(current_type, 0):
+            current["_source_type"] = source_type
+
+    for item in catalog:
+        add(item, "catalog")
+    for item in semantic:
+        add(item, "semantic")
+    for item, source_type in registered:
+        add(item, source_type)
+    return list(merged.values())
+
+
 def load_audit_regulations(category: Optional[str]) -> List[AuditRegulationItem]:
     with _regulation_cache_lock:
         if category in _regulation_cache:
@@ -286,64 +426,102 @@ def retrieve_audit_regulations_with_status(
     clause_topics: Tuple[str, ...] = (),
     top_k: int = 12,
 ) -> RegulationRetrievalOutcome:
-    """用产品适用性和条款主题对混合检索及注册法规候选进行安全分层。"""
+    """冻结全库适用候选；top_k 仅控制语义排序信号的检索宽度。"""
     engine = get_engine()
     if engine is None:
         fallback_regulations = load_audit_regulations(category)
+        coverage = RegulationRetrievalCoverage(
+            rag_available=False,
+            catalog_available=False,
+            semantic_available=False,
+            registered_available=False,
+            category_resolution="provided" if category else "unknown",
+            complete_candidate_freeze=False,
+            uncovered_scopes=(
+                "regulation_catalog",
+                "semantic_retrieval",
+                "registered_retrieval",
+            ),
+        )
         return RegulationRetrievalOutcome(
             regulations=tuple(fallback_regulations),
             degraded=True,
             warnings=("法规知识库未初始化，法规检索不可用；本次仅执行确定性规则和负面清单检查",),
+            coverage=coverage,
         )
 
     warnings: List[str] = []
+    uncovered_scopes: List[str] = []
     registered: List[Tuple[Dict, str]] = []
     effective_category = category or infer_category_from_product_tags(product_tags)
-    if category is None and effective_category:
+    if category:
+        category_resolution = "provided"
+    elif effective_category:
+        category_resolution = "product_tags"
         logger.warning("险种识别为空，按产品标签回退为 %s", effective_category)
-    elif effective_category is None:
+        warnings.append(f"产品分类识别失败，已按产品标签回退为 {effective_category}")
+    else:
+        category_resolution = "unknown_all_categories"
         logger.warning("险种和产品大类均未知，保守加载所有险种注册法规")
+        warnings.append("产品分类与产品大类均未知，已保守加载全部法规候选")
+        uncovered_scopes.append("product_category_resolution")
+
+    try:
+        catalog_result = engine.search_by_metadata({})
+        catalog = [dict(item) for item in catalog_result]
+    except Exception as exc:
+        logger.warning("法规全库目录加载失败: %s", exc)
+        catalog = []
+    if not catalog:
+        warnings.append("法规全库目录为空，无法证明候选集覆盖全部知识库")
+        uncovered_scopes.append("regulation_catalog")
+
     _load_regulation_chunks(
         engine, _list_registered_regulations(effective_category), registered, "category",
     )
     _load_regulation_chunks(engine, _get_general_regulations(), registered, "general")
     merged_registered = _merge_registered_candidates(registered)
-    registered_by_identity = {
-        get_candidate_identity(item): (item, source_type)
-        for item, source_type in merged_registered
-    }
+    if not merged_registered:
+        warnings.append("注册法规候选为空")
+        uncovered_scopes.append("registered_retrieval")
 
+    semantic_available = True
     try:
-        semantic = engine.search_candidates(query, top_k=max(top_k * 3, 24))
+        semantic = [
+            dict(item)
+            for item in engine.search_candidates(query, top_k=max(top_k * 3, 24))
+        ]
     except Exception as exc:
         logger.warning("基础混合检索失败，使用注册法规候选继续分层: %s", exc)
         warnings.append("语义检索失败，已降级为注册法规候选检索")
+        uncovered_scopes.append("semantic_retrieval")
+        semantic_available = False
         semantic = []
-    candidates: List[Dict[str, Any]] = []
-    for item in semantic:
-        candidate = dict(item)
-        registered_match = registered_by_identity.get(get_candidate_identity(candidate))
-        sources = set(candidate.get("retrieval_sources", ()))
-        if registered_match:
-            registered_item, source_type = registered_match
-            sources.update(registered_item.get("retrieval_sources", ()))
-            candidate["_source_type"] = source_type
-        else:
-            candidate["_source_type"] = "semantic"
-        candidate["retrieval_sources"] = sorted(sources)
-        candidates.append(candidate)
-    for item, source_type in merged_registered:
-        candidate = dict(item)
-        candidate["_source_type"] = source_type
-        candidates.append(candidate)
+
+    version_inputs = [
+        *catalog,
+        *semantic,
+        *(item for item, _ in merged_registered),
+    ]
+    kb_version = _resolve_kb_version(engine, version_inputs)
+    if not kb_version:
+        warnings.append("无法确定知识库版本，法规条款单元身份不完整")
+        uncovered_scopes.append("kb_version")
+    candidates = _merge_retrieval_candidates(
+        catalog,
+        semantic,
+        merged_registered,
+        kb_version,
+    )
     if not candidates:
         warnings.append("法规知识库未返回任何候选，无法执行基于法规正文的审核")
+        uncovered_scopes.append("regulation_candidates")
 
     layered = layer_regulation_candidates(
         candidates,
         product_tags=product_tags,
         clause_topics=clause_topics,
-        top_k=top_k,
+        top_k=None,
     )
     logger.info(
         "标签分层检索: 候选=%d, 排除=%d, 返回=%d, fallback=%s",
@@ -352,21 +530,67 @@ def retrieve_audit_regulations_with_status(
         len(layered.chunks),
         layered.fallback_used,
     )
+    unit_result = aggregate_regulation_units(layered.chunks, kb_version)
+    if unit_result.errors:
+        warnings.append(
+            f"{len(unit_result.errors)} 个法规 chunk 因稳定身份字段缺失未形成审核单元"
+        )
+        uncovered_scopes.append("regulation_unit_identity")
+    coverage = RegulationRetrievalCoverage(
+        rag_available=True,
+        catalog_available=bool(catalog),
+        semantic_available=semantic_available,
+        registered_available=bool(merged_registered),
+        category_resolution=category_resolution,
+        complete_candidate_freeze=(
+            bool(catalog)
+            and bool(kb_version)
+            and not unit_result.errors
+        ),
+        catalog_candidate_count=len(catalog),
+        semantic_candidate_count=len(semantic),
+        registered_candidate_count=len(merged_registered),
+        uncovered_scopes=tuple(dict.fromkeys(uncovered_scopes)),
+    )
     if not layered.chunks:
         logger.info("标签分层检索无结果：候选均被明确判定为不适用")
         return RegulationRetrievalOutcome(
             regulations=(),
             degraded=bool(warnings),
             warnings=tuple(warnings),
+            coverage=coverage,
+            candidate_count=layered.candidate_count,
+            excluded_count=layered.excluded_count,
         )
+    unit_by_chunk_id = {
+        chunk_id: unit
+        for unit in unit_result.units
+        for chunk_id in unit.chunk_ids
+    }
+    enriched_chunks: List[Dict[str, Any]] = []
+    for item in layered.chunks:
+        enriched = dict(item)
+        chunk_id = str(
+            _candidate_value(enriched, "id", "")
+            or _candidate_value(enriched, "chunk_id", "")
+        )
+        unit = unit_by_chunk_id.get(chunk_id)
+        if unit is not None:
+            enriched["regulation_unit_id"] = unit.unit_id
+            enriched["chunk_ids"] = list(unit.chunk_ids)
+        enriched_chunks.append(enriched)
     regulations = tuple(
         _build_regulation_item(item, item.get("_source_type", "tagged_retrieval"))
-        for item in layered.chunks
+        for item in enriched_chunks
     )
     return RegulationRetrievalOutcome(
         regulations=regulations,
+        regulation_units=unit_result.units,
         degraded=bool(warnings),
         warnings=tuple(warnings),
+        coverage=coverage,
+        candidate_count=layered.candidate_count,
+        excluded_count=layered.excluded_count,
     )
 
 

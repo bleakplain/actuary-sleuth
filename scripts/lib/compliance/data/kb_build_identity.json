@@ -1,0 +1,10 @@
+{
+  "schema_version": "1",
+  "kb_version": "v5",
+  "build_manifest_sha256": "f6ff40509b1237fc88b127f7bf7d6575f8474a9b78b0fa2ad9a4a0893fd29594",
+  "source_file": "1.产品开发检查清单2026年.xlsx",
+  "source_sha256": "7917433e40404192fffd5f30c21ffccfb79f8e022b8a7694d35d702f4c8e21d8",
+  "documents": 25,
+  "chunks": 171,
+  "catalog_sha256": "3428e545c36baeb0c511fd42b9d056a7efc80e00da50a10954a203211d0ba04e"
+}

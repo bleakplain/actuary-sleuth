@@ -49,3 +49,29 @@ def test_decode_invalid_token():
     import jwt
     with pytest.raises(jwt.InvalidTokenError):
         decode_token("invalid.token.here")
+
+
+def test_missing_secret_fails_closed_when_auth_is_enabled(monkeypatch):
+    from lib.auth.jwt import create_token
+    from lib.config import _get_config
+
+    with monkeypatch.context() as scoped:
+        scoped.delenv("AUTH_JWT_SECRET", raising=False)
+        scoped.delenv("AUTH_SKIP", raising=False)
+        _get_config().reload()
+        with pytest.raises(RuntimeError, match="AUTH_JWT_SECRET"):
+            create_token({"user_id": "u1"})
+    _get_config().reload()
+
+
+def test_short_secret_fails_closed_when_auth_is_enabled(monkeypatch):
+    from lib.auth.jwt import create_token
+    from lib.config import _get_config
+
+    with monkeypatch.context() as scoped:
+        scoped.setenv("AUTH_JWT_SECRET", "too-short")
+        scoped.delenv("AUTH_SKIP", raising=False)
+        _get_config().reload()
+        with pytest.raises(RuntimeError, match="至少需要32字节"):
+            create_token({"user_id": "u1"})
+    _get_config().reload()

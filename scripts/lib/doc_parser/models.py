@@ -3,10 +3,14 @@
 """文档解析数据模型"""
 from __future__ import annotations
 
+import hashlib
+import json
+import re
+import unicodedata
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from ..common.product_tags import ProductTags
 
@@ -14,6 +18,18 @@ from ..common.product_tags import ProductTags
 class SectionType(str, Enum):
     """内容类型枚举"""
     CLAUSE = "clause"
+    UNCLASSIFIED = "unclassified"
+    NOTICE = "notice"
+    HEALTH_DISCLOSURE = "health_disclosure"
+    EXCLUSION = "exclusion"
+    RIDER = "rider"
+
+
+class AuditBlockType(str, Enum):
+    """统一审核内容块类型。"""
+    UNCLASSIFIED = "unclassified"
+    CLAUSE = "clause"
+    TABLE = "table"
     NOTICE = "notice"
     HEALTH_DISCLOSURE = "health_disclosure"
     EXCLUSION = "exclusion"
@@ -206,21 +222,61 @@ class DocumentSection:
 
 
 @dataclass(frozen=True)
+class ClauseBlock:
+    """供审核主链消费的不可变产品内容块。"""
+    clause_id: str
+    document_fingerprint: str
+    block_type: AuditBlockType
+    source_index: int
+    number: str
+    title: str
+    content: str
+    topics: Tuple[str, ...] = ()
+    page_number: Optional[int] = None
+    table_index: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class _BlockSeed:
+    block_type: AuditBlockType
+    source_index: int
+    number: str
+    title: str
+    content: str
+    topics: Tuple[str, ...] = ()
+    page_number: Optional[int] = None
+    table_index: Optional[int] = None
+
+    def identity(self) -> Tuple[object, ...]:
+        """只使用块自身的原始结构与原文，派生标签和页码不影响证据 ID。"""
+        return (
+            self.block_type.value,
+            _normalize_identity_text(self.number),
+            _normalize_identity_text(self.title),
+            _normalize_content_identity(self.content),
+        )
+
+
+@dataclass(frozen=True)
 class AuditDocument:
     """保险产品审核文档"""
     file_name: str
     file_type: str  # .doc, .docx, .pdf
 
-    clauses: List[Clause] = field(default_factory=list)
-    tables: List[DataTable] = field(default_factory=list)
-    notices: List[DocumentSection] = field(default_factory=list)
-    health_disclosures: List[DocumentSection] = field(default_factory=list)
-    exclusions: List[DocumentSection] = field(default_factory=list)
-    rider_clauses: List[Clause] = field(default_factory=list)
+    clauses: Sequence[Clause] = ()
+    tables: Sequence[DataTable] = ()
+    unclassified_sections: Sequence[DocumentSection] = ()
+    notices: Sequence[DocumentSection] = ()
+    health_disclosures: Sequence[DocumentSection] = ()
+    exclusions: Sequence[DocumentSection] = ()
+    rider_clauses: Sequence[Clause] = ()
+    document_fingerprint: str = field(init=False, default="")
+    audit_input_fingerprint: str = field(init=False, default="")
+    audit_blocks: Tuple[ClauseBlock, ...] = field(init=False, default=())
 
-    # 产品名识别结果：从文档正文识别出的产品全名（如"人保健康欣好孕互联网医疗保险条款"）。
-    # 识别失败时为 None，调用方应回退到 file_name 并提示用户手动填写。
+    # 最终产品名按用户输入、正文识别、文件名的优先级确定。
     product_name: Optional[str] = None
+    product_name_source: str = "unknown"
     is_rider: bool = False              # 是否附加险（产品名中含"附加"且位于"保险"之前）
     # 结构化标签维度（从产品名提取，供后续标签化法规筛选使用）
     group_or_individual: Optional[str] = None  # 投保对象标签：团体/个人
@@ -231,6 +287,26 @@ class AuditDocument:
 
     parse_time: datetime = field(default_factory=datetime.now)
     warnings: List[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "clauses",
+            "tables",
+            "unclassified_sections",
+            "notices",
+            "health_disclosures",
+            "exclusions",
+            "rider_clauses",
+        ):
+            object.__setattr__(self, field_name, tuple(getattr(self, field_name)))
+        fingerprint, blocks = _build_audit_blocks(self)
+        object.__setattr__(self, "document_fingerprint", fingerprint)
+        object.__setattr__(
+            self,
+            "audit_input_fingerprint",
+            calculate_audit_input_fingerprint(fingerprint, self.product_name or ""),
+        )
+        object.__setattr__(self, "audit_blocks", blocks)
 
     def get_chunk_metadata(
         self,
@@ -246,7 +322,7 @@ class AuditDocument:
         doc_type = "insurance_contract" if self.file_type in ['.doc', '.pdf', '.docx'] else "unknown"
         char_count = sum(len(c.text) for c in self.clauses) + sum(
             len(t.raw_text) for t in self.tables
-        )
+        ) + sum(len(section.content) for section in self.unclassified_sections)
         return ChunkMetadata(
             doc_id=doc_id,
             doc_name=self.file_name,
@@ -262,6 +338,209 @@ class AuditDocument:
             parse_confidence=0.95,
             update_time=self.parse_time.isoformat(),
         )
+
+
+def _normalize_identity_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value or "")
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _normalize_content_identity(value: str) -> str:
+    """规范字符和换行，但保留正文中的段落、行与表格列边界。"""
+    normalized = unicodedata.normalize("NFKC", value or "")
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
+    return "\n".join(line.rstrip(" ") for line in normalized.split("\n"))
+
+
+def _table_content(table: DataTable) -> str:
+    if table.raw_text:
+        return table.raw_text
+    return "\n".join(
+        "\t".join(str(cell or "") for cell in row)
+        for row in table.data
+    )
+
+
+def calculate_document_fingerprint(
+    blocks: Iterable[Tuple[str, str, str, str]],
+) -> str:
+    """根据有序块的原始类型、编号、标题和正文计算内容指纹。"""
+    canonical = json.dumps(
+        [
+            (
+                block_type,
+                _normalize_identity_text(number),
+                _normalize_identity_text(title),
+                _normalize_content_identity(content),
+            )
+            for block_type, number, title, content in blocks
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def calculate_clause_ids(
+    blocks: Iterable[Tuple[str, str, str, str]],
+) -> Tuple[str, ...]:
+    """按块自身内容和同内容出现次序生成稳定证据 ID。"""
+    occurrences: Dict[Tuple[str, str, str, str], int] = {}
+    clause_ids = []
+    for block_type, number, title, content in blocks:
+        identity = (
+            block_type,
+            _normalize_identity_text(number),
+            _normalize_identity_text(title),
+            _normalize_content_identity(content),
+        )
+        occurrence = occurrences.get(identity, 0)
+        occurrences[identity] = occurrence + 1
+        encoded = json.dumps(
+            (*identity, occurrence),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        clause_ids.append(
+            f"clause_{hashlib.sha256(encoded.encode('utf-8')).hexdigest()[:32]}"
+        )
+    return tuple(clause_ids)
+
+
+def calculate_audit_input_fingerprint(
+    document_fingerprint: str,
+    product_name: str,
+) -> str:
+    """绑定内容指纹与本次审核采用的产品名称。"""
+    canonical = json.dumps(
+        [
+            document_fingerprint,
+            _normalize_identity_text(product_name),
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def render_audit_document_text(
+    blocks: Iterable[Tuple[str, int, str, str, str]],
+) -> str:
+    """按解析 API 的规范格式重建完整审核文本。"""
+    rendered = []
+    for block_type, source_index, number, title, content in blocks:
+        if block_type == AuditBlockType.UNCLASSIFIED.value:
+            heading = f"【未分类内容 {source_index + 1}】"
+            rendered.append(f"{heading}{title}\n{content}")
+        elif block_type == AuditBlockType.CLAUSE.value:
+            rendered.append(f"【条款 {number}】{title}\n{content}")
+        elif block_type == AuditBlockType.TABLE.value:
+            rendered.append(f"【数据表 {source_index + 1}】\n{content}")
+        elif block_type == AuditBlockType.NOTICE.value:
+            rendered.append(f"【投保须知】{title}\n{content}")
+        elif block_type == AuditBlockType.HEALTH_DISCLOSURE.value:
+            rendered.append(f"【健康告知】{title}\n{content}")
+        elif block_type == AuditBlockType.EXCLUSION.value:
+            rendered.append(f"【责任免除】{title}\n{content}")
+        elif block_type == AuditBlockType.RIDER.value:
+            rendered.append(f"【附加险条款 {number}】{title}\n{content}")
+        else:
+            raise ValueError(f"未知审核块类型: {block_type}")
+    return "\n\n".join(rendered)
+
+
+def _build_audit_blocks(
+    document: AuditDocument,
+) -> Tuple[str, Tuple[ClauseBlock, ...]]:
+    seeds: List[_BlockSeed] = []
+
+    def add_seed(
+        block_type: AuditBlockType,
+        source_index: int,
+        number: str,
+        title: str,
+        content: str,
+        topics: Tuple[str, ...] = (),
+        page_number: Optional[int] = None,
+        table_index: Optional[int] = None,
+    ) -> None:
+        seeds.append(_BlockSeed(
+            block_type=block_type,
+            source_index=source_index,
+            number=number,
+            title=title,
+            content=content,
+            topics=tuple(topics),
+            page_number=page_number,
+            table_index=table_index,
+        ))
+
+    for index, section in enumerate(document.unclassified_sections):
+        add_seed(
+            AuditBlockType.UNCLASSIFIED,
+            index,
+            "",
+            section.title,
+            section.content,
+        )
+    for index, clause in enumerate(document.clauses):
+        add_seed(
+            AuditBlockType.CLAUSE, index, clause.number, clause.title,
+            clause.text, clause.topics, clause.page_number, clause.table_index,
+        )
+    for index, table in enumerate(document.tables):
+        add_seed(
+            AuditBlockType.TABLE, index, str(index + 1), table.remark,
+            _table_content(table), (), table.page_number, table.table_index,
+        )
+    section_groups = (
+        (AuditBlockType.NOTICE, document.notices),
+        (AuditBlockType.HEALTH_DISCLOSURE, document.health_disclosures),
+        (AuditBlockType.EXCLUSION, document.exclusions),
+    )
+    for block_type, sections in section_groups:
+        for index, section in enumerate(sections):
+            add_seed(block_type, index, "", section.title, section.content)
+    for index, clause in enumerate(document.rider_clauses):
+        add_seed(
+            AuditBlockType.RIDER, index, clause.number, clause.title,
+            clause.text, clause.topics, clause.page_number, clause.table_index,
+        )
+
+    fingerprint = calculate_document_fingerprint(
+        (
+            seed.block_type.value,
+            seed.number,
+            seed.title,
+            seed.content,
+        )
+        for seed in seeds
+    )
+
+    clause_ids = calculate_clause_ids(
+        (
+            seed.block_type.value,
+            seed.number,
+            seed.title,
+            seed.content,
+        )
+        for seed in seeds
+    )
+    blocks: List[ClauseBlock] = []
+    for seed, clause_id in zip(seeds, clause_ids):
+        blocks.append(ClauseBlock(
+            clause_id=clause_id,
+            document_fingerprint=fingerprint,
+            block_type=seed.block_type,
+            source_index=seed.source_index,
+            number=seed.number,
+            title=seed.title,
+            content=seed.content,
+            topics=seed.topics,
+            page_number=seed.page_number,
+            table_index=seed.table_index,
+        ))
+    return fingerprint, tuple(blocks)
 
 
 class DocumentParseError(Exception):

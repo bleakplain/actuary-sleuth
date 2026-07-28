@@ -6,7 +6,10 @@
 """
 from __future__ import annotations
 
+import json
 import re
+import shutil
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -14,6 +17,14 @@ import pytest
 from lib.doc_parser import parse_product_document
 
 PRODUCTS_DIR = Path("/Users/plain/work/actuary-assets/products/")
+ACCEPTANCE_MANIFEST = (
+    Path(__file__).parents[2]
+    / "fixtures"
+    / "compliance_audit"
+    / "v1"
+    / "manifest.json"
+)
+PRODUCT_ARCHIVE = PRODUCTS_DIR / "条款(1).zip"
 
 
 @pytest.fixture
@@ -34,6 +45,67 @@ def real_docx_files():
 
 class TestRealDocuments:
     """真实文档集成测试"""
+
+    def test_parse_all_acceptance_products_without_llm(self):
+        """验收清单中的23份 DOC/DOCX/PDF 必须全部走确定性解析。"""
+        if not PRODUCTS_DIR.exists():
+            pytest.skip(f"产品目录不存在: {PRODUCTS_DIR}")
+        if not ACCEPTANCE_MANIFEST.exists():
+            pytest.fail(f"验收清单不存在: {ACCEPTANCE_MANIFEST}")
+        manifest = json.loads(ACCEPTANCE_MANIFEST.read_text(encoding="utf-8"))
+        products = manifest["products"]
+        if any(product["format"] == "doc" for product in products):
+            if not (shutil.which("soffice") or shutil.which("libreoffice")):
+                pytest.skip("旧版 DOC 解析需要 LibreOffice")
+
+        assert len(products) == 23
+        parsed_legacy_docs = 0
+        for product in products:
+            path = PRODUCTS_DIR / product["file_name"]
+            assert path.is_file(), f"验收产品缺失: {path.name}"
+            document = parse_product_document(str(path))
+            audit_content_count = sum(
+                len(items)
+                for items in (
+                    document.clauses,
+                    document.tables,
+                    document.notices,
+                    document.health_disclosures,
+                    document.exclusions,
+                    document.rider_clauses,
+                )
+            )
+            assert document.file_name == path.name
+            assert document.file_type == path.suffix.lower()
+            assert audit_content_count > 0, f"{path.name} 未提取到审核内容"
+            if path.suffix.lower() == ".doc":
+                parsed_legacy_docs += 1
+                assert any("临时转换" in warning for warning in document.warnings)
+
+        assert parsed_legacy_docs == 9
+
+    def test_all_twelve_legacy_docs_in_source_archive_are_parseable(
+        self,
+        tmp_path,
+    ):
+        """归档中的12份旧 DOC 均可转换；其中3份是主目录其他格式的重复版本。"""
+        if not PRODUCT_ARCHIVE.exists():
+            pytest.skip(f"产品归档不存在: {PRODUCT_ARCHIVE}")
+        if not (shutil.which("soffice") or shutil.which("libreoffice")):
+            pytest.skip("旧版 DOC 解析需要 LibreOffice")
+        with zipfile.ZipFile(PRODUCT_ARCHIVE) as archive:
+            members = [
+                member
+                for member in archive.infolist()
+                if not member.is_dir() and member.filename.lower().endswith(".doc")
+            ]
+            assert len(members) == 12
+            for index, member in enumerate(members):
+                source = tmp_path / f"legacy-{index:02d}.doc"
+                source.write_bytes(archive.read(member))
+                document = parse_product_document(str(source))
+                assert document.audit_blocks, member.filename
+                assert document.product_tags.primary_subtype.value != "unknown"
 
     def test_parse_real_pdfs(self, real_pdf_files):
         """测试解析真实 PDF 文件"""

@@ -11,9 +11,20 @@ import {
   SafetyCertificateOutlined, UploadOutlined, FileTextOutlined,
 } from '@ant-design/icons';
 import * as complianceApi from '../api/compliance';
-import type { ComplianceReport, AuditResultItem, AuditRegulationItem, ParsedDocument } from '../types';
+import type {
+  ComplianceReport,
+  AuditResultItem,
+  AuditRegulationItem,
+  ParsedDocument,
+  RegulationDecisionProgress,
+} from '../types';
 import { DRAWER_MD } from '../constants/layout';
 import PageHeader from '../components/PageHeader';
+import {
+  buildComplianceReport,
+  getCompletionNotice,
+  mergeAuditWarnings,
+} from './compliancePresentation';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -22,6 +33,13 @@ const STATUS_ICON: Record<string, { color: string; icon: React.ReactNode }> = {
   non_compliant: { color: 'error', icon: <CloseCircleOutlined /> },
   attention: { color: 'warning', icon: <ExclamationCircleOutlined /> },
   compliant: { color: 'success', icon: <CheckCircleOutlined /> },
+};
+
+const DECISION_STATUS: Record<string, { label: string; color: string }> = {
+  compliant: { label: '未发现违规', color: 'success' },
+  non_compliant: { label: '不合规', color: 'error' },
+  insufficient_information: { label: '信息不足', color: 'warning' },
+  manual_review: { label: '人工复核', color: 'warning' },
 };
 
 function RegulationDrawer({
@@ -126,6 +144,61 @@ function ClauseCard({
   );
 }
 
+function RegulationDecisionProgressCard({
+  decision,
+  token,
+}: {
+  decision: RegulationDecisionProgress;
+  token: ReturnType<typeof theme.useToken>['token'];
+}) {
+  const display = DECISION_STATUS[decision.status] ?? DECISION_STATUS.manual_review;
+  return (
+    <Card
+      size="small"
+      style={{ marginBottom: 12 }}
+      title={(
+        <Space size={8} wrap>
+          <Tag color={display.color} style={{ margin: 0 }}>{display.label}</Tag>
+          <Text code>{decision.regulation_unit_id}</Text>
+        </Space>
+      )}
+      extra={<Text type="secondary">{decision.completed}/{decision.total}</Text>}
+    >
+      {decision.reasoning && (
+        <div style={{ marginBottom: 8, whiteSpace: 'pre-wrap' }}>
+          {decision.reasoning}
+        </div>
+      )}
+      {decision.regulation_evidence?.map((evidence, index) => (
+        <div
+          key={`${evidence.chunk_id}-${index}`}
+          style={{ fontSize: token.fontSizeSM, marginBottom: 6 }}
+        >
+          <Text type="secondary">法规证据（{evidence.chunk_id}）：</Text>
+          <Text>{evidence.quote}</Text>
+        </div>
+      ))}
+      {decision.product_evidence?.map((evidence, index) => (
+        <div
+          key={`${evidence.clause_id}-${index}`}
+          style={{ fontSize: token.fontSizeSM, marginBottom: 6 }}
+        >
+          <Text type="secondary">产品条款证据（{evidence.clause_id}）：</Text>
+          <Text>{evidence.quote}</Text>
+        </div>
+      ))}
+      {decision.incomplete && (
+        <Alert
+          type="warning"
+          showIcon
+          message="该法规审核单元未完整完成，需要人工复核"
+          style={{ marginTop: 8 }}
+        />
+      )}
+    </Card>
+  );
+}
+
 export default function CompliancePage() {
   const { token } = theme.useToken();
   const screens = Grid.useBreakpoint();
@@ -138,7 +211,6 @@ export default function CompliancePage() {
   const [parsing, setParsing] = useState(false);
   const [richTextContent, setRichTextContent] = useState('');
   const [parsedDocument, setParsedDocument] = useState<ParsedDocument | null>(null);
-  const [productName, setProductName] = useState('');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -154,8 +226,10 @@ export default function CompliancePage() {
   // Result state
   const [checkingResult, setCheckingResult] = useState<ComplianceReport | null>(null);
   const [streamingViolations, setStreamingViolations] = useState<AuditResultItem[]>([]);
+  const [streamingDecisions, setStreamingDecisions] = useState<RegulationDecisionProgress[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamProgress, setStreamProgress] = useState('');
+  const [streamFailure, setStreamFailure] = useState('');
   const streamAbortRef = useRef<AbortController | null>(null);
 
   // Regulation drawer
@@ -178,10 +252,8 @@ export default function CompliancePage() {
     try { setHistory(await complianceApi.fetchComplianceReports()); } catch { /* empty */ }
   };
 
-  const applyParseResult = (result: ParsedDocument, name?: string) => {
+  const applyParseResult = (result: ParsedDocument) => {
     setParsedDocument(result);
-    // 优先用后端识别出的产品名；其次用户传入的 name（富文本场景）；最后回退 file_name
-    setProductName(result.product_name || name || result.file_name || '');
     setIdentifiedCategory(result.identified_category);
     setCategoryConfidence(result.category_confidence);
     setSelectedCategory(result.identified_category || '');
@@ -206,7 +278,7 @@ export default function CompliancePage() {
       setParsing(true);
       try {
         const result = await complianceApi.parseRichText(richTextContent);
-        applyParseResult(result, '');
+        applyParseResult(result);
       } catch { /* silent */ }
       finally { setParsing(false); }
     }, 500);
@@ -216,49 +288,72 @@ export default function CompliancePage() {
   const handleStartReview = () => {
     if (!parsedDocument) return;
     setStreamingViolations([]);
+    setStreamingDecisions([]);
     setIsStreaming(true);
     setStreamProgress('法规审查中...');
+    setStreamFailure('');
     setCheckingResult(null);
     setView('result');
 
     streamAbortRef.current = complianceApi.checkDocumentStream(
       {
         document_content: parsedDocument.combined_text,
-        product_name: productName || parsedDocument.file_name || undefined,
+        parse_id: parsedDocument.parse_id,
+        parse_attestation: parsedDocument.parse_attestation,
+        document_fingerprint: parsedDocument.document_fingerprint,
+        audit_input_fingerprint: parsedDocument.audit_input_fingerprint,
+        // 审核名称必须与解析凭证绑定的名称完全一致；文件名仅用于界面展示。
+        product_name: parsedDocument.product_name || undefined,
+        product_name_source: parsedDocument.product_name_source,
+        parse_warnings: parsedDocument.warnings,
         category: selectedCategory || undefined,
         clause_topics: Array.from(new Set([
           ...parsedDocument.clauses.flatMap(clause => clause.topics || []),
           ...parsedDocument.rider_clauses.flatMap(clause => clause.topics || []),
         ])),
+        audit_blocks: parsedDocument.audit_blocks,
+        product_tags: parsedDocument.product_tags,
       },
       {
         onViolation: (item) => setStreamingViolations(prev => [...prev, item]),
+        onCandidateFreeze: (progress) => {
+          const degraded = progress.degraded ? '（检索降级）' : '';
+          setStreamProgress(
+            `已冻结 ${progress.candidate_count} 个候选法规条款单元，`
+            + `排除 ${progress.excluded_count} 个${degraded}`,
+          );
+        },
+        onDecision: (decision) => {
+          setStreamingDecisions((previous) => {
+            const existingIndex = previous.findIndex(
+              item => item.task_id === decision.task_id,
+            );
+            if (existingIndex < 0) return [...previous, decision];
+            return previous.map((item, index) => (
+              index === existingIndex ? decision : item
+            ));
+          });
+          setStreamProgress(
+            `已完成 ${decision.completed}/${decision.total} 个法规条款单元`,
+          );
+        },
         onProgress: (msg) => setStreamProgress(msg),
         onDone: (data) => {
           setIsStreaming(false);
           setStreamProgress('');
-          setCheckingResult({
-            id: data.report_id,
-            product_name: data.product_name,
-            category: data.category,
-            mode: 'document',
-            result: {
-              summary: data.summary,
-              items: data.items,
-              regulations: [],
-              regulation_sources: data.regulation_sources,
-              category: data.category,
-              negative_list_result: data.negative_list_result,
-              clause_coverage: data.clause_coverage,
-            },
-            created_at: '',
-          });
-          message.success(`审查完成，发现 ${data.summary.non_compliant} 条不合规`);
+          setCheckingResult(buildComplianceReport(data));
+          const notice = getCompletionNotice(
+            data.audit_status,
+            data.compliance_conclusion,
+            data.summary.non_compliant,
+          );
+          message[notice.kind](notice.text);
           loadHistory();
         },
         onError: (err) => {
           setIsStreaming(false);
           setStreamProgress('');
+          setStreamFailure(err);
           message.error(`检查失败: ${err}`);
         },
       },
@@ -269,7 +364,9 @@ export default function CompliancePage() {
     streamAbortRef.current?.abort();
     setIsStreaming(false);
     setStreamingViolations([]);
+    setStreamingDecisions([]);
     setStreamProgress('');
+    setStreamFailure('');
     setCheckingResult(null);
     setView('input');
   };
@@ -344,7 +441,7 @@ export default function CompliancePage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.docx"
+            accept=".pdf,.doc,.docx"
             style={{ display: 'none' }}
             onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); }}
           />
@@ -358,7 +455,7 @@ export default function CompliancePage() {
             <div>
               <UploadOutlined style={{ fontSize: 32, color: token.colorTextSecondary, marginBottom: 8 }} />
               <div><Text>点击上传文件</Text></div>
-              <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>支持 PDF、DOCX</Text>
+              <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>支持 PDF、DOC、DOCX</Text>
             </div>
           )}
         </Card>
@@ -425,6 +522,8 @@ export default function CompliancePage() {
             {history.slice(0, 10).map(report => {
               const s = report.result?.summary;
               const hasViolation = (s?.non_compliant || 0) > 0;
+              const explicitlyPassed = report.result?.audit_status === 'completed'
+                && report.result?.compliance_conclusion === 'no_violation_found';
               return (
                 <div
                   key={report.id}
@@ -442,13 +541,17 @@ export default function CompliancePage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       {hasViolation
                         ? <CloseCircleOutlined style={{ color: token.colorError }} />
-                        : <CheckCircleOutlined style={{ color: token.colorSuccess }} />
+                        : explicitlyPassed
+                          ? <CheckCircleOutlined style={{ color: token.colorSuccess }} />
+                          : <ExclamationCircleOutlined style={{ color: token.colorWarning }} />
                       }
                       <Text strong ellipsis style={{ maxWidth: 200 }}>{report.product_name}</Text>
                       <Tag style={{ margin: 0 }}>{report.category}</Tag>
                     </div>
                     <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
-                      {s ? `${s.non_compliant || 0} 项不合规` : '—'} · {report.created_at?.slice(0, 10)}
+                      {s ? `${s.non_compliant || 0} 项不合规` : '—'}
+                      {!hasViolation && !explicitlyPassed ? ' · 结果未确认' : ''}
+                      {' · '}{report.created_at?.slice(0, 10)}
                     </Text>
                   </div>
                   <Popconfirm title="确定删除？" onConfirm={(e) => { e?.stopPropagation(); handleDeleteReport(report.id); }}>
@@ -475,6 +578,7 @@ export default function CompliancePage() {
     // Streaming state
     if (isStreaming) {
       const merged = mergeItemsByClause(streamingViolations);
+      const hasLiveResults = merged.length > 0 || streamingDecisions.length > 0;
       return (
         <div style={{ maxWidth: 800, margin: '0 auto' }}>
           {/* Header */}
@@ -490,6 +594,21 @@ export default function CompliancePage() {
             message={streamProgress || '正在分析…'}
             style={{ marginBottom: 16 }}
           />
+
+          {streamingDecisions.length > 0 && (
+            <>
+              <Text strong style={{ display: 'block', marginBottom: 12 }}>
+                法规条款单元进度
+              </Text>
+              {streamingDecisions.map(decision => (
+                <RegulationDecisionProgressCard
+                  key={decision.task_id}
+                  decision={decision}
+                  token={token}
+                />
+              ))}
+            </>
+          )}
 
           {/* Streaming violations */}
           {merged.length > 0 ? (
@@ -507,23 +626,64 @@ export default function CompliancePage() {
                 />
               ))}
             </>
-          ) : (
+          ) : !hasLiveResults ? (
             <div style={{ textAlign: 'center', padding: 40 }}>
               <Spin size="large" />
               <div style={{ marginTop: 16 }}><Text type="secondary">正在分析中…</Text></div>
             </div>
-          )}
+          ) : null}
         </div>
       );
     }
 
     // Final result
-    if (!docResult?.summary) return null;
+    if (!docResult?.summary) {
+      return streamFailure ? (
+        <div style={{ maxWidth: 800, margin: '0 auto' }}>
+          <Button type="text" icon={<ArrowLeftOutlined />} onClick={handleBack} style={{ marginBottom: 16 }}>
+            返回
+          </Button>
+          <Alert
+            type="error"
+            showIcon
+            message="审核未完成"
+            description={`${streamFailure}。本次不能据此得出“审核通过”结论。`}
+          />
+        </div>
+      ) : null;
+    }
     const s = docResult.summary;
     const hasViolation = (s.non_compliant || 0) > 0;
+    const explicitlyPassed = docResult.audit_status === 'completed'
+      && docResult.compliance_conclusion === 'no_violation_found';
+    const noApplicableRegulations =
+      docResult.compliance_conclusion === 'no_applicable_regulations';
+    const incomplete = docResult.audit_status === 'incomplete';
+    const degraded = docResult.audit_status === 'degraded';
+    const outcome = hasViolation
+      ? { label: '发现不合规', color: 'error', icon: <CloseCircleOutlined />, border: token.colorError }
+      : explicitlyPassed
+        ? { label: '审核完成，未发现违规', color: 'success', icon: <CheckCircleOutlined />, border: token.colorSuccess }
+        : noApplicableRegulations
+          ? {
+              label: '没有法规进入实质审核',
+              color: 'warning',
+              icon: <ExclamationCircleOutlined />,
+              border: token.colorWarning,
+            }
+        : {
+            label: incomplete ? '审核未完成' : degraded ? '审核降级完成' : '审核结果不确定',
+            color: 'warning',
+            icon: <ExclamationCircleOutlined />,
+            border: token.colorWarning,
+          };
     const negResult = docResult.negative_list_result;
     const merged = mergeItemsByClause(docResult.items || []);
     const coverage = docResult.clause_coverage;
+    const auditWarnings = mergeAuditWarnings(
+      docResult.failure_reasons,
+      docResult.retrieval_warnings,
+    );
 
     return (
       <div style={{ maxWidth: 800, margin: '0 auto' }}>
@@ -536,26 +696,45 @@ export default function CompliancePage() {
 
         {/* Summary card */}
         <Card
-          style={{ marginBottom: 16, borderLeft: `3px solid ${hasViolation ? token.colorError : token.colorSuccess}` }}
+          style={{ marginBottom: 16, borderLeft: `3px solid ${outcome.border}` }}
           styles={{ body: { padding: 16 } }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-            {hasViolation
-              ? <Tag color="error" icon={<CloseCircleOutlined />} style={{ fontSize: 16, padding: '4px 16px' }}>审核未通过</Tag>
-              : <Tag color="success" icon={<CheckCircleOutlined />} style={{ fontSize: 16, padding: '4px 16px' }}>审核通过</Tag>
-            }
+            <Tag color={outcome.color} icon={outcome.icon} style={{ fontSize: 16, padding: '4px 16px' }}>
+              {outcome.label}
+            </Tag>
             <Space size={isMobile ? 'small' : 'middle'} wrap>
               {(s.compliant || 0) > 0 && <Tag color="success" icon={<CheckCircleOutlined />}>合规 {s.compliant}</Tag>}
               <Tag color="error" icon={<CloseCircleOutlined />}>不合规 {s.non_compliant || 0}</Tag>
               {(s.attention || 0) > 0 && <Tag color="warning" icon={<ExclamationCircleOutlined />}>需关注 {s.attention}</Tag>}
               {negResult && (
-                <Tag color={negResult === 'violated' ? 'error' : 'success'}
-                  icon={negResult === 'violated' ? <CloseCircleOutlined /> : <CheckCircleOutlined />}>
-                  负面清单{negResult === 'violated' ? '违规' : '通过'}
+                <Tag
+                  color={negResult === 'violated' ? 'error' : negResult === 'passed' ? 'success' : 'default'}
+                  icon={negResult === 'violated'
+                    ? <CloseCircleOutlined />
+                    : negResult === 'passed'
+                      ? <CheckCircleOutlined />
+                      : <ExclamationCircleOutlined />}
+                >
+                  负面清单{negResult === 'violated' ? '违规' : negResult === 'passed' ? '通过' : '未执行'}
                 </Tag>
               )}
             </Space>
           </div>
+          {(incomplete || degraded || noApplicableRegulations
+            || docResult.compliance_conclusion === 'undetermined') && (
+            <Alert
+              type="warning"
+              showIcon
+              message="本次结果不能解释为审核通过"
+              description={auditWarnings.join('；') || (
+                noApplicableRegulations
+                  ? '全部法规均被适用性过滤排除，本次结果不能表述为“未发现违规”。'
+                  : '部分审核单元未完成或检索链路已降级，请人工复核。'
+              )}
+              style={{ marginTop: 12 }}
+            />
+          )}
           {coverage && coverage.total > 0 && (
             <div style={{ marginTop: 8, fontSize: token.fontSizeSM, color: token.colorTextSecondary }}>
               条款覆盖率：{coverage.checked}/{coverage.total}

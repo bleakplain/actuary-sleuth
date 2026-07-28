@@ -21,6 +21,9 @@ from .models import (
     SectionType,
     DocumentMeta,
     TableType,
+    AuditBlockType,
+    ClauseBlock,
+    calculate_audit_input_fingerprint,
 )
 from .kb import parse_knowledge_base
 
@@ -28,6 +31,7 @@ __all__ = [
     # 数据模型
     'Clause', 'DataTable', 'DocumentSection', 'AuditDocument',
     'DocumentParseError', 'SectionType', 'DocumentMeta', 'TableType',
+    'AuditBlockType', 'ClauseBlock', 'calculate_audit_input_fingerprint',
     # 公共接口
     'parse_knowledge_base',
     'parse_product_document',

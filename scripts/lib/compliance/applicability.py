@@ -170,19 +170,34 @@ def match_regulation_applicability(
         elif outcome == "excluded":
             excluded.append(dimension)
 
-    for feature in sorted(regulation.special_features):
-        field_name = _SPECIAL_PRODUCT_FIELDS[feature]
-        actual = getattr(product_tags, field_name)
-        reasons.append(
-            f"special_feature.{feature}: "
-            + ("命中" if actual is True else "明确不满足" if actual is False else "产品标签未知，保守保留")
+    if regulation.special_features:
+        feature_values = tuple(
+            (
+                feature,
+                getattr(product_tags, _SPECIAL_PRODUCT_FIELDS[feature]),
+            )
+            for feature in sorted(regulation.special_features)
         )
-        if actual is True:
-            matched.append(f"special_feature.{feature}")
-        elif actual is False:
-            excluded.append(f"special_feature.{feature}")
+        for feature, actual in feature_values:
+            reasons.append(
+                f"special_feature.{feature}: "
+                + (
+                    "命中"
+                    if actual is True
+                    else "明确不满足"
+                    if actual is False
+                    else "产品标签未知"
+                )
+            )
+        if any(actual is True for _, actual in feature_values):
+            matched.append("special_feature")
+            reasons.append("special_feature: 同维度多值按 OR，至少一个值命中")
+        elif any(actual is None for _, actual in feature_values):
+            indeterminate.append("special_feature")
+            reasons.append("special_feature: 同维度没有已知命中且存在未知值，保守保留")
         else:
-            indeterminate.append(f"special_feature.{feature}")
+            excluded.append("special_feature")
+            reasons.append("special_feature: 同维度所有允许值均明确不满足")
 
     if regulation.unknown_tags:
         indeterminate.append("unknown_regulation_tags")

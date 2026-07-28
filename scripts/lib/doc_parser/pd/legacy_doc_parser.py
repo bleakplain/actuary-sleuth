@@ -6,10 +6,12 @@ import subprocess
 import tempfile
 from dataclasses import replace
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from ..models import AuditDocument, DocumentParseError
 from .docx_parser import DocxParser
+
+_OLE_COMPOUND_FILE_SIGNATURE = bytes.fromhex("d0cf11e0a1b11ae1")
 
 
 class LegacyDocParser:
@@ -19,10 +21,30 @@ class LegacyDocParser:
     def supported_extensions() -> List[str]:
         return [".doc"]
 
-    def parse(self, file_path: str) -> AuditDocument:
+    def parse(
+        self,
+        file_path: str,
+        *,
+        original_file_name: Optional[str] = None,
+        user_product_name: Optional[str] = None,
+    ) -> AuditDocument:
         source = Path(file_path)
         if not source.exists():
             raise DocumentParseError("文件不存在", file_path)
+        display_file_name = (
+            Path(original_file_name).name if original_file_name else source.name
+        )
+        with source.open("rb") as stream:
+            header = stream.read(16)
+        if not (
+            header.startswith(_OLE_COMPOUND_FILE_SIGNATURE)
+            or header.lstrip().startswith(b"{\\rtf")
+        ):
+            raise DocumentParseError(
+                "旧版 Word 文件格式无效",
+                file_path,
+                "文件不是 OLE Word 文档或 RTF 文档",
+            )
 
         converter = shutil.which("soffice") or shutil.which("libreoffice")
         if converter is None:
@@ -60,11 +82,16 @@ class LegacyDocParser:
                 detail = (completed.stderr or completed.stdout or "未生成 docx 文件").strip()
                 raise DocumentParseError("旧版 Word 文件转换失败", file_path, detail)
 
-            parsed = DocxParser().parse(str(converted))
+            parsed = DocxParser().parse(
+                str(converted),
+                original_file_name=display_file_name,
+                user_product_name=user_product_name,
+            )
             has_audit_content = any(
                 (
                     parsed.clauses,
                     parsed.tables,
+                    parsed.unclassified_sections,
                     parsed.notices,
                     parsed.health_disclosures,
                     parsed.exclusions,
@@ -78,7 +105,7 @@ class LegacyDocParser:
                 )
             return replace(
                 parsed,
-                file_name=source.name,
+                file_name=display_file_name,
                 file_type=".doc",
                 warnings=[*parsed.warnings, "旧版 .doc 已临时转换为 .docx 后解析"],
             )

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from lib.common.product_tags import ProductTags
 from lib.compliance.applicability import (
@@ -16,13 +16,20 @@ from lib.compliance.applicability import (
 
 @dataclass(frozen=True)
 class RetrievalTrace:
+    chunk_id: str
+    kb_version: str
+    source_file: str
+    section_path: str
     law_name: str
     article_number: str
+    category: str
     status: MatchStatus
     layer: str
+    regulation_topics: Tuple[str, ...]
     matched_dimensions: Tuple[str, ...]
     indeterminate_dimensions: Tuple[str, ...]
     excluded_by: Tuple[str, ...]
+    reasons: Tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -37,6 +44,22 @@ class LayeredRetrievalResult:
 def _metadata(candidate: Mapping[str, Any]) -> Mapping[str, Any]:
     metadata = candidate.get("metadata")
     return metadata if isinstance(metadata, Mapping) else candidate
+
+
+def _value(candidate: Mapping[str, Any], key: str) -> Any:
+    value = candidate.get(key)
+    if value not in (None, ""):
+        return value
+    return _metadata(candidate).get(key)
+
+
+def _text(candidate: Mapping[str, Any], key: str) -> str:
+    value = _value(candidate, key)
+    return str(value).strip() if value not in (None, "") else ""
+
+
+def _chunk_index(candidate: Mapping[str, Any]) -> Any:
+    return _value(candidate, "chunk_index") or _value(candidate, "chunk_id")
 
 
 def get_candidate_identity(candidate: Mapping[str, Any]) -> str:
@@ -97,13 +120,26 @@ def _retrieval_score(candidate: Mapping[str, Any]) -> float:
     return float(score) if isinstance(score, (int, float)) else 0.0
 
 
+def _regulation_unit_key(candidate: Mapping[str, Any]) -> Tuple[str, str, str]:
+    """以法规单元身份聚合同条款的物理块；缺字段时保持块级隔离。"""
+    version = _text(candidate, "kb_version")
+    source_file = _text(candidate, "source_file")
+    locator = _text(candidate, "article_number") or _text(
+        candidate,
+        "section_path",
+    )
+    if version and source_file and locator:
+        return version, source_file, locator
+    return "invalid", get_candidate_identity(candidate), ""
+
+
 def layer_regulation_candidates(
     candidates: Sequence[Dict[str, Any]],
     product_tags: ProductTags,
     clause_topics: Iterable[str] = (),
-    top_k: int = 8,
+    top_k: Optional[int] = 8,
 ) -> LayeredRetrievalResult:
-    """按适用性和主题对已排序的混合检索候选进行稳定分层。"""
+    """按适用性和主题稳定分层；top_k=None 时冻结全部保留候选。"""
     current_topics = frozenset(topic for topic in clause_topics if topic)
     deduplicated: List[Dict[str, Any]] = []
     seen: set[str] = set()
@@ -114,24 +150,61 @@ def layer_regulation_candidates(
         seen.add(key)
         deduplicated.append(candidate)
 
+    applicability_by_identity: Dict[str, ApplicabilityResult] = {}
+    unit_statuses: Dict[Tuple[str, str, str], set[MatchStatus]] = {}
+    for candidate in deduplicated:
+        identity = get_candidate_identity(candidate)
+        regulation = RegulationApplicability.from_metadata(_metadata(candidate))
+        applicability = match_regulation_applicability(product_tags, regulation)
+        applicability_by_identity[identity] = applicability
+        unit_statuses.setdefault(
+            _regulation_unit_key(candidate),
+            set(),
+        ).add(applicability.status)
+
     ranked: List[Tuple[int, float, int, Dict[str, Any], RetrievalTrace]] = []
     traces: List[RetrievalTrace] = []
     excluded_count = 0
     for original_rank, candidate in enumerate(deduplicated):
         regulation = RegulationApplicability.from_metadata(_metadata(candidate))
-        applicability = match_regulation_applicability(product_tags, regulation)
-        if applicability.status is MatchStatus.NOT_APPLICABLE:
-            layer = "excluded"
-            excluded_count += 1
-            trace = RetrievalTrace(
-                law_name=str(candidate.get("law_name", "")),
-                article_number=str(candidate.get("article_number", "")),
-                status=applicability.status,
-                layer=layer,
+        applicability = applicability_by_identity[get_candidate_identity(candidate)]
+        statuses = unit_statuses[_regulation_unit_key(candidate)]
+        if (
+            applicability.status is MatchStatus.NOT_APPLICABLE
+            and statuses != {MatchStatus.NOT_APPLICABLE}
+        ):
+            applicability = ApplicabilityResult(
+                status=MatchStatus.INDETERMINATE,
                 matched_dimensions=applicability.matched_dimensions,
-                indeterminate_dimensions=applicability.indeterminate_dimensions,
-                excluded_by=applicability.excluded_by,
+                indeterminate_dimensions=tuple(dict.fromkeys((
+                    *applicability.indeterminate_dimensions,
+                    "unit_chunk_consistency",
+                ))),
+                excluded_by=(),
+                reasons=(
+                    *applicability.reasons,
+                    "同一法规条款单元的物理 chunk 适用性不一致，全文保守保留",
+                ),
             )
+        trace = RetrievalTrace(
+            chunk_id=_text(candidate, "id") or _text(candidate, "chunk_id")
+            or get_candidate_identity(candidate),
+            kb_version=_text(candidate, "kb_version"),
+            source_file=_text(candidate, "source_file"),
+            section_path=_text(candidate, "section_path"),
+            law_name=str(candidate.get("law_name", "")),
+            article_number=str(candidate.get("article_number", "")),
+            category=_text(candidate, "category"),
+            status=applicability.status,
+            layer="excluded",
+            regulation_topics=tuple(sorted(regulation.clause_topics)),
+            matched_dimensions=applicability.matched_dimensions,
+            indeterminate_dimensions=applicability.indeterminate_dimensions,
+            excluded_by=applicability.excluded_by,
+            reasons=applicability.reasons,
+        )
+        if applicability.status is MatchStatus.NOT_APPLICABLE:
+            excluded_count += 1
             traces.append(trace)
             continue
 
@@ -146,19 +219,33 @@ def layer_regulation_candidates(
         enriched = dict(candidate)
         enriched.update({
             "applicability_status": applicability.status.value,
+            "applicability_reasons": list(applicability.reasons),
             "matched_dimensions": list(applicability.matched_dimensions),
             "indeterminate_dimensions": list(applicability.indeterminate_dimensions),
+            "excluded_by": list(applicability.excluded_by),
+            "regulation_topics": sorted(regulation.clause_topics),
             "matched_topics": list(matched_topics),
             "fallback_layer": layer,
+            "kb_version": _text(candidate, "kb_version"),
+            "source_file": _text(candidate, "source_file"),
+            "section_path": _text(candidate, "section_path"),
+            "chunk_index": _chunk_index(candidate),
         })
         trace = RetrievalTrace(
-            law_name=str(candidate.get("law_name", "")),
-            article_number=str(candidate.get("article_number", "")),
-            status=applicability.status,
+            chunk_id=trace.chunk_id,
+            kb_version=trace.kb_version,
+            source_file=trace.source_file,
+            section_path=trace.section_path,
+            law_name=trace.law_name,
+            article_number=trace.article_number,
+            category=trace.category,
+            status=trace.status,
             layer=layer,
-            matched_dimensions=applicability.matched_dimensions,
-            indeterminate_dimensions=applicability.indeterminate_dimensions,
-            excluded_by=applicability.excluded_by,
+            regulation_topics=trace.regulation_topics,
+            matched_dimensions=trace.matched_dimensions,
+            indeterminate_dimensions=trace.indeterminate_dimensions,
+            excluded_by=trace.excluded_by,
+            reasons=trace.reasons,
         )
         traces.append(trace)
         ranked.append((
@@ -170,7 +257,8 @@ def layer_regulation_candidates(
         ))
 
     ranked.sort(key=lambda item: (item[0], item[1], item[2]))
-    selected = tuple(item[3] for item in ranked[:max(top_k, 0)])
+    selected_ranked = ranked if top_k is None else ranked[:max(top_k, 0)]
+    selected = tuple(item[3] for item in selected_ranked)
     fallback_used = any(
         item.get("applicability_status") == MatchStatus.INDETERMINATE.value
         for item in selected

@@ -28,6 +28,7 @@ class BaseLLMClient(ABC):
     def _validate_messages(self, messages: List[Dict[str, str]]) -> None:
         if not messages:
             raise ValueError("消息列表不能为空")
+        total_length = 0
         for i, msg in enumerate(messages):
             if not isinstance(msg, dict):
                 raise ValueError(f"消息 {i} 必须是字典")
@@ -35,6 +36,11 @@ class BaseLLMClient(ABC):
                 raise ValueError(f"消息 {i} 必须包含 'role' 和 'content' 字段")
             if not msg['content'] or not msg['content'].strip():
                 raise ValueError(f"消息 {i} 的内容不能为空")
+            total_length += len(msg['content'])
+        if total_length > self.MAX_PROMPT_LENGTH:
+            raise ValueError(
+                f"消息内容过长: {total_length} 字符 (最大 {self.MAX_PROMPT_LENGTH})"
+            )
 
     def close(self):
         if hasattr(self, '_session') and self._session is not None:

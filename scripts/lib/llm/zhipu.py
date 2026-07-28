@@ -6,6 +6,7 @@ import re
 import logging
 import requests  # type: ignore[import-untyped]
 import threading
+import weakref
 from typing import Dict, Iterator, List, Optional
 
 from .base import BaseLLMClient
@@ -19,7 +20,9 @@ logger = logging.getLogger(__name__)
 class ZhipuClient(BaseLLMClient):
     """智谱AI客户端"""
 
-    _shutdown_hooks: List = []
+    _instances: weakref.WeakSet["ZhipuClient"] = weakref.WeakSet()
+    _cleanup_registered = False
+    _cleanup_lock = threading.Lock()
 
     def __init__(
         self,
@@ -47,7 +50,9 @@ class ZhipuClient(BaseLLMClient):
                     adapter = requests.adapters.HTTPAdapter(
                         pool_connections=10,
                         pool_maxsize=20,
-                        max_retries=3
+                        # 重试统一由带审核 deadline 的外层策略负责，避免两层重试
+                        # 将一次法规单元调用拖过整份审核预算。
+                        max_retries=0,
                     )
                     session.mount('http://', adapter)
                     session.mount('https://', adapter)
@@ -71,16 +76,20 @@ class ZhipuClient(BaseLLMClient):
         return False
 
     def _register_cleanup(self):
-        def cleanup():
-            self.close()
+        with ZhipuClient._cleanup_lock:
+            ZhipuClient._instances.add(self)
+            if not ZhipuClient._cleanup_registered:
+                atexit.register(ZhipuClient._close_all_instances)
+                ZhipuClient._cleanup_registered = True
 
-        if cleanup not in ZhipuClient._shutdown_hooks:
-            ZhipuClient._shutdown_hooks.append(cleanup)
-            atexit.register(cleanup)
+    @classmethod
+    def _close_all_instances(cls) -> None:
+        for client in tuple(cls._instances):
+            client.close()
 
     def _do_generate(self, prompt: str, **kwargs) -> str:
         url = f"{self.base_url}/chat/completions"
-        model = kwargs.get('model', self.model)
+        model = str(kwargs.get("model") or self.model)
         data: Dict[str, object] = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
@@ -92,7 +101,7 @@ class ZhipuClient(BaseLLMClient):
             data["thinking"] = {"type": "disabled"}
 
         session = self._get_session()
-        response = session.post(url, json=data, timeout=self.timeout)
+        response = session.post(url, json=data, timeout=kwargs.get("timeout", self.timeout))
 
         if response.status_code == 429:
             raise requests.exceptions.RequestException(f"429 Rate limit exceeded: {response.text[:200]}")
@@ -135,7 +144,7 @@ class ZhipuClient(BaseLLMClient):
 
     def _do_chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         url = f"{self.base_url}/chat/completions"
-        model = kwargs.get('model', self.model)
+        model = str(kwargs.get("model") or self.model)
         data: Dict[str, object] = {
             "model": model,
             "messages": messages,
@@ -147,7 +156,7 @@ class ZhipuClient(BaseLLMClient):
             data["thinking"] = {"type": "disabled"}
 
         session = self._get_session()
-        response = session.post(url, json=data, timeout=self.timeout)
+        response = session.post(url, json=data, timeout=kwargs.get("timeout", self.timeout))
 
         if response.status_code == 429:
             raise requests.exceptions.RequestException(f"429 Rate limit exceeded: {response.text[:200]}")
@@ -179,7 +188,7 @@ class ZhipuClient(BaseLLMClient):
 
     def _do_chat_stream(self, messages: List[Dict[str, str]], **kwargs) -> Iterator[str]:
         url = f"{self.base_url}/chat/completions"
-        model = kwargs.get('model', self.model)
+        model = str(kwargs.get("model") or self.model)
         data: Dict[str, object] = {
             "model": model,
             "messages": messages,

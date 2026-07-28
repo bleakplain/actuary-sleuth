@@ -1,5 +1,7 @@
 export interface AuditRegulationItem {
   chunk_id: string;
+  chunk_ids?: string[];
+  regulation_unit_id?: string;
   law_name: string;
   article_number: string;
   content: string;
@@ -12,6 +14,15 @@ export interface AuditRegulationItem {
   matched_topics?: string[];
   fallback_layer?: string;
   retrieval_sources?: string[];
+  kb_version?: string;
+  source_file?: string;
+  section_path?: string;
+  chunk_index?: number | null;
+  regulation_topics?: string[];
+  applicability_reasons?: string[];
+  indeterminate_dimensions?: string[];
+  excluded_by?: string[];
+  category?: string;
 }
 
 export interface AuditResultItem {
@@ -23,17 +34,138 @@ export interface AuditResultItem {
   source_ref?: string;
   suggestion: string;
   conclusion?: string;
+  regulation_unit_id?: string;
+  regulation_chunk_ids?: string[];
+  product_clause_ids?: string[];
+  reasoning?: string;
+  confidence?: number | null;
+  applicability_dispute?: boolean;
+  incomplete?: boolean;
+  error_code?: string;
+}
+
+export type AuditStatus = 'completed' | 'degraded' | 'incomplete';
+export type ComplianceConclusion =
+  | 'non_compliant'
+  | 'no_violation_found'
+  | 'no_applicable_regulations'
+  | 'undetermined';
+export type RegulationDecisionStatus =
+  | 'compliant'
+  | 'non_compliant'
+  | 'insufficient_information'
+  | 'manual_review';
+
+export interface RegulationEvidence {
+  chunk_id: string;
+  quote: string;
+}
+
+export interface ProductEvidence {
+  clause_id: string;
+  quote: string;
+  source_kind: 'clause_body' | 'product_name';
+}
+
+export interface ExtractedFact {
+  kind: string;
+  value: string;
+  unit: string;
+  clause_id: string;
+  evidence: string;
+  confidence: number;
+}
+
+export interface RoutedClause {
+  clause_id: string;
+  number: string;
+  title: string;
+  topics: string[];
+  relation: 'direct' | 'related' | 'unknown' | 'not_relevant';
+  reasons: string[];
+  submitted: boolean;
+}
+
+export interface RegulationDecision {
+  task_id: string;
+  regulation_unit_id: string;
+  status: RegulationDecisionStatus;
+  reasoning: string;
+  suggestion: string;
+  regulation_evidence: RegulationEvidence[];
+  product_evidence: ProductEvidence[];
+  applicability_dispute: boolean;
+  confidence?: number | null;
+  incomplete: boolean;
+  error_code: string;
+  routed_clauses: RoutedClause[];
+  facts: ExtractedFact[];
+}
+
+export type RegulationDecisionProgress = Omit<
+  RegulationDecision,
+  'routed_clauses' | 'facts'
+> & {
+  routed_clauses?: RoutedClause[];
+  facts?: ExtractedFact[];
+  completed: number;
+  total: number;
+};
+
+export interface CandidateFreezeProgress {
+  candidate_count: number;
+  excluded_count: number;
+  degraded: boolean;
+  warnings: string[];
+  coverage?: {
+    complete_candidate_freeze: boolean;
+    uncovered_scopes: string[];
+  } | null;
+}
+
+export interface ExcludedRegulationUnit {
+  regulation_unit_id: string;
+  kb_version: string;
+  source_file: string;
+  section_path: string;
+  law_name: string;
+  article_number: string;
+  chunk_ids: string[];
+  regulation_topics: string[];
+  excluded_by: string[];
+  reasons: string[];
+  category?: string;
 }
 
 export interface ComplianceResult {
   summary: Record<string, number>;
   items: AuditResultItem[];
   regulations: AuditRegulationItem[];
+  excluded_regulations?: ExcludedRegulationUnit[];
+  decisions?: RegulationDecision[];
+  product_tags?: Record<string, unknown>;
+  document_fingerprint?: string;
+  audit_input_fingerprint?: string;
+  product_name_source?: string;
+  parse_warnings?: string[];
   regulation_sources: Record<string, string[]>;
-  category: string;
-  negative_list_result: string;
+  category: string | null;
+  negative_list_result: string | null;
   retrieval_degraded?: boolean;
   retrieval_warnings?: string[];
+  audit_status?: AuditStatus;
+  compliance_conclusion?: ComplianceConclusion;
+  kb_version?: string;
+  topic_taxonomy_version?: string;
+  topic_relations_version?: string;
+  evaluation_dataset_version?: string;
+  evaluation_dataset_status?: string;
+  cutover_gate_status?: string;
+  candidate_count?: number;
+  excluded_count?: number;
+  completed_count?: number;
+  failed_count?: number;
+  failure_reasons?: string[];
   clause_coverage: {
     total: number;
     checked: number;
@@ -50,11 +182,13 @@ export interface ComplianceReport {
   product_name: string;
   category: string;
   mode: string;
+  owner_user_id?: string;
   result: ComplianceResult;
   created_at: string;
 }
 
 export interface ParsedClause {
+  clause_id: string;
   number: string;
   title: string;
   text: string;
@@ -62,6 +196,7 @@ export interface ParsedClause {
 }
 
 export interface ParsedDataTable {
+  clause_id: string;
   table_type: string;
   remark: string;
   raw_text: string;
@@ -69,12 +204,25 @@ export interface ParsedDataTable {
 }
 
 export interface ParsedSection {
+  clause_id: string;
   title: string;
   content: string;
 }
 
+export interface ParsedAuditBlock {
+  clause_id: string;
+  block_type: string;
+  source_index: number;
+  number: string;
+  title: string;
+  content: string;
+  topics: string[];
+}
+
 export interface ParsedDocument {
   parse_id: string;
+  parse_attestation: string;
+  parse_attestation_expires_at: string;
   file_name: string;
   file_type: string;
   clauses: ParsedClause[];
@@ -82,18 +230,24 @@ export interface ParsedDocument {
   notices: ParsedSection[];
   health_disclosures: ParsedSection[];
   exclusions: ParsedSection[];
+  unclassified_sections: ParsedSection[];
   rider_clauses: ParsedClause[];
+  audit_blocks: ParsedAuditBlock[];
+  document_fingerprint: string;
+  audit_input_fingerprint: string;
   warnings: string[];
   combined_text: string;
   parse_time: string;
   identified_category: string | null;
   category_confidence: number;
   product_name?: string | null;
+  product_name_source: string;
   is_rider?: boolean;
   group_or_individual?: string | null;
   duration_type?: string | null;
   design_type?: string | null;
   naming_warnings?: string[];
+  product_tags: Record<string, unknown>;
 }
 
 // ===== 法规问答（ask） =====

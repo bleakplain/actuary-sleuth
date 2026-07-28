@@ -1,0 +1,343 @@
+{
+  "schema_version": "1",
+  "dataset_id": "compliance-audit-v1",
+  "dataset_status": "pending",
+  "kb": {
+    "version": "v5",
+    "build_manifest_sha256": "f6ff40509b1237fc88b127f7bf7d6575f8474a9b78b0fa2ad9a4a0893fd29594",
+    "source_file": "1.产品开发检查清单2026年.xlsx",
+    "source_sha256": "7917433e40404192fffd5f30c21ffccfb79f8e022b8a7694d35d702f4c8e21d8",
+    "documents": 25,
+    "chunks": 171
+  },
+  "annotations": {
+    "version": "compliance-audit-v1-annotations-draft.1",
+    "status": "pending",
+    "fields": {
+      "product_tags": "pending",
+      "regulation_applicability": "pending",
+      "clause_routing": "pending",
+      "audit_decisions": "pending"
+    }
+  },
+  "actuary_review": {
+    "status": "pending",
+    "reviewer": null,
+    "reviewed_at": null,
+    "comment": "尚未录入精算验收结论；本清单只冻结输入和候选边界。"
+  },
+  "cutover_gate": {
+    "status": "blocked",
+    "reason": "compliance-audit-v1 尚未由精算师签收，Phase 7 不得自动切换。"
+  },
+  "products": [
+    {
+      "sample_id": "real-001",
+      "file_name": "125904《人保健康悠优保互联网医疗保险（费率可调）》条款v4.doc",
+      "format": "doc",
+      "size_bytes": 349184,
+      "sha256": "8b9a49e926a734ee8ec3ea32aaa805feeb65876ecec282d914be11b8b5d33ace",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-002",
+      "file_name": "《人保健康互联网团体意外伤害保险（2025版）》条款.pdf",
+      "format": "pdf",
+      "size_bytes": 531159,
+      "sha256": "c2a115d5c3d59b1eb8ca439b19c636f01bf9a088fea0f78e4d28bb0bdca6b1db",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-003",
+      "file_name": "《人保健康互联网失能收入损失保险（2025版）》条款.docx",
+      "format": "docx",
+      "size_bytes": 144856,
+      "sha256": "8b6e3434270b5c0821bfc72eddad6a81d805d486fae93908d606a191f1add656",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-004",
+      "file_name": "《人保健康互联网手术医疗意外保险》保险条款.pdf",
+      "format": "pdf",
+      "size_bytes": 440981,
+      "sha256": "a0664072c6436eff92326f068af0a9d89b82fc833323471426efcdb01056079a",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-005",
+      "file_name": "《人保健康互联网重大疾病保险（A款）》条款V5 - 无修订.docx",
+      "format": "docx",
+      "size_bytes": 120419,
+      "sha256": "7f9b3bb7d4691206bd3bed7ebf3a886c3efd4d371b5c157c108782b4b13c172a",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-006",
+      "file_name": "《人保健康企业员工团体终身重大疾病保险（H款）》条款.docx",
+      "format": "docx",
+      "size_bytes": 152379,
+      "sha256": "ccba4b820021516253d49c5897eb2471a80616d1216239837d8126a40ec5bfe6",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-007",
+      "file_name": "《人保健康团体失能收入损失保险》条款.doc",
+      "format": "doc",
+      "size_bytes": 252416,
+      "sha256": "b94ddd06f8d57d492e47fb4e816ad537b178e2a369c6255d7f894a07a85c3b94",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-008",
+      "file_name": "《人保健康团体短期重大疾病保险（推荐版）》条款.docx",
+      "format": "docx",
+      "size_bytes": 76995,
+      "sha256": "df6e604f50b1a43be0b16b86634b7caa597c770bd88541dee5bce3fded01b905",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-009",
+      "file_name": "《人保健康城市定制型团体医疗保险（A款）》产品条款.docx",
+      "format": "docx",
+      "size_bytes": 99923,
+      "sha256": "af1912a76faf157db9620befa83f95f50e0cf01154944dca70f2328098d44bfe",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-010",
+      "file_name": "《人保健康惠享安行互联网意外伤害保险》条款.doc",
+      "format": "doc",
+      "size_bytes": 153600,
+      "sha256": "58a6a270f8a4c197a594381cefb2efe92a8fc17996133ec50f62e026390faf24",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-011",
+      "file_name": "《人保健康欣好孕互联网医疗保险》条款V6.1二维码-无修订.docx",
+      "format": "docx",
+      "size_bytes": 86988,
+      "sha256": "89262c2662d2dfb37cce0d6610c36f3b67c8e1e6ba91cc8a5496c54e2b7d4e3e",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-012",
+      "file_name": "《人保健康温暖常伴互联网意外伤害保险（2.0版）》条款.docx",
+      "format": "docx",
+      "size_bytes": 83450,
+      "sha256": "b21b93b4ce6b70da33647316332970e8992a25acd7b334e3680ee0c5e35563ca",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-013",
+      "file_name": "《人保健康温暖惠欣团体护理保险》条款.doc",
+      "format": "doc",
+      "size_bytes": 140288,
+      "sha256": "1f5a9201fbf5caceee743b151e05f7f85a2342619646a9c1d7ad108fda0a9620",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-014",
+      "file_name": "《人保健康玺悦一生互联网重大疾病保险（2025版）》条款.docx",
+      "format": "docx",
+      "size_bytes": 141406,
+      "sha256": "e7937d55612b43cda9c45bc9aa3c23bc04771313f482c8fba3e19462edfe5681",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-015",
+      "file_name": "《人保健康长期补充团体医疗保险（D款）》条款-无标记v3.docx",
+      "format": "docx",
+      "size_bytes": 157208,
+      "sha256": "4d6f1b6597852a971268623a42e2b76f4380fcaf824f012175c7bfe4ccdacfcd",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-016",
+      "file_name": "《人保健康长相依互联网终身护理保险》条款.doc",
+      "format": "doc",
+      "size_bytes": 143872,
+      "sha256": "05823140616f2682738099f622e3603fdd5ea64dd28590d83fe503e7a9c91ce6",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-017",
+      "file_name": "《人保健康附加互联网恶性肿瘤特定药品费用医疗保险》条款.pdf",
+      "format": "pdf",
+      "size_bytes": 540556,
+      "sha256": "7c991ca7285a71226c936d1c705bbb06c0c61e82197b8f234733eb76ebaa5b6c",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-018",
+      "file_name": "《人保健康附加互联网特定药品费用医疗保险（B款）》条款.doc",
+      "format": "doc",
+      "size_bytes": 282624,
+      "sha256": "4ae47b17adcc178a3ca21ff40d1031bd23d42c6ba7fcb1ae7be9ed54da05f798",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-019",
+      "file_name": "《人保健康附加出境人员团体意外医疗保险》条款v2-无标记.docx",
+      "format": "docx",
+      "size_bytes": 78093,
+      "sha256": "da5bf033921283a9c91ec4923b572e9ab904281d47368a5474ac77c256421bb7",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-020",
+      "file_name": "《人保健康附加团体终身重度恶性肿瘤疾病保险》条款.docx",
+      "format": "docx",
+      "size_bytes": 95321,
+      "sha256": "8c5d4dfec042e27d00ca41dfda6acdd36fa894e532513112d8992fb09977206b",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-021",
+      "file_name": "《人保健康附加鸿利来护理保险》条款.doc",
+      "format": "doc",
+      "size_bytes": 144896,
+      "sha256": "db50fdff6de184d7940af578c0abd587752fa2dda050f79f505f73d7f9d9b677",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-022",
+      "file_name": "《人保健康鸿利来两全保险（分红型）》条款.doc",
+      "format": "doc",
+      "size_bytes": 108544,
+      "sha256": "4abb081ec597a4212eed2b153375452767dec36b11f3f4431c77be1b89d7358b",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    },
+    {
+      "sample_id": "real-023",
+      "file_name": "《农民工团体护理保险（万能型）》条款.doc",
+      "format": "doc",
+      "size_bytes": 154624,
+      "sha256": "5c927133ece9117670d47a31badf75e88d8eb484071bcb179646228651889ec1",
+      "source_kind": "real",
+      "annotation_status": "pending"
+    }
+  ],
+  "candidate_boundary_cases": [
+    {
+      "case_id": "short_health_non_guaranteed_renewal",
+      "description": "短期健康险存在续保安排但明确不保证续保",
+      "source_status": "real_candidate",
+      "product_candidates": ["real-008", "real-011"],
+      "annotation_status": "pending"
+    },
+    {
+      "case_id": "short_health_without_renewal",
+      "description": "短期健康险完全没有续保安排",
+      "source_status": "synthetic_pending",
+      "product_candidates": [],
+      "annotation_status": "pending"
+    },
+    {
+      "case_id": "long_rate_adjustable_medical",
+      "description": "长期费率可调医疗保险",
+      "source_status": "real_candidate",
+      "product_candidates": ["real-001"],
+      "annotation_status": "pending"
+    },
+    {
+      "case_id": "long_non_adjustable_medical",
+      "description": "长期费率不可调医疗保险",
+      "source_status": "real_candidate",
+      "product_candidates": ["real-015"],
+      "annotation_status": "pending"
+    },
+    {
+      "case_id": "long_guaranteed_renewal_health",
+      "description": "长期保证续保健康保险",
+      "source_status": "synthetic_pending",
+      "product_candidates": [],
+      "annotation_status": "pending"
+    },
+    {
+      "case_id": "endowment",
+      "description": "两全保险",
+      "source_status": "real_candidate",
+      "product_candidates": ["real-022"],
+      "annotation_status": "pending"
+    },
+    {
+      "case_id": "annuity",
+      "description": "年金保险",
+      "source_status": "synthetic_pending",
+      "product_candidates": [],
+      "annotation_status": "pending"
+    },
+    {
+      "case_id": "critical_illness",
+      "description": "重大疾病保险",
+      "source_status": "real_candidate",
+      "product_candidates": [
+        "real-005",
+        "real-006",
+        "real-008",
+        "real-014",
+        "real-020"
+      ],
+      "annotation_status": "pending"
+    },
+    {
+      "case_id": "unrecognized_clause_title",
+      "description": "条款标题无法映射到受控主题",
+      "source_status": "synthetic_pending",
+      "product_candidates": [],
+      "annotation_status": "pending"
+    }
+  ],
+  "synthetic_boundary_samples": [
+    {
+      "sample_id": "synthetic-001",
+      "boundary_case": "short_health_without_renewal",
+      "source_kind": "synthetic",
+      "status": "pending",
+      "reason": "真实产品目录中尚未由精算师确认符合该边界的文件；不得自行推断。"
+    },
+    {
+      "sample_id": "synthetic-002",
+      "boundary_case": "long_guaranteed_renewal_health",
+      "source_kind": "synthetic",
+      "status": "pending",
+      "reason": "真实产品目录中尚未由精算师确认符合该边界的文件；不得自行推断。"
+    },
+    {
+      "sample_id": "synthetic-003",
+      "boundary_case": "annuity",
+      "source_kind": "synthetic",
+      "status": "pending",
+      "reason": "当前23份真实产品中没有年金险文件，后续需补充脱敏或合成样例。"
+    },
+    {
+      "sample_id": "synthetic-004",
+      "boundary_case": "unrecognized_clause_title",
+      "source_kind": "synthetic",
+      "status": "pending",
+      "reason": "需由精算师确认真实标题样例，当前不伪造预期主题或审核结论。"
+    }
+  ]
+}

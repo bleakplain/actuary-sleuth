@@ -12,6 +12,7 @@ from lib.compliance.applicability import (
     RegulationApplicability,
     match_regulation_applicability,
 )
+from lib.doc_parser.pd.product_tagging import build_product_tags
 
 
 def _health_product(**overrides) -> ProductTags:
@@ -87,6 +88,24 @@ def test_explicit_special_feature_false_excludes_and_none_is_indeterminate():
     assert unknown.status is MatchStatus.INDETERMINATE
 
 
+def test_special_features_within_same_dimension_are_or():
+    regulation = RegulationApplicability(
+        special_features=frozenset({"internet_exclusive", "rate_adjustable"}),
+    )
+
+    result = match_regulation_applicability(
+        _health_product(
+            is_internet_exclusive=True,
+            is_rate_adjustable=False,
+        ),
+        regulation,
+    )
+
+    assert result.status is MatchStatus.APPLICABLE
+    assert "special_feature" in result.matched_dimensions
+    assert "special_feature" not in result.excluded_by
+
+
 def test_explicit_conflict_wins_over_an_unknown_dimension():
     product = _health_product(
         line=ProductLine.LIFE,
@@ -141,3 +160,47 @@ def test_related_tags_do_not_constrain_applicability():
     assert result.status is MatchStatus.APPLICABLE
     assert regulation.lines == frozenset()
     assert regulation.subtypes == frozenset()
+
+
+def test_one_year_guaranteed_health_product_keeps_long_term_regulations():
+    product = build_product_tags(
+        "某某长期医疗保险条款",
+        "保险期间为1年。本合同保证续保。保证续保期间为20年。",
+        complete_document=True,
+    )
+    long_term_rule = RegulationApplicability(
+        lines=frozenset({"health"}),
+        term_classes=frozenset({"long_term"}),
+    )
+    short_term_rule = RegulationApplicability(
+        lines=frozenset({"health"}),
+        term_classes=frozenset({"short_term"}),
+    )
+
+    assert match_regulation_applicability(
+        product,
+        long_term_rule,
+    ).status is MatchStatus.APPLICABLE
+    assert match_regulation_applicability(
+        product,
+        short_term_rule,
+    ).status is MatchStatus.NOT_APPLICABLE
+
+
+def test_ordinary_health_product_keeps_ordinary_regulations():
+    product = build_product_tags(
+        "某某医疗保险条款",
+        "保险期间为一年。",
+        complete_document=True,
+    )
+    regulation = RegulationApplicability(
+        lines=frozenset({"health"}),
+        subtypes=frozenset({"medical"}),
+        design_types=frozenset({"ordinary"}),
+    )
+
+    assert product.design_type is ProductDesignType.ORDINARY
+    assert match_regulation_applicability(
+        product,
+        regulation,
+    ).status is MatchStatus.APPLICABLE

@@ -53,7 +53,9 @@ class OllamaClient(BaseLLMClient):
             }
         }
 
-        response = self._session.post(url, json=data, timeout=self.timeout)
+        response = self._session.post(
+            url, json=data, timeout=kwargs.get("timeout", self.timeout),
+        )
         response.raise_for_status()
         result = response.json()
         return result.get('response', '')
@@ -76,7 +78,9 @@ class OllamaClient(BaseLLMClient):
             }
         }
 
-        response = self._session.post(url, json=data, timeout=self.timeout)
+        response = self._session.post(
+            url, json=data, timeout=kwargs.get("timeout", self.timeout),
+        )
         response.raise_for_status()
         result = response.json()
         content = result.get('message', {}).get('content', '')

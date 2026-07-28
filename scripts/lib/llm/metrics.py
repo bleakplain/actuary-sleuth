@@ -198,8 +198,16 @@ def _retry_with_backoff(
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             last_exception = None
+            retry_deadline = kwargs.pop("_retry_deadline", None)
 
             for attempt in range(max_retries):
+                if (
+                    isinstance(retry_deadline, (int, float))
+                    and time.monotonic() >= retry_deadline
+                ):
+                    raise requests.exceptions.Timeout(
+                        "LLM retry deadline exceeded"
+                    ) from last_exception
                 try:
                     return func(*args, **kwargs)
                 except requests.exceptions.RequestException as e:
@@ -223,18 +231,25 @@ def _retry_with_backoff(
                     if is_rate_limit:
                         delay = base_delay * (rate_limit_delay_mult ** attempt)
                         logger.warning(f"Rate limited, retrying in {delay:.1f}s...")
-                        time.sleep(delay)
                     elif is_server_error:
                         delay = base_delay * (2 ** attempt)
                         logger.warning(f"Server error ({e.response.status_code if hasattr(e, 'response') and e.response else '?'}), retrying in {delay:.1f}s...")
-                        time.sleep(delay)
                     elif is_timeout:
                         delay = base_delay * (1.5 ** attempt)
                         logger.warning(f"Timeout, retrying in {delay:.1f}s...")
-                        time.sleep(delay)
                     else:
                         logger.error(f"Request failed: {e}, retrying in {base_delay}s...")
-                        time.sleep(base_delay)
+                        delay = base_delay
+
+                    if isinstance(retry_deadline, (int, float)):
+                        remaining = retry_deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise requests.exceptions.Timeout(
+                                "LLM retry deadline exceeded"
+                            ) from last_exception
+                        delay = min(delay, remaining)
+                    if attempt < max_retries - 1:
+                        time.sleep(delay)
 
             raise last_exception
 

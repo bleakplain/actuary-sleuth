@@ -90,6 +90,14 @@ class LLMConstants:
 class ComplianceConstants:
     """合规检查常量"""
 
+    EVALUATION_DATASET_VERSION = "compliance-audit-v1"
+    EVALUATION_DATASET_STATUS = "pending"
+    CUTOVER_GATE_STATUS = "blocked"
+    AUDIT_TOTAL_DEADLINE_SECONDS = 300.0
+    AUDIT_REPORT_PERSISTENCE_RESERVE_SECONDS = 5.0
+    AUDIT_MAX_CONCURRENCY = 5
+    MAX_PRODUCT_DOCUMENT_BYTES = 25 * 1024 * 1024
+    MAX_RICH_TEXT_CHARACTERS = 5_000_000
     VALID_CATEGORIES: List[str] = ["健康险", "医疗险", "重疾险", "寿险", "意外险", "年金险", "财产险", "分红险"]
 
     # ProductCategory 枚举值 → 合规检查险种类别（子类别归入大类）
@@ -162,4 +170,4 @@ class ComplianceConstants:
         "中国银保监会办公厅关于进一步规范保险机构互联网人身保险业务有关事项的通知（银保监办发〔2021〕108号）",
     ]
 
-    ALLOWED_EXTENSIONS: List[str] = [".pdf", ".docx"]
+    ALLOWED_EXTENSIONS: List[str] = [".pdf", ".doc", ".docx"]

@@ -1,17 +1,15 @@
 """产品条款主题的确定性标签器。"""
 from __future__ import annotations
 
-import json
 from functools import lru_cache
-from pathlib import Path
 from typing import Dict, Tuple
+
+from .clause_topics import load_clause_topic_keywords, load_clause_topic_registry
 
 
 @lru_cache(maxsize=1)
 def _load_keywords() -> Dict[str, Tuple[str, ...]]:
-    path = Path(__file__).parent / "data" / "clause_topic_keywords.json"
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    return {topic: tuple(words) for topic, words in raw.items()}
+    return load_clause_topic_keywords(load_clause_topic_registry())
 
 
 def tag_clause_topics(title: str, text: str) -> Tuple[str, ...]:

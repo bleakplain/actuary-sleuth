@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0.0",
+  "topic_schema_version": "1.0.0",
+  "relations": [
+    {
+      "regulation_topic": "renewal.general",
+      "related_topics": ["renewal.guaranteed", "renewal.non_guaranteed", "renewal.reapplication", "renewal.termination", "coverage.period", "contract.definition"],
+      "not_relevant_topics": [{"topic": "policy.beneficiary", "fixture_id": "renewal-beneficiary-v1"}]
+    },
+    {
+      "regulation_topic": "renewal.guaranteed",
+      "related_topics": ["renewal.general", "renewal.non_guaranteed", "renewal.reapplication", "renewal.termination", "coverage.period", "contract.definition"],
+      "not_relevant_topics": [{"topic": "policy.beneficiary", "fixture_id": "renewal-beneficiary-v1"}]
+    },
+    {
+      "regulation_topic": "renewal.non_guaranteed",
+      "related_topics": ["renewal.general", "renewal.guaranteed", "renewal.reapplication", "renewal.termination", "coverage.period", "contract.definition"],
+      "not_relevant_topics": [{"topic": "policy.beneficiary", "fixture_id": "renewal-beneficiary-v1"}]
+    },
+    {
+      "regulation_topic": "renewal.reapplication",
+      "related_topics": ["renewal.general", "renewal.guaranteed", "renewal.non_guaranteed", "renewal.termination", "coverage.period", "contract.definition"],
+      "not_relevant_topics": [{"topic": "policy.beneficiary", "fixture_id": "renewal-beneficiary-v1"}]
+    },
+    {
+      "regulation_topic": "renewal.termination",
+      "related_topics": ["renewal.general", "renewal.guaranteed", "renewal.non_guaranteed", "renewal.reapplication", "coverage.period", "contract.definition"],
+      "not_relevant_topics": [{"topic": "policy.beneficiary", "fixture_id": "renewal-beneficiary-v1"}]
+    },
+    {
+      "regulation_topic": "coverage.period",
+      "related_topics": ["renewal.general", "renewal.guaranteed", "renewal.non_guaranteed", "renewal.reapplication", "renewal.termination", "contract.definition"],
+      "not_relevant_topics": [{"topic": "policy.beneficiary", "fixture_id": "period-beneficiary-v1"}]
+    },
+    {
+      "regulation_topic": "coverage.exclusion",
+      "related_topics": ["coverage.responsibility", "application.disclosure", "disclosure.exemption_notice"],
+      "not_relevant_topics": [{"topic": "policy.dividend", "fixture_id": "exclusion-dividend-v1"}]
+    },
+    {
+      "regulation_topic": "coverage.waiting_period",
+      "related_topics": ["coverage.responsibility", "coverage.period", "contract.definition"],
+      "not_relevant_topics": [{"topic": "policy.assignment", "fixture_id": "waiting-assignment-v1"}]
+    }
+  ]
+}

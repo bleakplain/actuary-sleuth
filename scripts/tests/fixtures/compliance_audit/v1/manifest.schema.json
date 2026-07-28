@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "compliance-audit-v1-manifest.schema.json",
+  "title": "Compliance audit acceptance fixture manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "dataset_status",
+    "kb",
+    "annotations",
+    "actuary_review",
+    "cutover_gate",
+    "products",
+    "candidate_boundary_cases",
+    "synthetic_boundary_samples"
+  ],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "dataset_id": {"const": "compliance-audit-v1"},
+    "dataset_status": {"enum": ["pending", "accepted", "rejected"]},
+    "kb": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "build_manifest_sha256",
+        "source_file",
+        "source_sha256",
+        "documents",
+        "chunks"
+      ],
+      "properties": {
+        "version": {"const": "v5"},
+        "build_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "source_file": {"type": "string", "minLength": 1},
+        "source_sha256": {"$ref": "#/$defs/sha256"},
+        "documents": {"type": "integer", "minimum": 1},
+        "chunks": {"type": "integer", "minimum": 1}
+      }
+    },
+    "annotations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "status", "fields"],
+      "properties": {
+        "version": {"type": "string", "minLength": 1},
+        "status": {"enum": ["pending", "accepted", "rejected"]},
+        "fields": {
+          "type": "object",
+          "additionalProperties": {"enum": ["pending", "accepted", "rejected"]},
+          "minProperties": 1
+        }
+      }
+    },
+    "actuary_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reviewer", "reviewed_at", "comment"],
+      "properties": {
+        "status": {"enum": ["pending", "accepted", "rejected"]},
+        "reviewer": {"type": ["string", "null"]},
+        "reviewed_at": {"type": ["string", "null"]},
+        "comment": {"type": "string"}
+      }
+    },
+    "cutover_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason"],
+      "properties": {
+        "status": {"enum": ["blocked", "open"]},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "products": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/product"}
+    },
+    "candidate_boundary_cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/boundaryCase"}
+    },
+    "synthetic_boundary_samples": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/syntheticSample"}
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sample_id",
+        "file_name",
+        "format",
+        "size_bytes",
+        "sha256",
+        "source_kind",
+        "annotation_status"
+      ],
+      "properties": {
+        "sample_id": {"type": "string", "pattern": "^real-[0-9]{3}$"},
+        "file_name": {"type": "string", "minLength": 1},
+        "format": {"enum": ["doc", "docx", "pdf"]},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "source_kind": {"const": "real"},
+        "annotation_status": {"enum": ["pending", "accepted", "rejected"]}
+      }
+    },
+    "boundaryCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "description",
+        "source_status",
+        "product_candidates",
+        "annotation_status"
+      ],
+      "properties": {
+        "case_id": {"type": "string", "minLength": 1},
+        "description": {"type": "string", "minLength": 1},
+        "source_status": {"enum": ["real_candidate", "synthetic_pending"]},
+        "product_candidates": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^real-[0-9]{3}$"},
+          "uniqueItems": true
+        },
+        "annotation_status": {"enum": ["pending", "accepted", "rejected"]}
+      }
+    },
+    "syntheticSample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sample_id",
+        "boundary_case",
+        "source_kind",
+        "status",
+        "reason"
+      ],
+      "properties": {
+        "sample_id": {"type": "string", "pattern": "^synthetic-[0-9]{3}$"},
+        "boundary_case": {"type": "string", "minLength": 1},
+        "source_kind": {"const": "synthetic"},
+        "status": {"const": "pending"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

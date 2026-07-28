@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional
+from pathlib import Path
+from typing import List, Optional, Tuple
 
 
 # 条款起始标记：第一条条款之前的段落是"产品名候选区"
@@ -38,6 +39,25 @@ _COMPANY_NAMES = [
 
 # 设计类型（出现在产品名末尾括号内）
 _DESIGN_TYPES = ["普通型", "分红型", "万能型", "投资连结型", "变额型"]
+_REGULATION_TITLE_WORDS = (
+    "办法",
+    "通知",
+    "规定",
+    "意见",
+    "规则",
+    "指引",
+    "条例",
+    "细则",
+    "监管",
+)
+_FORMAL_PRODUCT_TYPE_PATTERN = re.compile(
+    r'(?:'
+    r'失能收入损失保险|重大疾病保险|重疾保险|疾病保险|护理保险|'
+    r'意外伤害医疗保险|意外医疗保险|医疗意外保险|医疗保险|'
+    r'终身寿险|定期寿险|人寿保险|两全保险|年金保险|'
+    r'意外伤害保险|健康保险'
+    r')'
+)
 
 
 @dataclass(frozen=True)
@@ -49,6 +69,13 @@ class ProductNameRecognition:
     duration_type: Optional[str] = None    # 终身/定期 标签
     design_type: Optional[str] = None      # 设计类型（普通型/分红型/万能型等）
     warnings: List[str] = field(default_factory=list)  # 命名合规警告
+
+
+@dataclass(frozen=True)
+class ProductNameResolution:
+    recognition: ProductNameRecognition
+    source: str
+    warnings: Tuple[str, ...]
 
 
 def _is_clause_start(text: str) -> bool:
@@ -76,15 +103,33 @@ def _clean_product_name(raw: str) -> str:
     return name
 
 
+def _is_regulation_reference(value: str) -> bool:
+    return (
+        any(word in value for word in _REGULATION_TITLE_WORDS)
+        or value.strip().endswith(("法", "决定"))
+    )
+
+
+def _is_formal_product_name(value: str) -> bool:
+    """产品名必须含受控险种后缀，不能把阅读提示中的“保险条款”当名称。"""
+    return (
+        bool(_FORMAL_PRODUCT_TYPE_PATTERN.search(value))
+        and not _is_regulation_reference(value)
+    )
+
+
 def _try_bracket_match(paragraphs: List[str]) -> Optional[str]:
     """规则 1：从含《》的段落里提取产品名"""
     for text in paragraphs:
-        m = _BRACKET_NAME_PATTERN.search(text)
-        if m:
+        for m in _BRACKET_NAME_PATTERN.finditer(text):
+            inner = m.group(1).strip()
+            if (
+                not _is_formal_product_name(inner)
+            ):
+                continue
             # 取《》内完整内容 + 后续到"条款"的部分
             full_match = m.group(0)
             # 去掉书名号包裹后保留核心
-            inner = full_match.removeprefix('《').split('》')[0]
             suffix = full_match.split('》', 1)[1] if '》' in full_match else ''
             return _clean_product_name(f"{inner}{suffix}")
     return None
@@ -95,7 +140,14 @@ def _try_bare_match(paragraphs: List[str]) -> Optional[str]:
     for text in paragraphs:
         m = _BARE_NAME_PATTERN.search(text)
         if m:
-            return _clean_product_name(m.group(1))
+            candidate = m.group(1)
+            if (
+                "《" in text
+                or "》" in candidate
+                or not _is_formal_product_name(candidate)
+            ):
+                continue
+            return _clean_product_name(candidate)
     return None
 
 
@@ -103,7 +155,12 @@ def _try_fallback_match(paragraphs: List[str]) -> Optional[str]:
     """规则 3：兜底——最长的含"保险"的短段落"""
     candidates = [
         t for t in paragraphs
-        if '保险' in t and len(t) <= 60
+        if (
+            _is_formal_product_name(t)
+            and len(t) <= 60
+            and '《' not in t
+            and '》' not in t
+        )
     ]
     if not candidates:
         return None
@@ -335,4 +392,58 @@ def recognize_product_name(paragraphs: List[str]) -> ProductNameRecognition:
         duration_type=duration_type,
         design_type=design_type,
         warnings=warnings,
+    )
+
+
+def _recognize_selected_name(product_name: str) -> ProductNameRecognition:
+    name = product_name.strip()
+    is_rider = _detect_is_rider(name)
+    group_or_individual = _extract_group_or_individual(name)
+    duration_type = _extract_duration_type(name)
+    design_type = next((value for value in _DESIGN_TYPES if value in name), None)
+    return ProductNameRecognition(
+        product_name=name,
+        is_rider=is_rider,
+        group_or_individual=group_or_individual,
+        duration_type=duration_type,
+        design_type=design_type,
+        warnings=_check_naming_compliance(
+            name, is_rider, group_or_individual, design_type,
+        ),
+    )
+
+
+def resolve_product_name(
+    recognized: ProductNameRecognition,
+    file_name: str,
+    user_product_name: Optional[str] = None,
+) -> ProductNameResolution:
+    """按用户输入、正文识别、文件名顺序选择唯一产品名称。"""
+    user_name = (user_product_name or "").strip()
+    if user_name:
+        selected = _recognize_selected_name(user_name)
+        warnings = list(selected.warnings)
+        if recognized.product_name and recognized.product_name != user_name:
+            warnings.append(
+                f"用户填写的产品名称“{user_name}”覆盖正文识别名称"
+                f"“{recognized.product_name}”"
+            )
+        return ProductNameResolution(selected, "user_input", tuple(warnings))
+
+    if recognized.product_name:
+        return ProductNameResolution(
+            recognized, "document_content", tuple(recognized.warnings),
+        )
+
+    file_stem = Path(file_name).stem.strip()
+    file_recognition = recognize_product_name([file_stem])
+    if file_recognition.product_name:
+        warnings = list(file_recognition.warnings)
+        warnings.append("正文未识别到产品名称，已回退使用原文件名")
+        return ProductNameResolution(
+            file_recognition, "file_name", tuple(warnings),
+        )
+
+    return ProductNameResolution(
+        recognized, "unknown", tuple(recognized.warnings),
     )

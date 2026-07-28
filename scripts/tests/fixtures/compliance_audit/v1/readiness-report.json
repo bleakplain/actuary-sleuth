@@ -1,0 +1,55 @@
+{
+  "schema_version": "1",
+  "status": "ready_with_known_gaps",
+  "knowledge_base": {
+    "version": "v5",
+    "document_count": 25,
+    "chunk_count": 171,
+    "expected_document_count": 25,
+    "expected_chunk_count": 171,
+    "manifest_matches": true,
+    "applicability_tagged_chunks": 125,
+    "limited_tagged_chunks": 125,
+    "involved_tagged_chunks": 0,
+    "ambiguous_semantics_chunks": 0,
+    "regulation_topic_tagged_chunks": 29,
+    "missing_section_path_chunks": 0,
+    "boundary_issue_count": 0,
+    "boundary_issues": []
+  },
+  "products": {
+    "document_count": 23,
+    "parsed_document_count": 23,
+    "extension_counts": {
+      ".doc": 9,
+      ".docx": 11,
+      ".pdf": 3
+    },
+    "subtype_counts": {
+      "accident": 3,
+      "critical_illness": 4,
+      "disability_income": 2,
+      "disease": 1,
+      "endowment": 1,
+      "medical": 6,
+      "medical_accident": 2,
+      "nursing": 4
+    },
+    "clause_block_count": 1406,
+    "tagged_clause_block_count": 421,
+    "untagged_clause_block_count": 985,
+    "tagged_block_ratio": 0.299431,
+    "clause_char_count": 271927,
+    "tagged_clause_char_count": 96955,
+    "untagged_clause_char_count": 174972,
+    "tagged_char_ratio": 0.356548,
+    "topic_code_count": 59,
+    "keyword_mapping_count": 47,
+    "parse_failures": [],
+    "unknown_subtype_files": []
+  },
+  "known_gaps": [
+    "v5 当前没有涉及标签；涉及/限定分离仍是目标能力",
+    "产品条款仍有未标主题内容；unknown 条款必须保守保留"
+  ]
+}

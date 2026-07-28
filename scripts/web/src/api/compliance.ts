@@ -1,15 +1,49 @@
 import client from './client';
-import type { ComplianceReport, AuditResultItem, ParsedDocument } from '../types';
+import type {
+  AuditRegulationItem,
+  AuditResultItem,
+  AuditStatus,
+  CandidateFreezeProgress,
+  ComplianceConclusion,
+  ComplianceReport,
+  ExcludedRegulationUnit,
+  ParsedAuditBlock,
+  ParsedDocument,
+  RegulationDecision,
+  RegulationDecisionProgress,
+} from '../types';
 
-interface DoneData {
+export interface DoneData {
   report_id: string;
   product_name: string;
   category: string;
   summary: { compliant: number; non_compliant: number; attention: number };
-  negative_list_result: string;
+  negative_list_result: string | null;
+  regulations: AuditRegulationItem[];
+  excluded_regulations: ExcludedRegulationUnit[];
+  decisions: RegulationDecision[];
+  product_tags: Record<string, unknown>;
+  document_fingerprint: string;
+  audit_input_fingerprint: string;
+  product_name_source: string;
+  parse_warnings: string[];
   regulation_sources: Record<string, string[]>;
   retrieval_degraded: boolean;
   retrieval_warnings: string[];
+  audit_status: AuditStatus;
+  compliance_conclusion: ComplianceConclusion;
+  kb_version: string;
+  topic_taxonomy_version: string;
+  topic_relations_version: string;
+  evaluation_dataset_version: string;
+  evaluation_dataset_status?: string;
+  cutover_gate_status?: string;
+  candidate_count: number;
+  excluded_count: number;
+  completed_count: number;
+  failed_count: number;
+  failure_reasons: string[];
+  items?: AuditResultItem[];
   clause_coverage: {
     total: number;
     checked: number;
@@ -20,24 +54,44 @@ interface DoneData {
     has_health?: boolean;
     has_exclusions?: boolean;
     has_tables?: boolean;
-  };
+  } | null;
 }
 
-export function checkDocumentStream(
-  params: { document_content: string; product_name?: string; category?: string; clause_topics?: string[] },
-  callbacks: {
-    onViolation: (item: AuditResultItem) => void;
-    onProgress: (msg: string) => void;
-    onDone: (data: DoneData & { items: AuditResultItem[] }) => void;
-    onError: (err: string) => void;
-  },
+type StreamParams = {
+  document_content: string;
+  parse_id?: string;
+  parse_attestation?: string;
+  document_fingerprint?: string;
+  audit_input_fingerprint?: string;
+  product_name?: string;
+  product_name_source?: string;
+  parse_warnings?: string[];
+  category?: string;
+  clause_topics?: string[];
+  audit_blocks?: ParsedAuditBlock[];
+  product_tags?: Record<string, unknown>;
+};
+
+type StreamCallbacks = {
+  onViolation: (item: AuditResultItem) => void;
+  onCandidateFreeze?: (progress: CandidateFreezeProgress) => void;
+  onDecision?: (decision: RegulationDecisionProgress) => void;
+  onProgress: (msg: string) => void;
+  onDone: (data: DoneData & { items: AuditResultItem[] }) => void;
+  onError: (err: string) => void;
+};
+
+function startDocumentStream(
+  endpoint: string,
+  params: StreamParams,
+  callbacks: StreamCallbacks,
 ): AbortController {
   const controller = new AbortController();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = localStorage.getItem('auth_token');
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  fetch('/api/compliance/check/document/stream', {
+  fetch(endpoint, {
     method: 'POST',
     headers,
     body: JSON.stringify(params),
@@ -52,6 +106,54 @@ export function checkDocumentStream(
       const decoder = new TextDecoder();
       let buffer = '';
       const items: AuditResultItem[] = [];
+      let terminalReceived = false;
+
+      const failOnce = (error: string) => {
+        if (terminalReceived) return;
+        terminalReceived = true;
+        callbacks.onError(error);
+      };
+
+      const processLine = (rawLine: string): boolean => {
+        const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+        if (!line.startsWith('data:') || terminalReceived) return terminalReceived;
+        const payload = line.slice(5).trim();
+        if (!payload) return false;
+        let event: { type?: string; data?: unknown };
+        try {
+          event = JSON.parse(payload) as { type?: string; data?: unknown };
+        } catch {
+          failOnce('审核服务返回了无法解析的事件，审核结果不完整');
+          return true;
+        }
+        if (event.type === 'violation') {
+          const item = event.data as AuditResultItem;
+          items.push(item);
+          callbacks.onViolation(item);
+        } else if (event.type === 'progress') {
+          callbacks.onProgress(String(event.data ?? ''));
+        } else if (event.type === 'candidate_freeze') {
+          callbacks.onCandidateFreeze?.(
+            event.data as CandidateFreezeProgress,
+          );
+        } else if (event.type === 'regulation_decision') {
+          callbacks.onDecision?.(
+            event.data as RegulationDecisionProgress,
+          );
+        } else if (event.type === 'done') {
+          const doneData = event.data as DoneData;
+          const finalItems = Array.isArray(doneData.items)
+            ? doneData.items
+            : items;
+          terminalReceived = true;
+          callbacks.onDone({ ...doneData, items: finalItems });
+        } else if (event.type === 'error') {
+          failOnce(typeof event.data === 'string'
+            ? event.data
+            : '审核服务报告失败，审核结果不完整');
+        }
+        return terminalReceived;
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -62,24 +164,16 @@ export function checkDocumentStream(
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (!line.startsWith('data:')) continue;
-          try {
-            const data = JSON.parse(line.slice(5).trim());
-            if (data.type === 'violation') {
-              const item = data.data as AuditResultItem;
-              items.push(item);
-              callbacks.onViolation(item);
-            } else if (data.type === 'progress') {
-              callbacks.onProgress(data.data);
-            } else if (data.type === 'done') {
-              callbacks.onDone({ ...data.data, items });
-            } else if (data.type === 'error') {
-              callbacks.onError(data.data);
-            }
-          } catch {
-            // skip malformed SSE lines
-          }
+          if (processLine(line)) break;
         }
+        if (terminalReceived) break;
+      }
+      buffer += decoder.decode();
+      if (!terminalReceived && buffer.trim()) {
+        processLine(buffer);
+      }
+      if (!terminalReceived) {
+        failOnce('审核连接在终态前结束，审核结果不完整');
       }
     })
     .catch((err) => {
@@ -89,6 +183,28 @@ export function checkDocumentStream(
     });
 
   return controller;
+}
+
+export function checkDocumentStream(
+  params: StreamParams,
+  callbacks: StreamCallbacks,
+): AbortController {
+  return startDocumentStream(
+    '/api/compliance/check/document/stream',
+    params,
+    callbacks,
+  );
+}
+
+export function checkDocumentV2Stream(
+  params: StreamParams,
+  callbacks: StreamCallbacks,
+): AbortController {
+  return startDocumentStream(
+    '/api/compliance/check/document/v2/stream',
+    params,
+    callbacks,
+  );
 }
 
 export async function fetchComplianceReports(): Promise<ComplianceReport[]> {

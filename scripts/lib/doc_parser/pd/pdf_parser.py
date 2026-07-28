@@ -12,7 +12,15 @@ from typing import Any, Dict, List, Optional
 
 import pdfplumber
 
-from ..models import AuditDocument, Clause, DataTable, DocumentParseError, SectionType, TableType
+from ..models import (
+    AuditDocument,
+    Clause,
+    DataTable,
+    DocumentParseError,
+    DocumentSection,
+    SectionType,
+    TableType,
+)
 from .header_footer_filter import HeaderFooterFilter
 from .layout_analyzer import LayoutAnalyzer
 from .section_detector import SectionDetector
@@ -20,7 +28,7 @@ from .table_classifier import TableClassifier
 from .toc_detector import TocDetector
 from .utils import add_section, split_title_and_content
 from .clause_tagger import tag_clause_topics
-from .product_name_recognizer import recognize_product_name
+from .product_name_recognizer import recognize_product_name, resolve_product_name
 from .product_tagging import build_product_tags
 
 logger = logging.getLogger(__name__)
@@ -40,10 +48,19 @@ class PdfParser:
     def supported_extensions() -> List[str]:
         return ['.pdf']
 
-    def parse(self, file_path: str) -> AuditDocument:
+    def parse(
+        self,
+        file_path: str,
+        *,
+        original_file_name: Optional[str] = None,
+        user_product_name: Optional[str] = None,
+    ) -> AuditDocument:
         path = Path(file_path)
         if not path.exists():
             raise DocumentParseError("文件不存在", file_path)
+        display_file_name = (
+            Path(original_file_name).name if original_file_name else path.name
+        )
 
         try:
             pdf = pdfplumber.open(file_path)
@@ -63,36 +80,65 @@ class PdfParser:
             opening_lines: List[str] = []
             for page in pdf.pages[:5]:
                 opening_lines.extend((page.extract_text() or "").splitlines())
-            recognition = recognize_product_name(opening_lines)
+            recognized = recognize_product_name(opening_lines)
+            name_resolution = resolve_product_name(
+                recognized, display_file_name, user_product_name,
+            )
+            recognition = name_resolution.recognition
             clauses = self._extract_clauses(pdf.pages, warnings)
             tables = self._extract_tables(pdf.pages, warnings)
             sections_data = self._extract_special_sections(pdf.pages, warnings)
+            sections_data["unclassified_sections"] = (
+                self._extract_unclassified_sections(
+                    pdf.pages,
+                    clauses,
+                    tables,
+                    sections_data,
+                )
+            )
         finally:
             pdf.close()
 
         clauses = [replace(clause, topics=tag_clause_topics(clause.title, clause.text)) for clause in clauses]
+        sections_data["rider_clauses"] = [
+            replace(clause, topics=tag_clause_topics(clause.title, clause.text))
+            for clause in sections_data["rider_clauses"]
+        ]
         document_parts = [f"{clause.title}\n{clause.text}" for clause in clauses]
         document_parts.extend(table.raw_text for table in tables)
-        for section_name in ('notices', 'health_disclosures', 'exclusions', 'rider_clauses'):
+        for section_name in (
+            'unclassified_sections',
+            'notices',
+            'health_disclosures',
+            'exclusions',
+            'rider_clauses',
+        ):
             document_parts.extend(
                 f"{item.title}\n{getattr(item, 'content', getattr(item, 'text', ''))}"
                 for item in sections_data[section_name]
             )
         document_content = "\n".join(part for part in document_parts if part)
-        product_tags = build_product_tags(recognition.product_name, document_content)
-        warnings.extend(recognition.warnings)
+        product_tags = build_product_tags(
+            recognition.product_name,
+            document_content,
+            product_name_source=name_resolution.source,
+            complete_document=True,
+        )
+        warnings.extend(name_resolution.warnings)
         warnings.extend(product_tags.warnings)
 
         return AuditDocument(
-            file_name=path.name,
+            file_name=display_file_name,
             file_type='.pdf',
             clauses=clauses,
             tables=tables,
+            unclassified_sections=sections_data['unclassified_sections'],
             notices=sections_data['notices'],
             health_disclosures=sections_data['health_disclosures'],
             exclusions=sections_data['exclusions'],
             rider_clauses=sections_data['rider_clauses'],
             product_name=recognition.product_name,
+            product_name_source=name_resolution.source,
             is_rider=recognition.is_rider,
             group_or_individual=recognition.group_or_individual,
             duration_type=recognition.duration_type,
@@ -205,6 +251,78 @@ class PdfParser:
         if match:
             return match
         return None
+
+    def _extract_unclassified_sections(
+        self,
+        pages: List,
+        clauses: List[Clause],
+        tables: List[DataTable],
+        sections_data: Dict[str, List[Any]],
+    ) -> List[DocumentSection]:
+        """保留首个编号条款前的正文，并排除已进入其他结构的明显重复行。"""
+        represented: set[str] = set()
+
+        def register(value: str) -> None:
+            represented.update(
+                re.sub(r'\s+', ' ', line).strip()
+                for line in value.splitlines()
+                if line.strip()
+            )
+
+        for clause in clauses:
+            register(clause.title)
+            register(clause.text)
+        for table in tables:
+            register(table.raw_text)
+            register(table.remark)
+        for section_name in (
+            'notices',
+            'health_disclosures',
+            'exclusions',
+            'rider_clauses',
+        ):
+            for item in sections_data[section_name]:
+                register(item.title)
+                register(getattr(item, 'content', getattr(item, 'text', '')))
+
+        result: List[DocumentSection] = []
+        seen: set[str] = set()
+        reached_clause = False
+        page_marker = re.compile(
+            r'^(?:第\s*\d+\s*页|Page\s*\d+|共\s*\d+\s*页|\d+\s*/\s*\d+)$',
+            re.IGNORECASE,
+        )
+        for page_idx, page in enumerate(pages):
+            is_toc, _ = self.toc_detector.detect(page, page_idx)
+            if is_toc:
+                continue
+            text = self.header_footer_filter.filter(page)
+            if not text:
+                text = page.extract_text() or ''
+            for line in text.splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if self._match_clause_line(stripped):
+                    reached_clause = True
+                    break
+                normalized = re.sub(r'\s+', ' ', stripped).strip()
+                if (
+                    page_marker.match(normalized)
+                    or self.detector.detect_section_type(stripped)
+                    or normalized in represented
+                    or normalized in seen
+                ):
+                    continue
+                seen.add(normalized)
+                result.append(DocumentSection(
+                    title='',
+                    content=stripped,
+                    section_type=SectionType.UNCLASSIFIED.value,
+                ))
+            if reached_clause:
+                break
+        return result
 
     def _merge_clause(
         self,
@@ -466,6 +584,7 @@ class PdfParser:
         }
 
         current_type: Optional[SectionType] = None
+        current_title = ''
         current_content: List[str] = []
 
         for page_idx, page in enumerate(pages):
@@ -487,21 +606,51 @@ class PdfParser:
 
                 detected = self.detector.detect_section_type(stripped)
                 if detected:
-                    # EXCLUSION 类型跳过（已在 clauses 中）
                     if detected == SectionType.EXCLUSION:
+                        if current_type:
+                            add_section(
+                                result,
+                                current_type,
+                                current_title,
+                                '\n'.join(current_content),
+                            )
+                            current_type = None
+                            current_title = ''
+                            current_content = []
+                        if not any(
+                            section.title == stripped
+                            for section in result['exclusions']
+                        ):
+                            result['exclusions'].append(DocumentSection(
+                                title=stripped,
+                                content='',
+                                section_type=SectionType.EXCLUSION.value,
+                            ))
                         continue
                     # 同类型章节标题视为延续，不重新开始
                     if detected == current_type:
-                        current_content.append(stripped)
+                        if stripped != current_title:
+                            current_content.append(stripped)
                     else:
-                        if current_type and current_content:
-                            add_section(result, current_type, '', '\n'.join(current_content))
+                        if current_type:
+                            add_section(
+                                result,
+                                current_type,
+                                current_title,
+                                '\n'.join(current_content),
+                            )
                         current_type = detected
+                        current_title = stripped
                         current_content = []
                 elif current_type:
                     current_content.append(stripped)
 
-        if current_type and current_content:
-            add_section(result, current_type, '', '\n'.join(current_content))
+        if current_type:
+            add_section(
+                result,
+                current_type,
+                current_title,
+                '\n'.join(current_content),
+            )
 
         return result

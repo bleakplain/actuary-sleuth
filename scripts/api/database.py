@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS compliance_reports (
     product_name TEXT NOT NULL DEFAULT '',
     category TEXT NOT NULL DEFAULT '',
     mode TEXT NOT NULL CHECK(mode IN ('product', 'document')),
+    owner_user_id TEXT NOT NULL DEFAULT '',
     result_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -326,6 +327,22 @@ def _migrate_db():
             conn.execute("ALTER TABLE eval_samples ADD COLUMN created_by TEXT NOT NULL DEFAULT 'human'")
         if 'kb_version' not in sample_cols:
             conn.execute("ALTER TABLE eval_samples ADD COLUMN kb_version TEXT NOT NULL DEFAULT ''")
+
+        report_cols = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(compliance_reports)"
+            ).fetchall()
+        }
+        if 'owner_user_id' not in report_cols:
+            conn.execute(
+                "ALTER TABLE compliance_reports "
+                "ADD COLUMN owner_user_id TEXT NOT NULL DEFAULT ''"
+            )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_compliance_reports_owner "
+            "ON compliance_reports(owner_user_id)"
+        )
 
         run_cols = {row[1] for row in conn.execute("PRAGMA table_info(eval_runs)").fetchall()}
         if 'config_version' not in run_cols:
@@ -1140,29 +1157,51 @@ def save_compliance_report(
     category: str,
     mode: str,
     result: Dict,
+    owner_user_id: str = "",
 ) -> None:
     with get_connection() as conn:
         conn.execute(
-            "INSERT INTO compliance_reports (id, product_name, category, mode, result_json) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO compliance_reports "
+            "(id, product_name, category, mode, result_json, owner_user_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
             (report_id, product_name, category, mode,
-             json.dumps(result, ensure_ascii=False)),
+             json.dumps(result, ensure_ascii=False), owner_user_id),
         )
 
 
-def list_compliance_reports() -> List[Dict]:
+def list_compliance_reports(
+    owner_user_id: Optional[str] = None,
+) -> List[Dict]:
     with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT * FROM compliance_reports ORDER BY created_at DESC"
-        ).fetchall()
+        if owner_user_id is None:
+            rows = conn.execute(
+                "SELECT * FROM compliance_reports ORDER BY created_at DESC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM compliance_reports "
+                "WHERE owner_user_id = ? ORDER BY created_at DESC",
+                (owner_user_id,),
+            ).fetchall()
         return [_deserialize_json_fields(dict(r), {"result": "result_json"}) for r in rows]
 
 
-def get_compliance_report(report_id: str) -> Optional[Dict]:
+def get_compliance_report(
+    report_id: str,
+    owner_user_id: Optional[str] = None,
+) -> Optional[Dict]:
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM compliance_reports WHERE id = ?", (report_id,)
-        ).fetchone()
+        if owner_user_id is None:
+            row = conn.execute(
+                "SELECT * FROM compliance_reports WHERE id = ?",
+                (report_id,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM compliance_reports "
+                "WHERE id = ? AND owner_user_id = ?",
+                (report_id, owner_user_id),
+            ).fetchone()
         if row is None:
             return None
         return _deserialize_json_fields(dict(row), {"result": "result_json"})

@@ -49,7 +49,7 @@ LLM 针对一个独立法规条款单元及其候选产品条款输出结构化�
 - 输出限于 compliant、non_compliant、insufficient_information、manual_review；
 - non_compliant 必须同时引用法规证据和产品条款证据；
 - 无效输出、调用失败或证据不足不得变成合规；
-- 小批量只是传输优化，各单元的 prompt、输出和证据严格隔离。
+- 第一版一法规条款单元一 HTTP 请求，最多并发 5 个，各单元的 prompt、输出和证据严格隔离。
 
 ### US5：确定性程序只提供事实证据（P2）
 
@@ -87,7 +87,7 @@ LLM 针对一个独立法规条款单元及其候选产品条款输出结构化�
 - **FR-010**：单元失败 MUST 标记 manual_review 和 incomplete，并继续其他独立单元。
 - **FR-011**：事实提取器 MUST 不形成最终合规结论。
 - **FR-012**：旧 `rule_engine.py` 结果 MUST 不进入新主链，并在切换完成后删除旧生产路径。
-- **FR-013**：并发和小批量 MUST 不改变结论集合或证据归属。
+- **FR-013**：并发 MUST 不改变结论集合或证据归属；没有原生 batch API 时 MUST NOT 把多个单元拼进同一 prompt。
 - **FR-014**：端到端审核目标时长暂定不超过 5 分钟，初始最大并发为 5。
 
 ## Success Criteria

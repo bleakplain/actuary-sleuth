@@ -50,6 +50,9 @@ def _ensure_knowledge_base():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global rag_engine, _rag_initialized
+    from lib.auth.jwt import validate_auth_configuration
+    validate_auth_configuration()
+
     from api.database import init_db
     init_db()
     logger.info("数据库初始化完成")
@@ -173,7 +176,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from api.routers import ask, knowledge, eval as eval_router, compliance, kb_version, feedback, observability
+from api.routers import (
+    ask,
+    compliance,
+    compliance_v2,
+    eval as eval_router,
+    feedback,
+    kb_version,
+    knowledge,
+    observability,
+)
 from api.routers import auth, admin as admin_router
 from api.routers.memory import router as memory_router
 app.include_router(auth.router)
@@ -182,6 +194,7 @@ app.include_router(ask.router)
 app.include_router(knowledge.router)
 app.include_router(eval_router.router)
 app.include_router(compliance.router)
+app.include_router(compliance_v2.router)
 app.include_router(kb_version.router)
 app.include_router(feedback.router)
 app.include_router(observability.router)

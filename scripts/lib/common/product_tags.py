@@ -3,7 +3,45 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple, Type, TypeVar
+
+_EnumValue = TypeVar("_EnumValue", bound=Enum)
+
+
+def _enum_or_default(
+    enum_type: Type[_EnumValue],
+    value: object,
+    default: _EnumValue,
+) -> _EnumValue:
+    try:
+        return enum_type(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _optional_bool(value: object) -> Optional[bool]:
+    return value if isinstance(value, bool) else None
+
+
+def _optional_float(value: object) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _enum_tuple(
+    enum_type: Type[_EnumValue],
+    values: object,
+) -> Tuple[_EnumValue, ...]:
+    if not isinstance(values, (list, tuple)):
+        return ()
+    result = []
+    for value in values:
+        try:
+            result.append(enum_type(value))
+        except (TypeError, ValueError):
+            continue
+    return tuple(result)
 
 
 class ProductLine(str, Enum):
@@ -258,6 +296,125 @@ class ProductTags:
             "disability_income", "nursing",
         }
         return len(health_components.intersection(self.coverage_components)) > 1
+
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, object]) -> "ProductTags":
+        """恢复由 ``to_dict`` 产生的受控标签，不采纳未知字段。"""
+        term_forms = _enum_tuple(ProductTermForm, raw.get("term_forms"))
+        raw_term_options = raw.get("term_options")
+        option_items = (
+            raw_term_options
+            if isinstance(raw_term_options, (list, tuple))
+            else ()
+        )
+        term_options = tuple(
+            TermOption(
+                kind=str(item.get("kind", "")),
+                value=_optional_float(item.get("value")),
+                unit=str(item.get("unit", "")),
+            )
+            for item in option_items
+            if isinstance(item, Mapping)
+            and str(item.get("kind", "")).strip()
+        )
+        raw_evidence = raw.get("evidence")
+        evidence_items = (
+            raw_evidence
+            if isinstance(raw_evidence, (list, tuple))
+            else ()
+        )
+        evidence = tuple(
+            TagEvidence(
+                field_name=str(item.get("field_name", "")),
+                value=str(item.get("value", "")),
+                source=str(item.get("source", "")),
+                evidence=str(item.get("evidence", "")),
+                confidence=float(item.get("confidence", 0.0)),
+            )
+            for item in evidence_items
+            if isinstance(item, Mapping)
+            and isinstance(item.get("confidence", 0.0), (int, float))
+        )
+        insured_age = raw.get("insured_age")
+        age = insured_age if isinstance(insured_age, Mapping) else {}
+
+        def strings(key: str) -> Tuple[str, ...]:
+            values = raw.get(key)
+            if not isinstance(values, (list, tuple)):
+                return ()
+            return tuple(str(value) for value in values if str(value).strip())
+
+        return cls(
+            line=_enum_or_default(ProductLine, raw.get("line"), ProductLine.UNKNOWN),
+            primary_subtype=_enum_or_default(
+                ProductSubtype,
+                raw.get("primary_subtype"),
+                ProductSubtype.UNKNOWN,
+            ),
+            design_type=_enum_or_default(
+                ProductDesignType,
+                raw.get("design_type"),
+                ProductDesignType.UNKNOWN,
+            ),
+            term_class=_enum_or_default(
+                ProductTermClass,
+                raw.get("term_class"),
+                ProductTermClass.UNKNOWN,
+            ),
+            term_forms=term_forms,
+            term_options=term_options,
+            health_term_class=_enum_or_default(
+                HealthTermClass,
+                raw.get("health_term_class"),
+                HealthTermClass.UNKNOWN,
+            ),
+            customer_scope=_enum_or_default(
+                CustomerScope,
+                raw.get("customer_scope"),
+                CustomerScope.UNKNOWN,
+            ),
+            contract_role=_enum_or_default(
+                ContractRole,
+                raw.get("contract_role"),
+                ContractRole.UNKNOWN,
+            ),
+            premium_pattern=_enum_or_default(
+                PremiumPattern,
+                raw.get("premium_pattern"),
+                PremiumPattern.UNKNOWN,
+            ),
+            renewal_type=_enum_or_default(
+                RenewalType,
+                raw.get("renewal_type"),
+                RenewalType.UNKNOWN,
+            ),
+            is_internet_exclusive=_optional_bool(raw.get("is_internet_exclusive")),
+            is_rate_adjustable=_optional_bool(raw.get("is_rate_adjustable")),
+            is_tax_advantaged_health=_optional_bool(raw.get("is_tax_advantaged_health")),
+            is_city_customized_medical=_optional_bool(raw.get("is_city_customized_medical")),
+            coverage_components=strings("coverage_components"),
+            medical_benefit_basis=_enum_or_default(
+                MedicalBenefitBasis,
+                raw.get("medical_benefit_basis"),
+                MedicalBenefitBasis.UNKNOWN,
+            ),
+            disease_payment_pattern=_enum_or_default(
+                DiseasePaymentPattern,
+                raw.get("disease_payment_pattern"),
+                DiseasePaymentPattern.UNKNOWN,
+            ),
+            has_cash_value=_optional_bool(raw.get("has_cash_value")),
+            policy_rights=strings("policy_rights"),
+            insured_age_min=_optional_float(age.get("minimum")),
+            insured_age_max=_optional_float(age.get("maximum")),
+            insured_populations=strings("insured_populations"),
+            has_waiting_period=_optional_bool(raw.get("has_waiting_period")),
+            has_hesitation_period=_optional_bool(raw.get("has_hesitation_period")),
+            deductible_types=strings("deductible_types"),
+            health_management_service=str(raw.get("health_management_service", "unknown")),
+            evidence=evidence,
+            warnings=strings("warnings"),
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         result = {

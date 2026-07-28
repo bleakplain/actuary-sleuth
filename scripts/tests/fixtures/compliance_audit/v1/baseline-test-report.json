@@ -1,0 +1,38 @@
+{
+  "schema_version": "1",
+  "baseline_date": "2026-07-28",
+  "baseline_commit": "2bffae4",
+  "full_suite": {
+    "command": "pytest scripts/tests/ --no-cov -q",
+    "status": "known_failures",
+    "passed": 703,
+    "failed": 24,
+    "errors": 13,
+    "skipped": 4,
+    "deselected": 2,
+    "oracle": false,
+    "source": ".Codex/specs/036-tagged-regulation-retrieval/research.md",
+    "known_failure_categories": [
+      "SQLite 配置路径在当前环境不可写",
+      "Ollama 未启动导致真实向量索引测试失败",
+      "合规 E2E 依赖未运行的 API 或外部 LLM",
+      "认证、权限和 memory 测试存在既有环境或 Python 3.14 兼容问题"
+    ]
+  },
+  "phase0_offline_gate": {
+    "command": "pytest -q scripts/tests/compliance/test_acceptance_manifest.py scripts/tests/compliance/test_readiness.py scripts/tests/lib/doc_parser/test_integration_real_docs.py::TestRealDocuments::test_parse_all_acceptance_products_without_llm --no-cov",
+    "status": "passed",
+    "passed": 11,
+    "failed": 0,
+    "errors": 0,
+    "uses_external_llm": false,
+    "uses_network": false,
+    "covers_real_products": 23,
+    "covers_legacy_doc": 9
+  },
+  "type_check": {
+    "command": "mypy scripts/lib/compliance/readiness.py --show-error-codes",
+    "status": "tooling_blocked",
+    "detail": "mypy 2.0.0 在 Python 3.14.4 下触发 INTERNAL ERROR；以 py_compile 和离线 pytest 作为本阶段新增文件门禁，并保留该既有工具链缺陷。"
+  }
+}
