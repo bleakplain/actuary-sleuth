@@ -4,8 +4,9 @@
 import json
 import pytest
 from pathlib import Path
+from lib.config import get_regulations_dir
 
-EXCEL_PATH = Path(__file__).parent.parent.parent.parent.parent / "references" / "1.产品开发检查清单2025年.xlsx"
+EXCEL_PATH = Path(get_regulations_dir()) / "1.产品开发检查清单2026年.xlsx"
 
 requires_excel_data = pytest.mark.skipif(
     not EXCEL_PATH.exists(),
@@ -50,28 +51,28 @@ class TestSheetStructureParser:
 
     @requires_excel_data
     def test_detect_regulation_boundaries_standard(self, excel_workbook):
-        """Standard sheets (00, 02-05) have title in row 1, headers in row 2, regulation in row 3."""
+        """2026 标准表从第一行读取表头、第二行读取法规名。"""
         from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure
 
         sheet = _find_sheet(excel_workbook, "00")
         assert sheet is not None
 
         structure = parse_sheet_structure(sheet, "00. 对照样例")
-        assert structure.header_row == 2
-        assert structure.data_start_row == 4
+        assert structure.header_row == 1
+        assert structure.data_start_row == 3
         assert structure.regulation_name != ""
 
     @requires_excel_data
     def test_detect_regulation_boundaries_with_owner(self, excel_workbook):
-        """Sheets with '产品开发责任人' row (01, 06-08) have headers in row 3, data in row 5."""
+        """2026 负面清单包含责任人行，第二行表头、第四行开始数据。"""
         from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure
 
         sheet = _find_sheet(excel_workbook, "01")
         assert sheet is not None
 
         structure = parse_sheet_structure(sheet, "01. 对照样例")
-        assert structure.header_row == 3
-        assert structure.data_start_row == 5
+        assert structure.header_row == 2
+        assert structure.data_start_row == 4
 
     @requires_excel_data
     def test_detect_sub_regulations_in_sheet_10(self, excel_workbook):
@@ -83,7 +84,7 @@ class TestSheetStructureParser:
 
         structure = parse_sheet_structure(sheet, "10. 对照样例")
         # Sheet 10 should have multiple sub-regulations
-        assert len(structure.sub_regulations) >= 5
+        assert len(structure.sub_regulations) == 2
 
     @requires_excel_data
     def test_extract_metadata_columns(self, excel_workbook):
@@ -100,6 +101,44 @@ class TestSheetStructureParser:
 
 class TestClauseExtraction:
     """Tests for clause extraction and sub-regulation filtering."""
+
+    def test_2026_header_driven_columns_and_continuation_rows(self):
+        from openpyxl import Workbook
+        from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure, extract_clauses
+
+        wb = Workbook()
+        sheet = wb.active
+        sheet.title = "00. test"
+        sheet.append(["序号", None, "项目", "产品条款对应条目", "涉及险种大类", "逻辑"])
+        sheet.append(["测试法规", None, None, None, None, None])
+        sheet.append([1, "第一条", "规则一", "保险期间\n续保", "健康保险", "应当"])
+        sheet.append([None, None, "规则一的独立子要求", None, "健康保险", "不得"])
+
+        structure = parse_sheet_structure(sheet, sheet.title)
+        clauses = extract_clauses(sheet, structure)
+
+        assert structure.header_row == 1
+        assert [clause.content for clause in clauses] == ["规则一", "规则一的独立子要求"]
+        assert clauses[0].metadata["条款主体"] == "保险期间\n续保"
+        assert clauses[0].metadata["适用标签"] == "health"
+        assert clauses[0].metadata["适用标签语义"] == "限定"
+        assert clauses[1].metadata["规则逻辑"] == "不得"
+
+    def test_related_tags_are_not_emitted_as_applicability_constraints(self):
+        from openpyxl import Workbook
+        from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure, extract_clauses
+
+        wb = Workbook()
+        sheet = wb.active
+        sheet.title = "00. test"
+        sheet.append(["序号", "项目", "涉及险种大类", "涉及险种类型", "标签语义"])
+        sheet.append(["测试法规", None, None, None, None])
+        sheet.append([1, "背景说明", "健康保险", "护理保险", "涉及"])
+
+        clauses = extract_clauses(sheet, parse_sheet_structure(sheet, sheet.title))
+
+        assert clauses[0].metadata["涉及标签"] == "health,nursing"
+        assert "适用标签" not in clauses[0].metadata
 
     @requires_excel_data
     def test_extract_clauses_returns_entries(self, excel_workbook):
@@ -128,6 +167,38 @@ class TestClauseExtraction:
         clauses = extract_clauses(sheet, structure)
         clauses_with_meta = [c for c in clauses if c.metadata]
         assert len(clauses_with_meta) > 0
+
+    @requires_excel_data
+    def test_negative_list_preserves_row_specific_check_requirement(self, excel_workbook):
+        """相同问题描述的相邻行应保留各自不同的具体检查要求。"""
+        from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure, extract_clauses
+
+        sheet = _find_sheet(excel_workbook, "01")
+        structure = parse_sheet_structure(sheet, "01. 对照样例")
+        clauses = extract_clauses(sheet, structure)
+
+        assert "检查项目" in structure.headers.values()
+        clauses_with_requirement = [c for c in clauses if c.metadata.get("检查要求")]
+        assert clauses_with_requirement
+        assert all(c.metadata["检查要求"] in c.content for c in clauses_with_requirement)
+        repeated = [c for c in clauses if c.metadata.get("原序号") in {"23", "24"}]
+        assert len(repeated) == 2
+        assert repeated[0].content != repeated[1].content
+
+    @requires_excel_data
+    def test_short_health_renewal_rule_uses_regulatory_meaning(self, excel_workbook):
+        """栏目名为保证续保，但正文要求不保证续保时应保留正文监管语义。"""
+        from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure, extract_clauses
+
+        sheet = _find_sheet(excel_workbook, "06")
+        structure = parse_sheet_structure(sheet, "06. 对照样例")
+        clauses = extract_clauses(sheet, structure)
+        renewal = next(c for c in clauses if "不保证续保" in c.content)
+
+        topics = set(renewal.metadata["条款主题"].split(","))
+        assert "renewal.general" in topics
+        assert "renewal.non_guaranteed" in topics
+        assert "renewal.guaranteed" not in topics
 
     @requires_excel_data
     def test_sheet_10_sub_regulation_filtering(self, excel_workbook):
@@ -180,10 +251,19 @@ class TestMarkdownGeneration:
 
         assert md.startswith("---\n")
         assert "# 负面清单" in md
-        assert "## 第1项" in md
-        assert "## 第2项" in md
+        assert "## 第1条检核规则" in md
+        assert "## 第2条检核规则" in md
         assert "> **元数据**: 险种大类=人身保险" in md
         assert "第一条内容" in md
+
+    def test_markdown_uses_local_rule_number_and_preserves_source_number(self):
+        from lib.doc_parser.kb.converter.excel_to_md import clauses_to_markdown, ClauseEntry
+
+        clauses = [ClauseEntry(sequence=22, content="规则内容", metadata={"原序号": "5"})]
+        md = clauses_to_markdown(clauses, "---\n---\n", "测试法规")
+
+        assert "## 第1条检核规则" in md
+        assert "原序号=5" in md
 
     def test_clauses_to_markdown_no_metadata_no_blockquote(self):
         """Clauses without metadata should not produce blockquote lines."""

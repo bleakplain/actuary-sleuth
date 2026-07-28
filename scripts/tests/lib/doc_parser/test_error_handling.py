@@ -21,7 +21,7 @@ class TestErrorHandling:
         assert "不支持" in str(exc.value)
 
     def test_doc_format_error(self, tmp_path):
-        """测试 .doc 格式不支持"""
+        """损坏的 .doc 应报告转换失败，而不是格式不支持。"""
         pytest.importorskip("docx")
         from lib.doc_parser import parse_product_document
 
@@ -30,7 +30,7 @@ class TestErrorHandling:
 
         with pytest.raises(DocumentParseError) as exc:
             parse_product_document(str(doc_file))
-        assert "不支持" in str(exc.value)
+        assert "旧版 Word" in str(exc.value)
 
     def test_corrupted_docx(self, tmp_path):
         """测试损坏的 docx 文件"""

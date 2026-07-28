@@ -16,10 +16,9 @@ PRODUCTS_DIR = Path("/mnt/d/work/actuary-assets/products")
 def get_product_files() -> List[Path]:
     """获取所有产品文档文件"""
     files = []
-    for ext in ['.docx', '.pdf']:
+    for ext in ['.doc', '.docx', '.pdf']:
         files.extend(PRODUCTS_DIR.glob(f"*{ext}"))
-    # 排除 .doc 文件（不支持）
-    return [f for f in files if not f.name.endswith('.doc')]
+    return files
 
 
 def parse_file(file_path: Path) -> Dict[str, Any]:

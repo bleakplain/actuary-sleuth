@@ -7,8 +7,26 @@ from dataclasses import dataclass
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
 from lib.common.constants import ComplianceConstants
+from lib.common.product_tags import (
+    PRODUCT_TAG_LABELS,
+    ProductDesignType,
+    ProductLine,
+    ProductSubtype,
+    ProductTags,
+)
 from lib.common.product_types import ProductCategory, classify_product
+from lib.compliance.prompts import (
+    STREAMING_AUDIT_PROMPT,
+    STREAMING_NEGATIVE_LIST_PROMPT,
+)
 from lib.compliance.rule_engine import check_rules as _check_rules, ProductMetadata
+from lib.llm import get_audit_llm
+from lib.llm.base import BaseLLMClient
+from lib.rag_engine import get_engine
+from lib.rag_engine.layered_retrieval import (
+    get_candidate_identity,
+    layer_regulation_candidates,
+)
 
 VALID_CATEGORIES = ComplianceConstants.VALID_CATEGORIES
 
@@ -19,13 +37,58 @@ def _get_category_regulations(category: str) -> List[str]:
 
 def _get_general_regulations() -> List[str]:
     return ComplianceConstants.GENERAL_REGULATIONS.copy()
-from lib.llm import get_audit_llm
-from lib.llm.base import BaseLLMClient
-from lib.rag_engine import get_engine
-from lib.compliance.prompts import (
-    STREAMING_AUDIT_PROMPT,
-    STREAMING_NEGATIVE_LIST_PROMPT,
-)
+
+
+def infer_category_from_product_tags(product_tags: ProductTags) -> Optional[str]:
+    """在常规险种识别失败时，用已取证的产品标签恢复法规分类。"""
+    if product_tags.line is ProductLine.HEALTH:
+        if product_tags.primary_subtype is ProductSubtype.MEDICAL:
+            return "医疗险"
+        if product_tags.primary_subtype is ProductSubtype.CRITICAL_ILLNESS:
+            return "重疾险"
+        return "健康险"
+    if product_tags.line is ProductLine.LIFE:
+        if product_tags.primary_subtype is ProductSubtype.ANNUITY:
+            return "年金险"
+        if product_tags.design_type is ProductDesignType.PARTICIPATING:
+            return "分红险"
+        return "寿险"
+    if product_tags.line is ProductLine.ACCIDENT:
+        return "意外险"
+    return None
+
+
+def build_regulation_retrieval_query(
+    product_name: str,
+    document_content: str,
+    product_tags: ProductTags,
+) -> str:
+    """把受控产品标签转成检索词，避免专业子类缺少上位险种词导致弱召回。"""
+    tag_terms = (
+        PRODUCT_TAG_LABELS["line"].get(product_tags.line.value, ""),
+        PRODUCT_TAG_LABELS["primary_subtype"].get(product_tags.primary_subtype.value, ""),
+        PRODUCT_TAG_LABELS["term_class"].get(product_tags.term_class.value, ""),
+    )
+    parts = [product_name, *tag_terms, document_content[:3000]]
+    return "\n".join(dict.fromkeys(part for part in parts if part and part != "未知"))
+
+
+def _list_registered_regulations(category: Optional[str]) -> List[str]:
+    if category:
+        categories = [category]
+        parent = ComplianceConstants.CATEGORY_PARENT_MAPPING.get(category)
+        if parent:
+            categories.append(parent)
+        names = [
+            name
+            for current_category in categories
+            for name in _get_category_regulations(current_category)
+        ]
+        return list(dict.fromkeys(names))
+    all_names: List[str] = []
+    for category_names in ComplianceConstants.CATEGORY_REGULATION_REGISTRY.values():
+        all_names.extend(category_names)
+    return list(dict.fromkeys(all_names))
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +124,18 @@ class AuditRegulationItem:
     doc_number: str = ""
     issuing_authority: str = ""
     effective_date: str = ""
+    applicability_status: str = ""
+    matched_dimensions: Tuple[str, ...] = ()
+    matched_topics: Tuple[str, ...] = ()
+    fallback_layer: str = ""
+    retrieval_sources: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RegulationRetrievalOutcome:
+    regulations: Tuple[AuditRegulationItem, ...]
+    degraded: bool = False
+    warnings: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -137,13 +212,17 @@ def _build_regulation_item(doc: Dict, source_type: str) -> AuditRegulationItem:
         issuing_authority=doc.get("issuing_authority", ""),
         effective_date=doc.get("effective_date", ""),
         source_type=source_type,
+        applicability_status=doc.get("applicability_status", ""),
+        matched_dimensions=tuple(doc.get("matched_dimensions", ())),
+        matched_topics=tuple(doc.get("matched_topics", ())),
+        fallback_layer=doc.get("fallback_layer", ""),
+        retrieval_sources=tuple(doc.get("retrieval_sources", ())),
     )
 
 
 def _load_regulation_chunks(
     engine: Any,
     reg_names: List[str],
-    seen_keys: set,
     all_results: List[Tuple[Dict, str]],
     source_type: str,
 ) -> None:
@@ -152,10 +231,30 @@ def _load_regulation_chunks(
         if not results:
             logger.warning(f"注册法规在知识库中未找到: {reg_name}")
         for r in results:
-            key = (r.get("law_name", ""), r.get("article_number", ""))
-            if key not in seen_keys:
-                seen_keys.add(key)
-                all_results.append((r, source_type))
+            all_results.append((r, source_type))
+
+
+def _merge_registered_candidates(
+    registered: List[Tuple[Dict, str]],
+) -> List[Tuple[Dict[str, Any], str]]:
+    """按 chunk 身份合并重复注册来源，同时保留 category/general 来源轨迹。"""
+    merged: Dict[str, Tuple[Dict[str, Any], str]] = {}
+    for item, source_type in registered:
+        identity = get_candidate_identity(item)
+        if identity not in merged:
+            candidate = dict(item)
+            candidate["retrieval_sources"] = [f"registered:{source_type}"]
+            merged[identity] = (candidate, source_type)
+            continue
+        candidate, current_type = merged[identity]
+        sources = set(candidate.get("retrieval_sources", ()))
+        sources.add(f"registered:{source_type}")
+        candidate["retrieval_sources"] = sorted(sources)
+        if source_type == "category":
+            merged[identity] = (candidate, "category")
+        else:
+            merged[identity] = (candidate, current_type)
+    return list(merged.values())
 
 
 def load_audit_regulations(category: Optional[str]) -> List[AuditRegulationItem]:
@@ -167,15 +266,122 @@ def load_audit_regulations(category: Optional[str]) -> List[AuditRegulationItem]
         logger.warning("RAG 引擎未初始化")
         return []
     all_results: List[Tuple[Dict, str]] = []
-    seen_keys: set = set()
     if category:
-        _load_regulation_chunks(engine, _get_category_regulations(category), seen_keys, all_results, "category")
-    _load_regulation_chunks(engine, _get_general_regulations(), seen_keys, all_results, "general")
-    regulations = [_build_regulation_item(r, st) for r, st in all_results]
+        _load_regulation_chunks(engine, _list_registered_regulations(category), all_results, "category")
+    _load_regulation_chunks(engine, _get_general_regulations(), all_results, "general")
+    regulations = [
+        _build_regulation_item(item, source_type)
+        for item, source_type in _merge_registered_candidates(all_results)
+    ]
     logger.info(f"加载法规: 共 {len(regulations)} 条")
     with _regulation_cache_lock:
         _regulation_cache[category] = regulations
     return regulations
+
+
+def retrieve_audit_regulations_with_status(
+    query: str,
+    category: Optional[str],
+    product_tags: ProductTags,
+    clause_topics: Tuple[str, ...] = (),
+    top_k: int = 12,
+) -> RegulationRetrievalOutcome:
+    """用产品适用性和条款主题对混合检索及注册法规候选进行安全分层。"""
+    engine = get_engine()
+    if engine is None:
+        fallback_regulations = load_audit_regulations(category)
+        return RegulationRetrievalOutcome(
+            regulations=tuple(fallback_regulations),
+            degraded=True,
+            warnings=("法规知识库未初始化，法规检索不可用；本次仅执行确定性规则和负面清单检查",),
+        )
+
+    warnings: List[str] = []
+    registered: List[Tuple[Dict, str]] = []
+    effective_category = category or infer_category_from_product_tags(product_tags)
+    if category is None and effective_category:
+        logger.warning("险种识别为空，按产品标签回退为 %s", effective_category)
+    elif effective_category is None:
+        logger.warning("险种和产品大类均未知，保守加载所有险种注册法规")
+    _load_regulation_chunks(
+        engine, _list_registered_regulations(effective_category), registered, "category",
+    )
+    _load_regulation_chunks(engine, _get_general_regulations(), registered, "general")
+    merged_registered = _merge_registered_candidates(registered)
+    registered_by_identity = {
+        get_candidate_identity(item): (item, source_type)
+        for item, source_type in merged_registered
+    }
+
+    try:
+        semantic = engine.search_candidates(query, top_k=max(top_k * 3, 24))
+    except Exception as exc:
+        logger.warning("基础混合检索失败，使用注册法规候选继续分层: %s", exc)
+        warnings.append("语义检索失败，已降级为注册法规候选检索")
+        semantic = []
+    candidates: List[Dict[str, Any]] = []
+    for item in semantic:
+        candidate = dict(item)
+        registered_match = registered_by_identity.get(get_candidate_identity(candidate))
+        sources = set(candidate.get("retrieval_sources", ()))
+        if registered_match:
+            registered_item, source_type = registered_match
+            sources.update(registered_item.get("retrieval_sources", ()))
+            candidate["_source_type"] = source_type
+        else:
+            candidate["_source_type"] = "semantic"
+        candidate["retrieval_sources"] = sorted(sources)
+        candidates.append(candidate)
+    for item, source_type in merged_registered:
+        candidate = dict(item)
+        candidate["_source_type"] = source_type
+        candidates.append(candidate)
+    if not candidates:
+        warnings.append("法规知识库未返回任何候选，无法执行基于法规正文的审核")
+
+    layered = layer_regulation_candidates(
+        candidates,
+        product_tags=product_tags,
+        clause_topics=clause_topics,
+        top_k=top_k,
+    )
+    logger.info(
+        "标签分层检索: 候选=%d, 排除=%d, 返回=%d, fallback=%s",
+        layered.candidate_count,
+        layered.excluded_count,
+        len(layered.chunks),
+        layered.fallback_used,
+    )
+    if not layered.chunks:
+        logger.info("标签分层检索无结果：候选均被明确判定为不适用")
+        return RegulationRetrievalOutcome(
+            regulations=(),
+            degraded=bool(warnings),
+            warnings=tuple(warnings),
+        )
+    regulations = tuple(
+        _build_regulation_item(item, item.get("_source_type", "tagged_retrieval"))
+        for item in layered.chunks
+    )
+    return RegulationRetrievalOutcome(
+        regulations=regulations,
+        degraded=bool(warnings),
+        warnings=tuple(warnings),
+    )
+
+
+def retrieve_audit_regulations(
+    query: str,
+    category: Optional[str],
+    product_tags: ProductTags,
+    clause_topics: Tuple[str, ...] = (),
+    top_k: int = 12,
+) -> List[AuditRegulationItem]:
+    """兼容原调用方，只返回法规列表；API 应使用带状态的入口。"""
+    outcome = retrieve_audit_regulations_with_status(
+        query, category, product_tags, clause_topics, top_k,
+    )
+    return list(outcome.regulations)
 
 
 # --- Category identification ---

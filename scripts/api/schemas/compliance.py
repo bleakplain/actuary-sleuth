@@ -1,6 +1,6 @@
 """合规检查相关 schema"""
 from typing import Dict, List, Optional
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AuditRegulationItemResponse(BaseModel):
@@ -13,6 +13,11 @@ class AuditRegulationItemResponse(BaseModel):
     doc_number: Optional[str] = None
     issuing_authority: Optional[str] = None
     effective_date: Optional[str] = None
+    applicability_status: str = ""
+    matched_dimensions: List[str] = Field(default_factory=list)
+    matched_topics: List[str] = Field(default_factory=list)
+    fallback_layer: str = ""
+    retrieval_sources: List[str] = Field(default_factory=list)
 
 
 class AuditResultItemResponse(BaseModel):
@@ -33,6 +38,8 @@ class ComplianceReportDataResponse(BaseModel):
     regulation_sources: Dict[str, List[str]] = {}
     category: Optional[str] = ""
     negative_list_result: Optional[str] = ""
+    retrieval_degraded: bool = False
+    retrieval_warnings: List[str] = Field(default_factory=list)
     clause_coverage: Optional[Dict] = None
 
 
@@ -49,12 +56,14 @@ class DocumentCheckRequest(BaseModel):
     document_content: str
     product_name: str = ""
     category: str = ""
+    clause_topics: List[str] = Field(default_factory=list)
 
 
 class ParsedClause(BaseModel):
     number: str
     title: str
     text: str
+    topics: List[str] = Field(default_factory=list)
 
 
 class ParsedDataTable(BaseModel):
@@ -92,6 +101,7 @@ class ParsedDocumentResponse(BaseModel):
     duration_type: Optional[str] = None
     design_type: Optional[str] = None
     naming_warnings: List[str] = []
+    product_tags: Dict = Field(default_factory=dict)
 
 
 class RichTextParseRequest(BaseModel):

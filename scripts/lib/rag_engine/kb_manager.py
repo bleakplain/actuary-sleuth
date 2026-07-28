@@ -126,6 +126,7 @@ class KBManager:
     def create_version(
         self,
         description: str = "",
+        activate: bool = True,
     ) -> VersionMeta:
         """创建新版本：仅管理索引，源文件保持在环境变量配置的目录。"""
         version_id = self.next_version_id()
@@ -139,13 +140,14 @@ class KBManager:
         now = datetime.now(timezone.utc).isoformat()
 
         with _get_connection() as conn:
-            conn.execute("UPDATE kb_versions SET active = 0")
+            if activate:
+                conn.execute("UPDATE kb_versions SET active = 0")
             conn.execute(
                 "INSERT INTO kb_versions "
                 "(version_id, created_at, document_count, chunk_count, "
                 "description, active) "
-                "VALUES (?, ?, ?, ?, ?, 1)",
-                (version_id, now, doc_count, 0, description),
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (version_id, now, doc_count, 0, description, int(activate)),
             )
 
         meta = VersionMeta(
@@ -153,7 +155,7 @@ class KBManager:
             created_at=now,
             document_count=doc_count,
             chunk_count=0,
-            active=True,
+            active=activate,
             description=description,
         )
 
@@ -243,6 +245,7 @@ class KBManager:
         file_pattern: str = "**/*.md",
         force_rebuild: bool = False,
         skip_vector: bool = False,
+        activate_on_success: bool = True,
     ) -> Dict[str, Any]:
         """创建版本并构建索引。
 
@@ -251,6 +254,7 @@ class KBManager:
         """
         meta = self.create_version(
             description=description,
+            activate=False,
         )
         version_config = self.load_kb(meta.version_id)
 
@@ -266,6 +270,14 @@ class KBManager:
             meta.version_id,
             stats.get("vector", 0) or stats.get("bm25", 0),
         )
+
+        index_ready = stats.get("bm25", 0) > 0 and (
+            skip_vector or stats.get("vector", 0) > 0
+        )
+        if activate_on_success and index_ready:
+            self.activate_version(meta.version_id)
+        elif activate_on_success:
+            logger.error(f"版本 {meta.version_id} 索引不完整，保留当前 active 版本")
 
         logger.info(f"版本 {meta.version_id} 构建完成: {stats}")
         return {"version_id": meta.version_id, "meta": meta, "stats": stats}

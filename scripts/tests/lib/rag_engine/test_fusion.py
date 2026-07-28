@@ -113,6 +113,7 @@ class TestReciprocalRankFusion:
         result = reciprocal_rank_fusion(nodes, [])
 
         assert 'law_name' in result[0]
+        assert result[0]['id'] == doc.node_id
         assert 'article_number' in result[0]
         assert 'category' in result[0]
         assert 'content' in result[0]

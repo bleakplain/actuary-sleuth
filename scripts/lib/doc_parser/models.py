@@ -8,6 +8,8 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Dict, Any, Optional, Tuple
 
+from ..common.product_tags import ProductTags
+
 
 class SectionType(str, Enum):
     """内容类型枚举"""
@@ -138,6 +140,7 @@ class Clause:
     page_number: Optional[int] = None
     bbox: Optional[Tuple[float, float, float, float]] = None
     table_index: Optional[int] = None
+    topics: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -206,7 +209,7 @@ class DocumentSection:
 class AuditDocument:
     """保险产品审核文档"""
     file_name: str
-    file_type: str  # .docx, .pdf
+    file_type: str  # .doc, .docx, .pdf
 
     clauses: List[Clause] = field(default_factory=list)
     tables: List[DataTable] = field(default_factory=list)
@@ -224,6 +227,7 @@ class AuditDocument:
     duration_type: Optional[str] = None        # 保险期限标签：终身/定期
     design_type: Optional[str] = None          # 设计类型：普通型/分红型/万能型等
     naming_warnings: List[str] = field(default_factory=list)  # 命名合规校验警告
+    product_tags: ProductTags = field(default_factory=ProductTags)
 
     parse_time: datetime = field(default_factory=datetime.now)
     warnings: List[str] = field(default_factory=list)
@@ -239,7 +243,7 @@ class AuditDocument:
     ) -> ChunkMetadata:
         """生成 Chunk 元数据"""
         doc_id = self.file_name.replace('.', '_')
-        doc_type = "insurance_contract" if self.file_type in ['.pdf', '.docx'] else "unknown"
+        doc_type = "insurance_contract" if self.file_type in ['.doc', '.pdf', '.docx'] else "unknown"
         char_count = sum(len(c.text) for c in self.clauses) + sum(
             len(t.raw_text) for t in self.tables
         )

@@ -173,32 +173,6 @@ RULES: List[ComplianceRule] = [
         description="非人寿保险的诉讼时效不得少于2年",
     ),
 
-    # === 保监发〔2015〕90号 — 未成年人身故保额 ===
-    ComplianceRule(
-        rule_id="minor_death_benefit_under10",
-        regulation_source="《关于父母为其未成年子女投保以死亡为给付保险金条件人身保险有关问题的通知》保监发〔2015〕90号",
-        article_number="第一条",
-        target_field="身故保险金",
-        check_type="numeric_comparison",
-        operator="<=",
-        threshold=20,
-        applicable_categories=["寿险", "意外险"],
-        severity="high",
-        description="不满10周岁未成年人的身故保险金总额不得超过20万元",
-    ),
-    ComplianceRule(
-        rule_id="minor_death_benefit_10to17",
-        regulation_source="《关于父母为其未成年子女投保以死亡为给付保险金条件人身保险有关问题的通知》保监发〔2015〕90号",
-        article_number="第一条",
-        target_field="身故保险金",
-        check_type="numeric_comparison",
-        operator="<=",
-        threshold=50,
-        applicable_categories=["寿险", "意外险"],
-        severity="high",
-        description="已满10周岁未满18周岁未成年人的身故保险金总额不得超过50万元",
-    ),
-
     # === 保监人身险〔2017〕134号 — 产品开发设计 ===
     ComplianceRule(
         rule_id="design_first_survival_payment_after_5y",

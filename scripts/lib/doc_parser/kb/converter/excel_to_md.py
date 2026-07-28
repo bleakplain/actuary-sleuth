@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Dict, Optional
 
+from ...pd.clause_tagger import tag_clause_topics
+
 logger = logging.getLogger(__name__)
 
 # 跳过的 sheet 名称
@@ -37,12 +39,35 @@ _SHEET_DIR_MAP = {
 # 非险种目录（不提取险种类型到 frontmatter）
 _NON_INSURANCE_TYPE_DIRS = {"00_保险法", "01_负面清单检查", "02_条款费率管理办法", "10_其他监管规定"}
 
-_METADATA_COLUMNS = {
-    3: "险种大类",
-    4: "险种类型",
-    5: "险种分型",
-    6: "保险期限",
-    7: "主附险",
+_METADATA_HEADERS = {
+    "产品条款对应条目": "条款主体",
+    "涉及险种大类": "险种大类",
+    "涉及险种类型": "险种类型",
+    "涉及产品类型": "险种类型",
+    "涉及险种分型": "险种分型",
+    "涉及产品分型": "险种分型",
+    "涉及保险期限": "保险期限",
+    "涉及主附险": "主附险",
+    "涉及团体个人": "团体个人",
+    "特殊属性": "特殊属性",
+    "标签语义": "适用标签语义",
+    "适用范围性质": "适用标签语义",
+    "逻辑": "规则逻辑",
+    "检查项目": "检查要求",
+    "备注": "备注",
+}
+
+_VALUE_CODES = {
+    "人寿保险": "life", "健康保险": "health", "意外伤害保险": "accident",
+    "定期寿险": "term_life", "终身寿险": "whole_life", "两全保险": "endowment",
+    "年金保险": "annuity", "疾病保险": "disease", "重大疾病保险": "critical_illness",
+    "医疗保险": "medical", "失能收入损失保险": "disability_income", "护理保险": "nursing",
+    "医疗意外保险": "medical_accident", "长期": "long_term", "短期": "short_term",
+    "主险": "main", "附加险": "rider", "个人": "individual", "团体": "group",
+    "普通型": "ordinary", "分红型": "participating", "万能型": "universal",
+    "投连型": "unit_linked", "投资连结型": "unit_linked",
+    "互联网产品": "internet_exclusive", "税优健康险": "tax_advantaged_health",
+    "费率可调": "rate_adjustable",
 }
 
 
@@ -118,27 +143,30 @@ def _list_content_sheets(excel_path: str) -> List[Dict]:
 def parse_sheet_structure(sheet, sheet_name: str) -> SheetStructure:
     """解析 sheet 的结构信息：header 行、数据起始行、法规名称、子法规边界。"""
     rows = list(sheet.iter_rows(min_row=1, max_row=6, values_only=True))
-
-    layout_type = "standard"
-    if len(rows) >= 2 and rows[1] and any(
-        "产品开发责任人" in str(cell) for cell in rows[1] if cell
-    ):
-        layout_type = "with_owner"
-
-    if layout_type == "standard":
-        header_row = 2
-        regulation_row = 3
-        data_start_row = 4
-    else:
-        header_row = 3
-        regulation_row = 4
-        data_start_row = 5
+    header_row = 0
+    for row_idx, row in enumerate(rows, 1):
+        values = {str(cell).strip() for cell in row if cell is not None}
+        if "序号" in values and "项目" in values:
+            header_row = row_idx
+            break
+    if not header_row:
+        raise ValueError(f"sheet未找到‘序号/项目’表头: {sheet_name}")
+    layout_type = "with_owner" if header_row > 1 else "standard"
+    regulation_row = header_row + 1
+    data_start_row = header_row + 2
 
     header_data = rows[header_row - 1] if len(rows) >= header_row else []
     headers = {}
     for idx, val in enumerate(header_data):
         if val:
             headers[idx] = str(val).strip()
+    # 2026 负面清单把“检查项目”放在法规分组标题行，而不是主表头行。
+    # 补充识别这些命名列，避免只保留共性问题描述而丢失逐行检查要求。
+    for row in rows[header_row:header_row + 2]:
+        for idx, val in enumerate(row):
+            normalized = str(val).strip() if val is not None else ""
+            if idx not in headers and normalized in _METADATA_HEADERS:
+                headers[idx] = normalized
 
     regulation_name = ""
     if len(rows) >= regulation_row and rows[regulation_row - 1]:
@@ -185,6 +213,11 @@ def parse_sheet_structure(sheet, sheet_name: str) -> SheetStructure:
 def extract_clauses(sheet, structure: SheetStructure) -> List[ClauseEntry]:
     """从 sheet 中提取所有检查条款及其元数据。"""
     clauses = []
+    content_col = next(
+        (idx for idx, header in structure.headers.items() if header == "项目"),
+        1,
+    )
+    emitted_sequence = 0
 
     for row_idx, row in enumerate(
         sheet.iter_rows(min_row=structure.data_start_row, values_only=True),
@@ -192,22 +225,44 @@ def extract_clauses(sheet, structure: SheetStructure) -> List[ClauseEntry]:
     ):
         cell_a = row[0] if row else None
 
-        if cell_a is None or (not _is_number(cell_a)):
+        if cell_a is not None and not _is_number(cell_a):
             continue
-
-        content = str(row[1] or "").strip() if len(row) > 1 else ""
+        content = str(row[content_col] or "").strip() if len(row) > content_col else ""
         if not content:
             continue
-
+        emitted_sequence += 1
         metadata = {}
-        for col_idx, col_name in _METADATA_COLUMNS.items():
-            if col_idx < len(row) and row[col_idx]:
-                val = str(row[col_idx]).strip()
-                if val and val != "全部":
-                    metadata[col_name] = val
+        if _is_number(cell_a):
+            metadata["原序号"] = str(cell_a)
+        standard_codes: List[str] = []
+        for col_idx, header in structure.headers.items():
+            target_name = _METADATA_HEADERS.get(header)
+            if not target_name or col_idx >= len(row) or not row[col_idx]:
+                continue
+            value = str(row[col_idx]).strip()
+            if not value or value == "全部":
+                continue
+            metadata[target_name] = value
+            values = [item.strip() for item in re.split(r"[\n,，、]", value) if item.strip()]
+            standard_codes.extend(_VALUE_CODES[item] for item in values if item in _VALUE_CODES)
+        if standard_codes:
+            tag_codes = ",".join(dict.fromkeys(standard_codes))
+            if metadata.get("适用标签语义") == "涉及":
+                metadata["涉及标签"] = tag_codes
+            else:
+                metadata["适用标签"] = tag_codes
+                metadata["适用标签语义"] = "限定"
+        check_requirement = metadata.get("检查要求", "")
+        if check_requirement and check_requirement not in content:
+            content = f"{content}\n具体检查要求：{check_requirement}"
+        subject = metadata.get("条款主体", "")
+        if subject:
+            topics = tag_clause_topics(subject, content)
+            if topics:
+                metadata["条款主题"] = ",".join(topics)
 
         clauses.append(ClauseEntry(
-            sequence=int(cell_a) if isinstance(cell_a, (int, float)) else int(float(cell_a)),
+            sequence=emitted_sequence,
             content=content,
             row=row_idx,
             metadata=metadata,
@@ -220,7 +275,7 @@ def format_metadata_block(metadata: Dict[str, str]) -> str:
     """将元数据字典格式化为 blockquote 格式。"""
     if not metadata:
         return ""
-    parts = [f"{k}={v}" for k, v in metadata.items()]
+    parts = [f"{k}={re.sub(r'[\r\n]+', '、', v)}" for k, v in metadata.items()]
     return f"\n> **元数据**: {' | '.join(parts)}\n"
 
 
@@ -262,8 +317,8 @@ def clauses_to_markdown(
     """将条款列表转换为 Markdown 文档内容。"""
     lines = [frontmatter, f"# {regulation_name}", ""]
 
-    for clause in clauses:
-        lines.append(f"## 第{clause.sequence}项")
+    for local_sequence, clause in enumerate(clauses, 1):
+        lines.append(f"## 第{local_sequence}条检核规则")
         lines.append(format_metadata_block(clause.metadata))
         lines.append(clause.content)
         lines.append("")
@@ -454,6 +509,7 @@ def convert_excel_to_markdown(
     excel_path: str,
     output_dir: str,
     skip_ocr: bool = False,
+    skip_name_llm: bool = False,
 ) -> Path:
     """主转换函数：Excel → Markdown 知识库。
 
@@ -493,7 +549,7 @@ def convert_excel_to_markdown(
 
     regulation_names = [r[0] for r in all_regulations if r[0]]
     parsed_map = {}
-    if regulation_names:
+    if regulation_names and not skip_name_llm:
         parsed_map = parse_regulation_names(regulation_names)
         logger.info(f"LLM 解析了 {len(parsed_map)}/{len(regulation_names)} 条法规名称")
 
@@ -623,6 +679,7 @@ def main():
     parser.add_argument("--input", required=True, help="Excel 文件路径")
     parser.add_argument("--output", default=None, help="输出目录路径（默认为项目根目录 references/）")
     parser.add_argument("--skip-ocr", action="store_true", help="跳过 OCR 图片处理")
+    parser.add_argument("--skip-name-llm", action="store_true", help="跳过法规名称 LLM 简化，使用确定性文件名")
     args = parser.parse_args()
 
     output = args.output
@@ -639,6 +696,7 @@ def main():
         excel_path=args.input,
         output_dir=output,
         skip_ocr=args.skip_ocr,
+        skip_name_llm=args.skip_name_llm,
     )
 
 

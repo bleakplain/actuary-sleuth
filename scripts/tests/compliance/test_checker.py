@@ -9,7 +9,11 @@ from lib.compliance.checker import (
     streaming_compliance_check,
     streaming_negative_check,
     identify_category,
+    infer_category_from_product_tags,
+    build_regulation_retrieval_query,
     load_audit_regulations,
+    retrieve_audit_regulations,
+    retrieve_audit_regulations_with_status,
     _extract_real_article_number,
     _build_numbered_regulations,
     _split_document_by_clauses,
@@ -20,6 +24,12 @@ from lib.compliance.checker import (
     _normalize_violation,
     CheckResult,
     CategoryResult,
+)
+from lib.common.product_tags import (
+    ProductDesignType,
+    ProductLine,
+    ProductSubtype,
+    ProductTags,
 )
 
 
@@ -61,6 +71,206 @@ class TestLoadAuditRegulations:
             regulations = load_audit_regulations(None)
             assert len(regulations) == 1
             assert regulations[0].source_type == "general"
+
+
+class TestTaggedRegulationRetrieval:
+    @patch("lib.compliance.checker._get_general_regulations", return_value=[])
+    @patch("lib.compliance.checker._list_registered_regulations", return_value=[])
+    @patch("lib.compliance.checker.get_engine")
+    def test_layers_semantic_candidates_by_product_and_topic(
+        self, mock_engine, _mock_registered_regs, _mock_general_regs,
+    ):
+        mock_engine.return_value.search_candidates.return_value = [
+            {
+                "law_name": "寿险规定",
+                "article_number": "第1条",
+                "content": "寿险规则",
+                "metadata": {"适用标签": "life"},
+            },
+            {
+                "law_name": "短期健康险规定",
+                "article_number": "第2条",
+                "content": "应明确写明不保证续保",
+                "metadata": {
+                    "适用标签": "health,short_term",
+                    "条款主题": "renewal.non_guaranteed",
+                },
+            },
+        ]
+        product_tags = ProductTags(line=ProductLine.HEALTH)
+
+        result = retrieve_audit_regulations(
+            "不保证续保",
+            "健康险",
+            product_tags,
+            ("renewal.non_guaranteed",),
+            top_k=8,
+        )
+
+        assert len(result) == 1
+        assert result[0].law_name == "短期健康险规定"
+        assert result[0].matched_topics == ("renewal.non_guaranteed",)
+        assert result[0].applicability_status == "indeterminate"
+
+    @patch("lib.compliance.checker.load_audit_regulations")
+    @patch("lib.compliance.checker.get_engine", return_value=None)
+    def test_falls_back_to_legacy_loader_when_engine_is_unavailable(
+        self, _mock_engine, mock_legacy,
+    ):
+        mock_legacy.return_value = [_make_reg()]
+
+        result = retrieve_audit_regulations(
+            "query", "健康险", ProductTags(), (), top_k=8,
+        )
+
+        assert result == mock_legacy.return_value
+
+    @patch("lib.compliance.checker.load_audit_regulations", return_value=[])
+    @patch("lib.compliance.checker.get_engine", return_value=None)
+    def test_engine_unavailable_returns_explicit_degraded_status(
+        self, _mock_engine, _mock_legacy,
+    ):
+        outcome = retrieve_audit_regulations_with_status(
+            "query", "健康险", ProductTags(),
+        )
+
+        assert outcome.regulations == ()
+        assert outcome.degraded is True
+        assert "知识库未初始化" in outcome.warnings[0]
+
+    @patch("lib.compliance.checker.load_audit_regulations")
+    @patch("lib.compliance.checker._get_general_regulations", return_value=[])
+    @patch("lib.compliance.checker._list_registered_regulations", return_value=[])
+    @patch("lib.compliance.checker.get_engine")
+    def test_does_not_restore_explicitly_excluded_candidates(
+        self, mock_engine, _mock_registered_regs, _mock_general_regs, mock_legacy,
+    ):
+        mock_engine.return_value.search_candidates.return_value = [{
+            "law_name": "寿险规定",
+            "article_number": "第1条",
+            "content": "仅适用于寿险",
+            "metadata": {"适用标签": "life"},
+        }]
+
+        result = retrieve_audit_regulations(
+            "健康保险", "健康险", ProductTags(line=ProductLine.HEALTH),
+        )
+
+        assert result == []
+        mock_legacy.assert_not_called()
+
+    @patch("lib.compliance.checker._get_general_regulations", return_value=["共同法规"])
+    @patch("lib.compliance.checker._list_registered_regulations", return_value=["共同法规"])
+    @patch("lib.compliance.checker.get_engine")
+    def test_merges_semantic_and_registered_retrieval_sources(
+        self, mock_engine, _mock_registered_regs, _mock_general_regs,
+    ):
+        raw = {
+            "id": "chunk-1",
+            "law_name": "共同法规",
+            "article_number": "第1条",
+            "content": "健康保险规则",
+            "metadata": {"适用标签": "health"},
+        }
+        mock_engine.return_value.search_by_metadata.return_value = [raw]
+        mock_engine.return_value.search_candidates.return_value = [{
+            **raw,
+            "retrieval_sources": ["vector", "bm25"],
+        }]
+
+        result = retrieve_audit_regulations(
+            "健康保险", "健康险", ProductTags(line=ProductLine.HEALTH),
+        )
+
+        assert len(result) == 1
+        assert result[0].source_type == "category"
+        assert result[0].retrieval_sources == (
+            "bm25", "registered:category", "registered:general", "vector",
+        )
+
+    @patch("lib.compliance.checker._get_general_regulations", return_value=[])
+    @patch("lib.compliance.checker._list_registered_regulations", return_value=["分段法规"])
+    @patch("lib.compliance.checker.get_engine")
+    def test_registered_path_preserves_multiple_chunks_of_same_article(
+        self, mock_engine, _mock_registered_regs, _mock_general_regs,
+    ):
+        mock_engine.return_value.search_candidates.return_value = []
+        mock_engine.return_value.search_by_metadata.return_value = [
+            {
+                "id": f"chunk-{index}",
+                "law_name": "分段法规",
+                "article_number": "第1条",
+                "content": f"第{index}段",
+                "metadata": {"适用标签": "health"},
+            }
+            for index in (1, 2)
+        ]
+
+        result = retrieve_audit_regulations(
+            "健康保险", "健康险", ProductTags(line=ProductLine.HEALTH),
+        )
+
+        assert [item.chunk_id for item in result] == ["chunk-1", "chunk-2"]
+
+    @patch("lib.compliance.checker._get_general_regulations", return_value=[])
+    @patch("lib.compliance.checker._list_registered_regulations", return_value=["健康法规"])
+    @patch("lib.compliance.checker.get_engine")
+    def test_semantic_failure_returns_registered_candidates_and_degraded_status(
+        self, mock_engine, _mock_registered_regs, _mock_general_regs,
+    ):
+        mock_engine.return_value.search_by_metadata.return_value = [{
+            "id": "chunk-1",
+            "law_name": "健康法规",
+            "article_number": "第1条",
+            "content": "健康保险规则",
+            "metadata": {"适用标签": "health"},
+        }]
+        mock_engine.return_value.search_candidates.side_effect = RuntimeError("vector unavailable")
+
+        outcome = retrieve_audit_regulations_with_status(
+            "健康保险", "健康险", ProductTags(line=ProductLine.HEALTH),
+        )
+
+        assert len(outcome.regulations) == 1
+        assert outcome.degraded is True
+        assert "语义检索失败" in outcome.warnings[0]
+
+
+def test_disability_income_product_is_deterministically_health():
+    result = identify_category("", "互联网失能收入损失保险")
+
+    assert result.category == "健康险"
+    assert result.method == "keyword"
+
+
+@pytest.mark.parametrize(
+    ("tags", "expected"),
+    [
+        (ProductTags(line=ProductLine.HEALTH, primary_subtype=ProductSubtype.MEDICAL), "医疗险"),
+        (ProductTags(line=ProductLine.HEALTH, primary_subtype=ProductSubtype.CRITICAL_ILLNESS), "重疾险"),
+        (ProductTags(line=ProductLine.HEALTH, primary_subtype=ProductSubtype.NURSING), "健康险"),
+        (ProductTags(line=ProductLine.LIFE, primary_subtype=ProductSubtype.ANNUITY), "年金险"),
+        (ProductTags(line=ProductLine.LIFE, design_type=ProductDesignType.PARTICIPATING), "分红险"),
+        (ProductTags(line=ProductLine.ACCIDENT), "意外险"),
+        (ProductTags(), None),
+    ],
+)
+def test_category_can_be_recovered_from_product_tags(tags, expected):
+    assert infer_category_from_product_tags(tags) == expected
+
+
+def test_retrieval_query_includes_parent_line_and_specific_subtype_terms():
+    query = build_regulation_retrieval_query(
+        "某某失能收入损失保险条款",
+        "保险期间为一年。",
+        ProductTags(
+            line=ProductLine.HEALTH,
+            primary_subtype=ProductSubtype.DISABILITY_INCOME,
+        ),
+    )
+
+    assert "健康保险" in query
+    assert "失能收入损失保险" in query
 
 
 class TestExtractClauseNumbers:

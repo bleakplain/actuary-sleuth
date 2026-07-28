@@ -38,7 +38,7 @@ PRODUCT_TYPE_CONFIGS: Dict[ProductCategory, Dict] = {
         "default_premium_range": (1000, 50000)
     },
     ProductCategory.HEALTH: {
-        "keywords": ["健康"],
+        "keywords": ["健康", "失能收入损失", "护理保险", "疾病保险"],
         "focus_fields": ["coverage", "deductible", "payout_ratio", "amount"],
         "scoring_weight": 1.2,
         "default_premium_range": (500, 20000)

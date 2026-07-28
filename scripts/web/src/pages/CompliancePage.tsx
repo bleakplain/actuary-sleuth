@@ -226,6 +226,10 @@ export default function CompliancePage() {
         document_content: parsedDocument.combined_text,
         product_name: productName || parsedDocument.file_name || undefined,
         category: selectedCategory || undefined,
+        clause_topics: Array.from(new Set([
+          ...parsedDocument.clauses.flatMap(clause => clause.topics || []),
+          ...parsedDocument.rider_clauses.flatMap(clause => clause.topics || []),
+        ])),
       },
       {
         onViolation: (item) => setStreamingViolations(prev => [...prev, item]),

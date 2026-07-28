@@ -35,7 +35,11 @@ class KnowledgeBuilder:
         self.config = config or RAGConfig()
         self.chunker = MdParser(chunk_config=self.config.chunking)
         self.index_manager = VectorIndexManager(self.config)
-        self.quality_checker = quality_checker or QualityChecker()
+        # 法规清单中存在“保险期间不得低于5年”等短而完整的要求；
+        # 结构化来源已提供条目边界，不能用通用正文长度阈值将其删除。
+        self.quality_checker = quality_checker or QualityChecker(
+            allow_structured_short_chunks=True,
+        )
         self._embedding_setup_done = False
 
     def _ensure_embedding_setup(self):

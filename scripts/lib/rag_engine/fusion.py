@@ -43,21 +43,25 @@ def reciprocal_rank_fusion(
 
     scores: Dict[str, float] = defaultdict(float)
     chunks = {}
+    retrieval_sources: Dict[str, set[str]] = defaultdict(set)
 
     for rank, scored in enumerate(vector_results):
         key = _chunk_key(scored)
         scores[key] += 1.0 / (k + rank + 1)
         chunks[key] = scored.node
+        retrieval_sources[key].add("vector")
 
     for rank, scored in enumerate(keyword_results):
         key = _chunk_key(scored)
         scores[key] += 1.0 / (k + rank + 1)
         chunks[key] = scored.node
+        retrieval_sources[key].add("bm25")
 
     results = []
     for key, rrf_score in scores.items():
         chunk = chunks[key]
         results.append({
+            'id': key,
             'law_name': chunk.metadata.get('law_name', '未知'),
             'article_number': chunk.metadata.get('article_number', '未知'),
             'category': chunk.metadata.get('category', ''),
@@ -68,6 +72,8 @@ def reciprocal_rank_fusion(
             'effective_date': chunk.metadata.get('effective_date', ''),
             'issuing_authority': chunk.metadata.get('issuing_authority', ''),
             'score': rrf_score,
+            'metadata': dict(chunk.metadata),
+            'retrieval_sources': sorted(retrieval_sources[key]),
         })
 
     results = _deduplicate_by_article(results, max_chunks_per_article)

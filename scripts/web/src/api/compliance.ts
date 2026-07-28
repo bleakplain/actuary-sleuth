@@ -8,6 +8,8 @@ interface DoneData {
   summary: { compliant: number; non_compliant: number; attention: number };
   negative_list_result: string;
   regulation_sources: Record<string, string[]>;
+  retrieval_degraded: boolean;
+  retrieval_warnings: string[];
   clause_coverage: {
     total: number;
     checked: number;
@@ -22,7 +24,7 @@ interface DoneData {
 }
 
 export function checkDocumentStream(
-  params: { document_content: string; product_name?: string; category?: string },
+  params: { document_content: string; product_name?: string; category?: string; clause_topics?: string[] },
   callbacks: {
     onViolation: (item: AuditResultItem) => void;
     onProgress: (msg: string) => void;

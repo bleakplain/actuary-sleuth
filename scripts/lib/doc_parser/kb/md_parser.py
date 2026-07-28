@@ -616,7 +616,11 @@ class MdParser:
         for i, chunk in enumerate(chunks):
             content = chunk.content
 
-            if i > 0 and self.chunk_overlap_chars > 0:
+            same_section = (
+                i > 0
+                and chunks[i - 1].section_path == chunk.section_path
+            )
+            if same_section and self.chunk_overlap_chars > 0:
                 overlap = self._get_smart_overlap(chunks[i - 1].content)
                 if overlap and len(content) + len(overlap) <= self.max_chunk_chars:
                     content = overlap + content

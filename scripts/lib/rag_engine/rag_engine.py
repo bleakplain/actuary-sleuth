@@ -395,6 +395,31 @@ class RAGEngine:
             logger.error(f"搜索出错: {e}")
             return []
 
+    def search_candidates(
+        self,
+        query_text: str,
+        top_k: int = 24,
+    ) -> List[Dict[str, Any]]:
+        """返回不依赖外部 LLM 改写或重排的 BM25+向量基础候选。"""
+        if not self._initialized and not self.initialize():
+            return []
+        _thread_settings.apply()
+        index = self.index_manager.get_index()
+        if not index or not self._bm25_index:
+            return []
+        retrieval_k = max(top_k, self.config.retrieval.vector_top_k)
+        results = hybrid_search(
+            index=index,
+            bm25_index=self._bm25_index,
+            query_text=query_text,
+            vector_top_k=retrieval_k,
+            keyword_top_k=max(top_k, self.config.retrieval.keyword_top_k),
+            k=self.config.retrieval.rrf_k,
+            preprocessor=QueryPreprocessor(),
+            max_chunks_per_article=self.config.retrieval.max_chunks_per_article,
+        )
+        return results[:top_k]
+
     def _hybrid_search(
         self,
         query_text: str,
@@ -540,6 +565,7 @@ class RAGEngine:
                         'doc_number': meta.get('doc_number', ''),
                         'effective_date': meta.get('effective_date', ''),
                         'issuing_authority': meta.get('issuing_authority', ''),
+                        'metadata': dict(meta),
                     })
 
             logger.debug(f"search_by_metadata: filters={filters}, found={len(results)}")

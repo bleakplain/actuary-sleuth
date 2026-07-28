@@ -7,6 +7,11 @@ export interface AuditRegulationItem {
   doc_number?: string;
   issuing_authority?: string;
   effective_date?: string;
+  applicability_status?: 'applicable' | 'indeterminate' | '';
+  matched_dimensions?: string[];
+  matched_topics?: string[];
+  fallback_layer?: string;
+  retrieval_sources?: string[];
 }
 
 export interface AuditResultItem {
@@ -27,6 +32,8 @@ export interface ComplianceResult {
   regulation_sources: Record<string, string[]>;
   category: string;
   negative_list_result: string;
+  retrieval_degraded?: boolean;
+  retrieval_warnings?: string[];
   clause_coverage: {
     total: number;
     checked: number;
@@ -51,6 +58,7 @@ export interface ParsedClause {
   number: string;
   title: string;
   text: string;
+  topics: string[];
 }
 
 export interface ParsedDataTable {

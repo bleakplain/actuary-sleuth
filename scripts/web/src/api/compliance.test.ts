@@ -87,6 +87,7 @@ describe('compliance API', () => {
 describe('checkDocumentStream', () => {
   const mockFetch = vi.fn();
   vi.stubGlobal('fetch', mockFetch);
+  vi.stubGlobal('localStorage', { getItem: vi.fn(() => null) });
 
   beforeEach(() => {
     vi.clearAllMocks();

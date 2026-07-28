@@ -1,27 +1,6 @@
-"""合规检查业务逻辑模块"""
+"""合规检查业务逻辑模块。
 
-from .checker import (
-    AuditRegulationItem,
-    AuditResultItem,
-    CheckResult,
-    CategoryResult,
-    identify_category,
-    load_audit_regulations,
-    streaming_compliance_check,
-    streaming_negative_check,
-    normalize_clause_number,
-    extract_section_numbers,
-)
-
-__all__ = [
-    "AuditRegulationItem",
-    "AuditResultItem",
-    "CheckResult",
-    "CategoryResult",
-    "identify_category",
-    "load_audit_regulations",
-    "streaming_compliance_check",
-    "streaming_negative_check",
-    "normalize_clause_number",
-    "extract_section_numbers",
-]
+包入口不重导出 ``checker``：RAG 分层模块依赖本包内的适用性模型，
+而 ``checker`` 又依赖 RAG 分层模块，在包初始化阶段重导出会形成循环导入。
+调用方应从 ``lib.compliance.checker`` 等具体模块导入公开接口。
+"""

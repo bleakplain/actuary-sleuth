@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -15,6 +16,8 @@ import re
 
 from ..models import Clause, DataTable, AuditDocument, DocumentParseError, SectionType, TableType
 from .product_name_recognizer import recognize_product_name
+from .product_tagging import build_product_tags
+from .clause_tagger import tag_clause_topics
 from .section_detector import SectionDetector
 from .table_classifier import TableClassifier
 from .utils import split_title_and_content, add_section
@@ -60,6 +63,17 @@ class DocxParser:
                 clauses = para_clauses
         tables = self._extract_tables(doc.tables, warnings)
         sections = self._extract_sections(doc.paragraphs, warnings)
+        clauses = [replace(clause, topics=tag_clause_topics(clause.title, clause.text)) for clause in clauses]
+        document_parts = [f"{clause.title}\n{clause.text}" for clause in clauses]
+        document_parts.extend(table.raw_text for table in tables)
+        for section_name in ('notices', 'health_disclosures', 'exclusions', 'rider_clauses'):
+            document_parts.extend(
+                f"{item.title}\n{getattr(item, 'content', getattr(item, 'text', ''))}"
+                for item in sections[section_name]
+            )
+        document_content = "\n".join(part for part in document_parts if part)
+        product_tags = build_product_tags(recognition.product_name, document_content)
+        warnings.extend(product_tags.warnings)
 
         return AuditDocument(
             file_name=path.name,
@@ -76,6 +90,7 @@ class DocxParser:
             duration_type=recognition.duration_type,
             design_type=recognition.design_type,
             naming_warnings=recognition.warnings,
+            product_tags=product_tags,
             parse_time=datetime.now(),
             warnings=warnings,
         )

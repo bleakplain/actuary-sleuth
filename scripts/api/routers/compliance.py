@@ -3,6 +3,7 @@
 import os
 import uuid
 import asyncio
+from dataclasses import replace
 import json
 import logging
 import tempfile
@@ -20,21 +21,60 @@ from api.schemas.compliance import (
 )
 from lib.common.constants import ComplianceConstants
 from lib.common.html_converter import html_to_docx
+from lib.common.product_tags import ProductTags
 from lib.compliance.checker import (
     AuditResultItem,
     streaming_compliance_check,
     streaming_negative_check,
     identify_category,
-    load_audit_regulations,
+    infer_category_from_product_tags,
+    build_regulation_retrieval_query,
+    retrieve_audit_regulations_with_status,
     normalize_clause_number,
     extract_section_numbers,
 )
 from lib.compliance.rule_engine import RuleViolation, ProductMetadata
 from lib.doc_parser import parse_product_document, DocumentParseError
+from lib.doc_parser.models import AuditDocument
+from lib.doc_parser.pd.product_name_recognizer import recognize_product_name
+from lib.doc_parser.pd.clause_tagger import tag_clause_topics
+from lib.doc_parser.pd.product_tagging import build_product_tags
 from lib.auth.permissions import require_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/compliance", tags=["合规检查"])
+
+
+def _apply_requested_product_name(
+    audit_doc: AuditDocument, product_name: str, document_content: str,
+) -> AuditDocument:
+    """让用户明确提交的产品名称成为名称字段和标签的共同事实来源。"""
+    recognition = recognize_product_name([product_name])
+    return replace(
+        audit_doc,
+        product_name=product_name,
+        product_tags=build_product_tags(product_name, document_content),
+        is_rider=recognition.is_rider,
+        group_or_individual=recognition.group_or_individual,
+        duration_type=recognition.duration_type,
+        design_type=recognition.design_type,
+        naming_warnings=recognition.warnings,
+    )
+
+
+def _resolve_retrieval_context(
+    category: Optional[str],
+    product_tags: ProductTags,
+) -> Tuple[Optional[str], List[str]]:
+    """恢复法规分类并生成需要向用户展示的降级原因。"""
+    warnings: List[str] = []
+    if not category:
+        category = infer_category_from_product_tags(product_tags)
+        if category:
+            warnings.append(f"常规险种识别失败，已依据产品标签按“{category}”检索法规")
+        else:
+            warnings.append("无法确定险种，已保守检索所有险种法规")
+    return category, warnings
 
 
 @router.post("/check/document/stream")
@@ -44,11 +84,31 @@ async def check_document_stream(req: DocumentCheckRequest, user: dict = Depends(
     if not category:
         category, _ = await _identify_category_async(req.document_content, req.product_name or "")
 
-    regulations = await asyncio.to_thread(load_audit_regulations, category)
+    product_tags = build_product_tags(req.product_name or None, req.document_content)
+    category, retrieval_warnings = _resolve_retrieval_context(
+        category, product_tags,
+    )
+    clause_topics = tuple(req.clause_topics) or tag_clause_topics("", req.document_content)
+    retrieval_query = build_regulation_retrieval_query(
+        req.product_name, req.document_content, product_tags,
+    )
+    retrieval_outcome = await asyncio.to_thread(
+        retrieve_audit_regulations_with_status,
+        retrieval_query,
+        category,
+        product_tags,
+        clause_topics,
+    )
+    regulations = list(retrieval_outcome.regulations)
+    retrieval_warnings = list(dict.fromkeys(
+        [*retrieval_warnings, *retrieval_outcome.warnings],
+    ))
+    retrieval_degraded = bool(retrieval_warnings) or retrieval_outcome.degraded
 
     regulation_sources: Dict[str, List[str]] = {
         "险种专属": sorted(set(r.law_name for r in regulations if r.source_type == "category")),
         "通用法规": sorted(set(r.law_name for r in regulations if r.source_type == "general")),
+        "标签检索": sorted(set(r.law_name for r in regulations if r.source_type == "semantic")),
     }
 
     async def event_stream():
@@ -58,8 +118,29 @@ async def check_document_stream(req: DocumentCheckRequest, user: dict = Depends(
         loop = asyncio.get_event_loop()
         queue: asyncio.Queue = asyncio.Queue()
 
-        # 构建产品元数据（当前仅 category，后续可从前端/解析结果补充更多维度）
-        product_meta = ProductMetadata(category=category)
+        for warning in retrieval_warnings:
+            yield {"event": "message", "data": json.dumps(
+                {"type": "progress", "data": f"检索降级：{warning}"}, ensure_ascii=False,
+            )}
+
+        product_meta = ProductMetadata(
+            category=category,
+            product_form=(
+                "团体" if product_tags.customer_scope.value == "group"
+                else "个人" if product_tags.customer_scope.value == "individual"
+                else None
+            ),
+            insurance_term=(
+                "长期" if product_tags.term_class.value == "long_term"
+                else "短期" if product_tags.term_class.value == "short_term"
+                else None
+            ),
+            policy_type=(
+                "主险" if product_tags.contract_role.value == "main"
+                else "附加险" if product_tags.contract_role.value == "rider"
+                else None
+            ),
+        )
 
         def _producer():
             try:
@@ -124,6 +205,8 @@ async def check_document_stream(req: DocumentCheckRequest, user: dict = Depends(
             "negative_list_result": negative_list_result,
             "regulation_sources": regulation_sources,
             "regulations": [r.__dict__ if hasattr(r, '__dict__') else r for r in all_regulations],
+            "retrieval_degraded": retrieval_degraded,
+            "retrieval_warnings": retrieval_warnings,
             "clause_coverage": {
                 "total": len(checked_clauses),
                 "checked": len(checked_clauses),
@@ -145,6 +228,8 @@ async def check_document_stream(req: DocumentCheckRequest, user: dict = Depends(
             "regulation_sources": regulation_sources,
             "category": category or "",
             "negative_list_result": negative_list_result,
+            "retrieval_degraded": retrieval_degraded,
+            "retrieval_warnings": retrieval_warnings,
             "clause_coverage": done_data["clause_coverage"],
         }
         save_compliance_report(report_id, product_name, category or "", "document", result_for_db)
@@ -212,7 +297,7 @@ def _audit_doc_to_response(audit_doc, file_type: str,
                            identified_category: Optional[str] = None,
                            category_confidence: float = 0.0,
                            combined_text: Optional[str] = None) -> ParsedDocumentResponse:
-    clauses = [ParsedClause(number=c.number, title=c.title, text=c.text) for c in audit_doc.clauses]
+    clauses = [ParsedClause(number=c.number, title=c.title, text=c.text, topics=list(c.topics)) for c in audit_doc.clauses]
     tables = [ParsedDataTable(
         table_type=t.table_type.value if hasattr(t.table_type, 'value') else str(t.table_type),
         remark=t.remark or "", raw_text=t.raw_text, data=[list(row) for row in t.data],
@@ -220,7 +305,7 @@ def _audit_doc_to_response(audit_doc, file_type: str,
     notices = [ParsedSection(title=s.title, content=s.content) for s in audit_doc.notices]
     health = [ParsedSection(title=s.title, content=s.content) for s in audit_doc.health_disclosures]
     exclusions = [ParsedSection(title=s.title, content=s.content) for s in audit_doc.exclusions]
-    riders = [ParsedClause(number=c.number, title=c.title, text=c.text) for c in audit_doc.rider_clauses]
+    riders = [ParsedClause(number=c.number, title=c.title, text=c.text, topics=list(c.topics)) for c in audit_doc.rider_clauses]
 
     if combined_text is None:
         combined_text = _build_combined_text(clauses, tables, notices, health, exclusions, riders)
@@ -242,6 +327,7 @@ def _audit_doc_to_response(audit_doc, file_type: str,
         duration_type=audit_doc.duration_type,
         design_type=audit_doc.design_type,
         naming_warnings=list(audit_doc.naming_warnings),
+        product_tags=audit_doc.product_tags.to_dict(),
     )
 
 
@@ -296,8 +382,10 @@ async def parse_rich_text(req: RichTextParseRequest, user: dict = Depends(requir
             audit_doc.clauses, audit_doc.tables, audit_doc.notices,
             audit_doc.health_disclosures, audit_doc.exclusions, audit_doc.rider_clauses,
         )
-        # 识别出的产品名优先，其次用户传入的 product_name，最后回退到 file_name
-        category_name = audit_doc.product_name or req.product_name or audit_doc.file_name
+        if req.product_name:
+            audit_doc = _apply_requested_product_name(audit_doc, req.product_name, combined_text)
+        # 用户明确提交的名称优先；未提交时使用文档识别结果，最后回退到文件名。
+        category_name = audit_doc.product_name or audit_doc.file_name
         category, confidence = await _identify_category_async(combined_text, category_name)
         response = _audit_doc_to_response(audit_doc, ".html", category, confidence, combined_text)
         if req.product_name:

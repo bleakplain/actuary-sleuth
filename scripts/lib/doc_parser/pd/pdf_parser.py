@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -18,6 +19,9 @@ from .section_detector import SectionDetector
 from .table_classifier import TableClassifier
 from .toc_detector import TocDetector
 from .utils import add_section, split_title_and_content
+from .clause_tagger import tag_clause_topics
+from .product_name_recognizer import recognize_product_name
+from .product_tagging import build_product_tags
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +60,28 @@ class PdfParser:
         warnings: List[str] = []
 
         try:
+            opening_lines: List[str] = []
+            for page in pdf.pages[:5]:
+                opening_lines.extend((page.extract_text() or "").splitlines())
+            recognition = recognize_product_name(opening_lines)
             clauses = self._extract_clauses(pdf.pages, warnings)
             tables = self._extract_tables(pdf.pages, warnings)
             sections_data = self._extract_special_sections(pdf.pages, warnings)
         finally:
             pdf.close()
+
+        clauses = [replace(clause, topics=tag_clause_topics(clause.title, clause.text)) for clause in clauses]
+        document_parts = [f"{clause.title}\n{clause.text}" for clause in clauses]
+        document_parts.extend(table.raw_text for table in tables)
+        for section_name in ('notices', 'health_disclosures', 'exclusions', 'rider_clauses'):
+            document_parts.extend(
+                f"{item.title}\n{getattr(item, 'content', getattr(item, 'text', ''))}"
+                for item in sections_data[section_name]
+            )
+        document_content = "\n".join(part for part in document_parts if part)
+        product_tags = build_product_tags(recognition.product_name, document_content)
+        warnings.extend(recognition.warnings)
+        warnings.extend(product_tags.warnings)
 
         return AuditDocument(
             file_name=path.name,
@@ -71,6 +92,13 @@ class PdfParser:
             health_disclosures=sections_data['health_disclosures'],
             exclusions=sections_data['exclusions'],
             rider_clauses=sections_data['rider_clauses'],
+            product_name=recognition.product_name,
+            is_rider=recognition.is_rider,
+            group_or_individual=recognition.group_or_individual,
+            duration_type=recognition.duration_type,
+            design_type=recognition.design_type,
+            naming_warnings=recognition.warnings,
+            product_tags=product_tags,
             parse_time=datetime.now(),
             warnings=warnings,
         )

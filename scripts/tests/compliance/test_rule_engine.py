@@ -281,23 +281,10 @@ class TestFieldPresence:
 
 
 class TestNumericSpecificRules:
-    def test_minor_death_benefit_under10_violation(self):
-        doc = "【条款 3.1】身故保险金\n不满10周岁未成年人身故保险金为50万"
-        violations = check_rules(doc, "寿险")
-        v = [v for v in violations if v.rule_id == "minor_death_benefit_under10"]
-        assert len(v) == 1
+    def test_deleted_non_clause_regulation_has_no_deterministic_rule(self):
+        deleted_rule_ids = {"minor_death_benefit_under10", "minor_death_benefit_10to17"}
 
-    def test_minor_death_benefit_under10_compliant(self):
-        doc = "【条款 3.1】身故保险金\n不满10周岁未成年人身故保险金为15万"
-        violations = check_rules(doc, "寿险")
-        v = [v for v in violations if v.rule_id == "minor_death_benefit_under10"]
-        assert len(v) == 0
-
-    def test_minor_death_benefit_10to17_violation(self):
-        doc = "【条款 3.2】身故保险金\n10至17周岁未成年人身故保险金为80万"
-        violations = check_rules(doc, "寿险")
-        v = [v for v in violations if v.rule_id == "minor_death_benefit_10to17"]
-        assert len(v) == 1
+        assert deleted_rule_ids.isdisjoint(rule.rule_id for rule in RULES)
 
     def test_ci_mild_pay_ratio_max_30_violation(self):
         doc = "【条款 2.1】轻症\n轻度疾病给付比例为基本保险金额的40%"

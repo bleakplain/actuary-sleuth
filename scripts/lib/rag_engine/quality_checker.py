@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -60,10 +61,12 @@ class QualityChecker:
         min_content_chars: int = MIN_CONTENT_CHARS,
         max_duplicate_ratio: float = MAX_DUPLICATE_RATIO,
         min_unique_ratio: float = MIN_UNIQUE_RATIO,
+        allow_structured_short_chunks: bool = False,
     ):
         self.min_content_chars = min_content_chars
         self.max_duplicate_ratio = max_duplicate_ratio
         self.min_unique_ratio = min_unique_ratio
+        self.allow_structured_short_chunks = allow_structured_short_chunks
 
     def check_document(self, doc: Document) -> QualityReport:
         """文档级质量检查"""
@@ -191,7 +194,13 @@ class QualityChecker:
         duplicate_count = 0
 
         for node in nodes:
-            content_hash = hashlib.md5(node.text.encode()).hexdigest()
+            identity = json.dumps(
+                {"text": node.text, "metadata": node.metadata},
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
+            content_hash = hashlib.md5(identity.encode()).hexdigest()
             if content_hash in seen_hashes:
                 duplicate_count += 1
                 continue
@@ -210,7 +219,8 @@ class QualityChecker:
 
         for node in nodes:
             # 过滤过短内容
-            if len(node.text) < self.min_content_chars:
+            if (len(node.text) < self.min_content_chars
+                    and not self._is_valid_structured_short_chunk(node)):
                 removed_count += 1
                 continue
 
@@ -225,3 +235,12 @@ class QualityChecker:
             logger.info(f"质量过滤：移除 {removed_count} 个低质量 chunk")
 
         return filtered
+
+    def _is_valid_structured_short_chunk(self, node: TextNode) -> bool:
+        """允许来源和条目边界明确的短法规要求，仍拒绝单字符及标点噪声。"""
+        if not self.allow_structured_short_chunks:
+            return False
+        required_metadata = ("law_name", "article_number", "source_file")
+        if not all(node.metadata.get(key) for key in required_metadata):
+            return False
+        return bool(re.search(r"[\u4e00-\u9fffA-Za-z0-9]{4,}", node.text.strip()))
