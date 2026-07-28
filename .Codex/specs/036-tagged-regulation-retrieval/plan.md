@@ -1,0 +1,728 @@
+# Implementation Plan: 产品标签驱动的产品条款审核架构重构
+
+**Date**: 2026-07-27
+**Status**: Review Draft — 未执行
+**Inputs**:
+
+- `../035-compliance-tag-taxonomy/spec.md`
+- `design.md`
+- `audit-logic.md`
+- 项目根目录 `规则引擎重构验收表.md`
+
+## 1. Summary
+
+把当前“法规检索 + LLM审核”与独立 `rule_engine.py` 并行运行的结构，重构为一条可追溯的审核主链：
+
+```text
+文档解析
+→ 产品标签与条款主题
+→ 产品标签三态过滤法规
+→ 逐法规选择直接相关和可能相关条款块
+→ 确定性事实提取
+→ 法规级 LLM 判断
+→ 汇总带证据结论
+```
+
+本计划不增加新的法规内容，不重新标注已验收的 v5。法规原文及已验收元数据是唯一监管依据；现有20条 Python 规则属于旧实现，不是需求来源，也不作为迁移清单。第一版按候选法规的审核需要建设通用事实提取能力，且事实层不直接形成最终合规结论。
+
+## 2. Technical Context
+
+**Language**: Python 3.14、TypeScript
+**Backend**: FastAPI、Pydantic、dataclass
+**Knowledge retrieval**: LanceDB、BM25、向量检索、RRF
+**LLM abstraction**: `scripts/lib/llm/`
+**Testing**: pytest、Vitest、TypeScript build
+**Knowledge base**: v5，25 documents / 171 chunks
+**Primary constraints**:
+
+- 仅审核产品条款；
+- 复用现有 `ProductTags`、`RegulationApplicability` 和分层检索；
+- 未知信息保守保留；
+- 不在领域模块新增 LLM 重试；
+- 不创建新 service package；
+- 每个结论必须可追溯；
+- 本计划经用户 review 后才执行。
+
+## 3. User Stories
+
+### US1：上传后稳定生成审核事实
+
+用户上传产品条款后，系统识别产品名称、条款结构、条款主题和产品标签；不能确认的事实保持 unknown，不丢弃原文。
+
+### US2：只排除明确不适用法规
+
+系统根据产品标签和法规静态标签进行三态匹配，只排除明确冲突的法规。
+
+### US3：为每条法规选择安全的条款上下文
+
+系统优先选择主题直接相关的条款，同时保留结构关联、可能相关和主题未知条款，只排除明确不相关的条款块。
+
+### US4：逐法规执行有证据的 LLM 审核
+
+LLM 针对单条法规和候选条款块输出合规、不合规、信息不足或人工复核结论，并引用法规和产品条款证据。
+
+### US5：确定性能力作为辅助证据
+
+系统根据法规原文的审核需要提取天数、比例、固定表述等可验证事实；事实层不形成最终合规结论。旧 Python 规则仅用于影子对照和发现历史差异，不向新主链提供监管语义。
+
+### US6：审核降级可见且可回溯
+
+产品识别、检索、路由、事实提取或 LLM 失败时，用户能看到明确状态；系统不得把失败解释为“无问题”。
+
+## 4. Constitution Check
+
+- [x] **Library-First**：复用现有 `ProductTags`、`applicability.py`、`layered_retrieval.py`、解析器和 LLM 抽象。
+- [x] **测试优先**：每个阶段先建立独立 fixture 与验收测试，再迁移生产调用。
+- [x] **简单优先**：先做法规级顺序审核和显式上下文选择，不引入工作流引擎或新服务包。
+- [x] **显式优于隐式**：所有保留、排除、降级和判断均返回原因。
+- [x] **可追溯性**：每个阶段映射到 US1—US6。
+- [x] **独立可测试**：解析、法规过滤、条款路由、事实提取和 LLM 包装均可用 fixture 单测。
+
+## 5. 方案权衡
+
+| 方案 | 描述 | 优点 | 风险 | 选择 |
+|---|---|---|---|---|
+| A. 保留双轨 | LLM审核与现有规则引擎继续平行，最后合并结果 | 改动小 | 两套适用性逻辑、重复结论、来源冲突继续存在 | ❌ |
+| B. 规则优先 | Python规则先判违规，LLM只检查剩余内容 | 硬规则速度快 | 现有规则适用范围和事实提取不够可靠，会在LLM前产生误报 | ❌ |
+| C. 单主链混合审核 | 标签过滤法规，主题路由条款，确定性提取事实，LLM逐法规判断 | 与用户业务逻辑一致；可追溯；安全降级 | 需要迁移数据模型和审核编排 | ✅ |
+| D. 全部交给LLM | 仅做粗检索，把整篇条款交给模型 | 实现简单 | 上下文大、结果不稳、缺少确定性过滤与证据结构 | ❌ |
+
+## 6. Target Structure
+
+### Documentation
+
+```text
+.Codex/specs/036-tagged-regulation-retrieval/
+├── design.md
+├── audit-logic.md
+├── plan.md
+└── tasks.md                 # 执行阶段生成
+```
+
+### Expected source changes
+
+```text
+scripts/lib/
+├── common/
+│   └── product_tags.py
+├── compliance/
+│   ├── applicability.py
+│   ├── checker.py
+│   ├── rule_engine.py
+│   ├── prompts.py
+│   └── clause_routing.py    # 若现有 layered_retrieval 无法清晰承载，再新增
+├── doc_parser/
+│   └── pd/
+│       ├── clause_tagger.py
+│       └── product_tagging.py
+└── rag_engine/
+    └── layered_retrieval.py
+
+scripts/api/
+├── routers/compliance.py
+└── schemas/compliance.py
+
+scripts/tests/
+├── compliance/
+├── lib/doc_parser/pd/
+└── lib/rag_engine/
+```
+
+优先把条款路由放入现有模块；只有职责无法保持单一时才新增 `clause_routing.py`。
+
+## 7. Core Data Contracts
+
+计划新增或调整以下冻结数据模型。字段名在实现前通过测试固定：
+
+```python
+from dataclasses import dataclass
+from typing import Literal, Tuple
+
+
+@dataclass(frozen=True)
+class ClauseBlock:
+    clause_id: str
+    number: str
+    title: str
+    content: str
+    topics: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RoutedClause:
+    clause: ClauseBlock
+    relevance: Literal[
+        "direct",
+        "related",
+        "unknown",
+        "not_relevant",
+    ]
+    reasons: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ExtractedFact:
+    fact_type: str
+    value: str
+    unit: str
+    clause_id: str
+    evidence: str
+    confidence: str
+
+
+@dataclass(frozen=True)
+class RegulationAuditPackage:
+    kb_version: str
+    regulation_unit_id: str
+    regulation_chunk_ids: Tuple[str, ...]
+    applicability_status: str
+    applicability_reasons: Tuple[str, ...]
+    routed_clauses: Tuple[RoutedClause, ...]
+    facts: Tuple[ExtractedFact, ...]
+
+
+@dataclass(frozen=True)
+class RegulationAuditDecision:
+    status: Literal[
+        "compliant",
+        "non_compliant",
+        "insufficient_information",
+        "manual_review",
+    ]
+    kb_version: str
+    regulation_unit_id: str
+    regulation_chunk_ids: Tuple[str, ...]
+    clause_ids: Tuple[str, ...]
+    conclusion: str
+    reasoning: str
+    confidence: str
+    applicability_dispute: bool
+    dispute_reason: str
+```
+
+实现时优先复用现有 `ParsedClause`、`AuditRegulationItem` 和 `AuditResultItem`，避免创建重复模型。上述接口用于固定所需语义，不代表必须全部新增类。
+
+## 8. Implementation Phases
+
+### Phase 0：数据层就绪检查、基线净化与冻结验收样例
+
+**对应**：US1—US6
+**目标**：先排除已知数据污染，再固定输入、候选法规、候选条款块和期望结论。
+
+#### 工作内容
+
+1. 先执行“数据层就绪检查”：
+   - 记录知识库版本、文档数和 chunk 数；
+   - 统计 `适用标签`、`适用标签语义=限定`、`涉及标签` 的实际数量；
+   - 验证法规条款边界没有跨 section overlap；
+   - 验证产品名称对失能收入损失保险等核心子类可以直接稳定分类，不依赖异常回退；
+   - 记录受控条款主题代码总数、关键词映射总数，以及按条款块和字符量计算的主题覆盖率，作为 `clause_topics.json` schema version 1 的基线；
+   - 记录所有已知数据缺陷，未修复项不得被写成正确基线。
+2. 当前已确认：
+   - v5 为25个文档、171个 chunk；
+   - 保险法前8条的跨 section overlap 已修复并完成 LanceDB 验证；
+   - 失能收入损失保险已进入产品名称确定性关键词；
+   - v5 有125条 `适用标签语义=限定`、0条 `涉及标签`。
+3. 从真实或脱敏产品中建立最小回归集：
+   - 短期医疗险：有续保且不保证续保；
+   - 短期健康险：完全没有续保安排；
+   - 长期费率可调医疗险；
+   - 长期费率不可调医疗险；
+   - 长期保证续保健康险；
+   - 两全保险或年金保险；
+   - 重疾险；
+   - 条款标题无法识别的产品。
+   该清单在本阶段开始时只是候选范围；精算师完成样例选择和人工标注后，生成带版本号的冻结验收集，例如 `compliance-audit-v1`。未冻结不得进入 Phase 5 验收。
+4. 每个样例人工标注：
+   - 产品标签；
+   - 法规 `applicable/not_applicable/indeterminate`；
+   - 每条核心法规的直接相关、可能相关、明确不相关条款；
+   - 期望审核状态。
+5. 保存当前 API 输出快照，只作为“旧行为记录”，不作为正确性真值。人工标注和法规原文才是验收 oracle。
+6. 使用 `/Users/plain/work/actuary-assets/products` 建立真实产品验收集。当前盘点：
+   - 27个文件，其中11个DOCX、3个PDF、12个旧DOC和1个ZIP归档；
+   - 旧DOC通过临时转换为DOCX后复用同一结构解析器，转换产物不写回产品目录；
+   - 26个文档文件全部解析成功，共1580个条款块；其中旧DOC贡献653个；
+   - 491个条款块带主题，当前直接主题覆盖率约31.1%，证明未知条款必须保守保留；
+   - 3个旧DOC与对应PDF属于同一产品的不同文件版本，验收统计按规范化产品名和内容指纹去重，不重复加权；
+   - 标题别名只归一到同一受控主题，例如“保险期间/保险期限”“责任免除/除外责任”；原始条款块不因标题相似而合并；
+   - 同一文档内只有编号相同且可确认是跨页延续时才合并正文。跨产品、跨文件或编号不同的条款始终分别保存，以免丢失版本差异和证据定位。
+7. 第一批建议选择：
+   - 《人保健康互联网失能收入损失保险（2025版）》；
+   - 《人保健康团体短期重大疾病保险（推荐版）》；
+   - 《人保健康长期补充团体医疗保险（D款）》；
+   - 《人保健康欣好孕互联网医疗保险》；
+   - 《人保健康互联网手术医疗意外保险》；
+   - 《人保健康附加互联网恶性肿瘤特定药品费用医疗保险》；
+   - 《人保健康互联网团体意外伤害保险（2025版）》。
+8. 费率可调正例使用 `125904《人保健康悠优保互联网医疗保险（费率可调）》条款v4.doc`；长期补充团体医疗保险作为费率不可调对照。
+
+#### 涉及文件
+
+- 新增 `scripts/tests/fixtures/compliance_audit/`
+- 新增或扩展 `scripts/tests/compliance/`
+- 不改生产行为
+
+#### 验收
+
+- 每类关键边界至少一个样例；
+- fixture 不依赖在线 LLM；
+- 所有人工期望都能追溯到 v5 chunk。
+- 数据层就绪报告明确区分当前能力、目标能力和已知差异。
+- 精算验收集已完成业务确认、带版本号冻结，并记录产品文件指纹、KB版本和标注版本。
+
+---
+
+### Phase 1：统一审核输入模型
+
+**对应**：US1、US5
+**目标**：消除 `ProductMetadata` 与 `ProductTags` 两套事实模型。
+
+#### 工作内容
+
+1. 审核入口只生成一次 `ProductTags`。
+2. 条款解析结果提供稳定 `clause_id`、原文和主题。
+3. 用户提交的产品名称继续作为最高优先级事实来源。
+4. 对期限标签固定证据优先级：
+   - 条款中明确的保险期间决定通用期限形态；
+   - 健康险监管期限由保险期间和是否含保证续保条款共同决定：超过一年，或不超过一年但保证续保，归长期健康保险；不超过一年且不保证续保，归短期健康保险；
+   - 保证续保期间作为续保安排单独保留，不替代保险期间；
+   - 产品名称中的长期/短期仅在条款期限缺失时回退；
+   - 名称与条款冲突时保留双方证据并进入人工复核。
+5. 建立兼容适配层，让旧调用方暂时可工作，但新主链不再使用旧 `ProductMetadata` 做适用性判断。
+6. 确认数据表、投保须知、责任免除等非普通条款块进入统一审核输入。
+
+#### 涉及文件
+
+- 修改 `scripts/lib/doc_parser/models.py`
+- 修改 `scripts/lib/doc_parser/pd/docx_parser.py`
+- 修改 `scripts/lib/doc_parser/pd/pdf_parser.py`
+- 修改 `scripts/lib/compliance/checker.py`
+- 修改 `scripts/api/schemas/compliance.py`
+
+#### 测试
+
+- 产品名称优先级；
+- unknown 不被转换成 false；
+- 无主题条款完整保留；
+- 主险、附加险、表格等块具有稳定 ID。
+
+#### 验收
+
+- 一次上传只生成一份产品事实；
+- 新主链不再重新构造另一套产品分类；
+- 相同输入的标签和证据稳定。
+
+---
+
+### Phase 2：冻结法规候选集
+
+**对应**：US2、US6
+**目标**：让所有后续审核只处理统一的三态适用法规候选。
+
+#### 工作内容
+
+1. 复用 `RegulationApplicability` 对 v5 chunk 做三态判断。
+2. 候选集中保留 `applicable` 和 `indeterminate`。
+3. `not_applicable` 永久排除，后续回退不能恢复。
+4. 将产品标签证据、匹配维度和排除原因写入 trace。
+5. 明确区分：
+   - 没有适用法规；
+   - RAG 引擎未初始化；
+   - 语义检索失败；
+   - 注册法规候选为空。
+6. 把 `涉及标签` 支持标为目标能力；当前 v5 数量为0时，不把它计入当前效果或覆盖率。
+7. 每次发布知识库前执行标签就绪统计；未经人工验收的限定标签不得用于确定性排除。
+8. 候选和报告使用 `kb_version + source_file + article_number/section_path` 标识法规条款单元，并保留构成单元的物理 chunk ID。
+
+#### 涉及文件
+
+- 修改 `scripts/lib/compliance/applicability.py`
+- 修改 `scripts/lib/rag_engine/layered_retrieval.py`
+- 修改 `scripts/lib/compliance/checker.py`
+- 修改 `scripts/api/routers/compliance.py`
+
+#### 测试
+
+- 同维度 OR、跨维度 AND；
+- unknown 保守保留；
+- 明确冲突排除；
+- 回退不恢复 `not_applicable`；
+- 降级状态透传。
+
+#### 验收
+
+- 明确不适用法规排除准确率100%；
+- 因产品标签 unknown 造成的漏召回为0；
+- 每条法规都有保留或排除原因。
+- 历史报告固定原 `kb_version`；切换新版本后不复用旧版 `not_applicable` 判断。
+
+---
+
+### Phase 3：实现逐法规条款路由
+
+**对应**：US3
+**目标**：针对每条候选法规，生成直接相关、可能相关、未知和明确不相关的产品条款集合。
+
+#### 工作内容
+
+1. 建立受控的主题关联关系：
+   - 精确主题；
+   - 同族 general；
+   - 显式跨主题依赖；
+   - 明确无关关系。
+2. 新增 `clause_topics.json` 作为受控主题代码、中文名称、状态和 `schema_version` 的唯一载体；现有 `clause_topic_keywords.json` 只保存识别关键词，其键必须引用已注册主题代码。
+3. 主题关系存放在 compliance 或文档解析模块的 `data/` 目录，不硬编码散落在函数中。
+4. 主题体系文件和关系文件分别包含显式 `schema_version`，审核报告同时记录两者版本。
+5. 两类文件由合规标签体系维护者和精算审核人共同审批；新增主题时必须同步更新或确认关系文件。
+6. 配置变更必须通过 fixture 回归测试；未注册主题、测试未覆盖的关系、未知主题和配置错误一律降级为 `unknown` 并保守保留，不得排除条款。
+7. 未标主题条款默认为 `unknown`，保守保留。
+8. 支持一条法规需要多个主题，例如续保规则需要续保与保险期间。
+9. 输出逐条款路由原因和排序。
+10. 加入上下文预算，但先保证直接相关和结构必要内容。
+
+#### 候选方案
+
+| 方案 | 说明 | 选择 |
+|---|---|---|
+| 只保留精确同主题 | 最省上下文，但漏检风险高 | ❌ |
+| 精确主题 + 全部未知 | 安全，但跨主题依赖仍不明确 | ⏳ 作为第一步 |
+| 精确主题 + 显式关联图 + 未知回退 | 安全且可解释 | ✅ |
+
+Phase 3.A 先以“精确主题 + 全部未知”验证未知条款绝不丢失；通过后进入 Phase 3.B，启用显式关联图。第一批关联至少覆盖续保、保险期间、责任免除和等待期四个主题族，只有对应 fixture 通过后才允许用于“明确不相关”排除。
+
+#### 涉及文件
+
+- 优先修改 `scripts/lib/rag_engine/layered_retrieval.py`
+- 需要拆分时新增 `scripts/lib/compliance/clause_routing.py`
+- 新增 `scripts/lib/doc_parser/pd/data/clause_topics.json`
+- 新增 `scripts/lib/compliance/data/clause_topic_relations.json`
+- 新增 `scripts/tests/compliance/test_clause_routing.py`
+
+#### 测试
+
+- 续保法规选入续保、保险期间和未知相关块；
+- 续保法规排除明确的受益人变更块；
+- 无主题块不会被丢弃；
+- 多主题法规能合并候选且去重；
+- 上下文预算优先保留直接相关块。
+- 关系文件缺失、版本不兼容或出现未知主题时安全降级为 unknown。
+- 关键词和关系文件引用未注册主题代码时测试失败。
+
+#### 验收
+
+- 核心法规所需条款 Recall 为100%；
+- 每个剔除条款都有明确受控理由；
+- 不允许仅因“主题不相等”而排除。
+
+---
+
+### Phase 4：从法规审核需求建设确定性事实提取
+
+**对应**：US5
+**目标**：取消现有规则引擎的平行判断，依据法规审核包的实际需要建设通用、可复用的事实证据。
+
+#### 工作内容
+
+1. 从 v5 法规原文、法规适用标签和条款主题出发，列出 LLM 审核所需的结构化事实；不得从旧规则反向推导监管要求。
+2. 第一批建设高价值的通用事实提取：
+   - 等待期天数；
+   - 犹豫期天数；
+   - 续保安排；
+   - 不保证续保表述；
+   - 禁止续保词；
+   - 费率可调身份；
+   - 首次及后续费率调整时间。
+3. 数值提取必须带单位并支持中文数字。
+4. 提取失败返回 unknown，不形成违规。
+5. 旧规则不得向新链路提供法规依据、适用条件或最终结论；其中的纯解析算法只有在依据当前法规审核需求重新验证后才可复用。
+6. Phase 4 起，旧规则结果不得合并进新主链；当前生产旧入口仅保留影子对照和回滚能力。
+7. Phase 7 完成新主链验收和切换后，断开并最终删除 `rule_engine.py` 的生产调用，避免在 Phase 5 尚未完成时提前破坏现网审核。
+
+#### 涉及文件
+
+- 可能新增 `scripts/lib/compliance/fact_extraction.py`
+- 修改 `scripts/lib/compliance/checker.py`
+- 新增事实提取单元测试
+- 修改 `scripts/lib/compliance/rule_engine.py` 的调用边界：Phase 4 隔离新主链，Phase 7 断开生产调用
+
+#### 测试
+
+- 天、月、年和百分比不混用；
+- 支持阿拉伯数字与常见中文数字；
+- 否定语境正确；
+- 业务触发条件缺失时不判违规；
+- 产品不适用时不执行事实判断；
+- 事实包含条款 ID 和原文证据。
+
+#### 验收
+
+- 新链路不使用旧 `ProductMetadata` 过滤规则；
+- 事实提取不产生最终合规或违规结论；
+- 新主链的监管语义均可追溯到 v5 法规原文；
+- 现有20条规则的结果不合并进新主链。
+- 旧入口是否仍在迁移期运行不影响新主链结果；两者输出严格隔离。
+
+---
+
+### Phase 5：法规级 LLM 审核
+
+**对应**：US4、US6
+**目标**：每次让 LLM 判断一个法规条款单元与其候选产品条款，输出结构化证据结论。
+
+#### 工作内容
+
+1. 构建 `RegulationAuditPackage`：
+   - 产品标签证据；
+   - `kb_version + source_file + article_number/section_path` 组成的法规条款单元；
+   - 该单元按原文顺序合并的一个或多个物理 chunk；
+   - 适用性结果；
+   - 路由后的条款块；
+   - 确定性事实。
+2. 重写审核 prompt，明确：
+   - 不得脱离法规原文；
+   - 不得引用未提交条款；
+   - 信息不足时输出 `insufficient_information`；
+   - 复杂例外输出 `manual_review`；
+   - LLM不得直接输出生效的 `not_applicable`；
+   - 发现适用性争议时输出 `manual_review + applicability_dispute`，进入人工复核但不回写前置过滤；
+   - 必须返回法规和条款证据 ID。
+3. 使用 Pydantic 或现有 JSON 提取工具验证结构化结果。
+4. 单条失败不伪装为合规。默认策略固定为：失败单元输出 `manual_review + incomplete`，继续审核其他独立单元；整份报告不得因局部失败输出“合规”。
+5. 同一法规条款单元的多个 chunk 默认合并后只调用一次 LLM。
+6. 只有单元超过上下文预算时才分段调用；归并优先级固定为
+   `non_compliant > manual_review > insufficient_information > compliant`，
+   且所有分段均有充分合规证据时才能归并为 `compliant`。
+7. 调用次数上限为“候选法规条款单元数 × 1”，超长单元分段属于需要单独记录的例外。
+8. 小批量只作为 HTTP 传输优化：一个请求携带多个独立任务，每个法规条款单元在 prompt 和响应中独立分块、独立输出、独立归属证据。
+9. 小批量 HTTP 请求整体失败时，批次内每个单元分别进入 `manual_review + incomplete`；仅复用 `lib/llm/` 的既有重试机制，重试保持原 task ID 和证据 ID。
+
+#### 涉及文件
+
+- 修改 `scripts/lib/compliance/prompts.py`
+- 修改 `scripts/lib/compliance/checker.py`
+- 复用 `scripts/lib/llm/` 客户端和错误处理
+- 修改 `scripts/api/schemas/compliance.py`
+
+#### 测试
+
+- prompt 包含法规条款单元、全部来源 chunk ID 和候选条款 ID；
+- LLM 返回无效 JSON 时明确失败；
+- 无证据的违规结论被拒绝或降为人工复核；
+- 信息不足不会输出合规；
+- 多法规结果可稳定汇总。
+- LLM提出适用性争议时不会直接改变候选或结论状态。
+- 相同输入以配置的最大并发数重复运行 N 次，结论集合、法规证据 ID 集合和产品条款证据 ID 集合必须严格相等；仅允许完成事件的到达时间不同。
+- 小批量整体失败和单个任务结构化输出失败均不会污染同批其他任务的证据归属。
+
+#### 验收
+
+- 每条结论都有知识库版本、法规条款单元和全部来源 chunk；
+- `non_compliant` 必须至少引用一条产品条款证据；
+- 模型失败不会变成“0条违规”；
+- 核心人工样例结论与 Phase 0 冻结的精算验收集版本一致，报告记录该验收集版本号。
+
+---
+
+### Phase 6：API、前端与可观测性
+
+**对应**：US6
+**目标**：让用户看到审核覆盖范围、降级状态和证据链。
+
+#### 工作内容
+
+1. SSE 增加法规级进度：
+   - 候选法规数；
+   - 已审核数；
+   - 排除数；
+   - 降级或失败数。
+2. 报告增加：
+   - 知识库版本、主题体系版本和主题关系配置版本；
+   - 法规条款单元 ID 及全部来源 chunk ID；
+   - 产品标签及证据；
+   - 法规适用性；
+   - 使用的条款块；
+   - 未提交条款块及原因；
+   - 确定性事实；
+   - LLM判断状态。
+3. 前端区分：
+   - 无违规；
+   - 信息不足；
+   - 审核降级；
+   - 审核未完成。
+4. 保持旧报告读取兼容。
+5. 多个关键组件同时降级时，整份审核标记为 `incomplete`；允许展示已完成的局部结论，但不得输出整份产品“合规”。
+6. 知识库升级后历史报告保留原版本证据；用户要求按新版本判断时创建新的审核运行，不覆盖或复用旧版 `not_applicable` 结果。
+
+#### 涉及文件
+
+- 修改 `scripts/api/routers/compliance.py`
+- 修改 `scripts/api/schemas/compliance.py`
+- 修改 `scripts/web/src/api/compliance.ts`
+- 修改 `scripts/web/src/types/index.ts`
+- 修改 `scripts/web/src/pages/CompliancePage.tsx`
+
+#### 验收
+
+- 前端不能把系统失败显示为合规；
+- 报告可查看法规与条款证据；
+- 旧报告仍可打开；
+- SSE中断有明确状态。
+- RAG与产品识别同时失败、LLM与事实提取同时失败时均返回 `incomplete`。
+
+---
+
+### Phase 7：双轨对照、切换和死代码清理
+
+**对应**：US4—US6
+**目标**：在有证据的情况下切换主链，并删除旧的平行路径。
+
+#### 工作内容
+
+1. 在测试或受控环境对同一产品运行旧链路和新链路。
+2. 记录：
+   - 法规召回差异；
+   - 条款候选差异；
+   - 违规结论差异；
+   - LLM上下文长度；
+   - 降级率；
+   - 人工复核结果。
+3. 对所有差异做精算验收。
+4. 新链路满足门槛后切换默认入口。
+5. 搜索所有调用方后删除：
+   - `scripts/lib/compliance/rule_engine.py`；
+   - `scripts/tests/compliance/test_rule_engine.py` 及只服务于旧规则引擎的 fixture；
+   - 旧 `ProductMetadata` 适用性路径；
+   - 平行合并的规则结果路径；
+   - 不再使用的规则索引和测试；
+   - 不可达兼容代码。
+
+#### 验收
+
+- 核心样例法规 Recall@候选集 为100%；
+- 明确不适用法规排除准确率100%；
+- 核心条款块 Recall 为100%；
+- 所有非合规结论通过精算抽检；
+- 无静默失败；
+- 旧双轨路径完全删除后全量测试通过。
+
+## 9. 事实提取建设优先级
+
+### 第一批：高价值、确定性较强
+
+1. 短期健康险有续保时的不保证续保披露；
+2. 自动续保、承诺续保等禁止表述；
+3. 等待期与犹豫期天数；
+4. 费率可调长期医疗险的首次及后续调费间隔。
+
+### 第二批：需要结构化关系
+
+1. 两全/年金首次生存金时间和20%比例；
+2. 重疾险轻症与重症保额比例；
+3. 分期交费与宽限期复合条件；
+4. 保证续保条款中的减责、增免限制。
+
+### 不作为第一批通用事实提取
+
+1. 寿险必须包含现金价值表；
+2. 所有产品通用15天犹豫期；
+3. 分红险红利不保证的准确 v5 来源；
+4. 意外险不得以死亡为主险责任；
+5. 所有长期健康险必须包含续保条款。
+
+## 10. 成本与延迟预算
+
+Phase 0 先测量当前真实产品的候选法规条款单元数量、单元长度、LLM调用耗时和端到端耗时，再由用户确认正式 SLA；计划阶段不凭空填写秒数。
+
+固定预算原则：
+
+- 正常情况下，LLM调用次数上限等于候选法规条款单元数；
+- 同一法规条款单元的多个物理 chunk 合并为一次调用；
+- 超长单元分段必须单独计数并进入 trace；
+- 并发不得改变结果顺序、证据归属或失败状态；
+- 达到时间或调用预算时，剩余单元标记为未完成，整体状态为 `incomplete`，不得假装完成；
+- Phase 5 开始前必须由用户确认端到端目标时长、最大候选单元数和最大并发数。
+
+## 11. Risk Analysis
+
+| 风险 | 概率 | 影响 | 缓解措施 |
+|---|---|---|---|
+| 条款主题漏标造成上下文缺失 | 中 | 高 | unknown 条款保守保留；核心样例做 Recall 验收 |
+| 法规标签误标造成法规排除 | 低至中 | 高 | 仅明确冲突排除；保留验收表和排除 trace |
+| 上下文过长 | 中 | 中 | 直接相关优先；显式预算；不删必要上下文 |
+| LLM无证据判违规 | 中 | 高 | 强制结构化证据 ID；无证据降级 |
+| 确定性事实提取错单位 | 中 | 高 | 带单位模型；中文数字测试；提取失败为 unknown |
+| 双轨迁移期间结果重复 | 中 | 中 | 对照环境运行；生产入口只允许一个主链 |
+| 旧报告不兼容 | 低 | 中 | schema默认值和兼容读取测试 |
+| v5法规内容不足 | 中 | 高 | 明确 `insufficient_information`；不擅自恢复已删除法规 |
+
+## 12. Complexity Tracking
+
+| 项目 | 原因 | 更简单替代方案及排除理由 |
+|---|---|---|
+| 逐法规构建审核包 | 必须把法规、产品事实和候选条款形成可追溯最小单元 | 整篇一次审核更简单，但证据混乱且上下文过大 |
+| 显式条款关联关系 | 同主题不足以覆盖保险期间、续保等跨主题依赖 | 全部条款都提交更简单，但无法达到减少上下文目标 |
+| 多状态结论 | 需要区分合规、违规、信息不足和系统失败 | 布尔结论更简单，但会把失败或未知误报为合规 |
+
+不引入新的工作流框架、规则DSL或独立服务。若现有函数和冻结数据模型足够，则保持单进程模块化实现。
+
+## 13. Execution Order
+
+```text
+Phase 0 数据就绪与净化基线
+    ↓
+Phase 1 统一输入
+    ↓
+Phase 2 法规候选冻结
+    ↓
+Phase 3 条款路由
+    ↓
+Phase 4 事实提取
+    ↓
+Phase 5 法规级 LLM
+    ↓
+Phase 6 API与前端
+    ↓
+Phase 7 对照切换与清理
+```
+
+Phase 0—3 可以先独立验收，不需要在线 LLM。Phase 4 的每组事实提取可逐条交付。Phase 5 完成后才能判断端到端审核准确率。Phase 7 未验收前不删除旧路径。
+
+## 14. Acceptance Summary
+
+| User Story | 验收标准 | 主要测试 |
+|---|---|---|
+| US1 | 产品事实唯一；unknown安全；无主题条款不丢失 | 解析器与标签单测 |
+| US2 | 明确冲突排除100%；unknown漏召回为0 | applicability测试 |
+| US3 | 核心法规条款Recall 100%；排除均有理由 | clause routing测试 |
+| US4 | 每条结论引用法规chunk；违规引用产品条款 | prompt与审核包测试 |
+| US5 | 事实需求来自法规原文；旧规则结果不进入新主链；事实层不形成最终结论 | fact extraction测试 |
+| US6 | 系统失败、信息不足、无违规可被用户区分 | API、SSE、前端测试 |
+
+## 15. Review Gates
+
+执行前需要用户确认：
+
+1. 本文所述单主链是否作为唯一目标架构；
+2. 主题未知条款默认保留是否符合风险偏好；
+3. “明确不相关”是否仅允许通过受控关系配置；
+4. LLM是否作为最终法规合规判断者；
+5. 第一版确定性程序是否只提供事实证据、不直接形成最终合规结论；
+6. 第一批事实提取范围；
+7. 旧 Python 规则是否仅保留影子对照并在切换后删除；
+8. 端到端切换前需要哪些真实产品作为精算验收集。
+9. 可接受的端到端目标时长、最大候选法规条款单元数和最大并发数。
+
+## 16. Review Decision Record
+
+| Gate | 当前决定 | 状态 |
+|---:|---|---|
+| 1 | 采用唯一审核主链；旧链路只在迁移期影子对照 | 已确认 |
+| 2 | 需要先展示现有条款主题清单，再确认未知条款默认保留策略 | 待确认 |
+| 3 | 只有经过治理的受控关系明确判为不相关时才允许剔除；其他情况保守保留 | 已确认 |
+| 4 | 采用方案C：第一版LLM统一形成最终结论，稳定后再评估确定性直出 | 已确认，见 `future-optimizations.md` |
+| 5 | 第一版确定性程序只输出事实证据 | 已确认，见 `future-optimizations.md` |
+| 6 | 不迁移现有20条 Python 规则；从法规原文按需建设通用事实提取器 | 已确认 |
+| 7 | 法规原文及已验收元数据是唯一监管依据；旧固定规则不作为依据 | 已确认 |
+| 8 | 使用 `/Users/plain/work/actuary-assets/products` 建立验收集；Phase 0 第7项仅为候选清单，尚未冻结 | 原则已确认，具体样例待确认 |
+| 9 | 端到端目标暂定5分钟；单任务初始最大并发建议5；允许3—5个同上下文法规单元受控小批量 | 已确认 |
