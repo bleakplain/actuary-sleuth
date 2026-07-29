@@ -25,6 +25,24 @@ def test_requested_product_name_replaces_recognized_name_and_tags():
     assert result.group_or_individual == "团体"
 
 
+def test_requested_product_name_keeps_absence_inference_disabled_without_coverage():
+    audit_doc = AuditDocument(
+        file_name="upload.docx",
+        file_type=".docx",
+        product_name="旧定期寿险条款",
+        product_tags=build_product_tags("旧定期寿险条款"),
+    )
+
+    result = _apply_requested_product_name(
+        audit_doc,
+        "测试医疗保险条款",
+        "保险期间为一年。",
+    )
+
+    assert result.coverage_attested is False
+    assert result.product_tags.renewal_type.value == "unknown"
+
+
 def test_retrieval_context_recovers_category():
     category, warnings = _resolve_retrieval_context(
         None,

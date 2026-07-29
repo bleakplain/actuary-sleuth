@@ -42,6 +42,8 @@ _TAG_DIMENSIONS: Dict[str, str] = {
     "group": "customer_scope",
     "main": "contract_role",
     "rider": "contract_role",
+    "has_renewal": "renewal_condition",
+    "no_renewal": "renewal_condition",
     "internet_exclusive": "special_feature",
     "tax_advantaged_health": "special_feature",
     "rate_adjustable": "special_feature",
@@ -73,6 +75,7 @@ class RegulationApplicability:
     term_classes: FrozenSet[str] = frozenset()
     customer_scopes: FrozenSet[str] = frozenset()
     contract_roles: FrozenSet[str] = frozenset()
+    renewal_conditions: FrozenSet[str] = frozenset()
     special_features: FrozenSet[str] = frozenset()
     clause_topics: FrozenSet[str] = frozenset()
     unknown_tags: FrozenSet[str] = frozenset()
@@ -86,6 +89,7 @@ class RegulationApplicability:
             "term_class": set(),
             "customer_scope": set(),
             "contract_role": set(),
+            "renewal_condition": set(),
             "special_feature": set(),
         }
         unknown_tags: set[str] = set()
@@ -107,6 +111,7 @@ class RegulationApplicability:
             term_classes=frozenset(grouped["term_class"]),
             customer_scopes=frozenset(grouped["customer_scope"]),
             contract_roles=frozenset(grouped["contract_role"]),
+            renewal_conditions=frozenset(grouped["renewal_condition"]),
             special_features=frozenset(grouped["special_feature"]),
             clause_topics=frozenset(_split_values(metadata.get("条款主题"))),
             unknown_tags=frozenset(unknown_tags),
@@ -143,6 +148,13 @@ def _match_dimension(
     return "excluded", f"{dimension}: {actual} 不在 {sorted(allowed)}"
 
 
+def _renewal_condition(product_tags: ProductTags) -> Optional[str]:
+    renewal_type = _known_enum_value(product_tags.renewal_type)
+    if renewal_type is None:
+        return None
+    return "no_renewal" if renewal_type == "none" else "has_renewal"
+
+
 def match_regulation_applicability(
     product_tags: ProductTags,
     regulation: RegulationApplicability,
@@ -155,6 +167,7 @@ def match_regulation_applicability(
         ("term_class", regulation.term_classes, _known_enum_value(product_tags.term_class)),
         ("customer_scope", regulation.customer_scopes, _known_enum_value(product_tags.customer_scope)),
         ("contract_role", regulation.contract_roles, _known_enum_value(product_tags.contract_role)),
+        ("renewal_condition", regulation.renewal_conditions, _renewal_condition(product_tags)),
     )
     matched: list[str] = []
     indeterminate: list[str] = []

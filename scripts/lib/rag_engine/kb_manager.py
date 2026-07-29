@@ -259,7 +259,10 @@ class KBManager:
         version_config = self.load_kb(meta.version_id)
 
         from .builder import KnowledgeBuilder
-        builder = KnowledgeBuilder(version_config)
+        builder = KnowledgeBuilder(
+            version_config,
+            kb_version=meta.version_id,
+        )
         stats = builder.build(
             file_pattern=file_pattern,
             force_rebuild=force_rebuild,

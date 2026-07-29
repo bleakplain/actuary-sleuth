@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Mapping, Tuple
+from typing import Mapping, Optional, Tuple
 
 from lib.auth.parse_attestation import (
     ParseAttestationError,
@@ -14,6 +14,7 @@ from lib.compliance.audit_pipeline import AuditPipelineRequest
 from lib.compliance.regulation_retrieval import infer_category_from_product_tags
 from lib.doc_parser.models import (
     calculate_audit_input_fingerprint,
+    calculate_clause_hierarchy,
     calculate_clause_ids,
     calculate_document_fingerprint,
     render_audit_document_text,
@@ -42,6 +43,11 @@ class ParsedAuditBlockInput:
     number: str
     title: str
     content: str
+    hierarchy_level: int = 0
+    parent_number: Optional[str] = None
+    ancestor_numbers: Tuple[str, ...] = ()
+    hierarchy_path: str = ""
+    container_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -53,10 +59,69 @@ class PipelineRequestInput:
     audit_input_fingerprint: str
     product_name: str
     product_name_source: str
+    coverage_attested: bool
     parse_warnings: Tuple[str, ...]
     category: str
     audit_blocks: Tuple[ParsedAuditBlockInput, ...]
     product_tags: Mapping[str, object]
+
+
+def _validate_bound_hierarchy(
+    blocks: Tuple[ParsedAuditBlockInput, ...],
+) -> None:
+    """重算编号层级，拒绝客户端篡改派生路由事实。
+
+    层级不另行加入内容指纹：它完全由已绑定的 block_type、number、
+    content 和同类型编号集合决定。这样既保留证据 ID 的版面独立性，
+    又让下游只能消费服务端可重验的层级。
+    """
+    hierarchical_types = {"clause", "rider"}
+    numbers_by_type = {
+        block_type: tuple(
+            block.number
+            for block in blocks
+            if block.block_type == block_type and block.number
+        )
+        for block_type in hierarchical_types
+    }
+    for block in blocks:
+        if block.block_type in hierarchical_types:
+            (
+                expected_level,
+                expected_parent,
+                expected_ancestors,
+                expected_path,
+            ) = calculate_clause_hierarchy(block.number)
+            expected_container = bool(
+                not block.content.strip()
+                and block.number
+                and any(
+                    number.startswith(f"{block.number}.")
+                    for number in numbers_by_type[block.block_type]
+                )
+            )
+        else:
+            expected_level, expected_parent = 0, None
+            expected_ancestors, expected_path = (), ""
+            expected_container = False
+        submitted = (
+            block.hierarchy_level,
+            block.parent_number,
+            block.ancestor_numbers,
+            block.hierarchy_path,
+            block.container_only,
+        )
+        expected = (
+            expected_level,
+            expected_parent,
+            expected_ancestors,
+            expected_path,
+            expected_container,
+        )
+        if submitted != expected:
+            raise PipelineRequestConflictError(
+                f"审核块 {block.clause_id} 的编号层级与绑定原文不一致，请重新解析"
+            )
 
 
 def build_audit_pipeline_request(
@@ -73,6 +138,7 @@ def build_audit_pipeline_request(
             source.product_name_source,
             source.parse_warnings,
             user_subject,
+            coverage_attested=source.coverage_attested,
         )
     except ParseAttestationError as exc:
         raise PipelineRequestConflictError(str(exc)) from exc
@@ -83,6 +149,7 @@ def build_audit_pipeline_request(
     ids = [block.clause_id for block in source.audit_blocks]
     if len(ids) != len(set(ids)):
         raise InvalidPipelineRequestError("audit_blocks 包含重复 clause_id")
+    _validate_bound_hierarchy(source.audit_blocks)
     if not source.document_fingerprint:
         raise InvalidPipelineRequestError("缺少 document_fingerprint")
     block_identities = tuple(
@@ -124,7 +191,7 @@ def build_audit_pipeline_request(
         source.product_name or None,
         source.document_content,
         product_name_source=source.product_name_source,
-        complete_document=True,
+        complete_document=source.coverage_attested,
     )
     submitted_tags = ProductTags.from_dict(source.product_tags)
     if replace(submitted_tags, evidence=(), warnings=()) != replace(
@@ -143,6 +210,11 @@ def build_audit_pipeline_request(
             text=block.content,
             block_type=block.block_type,
             topics=tag_clause_topics(block.title, block.content),
+            hierarchy_level=block.hierarchy_level,
+            parent_number=block.parent_number,
+            ancestor_numbers=block.ancestor_numbers,
+            hierarchy_path=block.hierarchy_path,
+            container_only=block.container_only,
         )
         for block in source.audit_blocks
     )

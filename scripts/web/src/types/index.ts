@@ -193,6 +193,11 @@ export interface ParsedClause {
   title: string;
   text: string;
   topics: string[];
+  hierarchy_level: number;
+  parent_number: string | null;
+  ancestor_numbers: string[];
+  hierarchy_path: string;
+  container_only: boolean;
 }
 
 export interface ParsedDataTable {
@@ -217,6 +222,11 @@ export interface ParsedAuditBlock {
   title: string;
   content: string;
   topics: string[];
+  hierarchy_level: number;
+  parent_number: string | null;
+  ancestor_numbers: string[];
+  hierarchy_path: string;
+  container_only: boolean;
 }
 
 export interface ParsedDocument {
@@ -242,6 +252,7 @@ export interface ParsedDocument {
   category_confidence: number;
   product_name?: string | null;
   product_name_source: string;
+  coverage_attested: boolean;
   is_rider?: boolean;
   group_or_individual?: string | null;
   duration_type?: string | null;

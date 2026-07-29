@@ -364,6 +364,7 @@ def _pipeline_request(
                 audit_input_fingerprint=req.audit_input_fingerprint,
                 product_name=req.product_name,
                 product_name_source=req.product_name_source,
+                coverage_attested=req.coverage_attested,
                 parse_warnings=tuple(req.parse_warnings),
                 category=req.category,
                 audit_blocks=tuple(
@@ -374,6 +375,11 @@ def _pipeline_request(
                         number=block.number,
                         title=block.title,
                         content=block.content,
+                        hierarchy_level=block.hierarchy_level,
+                        parent_number=block.parent_number,
+                        ancestor_numbers=tuple(block.ancestor_numbers),
+                        hierarchy_path=block.hierarchy_path,
+                        container_only=block.container_only,
                     )
                     for block in req.audit_blocks
                 ),

@@ -12,7 +12,7 @@ from typing import Any, Mapping, Optional, Sequence
 
 from lib.auth.jwt import get_jwt_signing_secret
 
-_DOMAIN = b"actuary-sleuth/parse-attestation/v1"
+_DOMAIN = b"actuary-sleuth/parse-attestation/v2"
 _DEFAULT_TTL_SECONDS = 30 * 60
 
 
@@ -67,20 +67,22 @@ def issue_parse_attestation(
     parse_warnings: Sequence[str] = (),
     user_subject: str = "",
     *,
+    coverage_attested: bool = False,
     now: Optional[int] = None,
     ttl_seconds: int = _DEFAULT_TTL_SECONDS,
 ) -> IssuedParseAttestation:
-    """签发绑定解析身份、内容身份、名称身份和用户主体的短时凭证。"""
+    """签发绑定解析身份、原文覆盖证明和用户主体的短时凭证。"""
     issued_at = int(time.time()) if now is None else int(now)
     expires_epoch = issued_at + max(int(ttl_seconds), 1)
     payload = {
-        "v": 1,
+        "v": 2,
         "iat": issued_at,
         "exp": expires_epoch,
         "parse_id": parse_id,
         "document_fingerprint": document_fingerprint,
         "audit_input_fingerprint": audit_input_fingerprint,
         "product_name_source": product_name_source,
+        "coverage_attested": coverage_attested,
         "parse_warnings_sha256": _warnings_digest(parse_warnings),
         "sub": user_subject,
     }
@@ -114,6 +116,7 @@ def verify_parse_attestation(
     parse_warnings: Sequence[str] = (),
     user_subject: str = "",
     *,
+    coverage_attested: bool = False,
     now: Optional[int] = None,
 ) -> None:
     """验证签名、有效期以及审核请求与原始解析快照的全部绑定字段。"""
@@ -134,7 +137,7 @@ def verify_parse_attestation(
         payload: Any = json.loads(_decode(encoded_payload))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ParseAttestationError("解析凭证载荷无效") from exc
-    if not isinstance(payload, Mapping) or payload.get("v") != 1:
+    if not isinstance(payload, Mapping) or payload.get("v") != 2:
         raise ParseAttestationError("解析凭证版本无效")
     current_time = int(time.time()) if now is None else int(now)
     expires_at = payload.get("exp")
@@ -145,6 +148,7 @@ def verify_parse_attestation(
         "document_fingerprint": document_fingerprint,
         "audit_input_fingerprint": audit_input_fingerprint,
         "product_name_source": product_name_source,
+        "coverage_attested": coverage_attested,
         "parse_warnings_sha256": _warnings_digest(parse_warnings),
         "sub": user_subject,
     }

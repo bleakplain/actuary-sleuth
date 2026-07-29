@@ -181,8 +181,9 @@ def test_docx_unnumbered_paragraphs_are_preserved_as_unclassified(tmp_path):
         for block in result.audit_blocks
         if block.block_type is AuditBlockType.UNCLASSIFIED
     ]
-    assert "某某医疗保险条款" in contents
-    assert "本段没有条款编号，但仍属于待审核产品原文。" in contents
+    combined = "\n".join(contents)
+    assert "某某医疗保险条款" in combined
+    assert "本段没有条款编号，但仍属于待审核产品原文。" in combined
     assert all(block.topics == () for block in result.audit_blocks
                if block.block_type is AuditBlockType.UNCLASSIFIED)
 
@@ -200,12 +201,32 @@ def test_docx_one_row_table_and_special_heading_are_represented(tmp_path):
     result = parse_product_document(str(path))
 
     assert result.notices[0].title == "投保须知"
-    assert result.notices[0].content == "请投保人完整阅读本须知。"
-    assert any(
-        "特别约定" in section.content
-        and "这一行不是标准数据表，但仍须审核。" in section.content
-        for section in result.unclassified_sections
+    assert "请投保人完整阅读本须知。" in result.notices[0].content
+    assert "特别约定" in result.notices[0].content
+    assert "这一行不是标准数据表，但仍须审核。" in (
+        result.notices[0].content
     )
+
+
+def test_docx_table_remark_uses_the_same_canonical_text_for_product_tags(
+    tmp_path,
+):
+    path = tmp_path / "table-remark.docx"
+    document = Document()
+    document.add_paragraph("某某医疗保险条款")
+    document.add_paragraph("附表一：保证续保期间为六年")
+    table = document.add_table(rows=2, cols=2)
+    table.rows[0].cells[0].text = "计划"
+    table.rows[0].cells[1].text = "保险金额"
+    table.rows[1].cells[0].text = "计划一"
+    table.rows[1].cells[1].text = "100万元"
+    document.save(str(path))
+
+    result = parse_product_document(str(path))
+
+    assert result.tables[0].remark == "附表一：保证续保期间为六年"
+    assert "【数据表 1】附表一：保证续保期间为六年" in result.canonical_text
+    assert result.product_tags.renewal_type.value == "guaranteed"
 
 
 def test_docx_merged_clause_cells_are_not_duplicated_as_unclassified(tmp_path):

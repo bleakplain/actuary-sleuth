@@ -10,6 +10,8 @@ V3 分块策略:
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import logging
 from dataclasses import dataclass
@@ -52,6 +54,39 @@ HEADING_PATTERNS = {
 # 元数据提取
 _BLOCKQUOTE_META = re.compile(r'^>\s*\*\*元数据\*\*\s*:\s*(.+)$', re.MULTILINE)
 _KV_PAIR = re.compile(r'(\S+?)=([^|]+)')
+
+
+def build_chunk_node_id(
+    kb_version: str,
+    source_path: str,
+    section_path: str,
+    article_number: str,
+    chunk_index: int,
+    content: str,
+) -> str:
+    """生成可跨重复构建复现的物理 chunk ID。
+
+    正文变化应形成新证据身份；仅修改适用标签等业务元数据时，定位和正文不变，
+    因而仍保留原证据身份。
+    """
+    identity = json.dumps(
+        {
+            "schema_version": "1",
+            "kb_version": kb_version,
+            "source_path": source_path,
+            "section_path": section_path,
+            "article_number": article_number,
+            "chunk_index": chunk_index,
+            "content_sha256": hashlib.sha256(
+                content.encode("utf-8")
+            ).hexdigest(),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return f"kb-chunk:{digest}"
 
 
 @dataclass
@@ -159,7 +194,15 @@ class MdParser:
 
         self._link_chunks(chunks)
 
-        return self._chunks_to_nodes(chunks)
+        kb_version = str(doc.metadata.get("kb_version", "")).strip()
+        source_path = str(
+            doc.metadata.get("source_path") or source_file
+        ).strip()
+        return self._chunks_to_nodes(
+            chunks,
+            kb_version=kb_version,
+            source_path=source_path,
+        )
 
     def _identify_headings(self, body: str) -> List[Heading]:
         """识别文档层级结构（多策略融合）
@@ -609,9 +652,15 @@ class MdParser:
             chunk.prev_chunk_id = chunks[i - 1].chunk_id if i > 0 else None
             chunk.next_chunk_id = chunks[i + 1].chunk_id if i + 1 < len(chunks) else None
 
-    def _chunks_to_nodes(self, chunks: List[Chunk]) -> List[TextNode]:
+    def _chunks_to_nodes(
+        self,
+        chunks: List[Chunk],
+        kb_version: str = "",
+        source_path: str = "",
+    ) -> List[TextNode]:
         """转换为TextNode，添加智能overlap"""
         nodes: List[TextNode] = []
+        section_chunk_counts: Dict[str, int] = {}
 
         for i, chunk in enumerate(chunks):
             content = chunk.content
@@ -631,8 +680,30 @@ class MdParser:
             metadata['next_chunk_id'] = chunk.next_chunk_id
             metadata['parent_chunk_id'] = chunk.parent_chunk_id
             metadata['level'] = chunk.level
-
-            nodes.append(TextNode(text=content.strip(), metadata=metadata))
+            section_chunk_index = section_chunk_counts.get(
+                chunk.section_path,
+                0,
+            )
+            section_chunk_counts[chunk.section_path] = section_chunk_index + 1
+            metadata["chunk_index"] = section_chunk_index
+            if kb_version:
+                metadata["kb_version"] = kb_version
+            if source_path:
+                metadata["source_path"] = source_path
+            normalized_content = content.strip()
+            node_id = build_chunk_node_id(
+                kb_version=kb_version,
+                source_path=source_path or str(metadata.get("source_file", "")),
+                section_path=str(metadata.get("section_path", "")),
+                article_number=str(metadata.get("article_number", "")),
+                chunk_index=section_chunk_index,
+                content=normalized_content,
+            )
+            nodes.append(TextNode(
+                id_=node_id,
+                text=normalized_content,
+                metadata=metadata,
+            ))
 
         return nodes
 

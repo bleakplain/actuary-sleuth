@@ -173,6 +173,11 @@ class ParsedAuditBlock(BaseModel):
     title: str = ""
     content: str
     topics: List[str] = Field(default_factory=list)
+    hierarchy_level: int = 0
+    parent_number: Optional[str] = None
+    ancestor_numbers: List[str] = Field(default_factory=list)
+    hierarchy_path: str = ""
+    container_only: bool = False
 
 
 class DocumentCheckRequest(BaseModel):
@@ -183,6 +188,7 @@ class DocumentCheckRequest(BaseModel):
     audit_input_fingerprint: str = ""
     product_name: str = ""
     product_name_source: str = "unknown"
+    coverage_attested: bool = False
     parse_warnings: List[str] = Field(default_factory=list)
     category: str = ""
     clause_topics: List[str] = Field(default_factory=list)
@@ -196,6 +202,11 @@ class ParsedClause(BaseModel):
     title: str
     text: str
     topics: List[str] = Field(default_factory=list)
+    hierarchy_level: int = 0
+    parent_number: Optional[str] = None
+    ancestor_numbers: List[str] = Field(default_factory=list)
+    hierarchy_path: str = ""
+    container_only: bool = False
 
 
 class ParsedDataTable(BaseModel):
@@ -236,6 +247,7 @@ class ParsedDocumentResponse(BaseModel):
     # 产品名识别结果（从文档正文提取，区别于 file_name）
     product_name: Optional[str] = None
     product_name_source: str = "unknown"
+    coverage_attested: bool = False
     is_rider: bool = False
     # 结构化标签维度（供前端展示与后续标签化法规筛选）
     group_or_individual: Optional[str] = None

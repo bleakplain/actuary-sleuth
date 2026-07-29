@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """知识库构建模块，将法规文档构建为向量索引和 BM25 索引。"""
 import logging
+import re
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -31,8 +32,12 @@ class KnowledgeBuilder:
         self,
         config: Optional[RAGConfig] = None,
         quality_checker: Optional[QualityChecker] = None,
+        kb_version: str = "",
     ):
         self.config = config or RAGConfig()
+        self.kb_version = kb_version or self._infer_kb_version(
+            self.config.vector_db_path
+        )
         self.chunker = MdParser(chunk_config=self.config.chunking)
         self.index_manager = VectorIndexManager(self.config)
         # 法规清单中存在“保险期间不得低于5年”等短而完整的要求；
@@ -41,6 +46,16 @@ class KnowledgeBuilder:
             allow_structured_short_chunks=True,
         )
         self._embedding_setup_done = False
+
+    @staticmethod
+    def _infer_kb_version(vector_db_path: Optional[str]) -> str:
+        """从 ``.../<version>/lancedb`` 回退识别版本。"""
+        if not vector_db_path:
+            return ""
+        for part in reversed(Path(vector_db_path).parts):
+            if re.fullmatch(r"v[1-9]\d*", part):
+                return part
+        return ""
 
     def _ensure_embedding_setup(self):
         if not self._embedding_setup_done:
@@ -72,7 +87,15 @@ class KnowledgeBuilder:
         for md_file in md_files:
             text = self._read_file(md_file)
             if text.strip():
-                doc = Document(text=text, metadata={'file_name': md_file.name})
+                source_path = md_file.relative_to(regulations_dir).as_posix()
+                doc = Document(
+                    text=text,
+                    metadata={
+                        "file_name": md_file.name,
+                        "source_path": source_path,
+                        "kb_version": self.kb_version,
+                    },
+                )
                 documents.append(doc)
 
         logger.info(f"从 {regulations_dir} 加载了 {len(documents)} 个文档")

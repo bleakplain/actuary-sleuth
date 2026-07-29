@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class HeaderFooterFilter:
 
     def __init__(
         self,
-        config: FilterConfig = None,
+        config: Optional[FilterConfig] = None,
         header_region_ratio: float = 0.08,
         footer_region_ratio: float = 0.08,
     ):
@@ -89,21 +89,38 @@ class HeaderFooterFilter:
         if not chars:
             return []
 
-        # 按 y 坐标分组字符（同一行的字符 y 坐标可能有基线偏移）
-        # 使用较大 tolerance 并采用 floor 分组，避免边界值问题
-        y_tolerance = 8.0
-        lines_by_y: dict[float, List[dict]] = {}
-        for c in chars:
-            y_key = round(c['top'] / y_tolerance) * y_tolerance
-            if y_key not in lines_by_y:
-                lines_by_y[y_key] = []
-            lines_by_y[y_key].append(c)
+        # 用字符垂直中心的相邻距离聚类。固定网格 round 会把仅有 1—2pt
+        # 基线差的“编号列/正文列”切到网格边界两侧，制造空编号条款。
+        y_tolerance = 3.0
+        line_groups: List[Tuple[float, List[dict]]] = []
+        for char in sorted(
+            chars,
+            key=lambda item: (
+                (float(item["top"]) + float(item["bottom"])) / 2,
+                float(item["x0"]),
+            ),
+        ):
+            center = (
+                float(char["top"]) + float(char["bottom"])
+            ) / 2
+            if (
+                line_groups
+                and abs(center - line_groups[-1][0]) <= y_tolerance
+            ):
+                baseline, group = line_groups[-1]
+                group.append(char)
+                line_groups[-1] = (
+                    baseline + (center - baseline) / len(group),
+                    group,
+                )
+            else:
+                line_groups.append((center, [char]))
 
         # 按 y 坐标从上到下排序（y 增大）
         result: List[Tuple[float, str]] = []
-        for y_pos in sorted(lines_by_y.keys()):
+        for center, line_chars in line_groups:
             # 按 x 坐标排序字符，并在间隙处插入空格
-            sorted_chars = sorted(lines_by_y[y_pos], key=lambda c: c['x0'])
+            sorted_chars = sorted(line_chars, key=lambda c: c['x0'])
             text_parts = []
             prev_x_end = None
             for c in sorted_chars:
@@ -116,7 +133,8 @@ class HeaderFooterFilter:
                 text_parts.append(c['text'])
                 prev_x_end = c['x0'] + c['width']
             text = ''.join(text_parts)
-            result.append((y_pos, text))
+            top = min(float(char["top"]) for char in line_chars)
+            result.append((top, text))
 
         return result
 

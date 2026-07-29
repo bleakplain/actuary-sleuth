@@ -140,6 +140,39 @@ class TestClauseExtraction:
         assert clauses[0].metadata["涉及标签"] == "health,nursing"
         assert "适用标签" not in clauses[0].metadata
 
+    def test_controlled_renewal_condition_is_emitted_as_applicability_tag(self):
+        from openpyxl import Workbook
+        from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure, extract_clauses
+
+        wb = Workbook()
+        sheet = wb.active
+        sheet.title = "06. test"
+        sheet.append([
+            "序号",
+            "项目",
+            "涉及险种大类",
+            "涉及保险期限",
+            "涉及团体个人",
+            "适用条件",
+        ])
+        sheet.append(["测试法规", None, None, None, None, None])
+        sheet.append([
+            1,
+            "设置续保责任时应明确写明不保证续保。",
+            "健康保险",
+            "短期",
+            "个人",
+            "设置续保责任",
+        ])
+
+        clauses = extract_clauses(sheet, parse_sheet_structure(sheet, sheet.title))
+
+        assert clauses[0].metadata["团体个人"] == "个人"
+        assert clauses[0].metadata["适用条件"] == "设置续保责任"
+        assert clauses[0].metadata["适用标签"] == (
+            "health,short_term,individual,has_renewal"
+        )
+
     @requires_excel_data
     def test_extract_clauses_returns_entries(self, excel_workbook):
         """Should extract non-empty clause entries with sequence numbers."""
@@ -199,6 +232,16 @@ class TestClauseExtraction:
         assert "renewal.general" in topics
         assert "renewal.non_guaranteed" in topics
         assert "renewal.guaranteed" not in topics
+        assert renewal.metadata["适用标签"] == (
+            "health,short_term,individual,has_renewal"
+        )
+
+        confusing_wording = next(
+            c for c in clauses if "自动续保" in c.content and c is not renewal
+        )
+        assert confusing_wording.metadata["适用标签"] == (
+            "health,short_term,individual"
+        )
 
     @requires_excel_data
     def test_sheet_10_sub_regulation_filtering(self, excel_workbook):

@@ -50,6 +50,7 @@ _METADATA_HEADERS = {
     "涉及主附险": "主附险",
     "涉及团体个人": "团体个人",
     "特殊属性": "特殊属性",
+    "适用条件": "适用条件",
     "标签语义": "适用标签语义",
     "适用范围性质": "适用标签语义",
     "逻辑": "规则逻辑",
@@ -68,6 +69,7 @@ _VALUE_CODES = {
     "投连型": "unit_linked", "投资连结型": "unit_linked",
     "互联网产品": "internet_exclusive", "税优健康险": "tax_advantaged_health",
     "费率可调": "rate_adjustable",
+    "设置续保责任": "has_renewal", "未设置续保责任": "no_renewal",
 }
 
 

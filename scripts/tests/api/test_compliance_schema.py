@@ -1,3 +1,8 @@
+from dataclasses import replace
+
+import pytest
+from fastapi import HTTPException
+
 from api.routers.compliance import _audit_doc_to_response
 from api.routers.compliance_v2 import _pipeline_request
 from api.schemas.compliance import ComplianceReportDataResponse, DocumentCheckRequest
@@ -5,6 +10,7 @@ from lib.doc_parser.models import (
     AuditDocument,
     AuditBlockType,
     Clause,
+    CoverageAttestation,
     DataTable,
     DocumentSection,
     TableType,
@@ -68,7 +74,6 @@ def test_document_request_accepts_structured_audit_blocks() -> None:
 
 def test_parse_response_serializes_stable_ids_and_all_audit_blocks() -> None:
     product_name = "医疗保险条款"
-    document_text = "等待期为30天\n年龄 费率\n18 100"
     document = AuditDocument(
         file_name="医疗保险条款.docx",
         file_type=".docx",
@@ -76,11 +81,23 @@ def test_parse_response_serializes_stable_ids_and_all_audit_blocks() -> None:
         unclassified_sections=[
             DocumentSection("", "未编号产品原文", "unclassified"),
         ],
-        clauses=[Clause("1.1", "等待期", "等待期为30天")],
-        tables=[DataTable([["年龄", "费率"], ["18", "100"]], TableType.PREMIUM)],
+        clauses=[Clause("2.5.4", "等待期", "等待期为30天")],
+        tables=[DataTable(
+            [["年龄", "费率"], ["18", "100"]],
+            TableType.PREMIUM,
+            remark="保证续保期间为六年",
+        )],
+        coverage_attestation=CoverageAttestation(
+            coverage_attested=True,
+            source_record_count=3,
+            assigned_record_count=3,
+        ),
+    )
+    document = replace(
+        document,
         product_tags=build_product_tags(
             product_name,
-            document_text,
+            document.canonical_text,
             complete_document=True,
         ),
     )
@@ -91,6 +108,7 @@ def test_parse_response_serializes_stable_ids_and_all_audit_blocks() -> None:
     assert response.audit_input_fingerprint == document.audit_input_fingerprint
     assert response.parse_attestation
     assert response.product_name_source == document.product_name_source
+    assert response.coverage_attested is True
     assert [block.clause_id for block in response.audit_blocks] == [
         block.clause_id for block in document.audit_blocks
     ]
@@ -101,9 +119,14 @@ def test_parse_response_serializes_stable_ids_and_all_audit_blocks() -> None:
     assert response.clauses[0].clause_id == block_by_type[
         AuditBlockType.CLAUSE
     ].clause_id
+    assert response.clauses[0].hierarchy_level == 3
+    assert response.clauses[0].parent_number == "2.5"
+    assert response.clauses[0].ancestor_numbers == ["2", "2.5"]
+    assert response.clauses[0].hierarchy_path == "2 > 2.5 > 2.5.4"
     assert response.data_tables[0].clause_id == block_by_type[
         AuditBlockType.TABLE
     ].clause_id
+    assert "【数据表 1】保证续保期间为六年" in response.combined_text
     assert response.combined_text == render_audit_document_text(
         (
             block.block_type.value,
@@ -122,8 +145,27 @@ def test_parse_response_serializes_stable_ids_and_all_audit_blocks() -> None:
         audit_input_fingerprint=response.audit_input_fingerprint,
         product_name=response.product_name or "",
         product_name_source=response.product_name_source,
+        coverage_attested=response.coverage_attested,
         parse_warnings=response.warnings,
         product_tags=response.product_tags,
         audit_blocks=response.audit_blocks,
     )
-    assert len(_pipeline_request(request).clauses) == 3
+    pipeline_request = _pipeline_request(request)
+    assert len(pipeline_request.clauses) == 3
+    clause = next(
+        item for item in pipeline_request.clauses
+        if item.number == "2.5.4"
+    )
+    assert clause.parent_number == "2.5"
+    assert clause.ancestor_numbers == ("2", "2.5")
+    assert clause.hierarchy_path == "2 > 2.5 > 2.5.4"
+    assert pipeline_request.product_tags.renewal_type.value == "guaranteed"
+
+    table_block = next(
+        block
+        for block in request.audit_blocks
+        if block.block_type == AuditBlockType.TABLE.value
+    )
+    table_block.title = "不保证续保"
+    with pytest.raises(HTTPException, match="document_fingerprint"):
+        _pipeline_request(request)

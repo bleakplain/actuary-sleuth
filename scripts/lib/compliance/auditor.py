@@ -86,6 +86,13 @@ def _package_payload(package: RegulationAuditPackage) -> Dict[str, object]:
                     "title": routed.clause.title,
                     "text": routed.clause.text,
                     "topics": list(routed.clause.topics),
+                    "hierarchy_level": routed.clause.hierarchy_level,
+                    "parent_number": routed.clause.parent_number,
+                    "ancestor_numbers": list(
+                        routed.clause.ancestor_numbers
+                    ),
+                    "hierarchy_path": routed.clause.hierarchy_path,
+                    "container_only": routed.clause.container_only,
                     "relation": routed.relation.value,
                     "routing_reasons": list(routed.reasons),
                 }

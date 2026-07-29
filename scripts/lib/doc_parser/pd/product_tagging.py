@@ -5,9 +5,10 @@ import re
 from typing import Dict, List, Match, Optional, Tuple, Union
 
 from ...common.product_tags import (
-    ContractRole, CustomerScope, HealthTermClass, ProductDesignType, ProductLine,
-    ProductSubtype, ProductTags, ProductTermClass, ProductTermForm, RenewalType,
-    TagEvidence, TermOption,
+    ContractRole, CustomerScope, DiseasePaymentPattern, HealthTermClass,
+    MedicalBenefitBasis, ProductDesignType, ProductLine, ProductSubtype,
+    ProductTags, ProductTermClass, ProductTermForm, RenewalType, TagEvidence,
+    TermOption,
 )
 
 _NAME_TYPES = (
@@ -28,15 +29,32 @@ _NAME_TYPES = (
     ("意外保险", ProductLine.ACCIDENT, ProductSubtype.ACCIDENT),
 )
 
-_COVERAGE_KEYWORDS = {
-    "critical_illness": ("重大疾病保险金", "重疾保险金"),
-    "disease": ("疾病保险金",),
-    "medical": ("医疗保险金", "医疗费用保险金"),
-    "accidental_medical": ("意外医疗保险金", "意外伤害医疗保险金"),
-    "disability_income": ("失能收入损失保险金",),
-    "nursing": ("护理保险金", "长期护理保险金"),
-    "death": ("身故保险金",),
-    "survival": ("生存保险金", "满期保险金"),
+_COVERAGE_PATTERNS = {
+    "critical_illness": (
+        re.compile(r"重大疾病保险金"),
+        re.compile(r"重疾保险金"),
+    ),
+    "disease": (
+        re.compile(r"(?<!重大)(?<!重症)(?<!中症)(?<!轻症)疾病保险金"),
+    ),
+    "medical": (
+        re.compile(r"医疗费用保险金"),
+        re.compile(r"(?<!意外)(?<!伤害)医疗保险金"),
+    ),
+    "accidental_medical": (
+        re.compile(r"意外医疗保险金"),
+        re.compile(r"意外伤害医疗保险金"),
+    ),
+    "disability_income": (re.compile(r"失能收入损失保险金"),),
+    "nursing": (
+        re.compile(r"长期护理保险金"),
+        re.compile(r"护理保险金"),
+    ),
+    "death": (re.compile(r"身故保险金"),),
+    "survival": (
+        re.compile(r"生存保险金"),
+        re.compile(r"满期保险金"),
+    ),
 }
 
 _SUBTYPE_COMPONENT = {
@@ -152,7 +170,7 @@ _INSURANCE_PERIOD_DEFINITION = re.compile(
 )
 _GUARANTEED_RENEWAL_DEFINITIONS = (
     re.compile(
-        r'每\s*'
+        r'(?:每\s*)?'
         r'(?P<value>[零一二两三四五六七八九十百\d]+)\s*'
         r'(?P<unit>年|个月|月|天|日)\s*'
         r'为\s*(?:一|1)?\s*个保证续保期间'
@@ -162,6 +180,63 @@ _GUARANTEED_RENEWAL_DEFINITIONS = (
         r'(?:为|是|[:：])\s*'
         r'(?P<value>[零一二两三四五六七八九十百\d]+)\s*'
         r'(?P<unit>年|个月|月|天|日)'
+    ),
+)
+
+_MEDICAL_EXPENSE_PATTERNS = (
+    re.compile(
+        r'(?:实际发生|支出)[^。；\n]{0,80}'
+        r'(?:医疗|药品|治疗|手术|基因检测)[^。；\n]{0,30}费用'
+    ),
+    re.compile(
+        r'(?:医疗|药品|治疗|手术|基因检测)[^。；\n]{0,30}费用'
+        r'[^。；\n]{0,100}(?:赔付比例|给付比例|剩余部分)'
+    ),
+    re.compile(r'费用补偿型(?:商业)?医疗保险'),
+)
+_MEDICAL_DAILY_ALLOWANCE_PATTERNS = (
+    re.compile(r'(?:住院|护理|重症监护)[^。；\n]{0,12}(?:日额|津贴)保险金'),
+    re.compile(
+        r'(?:每日|每天|按日)[^。；\n]{0,30}'
+        r'(?:给付|支付)[^。；\n]{0,30}(?:津贴|保险金)'
+    ),
+)
+_MEDICAL_FIXED_BENEFIT_PATTERNS = (
+    re.compile(
+        r'本公司按[^。；\n]{0,60}(?:基本保险金额|约定金额)'
+        r'给付\s*(?:医\s*疗意外|并发症)'
+    ),
+    re.compile(
+        r'(?:医疗意外身故|手术|并发症|住院)[^。；\n]{0,20}保险金'
+        r'[^。；\n]{0,160}(?:按|依照)[^。；\n]{0,40}'
+        r'(?:基本保险金额|约定金额)[^。；\n]{0,20}(?:给付|支付)'
+    ),
+    re.compile(
+        r'(?:医疗|手术|并发症|住院)[^。；\n]{0,40}'
+        r'(?:定额给付|固定金额给付)'
+    ),
+)
+_DISEASE_MULTIPLE_PAYMENT_PATTERNS = (
+    re.compile(r'多次给付'),
+    re.compile(
+        r'第[二三四五六七八九十\d]+次'
+        r'(?:重大疾病|中症疾病|轻症疾病|疾病)?保险金'
+    ),
+    re.compile(
+        r'(?:累计|最多|最高)[^。；\n]{0,30}给付'
+        r'[^。；\n]{0,20}[二两三四五六七八九十\d]+\s*次'
+    ),
+    re.compile(r'(?:每组|不同组)[^。；\n]{0,80}(?:疾病)?保险金[^。；\n]{0,40}给付'),
+)
+_DISEASE_SINGLE_PAYMENT_PATTERNS = (
+    re.compile(
+        r'(?:给付|支付)[^。；\n]{0,20}'
+        r'(?:重大疾病|疾病)保险金[^。；\n]{0,80}'
+        r'(?:保险责任|本合同|合同效力)[^。；\n]{0,20}终止'
+    ),
+    re.compile(
+        r'(?:重大疾病|疾病)保险金[^。；\n]{0,80}'
+        r'(?:仅|只|最多)?\s*(?:给付|支付)\s*(?:一|1)\s*次'
     ),
 )
 
@@ -294,6 +369,92 @@ def _term_facts(
     return tuple(dict.fromkeys(unique_forms)), unique_options
 
 
+def _first_match(
+    patterns: Tuple[re.Pattern[str], ...],
+    text: str,
+) -> Optional[Match[str]]:
+    for pattern in patterns:
+        match = pattern.search(text)
+        if match:
+            return match
+    return None
+
+
+def _medical_benefit_basis(
+    subtype: ProductSubtype,
+    components: Tuple[str, ...],
+    document_content: str,
+) -> Tuple[MedicalBenefitBasis, Optional[Match[str]]]:
+    medical_components = {"medical", "accidental_medical"}
+    if (
+        subtype in (ProductSubtype.UNKNOWN, ProductSubtype.OTHER_HEALTH)
+        and not medical_components.intersection(components)
+    ):
+        return MedicalBenefitBasis.UNKNOWN, None
+    if (
+        subtype not in (ProductSubtype.MEDICAL, ProductSubtype.MEDICAL_ACCIDENT)
+        and not medical_components.intersection(components)
+    ):
+        return MedicalBenefitBasis.NOT_APPLICABLE, None
+    expense_match = _first_match(_MEDICAL_EXPENSE_PATTERNS, document_content)
+    daily_match = _first_match(
+        _MEDICAL_DAILY_ALLOWANCE_PATTERNS,
+        document_content,
+    )
+    fixed_match = _first_match(
+        _MEDICAL_FIXED_BENEFIT_PATTERNS,
+        document_content,
+    )
+    positive_matches = tuple(
+        match
+        for match in (expense_match, daily_match, fixed_match)
+        if match is not None
+    )
+    if len(positive_matches) > 1:
+        return MedicalBenefitBasis.MIXED, positive_matches[0]
+    if expense_match:
+        return MedicalBenefitBasis.EXPENSE_REIMBURSEMENT, expense_match
+    if daily_match:
+        return MedicalBenefitBasis.DAILY_ALLOWANCE, daily_match
+    if fixed_match:
+        return MedicalBenefitBasis.FIXED_BENEFIT, fixed_match
+    return MedicalBenefitBasis.UNKNOWN, None
+
+
+def _disease_payment_pattern(
+    subtype: ProductSubtype,
+    components: Tuple[str, ...],
+    document_content: str,
+) -> Tuple[DiseasePaymentPattern, Optional[Match[str]]]:
+    disease_components = {"disease", "critical_illness"}
+    if (
+        subtype in (ProductSubtype.UNKNOWN, ProductSubtype.OTHER_HEALTH)
+        and not disease_components.intersection(components)
+    ):
+        return DiseasePaymentPattern.UNKNOWN, None
+    if (
+        subtype not in (
+            ProductSubtype.DISEASE,
+            ProductSubtype.CRITICAL_ILLNESS,
+        )
+        and not disease_components.intersection(components)
+    ):
+        return DiseasePaymentPattern.NOT_APPLICABLE, None
+    multiple_match = _first_match(
+        _DISEASE_MULTIPLE_PAYMENT_PATTERNS,
+        document_content,
+    )
+    if multiple_match:
+        return DiseasePaymentPattern.MULTIPLE, multiple_match
+    single_match = _first_match(
+        _DISEASE_SINGLE_PAYMENT_PATTERNS,
+        document_content,
+    )
+    if single_match:
+        return DiseasePaymentPattern.SINGLE, single_match
+    return DiseasePaymentPattern.UNKNOWN, None
+
+
 def build_product_tags(
     product_name: Optional[str],
     document_content: str = "",
@@ -301,7 +462,7 @@ def build_product_tags(
     product_name_source: str = "product_name",
     complete_document: bool = False,
 ) -> ProductTags:
-    """构建产品标签；无法从约定来源确认的值保持 unknown/None。"""
+    """构建产品标签；负向推断只在完整原文覆盖已由调用方确认时启用。"""
     name = product_name or ""
     line, subtype = _classify_name(name)
     evidence: List[TagEvidence] = []
@@ -349,7 +510,6 @@ def build_product_tags(
             _evidence("contract_role", role.value, product_name_source, name),
         ))
 
-    combined = f"{name}\n{document_content}"
     forms, options = _term_facts(document_content)
     term_from_clause = bool(forms)
     if not forms:
@@ -378,6 +538,16 @@ def build_product_tags(
         )
     if renewal_match and renewal is RenewalType.UNKNOWN:
         renewal = RenewalType.GUARANTEED
+    renewal_from_absence = False
+    if (
+        renewal is RenewalType.UNKNOWN
+        and complete_document
+        and line is ProductLine.HEALTH
+        and document_content.strip()
+        and "续保" not in document_content
+    ):
+        renewal = RenewalType.NONE
+        renewal_from_absence = True
 
     term_class = ProductTermClass.UNKNOWN
     if ProductTermForm.WHOLE_LIFE in forms or ProductTermForm.TO_AGE in forms or ProductTermForm.OVER_ONE_YEAR in forms:
@@ -397,16 +567,26 @@ def build_product_tags(
         elif ProductTermForm.ONE_YEAR_OR_LESS in forms:
             if renewal is RenewalType.GUARANTEED:
                 health_term = HealthTermClass.LONG_HEALTH
-            elif renewal in (RenewalType.NON_GUARANTEED, RenewalType.NONE) or complete_document:
+            elif renewal in (RenewalType.NON_GUARANTEED, RenewalType.NONE):
                 health_term = HealthTermClass.SHORT_HEALTH
         elif term_class is ProductTermClass.SHORT_TERM:
             health_term = HealthTermClass.SHORT_HEALTH
+    elif line is not ProductLine.UNKNOWN:
+        health_term = HealthTermClass.NOT_APPLICABLE
     # 对健康险，长期/短期本身就是监管分类：一年期保证续保产品也属于长期。
     # 物理保险期间仍完整保留在 term_forms/term_options，不能让两套单选标签冲突。
     if health_term is HealthTermClass.LONG_HEALTH:
         term_class = ProductTermClass.LONG_TERM
     elif health_term is HealthTermClass.SHORT_HEALTH:
         term_class = ProductTermClass.SHORT_TERM
+    elif (
+        line is ProductLine.HEALTH
+        and ProductTermForm.ONE_YEAR_OR_LESS in forms
+        and renewal is RenewalType.UNKNOWN
+    ):
+        # 一年期是物理期限事实，不足以单独确定健康险监管期限。续保
+        # 约定未能确定时保守保留两侧法规，避免错误排除长期健康险规则。
+        term_class = ProductTermClass.UNKNOWN
 
     internet = "互联网" in name if product_name else None
     adjustable = "费率可调" in name if product_name else None
@@ -414,21 +594,43 @@ def build_product_tags(
         r'税收优惠|个人所得税[^。；\n]*优惠|税优健康',
         document_content,
     )
-    tax = True if tax_match else None
+    tax: Optional[bool] = None
+    if tax_match:
+        tax = True
+    elif complete_document and document_content.strip():
+        tax = False
     customized = None
+    customized_match = None
     if product_name:
-        customized = "定制" in name and bool(re.search(r'适用地区|参保地|基本医疗保险统筹地区', document_content))
+        customized_match = re.search(r'城市定制(?:型)?', name)
+        customized = customized_match is not None
 
     component_matches: Dict[str, Optional[Match[str]]] = {}
-    for key, words in _COVERAGE_KEYWORDS.items():
+    for key, patterns in _COVERAGE_PATTERNS.items():
         component_match = None
-        for word in words:
-            component_match = re.search(re.escape(word), document_content)
+        for pattern in patterns:
+            component_match = pattern.search(document_content)
             if component_match:
                 break
         component_matches[key] = component_match
-    components = tuple(
+    content_components = tuple(
         key for key, match in component_matches.items() if match is not None
+    )
+    primary_component = _SUBTYPE_COMPONENT.get(subtype)
+    component_values = [primary_component] if primary_component else []
+    component_values.extend(
+        key for key in content_components if key != primary_component
+    )
+    components = tuple(component_values)
+    medical_benefit, medical_benefit_match = _medical_benefit_basis(
+        subtype,
+        components,
+        document_content,
+    )
+    disease_payment, disease_payment_match = _disease_payment_pattern(
+        subtype,
+        components,
+        document_content,
     )
     if term_class is not ProductTermClass.UNKNOWN:
         if (
@@ -463,18 +665,32 @@ def build_product_tags(
                 term_match,
             ))
     if health_term is not HealthTermClass.UNKNOWN:
+        health_term_reason = (
+            f"line={line.value}"
+            if health_term is HealthTermClass.NOT_APPLICABLE
+            else f"term_class={term_class.value}; renewal_type={renewal.value}"
+        )
         evidence.append(_evidence(
             "health_term_class", health_term.value, "derived",
-            f"term_class={term_class.value}; renewal_type={renewal.value}",
+            health_term_reason,
         ))
     if renewal is not RenewalType.UNKNOWN:
-        evidence.append(_evidence(
-            "renewal_type",
-            renewal.value,
-            "product_clause",
-            document_content,
-            renewal_match,
-        ))
+        if renewal_from_absence:
+            evidence.append(TagEvidence(
+                "renewal_type",
+                renewal.value,
+                "document_coverage_attestation",
+                "完整产品条款已覆盖，未出现续保约定",
+                1.0,
+            ))
+        else:
+            evidence.append(_evidence(
+                "renewal_type",
+                renewal.value,
+                "product_clause",
+                document_content,
+                renewal_match,
+            ))
     for field, tag_value, source, source_text, evidence_match in (
         (
             "is_internet_exclusive",
@@ -490,23 +706,6 @@ def build_product_tags(
             name,
             "费率可调",
         ),
-        (
-            "is_tax_advantaged_health",
-            tax,
-            "product_clause",
-            document_content,
-            tax_match,
-        ),
-        (
-            "is_city_customized_medical",
-            customized,
-            f"{product_name_source}_and_clause",
-            combined,
-            re.search(
-                r'适用地区|参保地|基本医疗保险统筹地区',
-                combined,
-            ),
-        ),
     ):
         if tag_value is not None:
             evidence.append(_evidence(
@@ -516,18 +715,74 @@ def build_product_tags(
                 source_text,
                 evidence_match,
             ))
-    for component in components:
+    if tax is True:
         evidence.append(_evidence(
-            "coverage_components",
-            component,
+            "is_tax_advantaged_health",
+            "true",
             "product_clause",
             document_content,
-            component_matches[component],
+            tax_match,
         ))
+    elif tax is False:
+        evidence.append(TagEvidence(
+            "is_tax_advantaged_health",
+            "false",
+            "document_coverage_attestation",
+            "完整产品条款已覆盖，未出现税收优惠表述",
+            1.0,
+        ))
+    if customized is not None:
+        evidence.append(_evidence(
+            "is_city_customized_medical",
+            str(customized).lower(),
+            product_name_source,
+            name,
+            customized_match,
+        ))
+    for component in components:
+        if component == primary_component:
+            evidence.append(_evidence(
+                "coverage_components",
+                component,
+                product_name_source,
+                name,
+            ))
+        else:
+            evidence.append(_evidence(
+                "coverage_components",
+                component,
+                "product_clause",
+                document_content,
+                component_matches[component],
+            ))
+    for benefit_field, benefit_value, benefit_match in (
+        ("medical_benefit_basis", medical_benefit, medical_benefit_match),
+        ("disease_payment_pattern", disease_payment, disease_payment_match),
+    ):
+        if benefit_value.value == "unknown":
+            continue
+        if benefit_value.value == "not_applicable":
+            evidence.append(_evidence(
+                benefit_field,
+                benefit_value.value,
+                "derived",
+                (
+                    f"primary_subtype={subtype.value}; "
+                    f"coverage_components={','.join(components)}"
+                ),
+            ))
+        else:
+            evidence.append(_evidence(
+                benefit_field,
+                benefit_value.value,
+                "product_clause",
+                document_content,
+                benefit_match,
+            ))
     if adjustable and not (line is ProductLine.HEALTH and subtype is ProductSubtype.MEDICAL):
         warnings.append("名称含“费率可调”，但产品名称识别结果不是健康险医疗保险")
     if "定制" in name and customized is False:
-        warnings.append("名称含“定制”，但条款未识别到明确适用地区")
+        warnings.append("产品名称含“定制”，但未识别到“城市定制型”身份")
     if line is ProductLine.HEALTH and health_term is HealthTermClass.UNKNOWN:
         warnings.append("健康险未能确定长期/短期属性")
     comparison_term = (
@@ -552,7 +807,9 @@ def build_product_tags(
     if "短期" in name and comparison_term is ProductTermClass.LONG_TERM:
         warnings.append("产品名称标示短期，但条款期限事实计算结果为长期，请人工复核")
     expected_component = _SUBTYPE_COMPONENT.get(subtype)
-    health_components = set(components).intersection(_SUBTYPE_COMPONENT.values())
+    health_components = set(content_components).intersection(
+        _SUBTYPE_COMPONENT.values(),
+    )
     if expected_component and health_components and expected_component not in health_components:
         warnings.append("产品名称确定的主要险种与条款中识别到的健康责任不一致")
 
@@ -563,5 +820,7 @@ def build_product_tags(
         renewal_type=renewal, is_internet_exclusive=internet,
         is_rate_adjustable=adjustable, is_tax_advantaged_health=tax,
         is_city_customized_medical=customized, coverage_components=components,
+        medical_benefit_basis=medical_benefit,
+        disease_payment_pattern=disease_payment,
         evidence=tuple(evidence), warnings=tuple(warnings),
     )

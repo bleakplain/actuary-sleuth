@@ -26,17 +26,23 @@ def split_title_and_content(content: str) -> Tuple[str, str]:
         return '', ''
 
     content = content.strip()
+    trailing_lines = ""
 
     # 先处理换行符（标题单独一行）
     if '\n' in content:
         lines = content.split('\n')
         first_line = lines[0].strip()
+        trailing_lines = '\n'.join(lines[1:]).strip()
         # 第一行是标题（长度 <= 25 且不含句号）
         if len(first_line) <= 25 and first_line and '。' not in first_line:
-            remaining = '\n'.join(lines[1:]).strip()
-            return first_line, remaining
+            return first_line, trailing_lines
         # 第一行过长，可能是标题+正文合并
         content = first_line
+
+    def with_trailing(value: str) -> str:
+        return "\n".join(
+            part for part in (value.strip(), trailing_lines) if part
+        )
 
     # 按空格分离（标题和正文之间有空格）
     first_space_idx = content.find(' ')
@@ -51,7 +57,7 @@ def split_title_and_content(content: str) -> Tuple[str, str]:
             if '。' not in potential_title:
                 # 检查有正文内容（不为空）
                 if potential_content:
-                    return potential_title, potential_content
+                    return potential_title, with_trailing(potential_content)
 
     # 书名号分离（标准/法规名称引用格式）
     # 格式：《标准名称》是由xxx发布...或《标准名称》指xxx
@@ -59,10 +65,10 @@ def split_title_and_content(content: str) -> Tuple[str, str]:
         end_idx = content.find('》') + 1
         remaining = content[end_idx:].strip()
         if remaining:
-            return content[:end_idx], remaining
+            return content[:end_idx], with_trailing(remaining)
 
     # 无法分离，视为纯标题（正文从后续行提取）
-    return content, ''
+    return content, trailing_lines
 
 
 

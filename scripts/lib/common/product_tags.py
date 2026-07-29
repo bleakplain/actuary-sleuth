@@ -97,6 +97,7 @@ class ProductTermForm(str, Enum):
 class HealthTermClass(str, Enum):
     LONG_HEALTH = "long_health"
     SHORT_HEALTH = "short_health"
+    NOT_APPLICABLE = "not_applicable"
     UNKNOWN = "unknown"
 
 
@@ -158,11 +159,70 @@ PRODUCT_TAG_LABELS: Dict[str, Dict[str, str]] = {
         "unit_linked": "投资连结型", "not_applicable": "不适用", "unknown": "未知",
     },
     "term_class": {"long_term": "长期", "short_term": "短期", "unknown": "未知"},
-    "health_term_class": {"long_health": "长期健康保险", "short_health": "短期健康保险", "unknown": "未知"},
+    "health_term_class": {
+        "long_health": "长期健康保险",
+        "short_health": "短期健康保险",
+        "not_applicable": "不适用",
+        "unknown": "未知",
+    },
     "customer_scope": {"individual": "个人", "group": "团体", "unknown": "未知"},
     "contract_role": {"main": "主险", "rider": "附加险", "unknown": "未知"},
+    "premium_pattern": {
+        "single": "趸交",
+        "installment": "分期交费",
+        "flexible": "灵活交费",
+        "mixed": "混合交费",
+        "unknown": "未知",
+    },
     "renewal_type": {"none": "无续保", "non_guaranteed": "不保证续保", "guaranteed": "保证续保", "unknown": "未知"},
+    "medical_benefit_basis": {
+        "expense_reimbursement": "费用补偿型",
+        "fixed_benefit": "定额给付型",
+        "daily_allowance": "住院津贴型",
+        "mixed": "混合型",
+        "not_applicable": "不适用",
+        "unknown": "未知",
+    },
+    "disease_payment_pattern": {
+        "single": "单次给付",
+        "multiple": "多次给付",
+        "not_applicable": "不适用",
+        "unknown": "未知",
+    },
 }
+
+PRODUCT_TERM_FORM_LABELS = {
+    "one_year_or_less": "一年及以下",
+    "over_one_year": "超过一年",
+    "fixed_duration": "固定年期",
+    "to_age": "保至约定年龄",
+    "whole_life": "终身",
+    "guaranteed_renewal_period": "保证续保期间",
+    "multiple_options": "多期限选项",
+}
+
+PRODUCT_COVERAGE_COMPONENT_LABELS = {
+    "critical_illness": "重大疾病责任",
+    "disease": "疾病责任",
+    "medical": "医疗责任",
+    "accidental_medical": "医疗意外责任",
+    "disability_income": "失能收入损失责任",
+    "nursing": "护理责任",
+    "death": "身故责任",
+    "survival": "生存责任",
+}
+
+
+def _format_number(value: float) -> str:
+    return f"{value:g}"
+
+
+def _optional_bool_display(value: Optional[bool]) -> str:
+    if value is True:
+        return "是"
+    if value is False:
+        return "否"
+    return "未知"
 
 
 class ClauseTopic(str, Enum):
@@ -255,6 +315,23 @@ class TermOption:
 
     def to_dict(self) -> Dict[str, Any]:
         return {"kind": self.kind, "value": self.value, "unit": self.unit}
+
+    def display_label(self) -> str:
+        number = _format_number(self.value) if self.value is not None else ""
+        unit = {"year": "年", "month": "个月", "day": "天"}.get(
+            self.unit,
+            self.unit,
+        )
+        if self.kind == "whole_life":
+            return "终身"
+        if self.kind == "to_age":
+            return f"保至{number}岁" if number else "保至约定年龄"
+        if self.kind == "guaranteed_renewal_period":
+            return f"保证续保{number}{unit}".rstrip()
+        if self.kind == "fixed_duration":
+            return f"保险期间{number}{unit}".rstrip()
+        detail = f"{number}{unit}".strip()
+        return f"{self.kind}：{detail}" if detail else self.kind
 
 
 @dataclass(frozen=True)
@@ -448,8 +525,38 @@ class ProductTags:
             "evidence": [item.to_dict() for item in self.evidence],
             "warnings": list(self.warnings),
         }
-        result["display_labels"] = {
+        display_labels: Dict[str, Any] = {
             field_name: labels.get(str(result[field_name]), str(result[field_name]))
             for field_name, labels in PRODUCT_TAG_LABELS.items()
         }
+        display_labels.update({
+            "term_forms": [
+                PRODUCT_TERM_FORM_LABELS.get(item.value, item.value)
+                for item in self.term_forms
+            ],
+            "term_options": [
+                item.display_label()
+                for item in self.term_options
+            ],
+            "is_internet_exclusive": _optional_bool_display(
+                self.is_internet_exclusive,
+            ),
+            "is_rate_adjustable": _optional_bool_display(
+                self.is_rate_adjustable,
+            ),
+            "is_tax_advantaged_health": _optional_bool_display(
+                self.is_tax_advantaged_health,
+            ),
+            "is_city_customized_medical": _optional_bool_display(
+                self.is_city_customized_medical,
+            ),
+            "coverage_components": [
+                PRODUCT_COVERAGE_COMPONENT_LABELS.get(item, item)
+                for item in self.coverage_components
+            ],
+            "multiple_health_coverages": _optional_bool_display(
+                self.multiple_health_coverages,
+            ),
+        })
+        result["display_labels"] = display_labels
         return result

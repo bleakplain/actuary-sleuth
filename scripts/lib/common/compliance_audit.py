@@ -54,6 +54,11 @@ class AuditClauseSnapshot:
     text: str
     block_type: str
     topics: Tuple[str, ...] = ()
+    hierarchy_level: int = 0
+    parent_number: Optional[str] = None
+    ancestor_numbers: Tuple[str, ...] = ()
+    hierarchy_path: str = ""
+    container_only: bool = False
 
 
 @dataclass(frozen=True)

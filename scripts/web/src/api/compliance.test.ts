@@ -202,6 +202,11 @@ describe('checkDocumentStream', () => {
         title: '等待期',
         content: '等待期为30日',
         topics: ['waiting_period'],
+        hierarchy_level: 1,
+        parent_number: null,
+        ancestor_numbers: [],
+        hierarchy_path: '1',
+        container_only: false,
       }],
       product_tags: { line: 'health' },
     };

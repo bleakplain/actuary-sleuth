@@ -1,10 +1,8 @@
 """冻结并解释产品审核所需的法规候选集。"""
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
-import math
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +25,10 @@ from lib.rag_engine import get_engine
 from lib.rag_engine.layered_retrieval import (
     get_candidate_identity,
     layer_regulation_candidates,
+)
+from lib.rag_engine.kb_identity import (
+    sha256_file as _sha256,
+    stable_catalog_sha256 as _stable_catalog_sha256,
 )
 
 logger = logging.getLogger(__name__)
@@ -213,73 +215,6 @@ def _registered_from_catalog(
             logger.warning("注册法规在知识库中未找到: %s", name)
         results.extend((dict(chunk), source_type) for chunk in chunks)
     return results
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        while chunk := source.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _canonical_metadata_value(key: str, value: Any) -> Any:
-    """消除 Arrow→Pandas 对 nullable 整数字段造成的类型漂移。"""
-    if isinstance(value, float) and math.isnan(value):
-        return None
-    if (
-        key in {"chunk_id", "level", "next_chunk_id", "prev_chunk_id"}
-        and isinstance(value, float)
-        and value.is_integer()
-    ):
-        return int(value)
-    if isinstance(value, Mapping):
-        return {
-            str(child_key): _canonical_metadata_value(str(child_key), child_value)
-            for child_key, child_value in value.items()
-        }
-    if isinstance(value, (list, tuple)):
-        return [
-            _canonical_metadata_value(key, child_value)
-            for child_value in value
-        ]
-    return value
-
-
-def _stable_catalog_sha256(catalog: Iterable[Mapping[str, Any]]) -> str:
-    """冻结全局 chunk 身份、正文、定位和全部业务 metadata。"""
-    rows = []
-    for candidate in catalog:
-        metadata = {
-            str(key): _canonical_metadata_value(str(key), value)
-            for key, value in _metadata(candidate).items()
-            if not str(key).startswith("_")
-        }
-        rows.append({
-            "id": str(candidate.get("id", "")),
-            "content": str(_value(candidate, "content", "")),
-            "location": {
-                key: _value(candidate, key, "")
-                for key in (
-                    "source_file",
-                    "law_name",
-                    "article_number",
-                    "section_path",
-                    "hierarchy_path",
-                    "chunk_index",
-                    "chunk_id",
-                )
-            },
-            "metadata": metadata,
-        })
-    canonical = json.dumps(
-        sorted(rows, key=lambda row: str(row["id"])),
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-        default=str,
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _explicit_kb_versions(candidate: Mapping[str, Any]) -> Tuple[str, ...]:

@@ -39,6 +39,11 @@ def _request(user_subject: str = "") -> DocumentCheckRequest:
         "title": "等待期",
         "content": "等待期为30日。",
         "topics": ["coverage.waiting_period"],
+        "hierarchy_level": 2,
+        "parent_number": "2",
+        "ancestor_numbers": ["2"],
+        "hierarchy_path": "2 > 2.1",
+        "container_only": False,
     }
     identity = (
         block["block_type"],
@@ -72,6 +77,7 @@ def _request(user_subject: str = "") -> DocumentCheckRequest:
         ),
         product_name_source,
         user_subject=user_subject,
+        coverage_attested=True,
     )
     return DocumentCheckRequest(
         document_content=document_content,
@@ -84,6 +90,7 @@ def _request(user_subject: str = "") -> DocumentCheckRequest:
         ),
         product_name=product_name,
         product_name_source=product_name_source,
+        coverage_attested=True,
         category="健康险",
         product_tags=product_tags.to_dict(),
         audit_blocks=[block],
@@ -135,6 +142,18 @@ def test_v2_request_rebuilds_authoritative_tags_and_keeps_stable_blocks() -> Non
     } == {"document_content"}
     assert request.clauses[0].clause_id.startswith("clause_")
     assert request.clauses[0].topics == ("coverage.waiting_period",)
+    assert request.clauses[0].hierarchy_level == 2
+    assert request.clauses[0].parent_number == "2"
+    assert request.clauses[0].ancestor_numbers == ("2",)
+    assert request.clauses[0].hierarchy_path == "2 > 2.1"
+
+
+def test_v2_request_rejects_tampered_clause_hierarchy() -> None:
+    request = _request()
+    request.audit_blocks[0].parent_number = "9"
+
+    with pytest.raises(HTTPException, match="编号层级"):
+        _pipeline_request(request)
 
 
 def test_v2_request_rejects_product_tags_from_another_document() -> None:
@@ -224,6 +243,7 @@ def test_v2_request_rejects_self_consistent_deleted_block_forgery() -> None:
         request.document_fingerprint,
         request.audit_input_fingerprint,
         request.product_name_source,
+        coverage_attested=request.coverage_attested,
     )
     request.parse_attestation = valid.token
 
@@ -264,6 +284,7 @@ def test_v2_request_rejects_expired_parse_attestation() -> None:
         request.document_fingerprint,
         request.audit_input_fingerprint,
         request.product_name_source,
+        coverage_attested=request.coverage_attested,
         now=1,
         ttl_seconds=1,
     ).token
@@ -292,6 +313,7 @@ def test_v2_request_rejects_removed_parse_warning() -> None:
         request.audit_input_fingerprint,
         request.product_name_source,
         request.parse_warnings,
+        coverage_attested=request.coverage_attested,
     ).token
     request.parse_warnings = []
 
@@ -307,10 +329,40 @@ def test_v2_request_rejects_parse_attestation_from_another_user() -> None:
         request.audit_input_fingerprint,
         request.product_name_source,
         user_subject="user-a",
+        coverage_attested=request.coverage_attested,
     ).token
 
     with pytest.raises(HTTPException, match="审核输入身份不一致"):
         _pipeline_request(request, "user-b")
+
+
+def test_v2_request_rejects_tampered_coverage_attestation() -> None:
+    request = _request()
+    request.coverage_attested = False
+
+    with pytest.raises(HTTPException, match="审核输入身份不一致"):
+        _pipeline_request(request)
+
+
+def test_v2_request_disables_absence_inference_without_coverage_proof() -> None:
+    request = _request()
+    request.coverage_attested = False
+    request.product_tags = build_product_tags(
+        request.product_name,
+        request.document_content,
+        complete_document=False,
+    ).to_dict()
+    request.parse_attestation = issue_parse_attestation(
+        request.parse_id,
+        request.document_fingerprint,
+        request.audit_input_fingerprint,
+        request.product_name_source,
+        coverage_attested=False,
+    ).token
+
+    pipeline_request = _pipeline_request(request)
+
+    assert pipeline_request.product_tags.renewal_type.value == "unknown"
 
 
 def test_v2_report_keeps_manual_review_and_incomplete_state() -> None:

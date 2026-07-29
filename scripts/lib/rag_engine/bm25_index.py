@@ -155,6 +155,16 @@ class BM25Index:
     def doc_count(self) -> int:
         return len(self._nodes)
 
+    def list_identity_rows(self) -> Tuple[Dict[str, str], ...]:
+        """返回用于跨索引完整性校验的稳定节点身份和正文副本。"""
+        return tuple(
+            {
+                "id": str(getattr(node, "node_id", "")),
+                "content": str(getattr(node, "text", "")),
+            }
+            for node in self._nodes
+        )
+
     def add_nodes(self, nodes: List, index_path: Path) -> None:
         """增量添加节点到 BM25 索引。
 

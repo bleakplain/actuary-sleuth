@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from lib.doc_parser import parse_product_document
+from lib.doc_parser.models import AuditDocument
 
 PRODUCTS_DIR = Path("/Users/plain/work/actuary-assets/products/")
 ACCEPTANCE_MANIFEST = (
@@ -25,6 +26,28 @@ ACCEPTANCE_MANIFEST = (
     / "manifest.json"
 )
 PRODUCT_ARCHIVE = PRODUCTS_DIR / "条款(1).zip"
+
+
+def _assert_full_source_coverage(
+    document: AuditDocument,
+    source_name: str,
+) -> None:
+    """真实产品的每条有效来源记录必须恰好归属一个审核块。"""
+    attestation = document.coverage_attestation
+    assert attestation.coverage_attested, source_name
+    assert attestation.source_record_count > 0, source_name
+    assert attestation.assigned_record_count == attestation.source_record_count, (
+        source_name
+    )
+    assert attestation.unassigned_orders == (), source_name
+    assert attestation.multiply_assigned_orders == (), source_name
+    assert attestation.duplicate_source_orders == (), source_name
+    assert attestation.truncated_orders == (), source_name
+
+
+def _require_product(path: Path) -> None:
+    if not path.is_file():
+        pytest.skip(f"真实产品不存在: {path}")
 
 
 @pytest.fixture
@@ -59,10 +82,16 @@ class TestRealDocuments:
                 pytest.skip("旧版 DOC 解析需要 LibreOffice")
 
         assert len(products) == 23
+        missing = [
+            product["file_name"]
+            for product in products
+            if not (PRODUCTS_DIR / product["file_name"]).is_file()
+        ]
+        if missing:
+            pytest.skip(f"验收产品资产缺失: {', '.join(missing)}")
         parsed_legacy_docs = 0
         for product in products:
             path = PRODUCTS_DIR / product["file_name"]
-            assert path.is_file(), f"验收产品缺失: {path.name}"
             document = parse_product_document(str(path))
             audit_content_count = sum(
                 len(items)
@@ -78,6 +107,7 @@ class TestRealDocuments:
             assert document.file_name == path.name
             assert document.file_type == path.suffix.lower()
             assert audit_content_count > 0, f"{path.name} 未提取到审核内容"
+            _assert_full_source_coverage(document, path.name)
             if path.suffix.lower() == ".doc":
                 parsed_legacy_docs += 1
                 assert any("临时转换" in warning for warning in document.warnings)
@@ -106,6 +136,116 @@ class TestRealDocuments:
                 document = parse_product_document(str(source))
                 assert document.audit_blocks, member.filename
                 assert document.product_tags.primary_subtype.value != "unknown"
+                _assert_full_source_coverage(document, member.filename)
+
+    @pytest.mark.parametrize(
+        ("file_name", "number", "parent", "ancestors", "title"),
+        (
+            (
+                "125904《人保健康悠优保互联网医疗保险（费率可调）》条款v4.doc",
+                "2.5.4",
+                "2.5",
+                ("2", "2.5"),
+                "特定药品费用保险金",
+            ),
+            (
+                "《人保健康互联网失能收入损失保险（2025版）》条款.docx",
+                "2.4.1",
+                "2.4",
+                ("2", "2.4"),
+                "住院失能收入损失保险金",
+            ),
+            (
+                "《人保健康互联网团体意外伤害保险（2025版）》条款.pdf",
+                "2.3.1",
+                "2.3",
+                ("2", "2.3"),
+                "基本部分",
+            ),
+        ),
+    )
+    def test_doc_docx_pdf_keep_golden_multilevel_hierarchy(
+        self,
+        file_name,
+        number,
+        parent,
+        ancestors,
+        title,
+    ):
+        """DOC、DOCX、PDF 各以一个真实三级编号锁定父子关系。"""
+        path = PRODUCTS_DIR / file_name
+        _require_product(path)
+        if path.suffix.lower() == ".doc":
+            if not (shutil.which("soffice") or shutil.which("libreoffice")):
+                pytest.skip("旧版 DOC 解析需要 LibreOffice")
+
+        document = parse_product_document(str(path))
+        clause = next(
+            (item for item in document.clauses if item.number == number),
+            None,
+        )
+
+        assert clause is not None, f"{path.name} 缺少条款 {number}"
+        assert clause.title == title
+        assert clause.hierarchy_level == 3
+        assert clause.parent_number == parent
+        assert clause.ancestor_numbers == ancestors
+        assert clause.hierarchy_path == " > ".join((*ancestors, number))
+        _assert_full_source_coverage(document, path.name)
+
+    def test_yoyou_numbered_rows_keep_continuations_and_hierarchy(self):
+        """悠优保空编号续接行必须归回对应编号，合并格不得污染标题。"""
+        path = PRODUCTS_DIR / (
+            "125904《人保健康悠优保互联网医疗保险（费率可调）》条款v4.doc"
+        )
+        _require_product(path)
+        if not (shutil.which("soffice") or shutil.which("libreoffice")):
+            pytest.skip("旧版 DOC 解析需要 LibreOffice")
+
+        document = parse_product_document(str(path))
+        by_number = {clause.number: clause for clause in document.clauses}
+        medicine_clause = by_number["2.5.4"]
+        paragraphs = [
+            line.strip()
+            for line in medicine_clause.text.splitlines()
+            if line.strip()
+        ]
+
+        assert len(document.clauses) == 99
+        assert "住院医疗费用保险金" in by_number["2.5.3"].text
+        assert "特殊门诊医疗费用保险金" in by_number["2.5.3"].text
+        assert "住院前后门急诊医疗费用保险金" in by_number["2.5.3"].text
+        assert "特定药品费用保险金年度累计给付限额" in medicine_clause.text
+        assert paragraphs[0].startswith(
+            "在本合同保险期间内，被保险人在等待期满后"
+        )
+        assert paragraphs[-1].startswith(
+            "在本合同保险期间内，若本合同医疗费用保险金责任"
+        )
+        assert paragraphs[-1].endswith("本合同效力终止。")
+        assert medicine_clause.source_start_order is not None
+        assert medicine_clause.source_end_order is not None
+        assert (
+            medicine_clause.source_start_order
+            < medicine_clause.source_end_order
+        )
+        assert "申请人和受益人的有效身份证件" in by_number["5.3"].text
+        assert medicine_clause.parent_number == "2.5"
+        assert medicine_clause.ancestor_numbers == ("2", "2.5")
+        assert by_number["7.42"].title == (
+            "因职业关系导致的感染艾滋病病毒或患艾滋病"
+        )
+        unclassified_text = "\n".join(
+            section.content for section in document.unclassified_sections
+        )
+        assert "住院前后门急诊医疗费用保险金" not in unclassified_text
+        positions = {
+            block.number: index
+            for index, block in enumerate(document.audit_blocks)
+            if block.block_type.value == "clause"
+        }
+        assert positions["2"] < positions["2.1"] < positions["2.5.4"]
+        _assert_full_source_coverage(document, path.name)
 
     def test_parse_real_pdfs(self, real_pdf_files):
         """测试解析真实 PDF 文件"""

@@ -65,6 +65,7 @@ type StreamParams = {
   audit_input_fingerprint?: string;
   product_name?: string;
   product_name_source?: string;
+  coverage_attested?: boolean;
   parse_warnings?: string[];
   category?: string;
   clause_topics?: string[];

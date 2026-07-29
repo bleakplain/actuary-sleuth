@@ -157,6 +157,14 @@ class Clause:
     bbox: Optional[Tuple[float, float, float, float]] = None
     table_index: Optional[int] = None
     topics: Tuple[str, ...] = ()
+    document_order: Optional[int] = None
+    hierarchy_level: int = 0
+    parent_number: Optional[str] = None
+    ancestor_numbers: Tuple[str, ...] = ()
+    hierarchy_path: str = ""
+    source_start_order: Optional[int] = None
+    source_end_order: Optional[int] = None
+    container_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -169,6 +177,7 @@ class DataTable:
     page_number: Optional[int] = None
     bbox: Optional[Tuple[float, float, float, float]] = None
     table_index: Optional[int] = None
+    document_order: Optional[int] = None
 
     def to_markdown(self) -> str:
         """转换为 Markdown 表格格式"""
@@ -209,6 +218,8 @@ class DataTable:
                 remark=self.remark if chunk_idx == 1 else "",  # 仅第一个 chunk 显示备注
                 page_number=self.page_number,
                 bbox=self.bbox,
+                table_index=self.table_index,
+                document_order=self.document_order,
             ))
         return result
 
@@ -219,6 +230,27 @@ class DocumentSection:
     title: str        # 章节标题
     content: str      # 章节内容
     section_type: str # 内容类型：notice, health_disclosure, exclusion, rider
+    document_order: Optional[int] = None
+    source_start_order: Optional[int] = None
+    source_end_order: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class CoverageAttestation:
+    """证明解析后的审核块完整覆盖了格式适配器产出的有效原文记录。
+
+    该证明只在每条有效 ``SourceRecord`` 恰好归属一个输出块、且没有
+    截断时成立。调用方只能在 ``coverage_attested`` 为真时启用基于
+    “全文未出现某词”的负向产品标签推断。
+    """
+
+    coverage_attested: bool = False
+    source_record_count: int = 0
+    assigned_record_count: int = 0
+    unassigned_orders: Tuple[int, ...] = ()
+    multiply_assigned_orders: Tuple[int, ...] = ()
+    duplicate_source_orders: Tuple[int, ...] = ()
+    truncated_orders: Tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -234,6 +266,14 @@ class ClauseBlock:
     topics: Tuple[str, ...] = ()
     page_number: Optional[int] = None
     table_index: Optional[int] = None
+    document_order: Optional[int] = None
+    hierarchy_level: int = 0
+    parent_number: Optional[str] = None
+    ancestor_numbers: Tuple[str, ...] = ()
+    hierarchy_path: str = ""
+    source_start_order: Optional[int] = None
+    source_end_order: Optional[int] = None
+    container_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -246,6 +286,14 @@ class _BlockSeed:
     topics: Tuple[str, ...] = ()
     page_number: Optional[int] = None
     table_index: Optional[int] = None
+    document_order: Optional[int] = None
+    hierarchy_level: int = 0
+    parent_number: Optional[str] = None
+    ancestor_numbers: Tuple[str, ...] = ()
+    hierarchy_path: str = ""
+    source_start_order: Optional[int] = None
+    source_end_order: Optional[int] = None
+    container_only: bool = False
 
     def identity(self) -> Tuple[object, ...]:
         """只使用块自身的原始结构与原文，派生标签和页码不影响证据 ID。"""
@@ -270,6 +318,9 @@ class AuditDocument:
     health_disclosures: Sequence[DocumentSection] = ()
     exclusions: Sequence[DocumentSection] = ()
     rider_clauses: Sequence[Clause] = ()
+    coverage_attestation: CoverageAttestation = field(
+        default_factory=CoverageAttestation,
+    )
     document_fingerprint: str = field(init=False, default="")
     audit_input_fingerprint: str = field(init=False, default="")
     audit_blocks: Tuple[ClauseBlock, ...] = field(init=False, default=())
@@ -287,6 +338,25 @@ class AuditDocument:
 
     parse_time: datetime = field(default_factory=datetime.now)
     warnings: List[str] = field(default_factory=list)
+
+    @property
+    def coverage_attested(self) -> bool:
+        """是否可以安全使用依赖全文缺失事实的负向推断。"""
+        return self.coverage_attestation.coverage_attested
+
+    @property
+    def canonical_text(self) -> str:
+        """返回解析、API 回传和审核重验共用的规范化全文。"""
+        return render_audit_document_text(
+            (
+                block.block_type.value,
+                block.source_index,
+                block.number,
+                block.title,
+                block.content,
+            )
+            for block in self.audit_blocks
+        )
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -350,6 +420,29 @@ def _normalize_content_identity(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value or "")
     normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
     return "\n".join(line.rstrip(" ") for line in normalized.split("\n"))
+
+
+def calculate_clause_hierarchy(
+    number: str,
+) -> Tuple[int, Optional[str], Tuple[str, ...], str]:
+    """从已绑定的十进制编号确定层级，不依赖版面或客户端字段。"""
+    normalized = unicodedata.normalize("NFKC", number or "").strip()
+    normalized = normalized.replace("．", ".").rstrip(".")
+    parts = normalized.split(".") if normalized else []
+    if not parts or any(not part.isdigit() for part in parts):
+        return 0, None, (), ""
+    canonical_parts = tuple(str(int(part)) for part in parts)
+    canonical = ".".join(canonical_parts)
+    ancestors = tuple(
+        ".".join(canonical_parts[:level])
+        for level in range(1, len(canonical_parts))
+    )
+    return (
+        len(canonical_parts),
+        ancestors[-1] if ancestors else None,
+        ancestors,
+        " > ".join((*ancestors, canonical)),
+    )
 
 
 def _table_content(table: DataTable) -> str:
@@ -435,7 +528,12 @@ def render_audit_document_text(
         elif block_type == AuditBlockType.CLAUSE.value:
             rendered.append(f"【条款 {number}】{title}\n{content}")
         elif block_type == AuditBlockType.TABLE.value:
-            rendered.append(f"【数据表 {source_index + 1}】\n{content}")
+            heading = f"【数据表 {source_index + 1}】"
+            rendered.append(
+                f"{heading}{title}\n{content}"
+                if title
+                else f"{heading}\n{content}"
+            )
         elif block_type == AuditBlockType.NOTICE.value:
             rendered.append(f"【投保须知】{title}\n{content}")
         elif block_type == AuditBlockType.HEALTH_DISCLOSURE.value:
@@ -463,6 +561,14 @@ def _build_audit_blocks(
         topics: Tuple[str, ...] = (),
         page_number: Optional[int] = None,
         table_index: Optional[int] = None,
+        document_order: Optional[int] = None,
+        hierarchy_level: int = 0,
+        parent_number: Optional[str] = None,
+        ancestor_numbers: Tuple[str, ...] = (),
+        hierarchy_path: str = "",
+        source_start_order: Optional[int] = None,
+        source_end_order: Optional[int] = None,
+        container_only: bool = False,
     ) -> None:
         seeds.append(_BlockSeed(
             block_type=block_type,
@@ -473,6 +579,14 @@ def _build_audit_blocks(
             topics=tuple(topics),
             page_number=page_number,
             table_index=table_index,
+            document_order=document_order,
+            hierarchy_level=hierarchy_level,
+            parent_number=parent_number,
+            ancestor_numbers=tuple(ancestor_numbers),
+            hierarchy_path=hierarchy_path,
+            source_start_order=source_start_order,
+            source_end_order=source_end_order,
+            container_only=container_only,
         ))
 
     for index, section in enumerate(document.unclassified_sections):
@@ -482,16 +596,38 @@ def _build_audit_blocks(
             "",
             section.title,
             section.content,
+            document_order=section.document_order,
+            source_start_order=section.source_start_order,
+            source_end_order=section.source_end_order,
         )
+    clause_numbers = tuple(clause.number for clause in document.clauses)
     for index, clause in enumerate(document.clauses):
+        (
+            hierarchy_level,
+            parent_number,
+            ancestor_numbers,
+            hierarchy_path,
+        ) = calculate_clause_hierarchy(clause.number)
+        container_only = bool(
+            not clause.text
+            and any(
+                number.startswith(f"{clause.number}.")
+                for number in clause_numbers
+            )
+        )
         add_seed(
             AuditBlockType.CLAUSE, index, clause.number, clause.title,
             clause.text, clause.topics, clause.page_number, clause.table_index,
+            clause.document_order, hierarchy_level, parent_number,
+            ancestor_numbers, hierarchy_path,
+            clause.source_start_order, clause.source_end_order,
+            container_only,
         )
     for index, table in enumerate(document.tables):
         add_seed(
             AuditBlockType.TABLE, index, str(index + 1), table.remark,
             _table_content(table), (), table.page_number, table.table_index,
+            table.document_order,
         )
     section_groups = (
         (AuditBlockType.NOTICE, document.notices),
@@ -500,12 +636,52 @@ def _build_audit_blocks(
     )
     for block_type, sections in section_groups:
         for index, section in enumerate(sections):
-            add_seed(block_type, index, "", section.title, section.content)
+            add_seed(
+                block_type,
+                index,
+                "",
+                section.title,
+                section.content,
+                document_order=section.document_order,
+                source_start_order=section.source_start_order,
+                source_end_order=section.source_end_order,
+            )
+    rider_numbers = tuple(clause.number for clause in document.rider_clauses)
     for index, clause in enumerate(document.rider_clauses):
+        (
+            hierarchy_level,
+            parent_number,
+            ancestor_numbers,
+            hierarchy_path,
+        ) = calculate_clause_hierarchy(clause.number)
+        container_only = bool(
+            not clause.text
+            and any(
+                number.startswith(f"{clause.number}.")
+                for number in rider_numbers
+            )
+        )
         add_seed(
             AuditBlockType.RIDER, index, clause.number, clause.title,
             clause.text, clause.topics, clause.page_number, clause.table_index,
+            clause.document_order, hierarchy_level, parent_number,
+            ancestor_numbers, hierarchy_path,
+            clause.source_start_order, clause.source_end_order,
+            container_only,
         )
+
+    if any(seed.document_order is not None for seed in seeds):
+        seeds = [
+            seed
+            for _, seed in sorted(
+                enumerate(seeds),
+                key=lambda item: (
+                    item[1].document_order
+                    if item[1].document_order is not None
+                    else 10**12 + item[0]
+                ),
+            )
+        ]
 
     fingerprint = calculate_document_fingerprint(
         (
@@ -539,6 +715,14 @@ def _build_audit_blocks(
             topics=seed.topics,
             page_number=seed.page_number,
             table_index=seed.table_index,
+            document_order=seed.document_order,
+            hierarchy_level=seed.hierarchy_level,
+            parent_number=seed.parent_number,
+            ancestor_numbers=seed.ancestor_numbers,
+            hierarchy_path=seed.hierarchy_path,
+            source_start_order=seed.source_start_order,
+            source_end_order=seed.source_end_order,
+            container_only=seed.container_only,
         ))
     return fingerprint, tuple(blocks)
 

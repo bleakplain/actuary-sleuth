@@ -8,7 +8,7 @@ import json
 import logging
 import tempfile
 import threading
-from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sse_starlette.sse import EventSourceResponse
@@ -38,7 +38,6 @@ from lib.doc_parser import parse_product_document, DocumentParseError
 from lib.doc_parser.models import (
     AuditBlockType,
     AuditDocument,
-    render_audit_document_text,
 )
 from lib.doc_parser.pd.product_name_recognizer import recognize_product_name
 from lib.doc_parser.pd.clause_tagger import tag_clause_topics
@@ -73,7 +72,7 @@ def _apply_requested_product_name(
             product_name,
             document_content,
             product_name_source="user_input",
-            complete_document=True,
+            complete_document=audit_doc.coverage_attested,
         ),
         is_rider=recognition.is_rider,
         group_or_individual=recognition.group_or_individual,
@@ -366,41 +365,9 @@ async def delete_compliance_report(report_id: str, user: dict = Depends(require_
 # --- Document parsing ---
 
 
-def _build_combined_text(
-    clauses: Sequence[ParsedClause],
-    data_tables: Sequence[ParsedDataTable],
-    notices: Sequence[ParsedSection],
-    health_disclosures: Sequence[ParsedSection],
-    exclusions: Sequence[ParsedSection],
-    rider_clauses: Sequence[ParsedClause],
-    unclassified_sections: Sequence[ParsedSection] = (),
-) -> str:
-    parts = []
-    for i, section in enumerate(unclassified_sections, 1):
-        parts.append(f"【未分类内容 {i}】{section.title}\n{section.content}")
-    for c in clauses:
-        parts.append(f"【条款 {c.number}】{c.title}\n{c.text}")
-    for i, t in enumerate(data_tables, 1):
-        table_text = t.raw_text or "\n".join(
-            "\t".join(str(cell or "") for cell in row)
-            for row in t.data
-        )
-        parts.append(f"【数据表 {i}】\n{table_text}")
-    for s in notices:
-        parts.append(f"【投保须知】{s.title}\n{s.content}")
-    for s in health_disclosures:
-        parts.append(f"【健康告知】{s.title}\n{s.content}")
-    for s in exclusions:
-        parts.append(f"【责任免除】{s.title}\n{s.content}")
-    for c in rider_clauses:
-        parts.append(f"【附加险条款 {c.number}】{c.title}\n{c.text}")
-    return "\n\n".join(parts)
-
-
 def _audit_doc_to_response(audit_doc, file_type: str,
                            identified_category: Optional[str] = None,
                            category_confidence: float = 0.0,
-                           combined_text: Optional[str] = None,
                            user_subject: str = "") -> ParsedDocumentResponse:
     block_by_source = {
         (block.block_type, block.source_index): block
@@ -413,6 +380,21 @@ def _audit_doc_to_response(audit_doc, file_type: str,
             title=clause.title,
             text=clause.text,
             topics=list(clause.topics),
+            hierarchy_level=block_by_source[
+                (AuditBlockType.CLAUSE, index)
+            ].hierarchy_level,
+            parent_number=block_by_source[
+                (AuditBlockType.CLAUSE, index)
+            ].parent_number,
+            ancestor_numbers=list(block_by_source[
+                (AuditBlockType.CLAUSE, index)
+            ].ancestor_numbers),
+            hierarchy_path=block_by_source[
+                (AuditBlockType.CLAUSE, index)
+            ].hierarchy_path,
+            container_only=block_by_source[
+                (AuditBlockType.CLAUSE, index)
+            ].container_only,
         )
         for index, clause in enumerate(audit_doc.clauses)
     ]
@@ -473,6 +455,21 @@ def _audit_doc_to_response(audit_doc, file_type: str,
             title=clause.title,
             text=clause.text,
             topics=list(clause.topics),
+            hierarchy_level=block_by_source[
+                (AuditBlockType.RIDER, index)
+            ].hierarchy_level,
+            parent_number=block_by_source[
+                (AuditBlockType.RIDER, index)
+            ].parent_number,
+            ancestor_numbers=list(block_by_source[
+                (AuditBlockType.RIDER, index)
+            ].ancestor_numbers),
+            hierarchy_path=block_by_source[
+                (AuditBlockType.RIDER, index)
+            ].hierarchy_path,
+            container_only=block_by_source[
+                (AuditBlockType.RIDER, index)
+            ].container_only,
         )
         for index, clause in enumerate(audit_doc.rider_clauses)
     ]
@@ -485,20 +482,16 @@ def _audit_doc_to_response(audit_doc, file_type: str,
             title=block.title,
             content=block.content,
             topics=list(block.topics),
+            hierarchy_level=block.hierarchy_level,
+            parent_number=block.parent_number,
+            ancestor_numbers=list(block.ancestor_numbers),
+            hierarchy_path=block.hierarchy_path,
+            container_only=block.container_only,
         )
         for block in audit_doc.audit_blocks
     ]
 
-    combined_text = render_audit_document_text(
-        (
-            block.block_type.value,
-            block.source_index,
-            block.number,
-            block.title,
-            block.content,
-        )
-        for block in audit_doc.audit_blocks
-    )
+    combined_text = audit_doc.canonical_text
     parse_id = f"pd_{uuid.uuid4().hex}"
     attestation = issue_parse_attestation(
         parse_id,
@@ -507,6 +500,7 @@ def _audit_doc_to_response(audit_doc, file_type: str,
         audit_doc.product_name_source,
         tuple(audit_doc.warnings),
         user_subject,
+        coverage_attested=audit_doc.coverage_attested,
     )
 
     return ParsedDocumentResponse(
@@ -528,6 +522,7 @@ def _audit_doc_to_response(audit_doc, file_type: str,
         category_confidence=category_confidence,
         product_name=audit_doc.product_name,
         product_name_source=audit_doc.product_name_source,
+        coverage_attested=audit_doc.coverage_attested,
         is_rider=audit_doc.is_rider,
         group_or_individual=audit_doc.group_or_individual,
         duration_type=audit_doc.duration_type,
@@ -566,11 +561,7 @@ async def parse_file(file: UploadFile = File(...), user: dict = Depends(require_
             tmp_path,
             original_file_name=file.filename,
         )
-        combined_text = _build_combined_text(
-            audit_doc.clauses, audit_doc.tables, audit_doc.notices,
-            audit_doc.health_disclosures, audit_doc.exclusions, audit_doc.rider_clauses,
-            audit_doc.unclassified_sections,
-        )
+        combined_text = audit_doc.canonical_text
         # 识别出的产品名优先，识别失败回退到文件名
         category_name = audit_doc.product_name or audit_doc.file_name
         category, confidence = await _identify_category_async(combined_text, category_name)
@@ -579,7 +570,6 @@ async def parse_file(file: UploadFile = File(...), user: dict = Depends(require_
             ext,
             category,
             confidence,
-            combined_text,
             str(user.get("user_id", "")),
         )
     except DocumentParseError as e:
@@ -607,11 +597,7 @@ async def parse_rich_text(req: RichTextParseRequest, user: dict = Depends(requir
             original_file_name="rich-text.docx",
             user_product_name=req.product_name or None,
         )
-        combined_text = _build_combined_text(
-            audit_doc.clauses, audit_doc.tables, audit_doc.notices,
-            audit_doc.health_disclosures, audit_doc.exclusions, audit_doc.rider_clauses,
-            audit_doc.unclassified_sections,
-        )
+        combined_text = audit_doc.canonical_text
         # 用户明确提交的名称优先；未提交时使用文档识别结果，最后回退到文件名。
         category_name = audit_doc.product_name or audit_doc.file_name
         category, confidence = await _identify_category_async(combined_text, category_name)
@@ -620,7 +606,6 @@ async def parse_rich_text(req: RichTextParseRequest, user: dict = Depends(requir
             ".html",
             category,
             confidence,
-            combined_text,
             str(user.get("user_id", "")),
         )
         if req.product_name:

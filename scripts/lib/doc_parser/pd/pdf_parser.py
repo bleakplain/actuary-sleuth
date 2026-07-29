@@ -3,35 +3,31 @@
 """PDF 文档解析器"""
 from __future__ import annotations
 
-import logging
-import re
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pdfplumber
 
 from ..models import (
     AuditDocument,
-    Clause,
     DataTable,
     DocumentParseError,
-    DocumentSection,
-    SectionType,
     TableType,
 )
 from .header_footer_filter import HeaderFooterFilter
-from .layout_analyzer import LayoutAnalyzer
 from .section_detector import SectionDetector
 from .table_classifier import TableClassifier
 from .toc_detector import TocDetector
-from .utils import add_section, split_title_and_content
-from .clause_tagger import tag_clause_topics
+from .numbered_blocks import (
+    SourceRecord,
+    SourceRecordKind,
+    assemble_numbered_content,
+    is_numbering_table_rows,
+)
 from .product_name_recognizer import recognize_product_name, resolve_product_name
 from .product_tagging import build_product_tags
-
-logger = logging.getLogger(__name__)
 
 
 class PdfParser:
@@ -39,7 +35,6 @@ class PdfParser:
 
     def __init__(self, section_detector: Optional[SectionDetector] = None):
         self.detector = section_detector or SectionDetector()
-        self.layout_analyzer = LayoutAnalyzer()
         self.header_footer_filter = HeaderFooterFilter()
         self.table_classifier = TableClassifier()
         self.toc_detector = TocDetector()
@@ -85,58 +80,24 @@ class PdfParser:
                 recognized, display_file_name, user_product_name,
             )
             recognition = name_resolution.recognition
-            clauses = self._extract_clauses(pdf.pages, warnings)
-            tables = self._extract_tables(pdf.pages, warnings)
-            sections_data = self._extract_special_sections(pdf.pages, warnings)
-            sections_data["unclassified_sections"] = (
-                self._extract_unclassified_sections(
-                    pdf.pages,
-                    clauses,
-                    tables,
-                    sections_data,
-                )
-            )
+            records = self._extract_source_records(pdf.pages)
+            content = assemble_numbered_content(records, self.detector)
+            warnings.extend(content.warnings)
         finally:
             pdf.close()
 
-        clauses = [replace(clause, topics=tag_clause_topics(clause.title, clause.text)) for clause in clauses]
-        sections_data["rider_clauses"] = [
-            replace(clause, topics=tag_clause_topics(clause.title, clause.text))
-            for clause in sections_data["rider_clauses"]
-        ]
-        document_parts = [f"{clause.title}\n{clause.text}" for clause in clauses]
-        document_parts.extend(table.raw_text for table in tables)
-        for section_name in (
-            'unclassified_sections',
-            'notices',
-            'health_disclosures',
-            'exclusions',
-            'rider_clauses',
-        ):
-            document_parts.extend(
-                f"{item.title}\n{getattr(item, 'content', getattr(item, 'text', ''))}"
-                for item in sections_data[section_name]
-            )
-        document_content = "\n".join(part for part in document_parts if part)
-        product_tags = build_product_tags(
-            recognition.product_name,
-            document_content,
-            product_name_source=name_resolution.source,
-            complete_document=True,
-        )
         warnings.extend(name_resolution.warnings)
-        warnings.extend(product_tags.warnings)
-
-        return AuditDocument(
+        audit_doc = AuditDocument(
             file_name=display_file_name,
             file_type='.pdf',
-            clauses=clauses,
-            tables=tables,
-            unclassified_sections=sections_data['unclassified_sections'],
-            notices=sections_data['notices'],
-            health_disclosures=sections_data['health_disclosures'],
-            exclusions=sections_data['exclusions'],
-            rider_clauses=sections_data['rider_clauses'],
+            clauses=content.clauses,
+            tables=content.tables,
+            unclassified_sections=content.unclassified_sections,
+            notices=content.notices,
+            health_disclosures=content.health_disclosures,
+            exclusions=content.exclusions,
+            rider_clauses=content.rider_clauses,
+            coverage_attestation=content.coverage_attestation,
             product_name=recognition.product_name,
             product_name_source=name_resolution.source,
             is_rider=recognition.is_rider,
@@ -144,330 +105,219 @@ class PdfParser:
             duration_type=recognition.duration_type,
             design_type=recognition.design_type,
             naming_warnings=recognition.warnings,
-            product_tags=product_tags,
             parse_time=datetime.now(),
             warnings=warnings,
         )
+        product_tags = build_product_tags(
+            recognition.product_name,
+            audit_doc.canonical_text,
+            product_name_source=name_resolution.source,
+            complete_document=(
+                content.coverage_attestation.coverage_attested
+            ),
+        )
+        return replace(
+            audit_doc,
+            product_tags=product_tags,
+            warnings=[*warnings, *product_tags.warnings],
+        )
 
-    def _extract_clauses(self, pages: List, warnings: List[str]) -> List[Clause]:
-        """提取条款内容。
-
-        从文本流识别条款编号和标题，合并跨页重复条款。
-        直接使用 extract_text() 获取文本，避免从 chars 重建的复杂性。
-        后处理过滤页眉页脚行。
-        """
-        clauses_dict: Dict[str, Clause] = {}
-
-        pending_number: Optional[str] = None
-        pending_title: Optional[str] = None
-        pending_content: List[str] = []
-        pending_page: int = 1
-
-        # 页眉页脚过滤模式（用于后处理）
-        footer_patterns = [
-            r'第\s*\d+\s*页', r'Page\s*\d+', r'共\s*\d+\s*页',
-            r'\d+\s*/\s*\d+', r'第\s*页', r'共\s*页',
-            r'^\d+\s+\d+$',  # 纯数字组合如 "9 18"
-        ]
-
-        for page_idx, page in enumerate(pages):
-            # 目录页检测与过滤
-            is_toc, toc_clean_text = self.toc_detector.detect(page, page_idx)
-
-            if is_toc:
-                text = toc_clean_text
-            else:
-                # 直接使用 extract_text()，后处理过滤页眉页脚
-                text = page.extract_text() or ''
-
-            if not text:
-                continue
-
-            lines = text.split('\n')
-
-            for line in lines:
-                stripped = line.strip()
-                if not stripped:
-                    continue
-
-                # 后处理：过滤页眉页脚行
-                is_footer = False
-                for pattern in footer_patterns:
-                    import re
-                    if re.search(pattern, stripped, re.IGNORECASE):
-                        is_footer = True
-                        break
-                if is_footer:
-                    continue
-
-                match = self._match_clause_line(stripped)
-                if match:
-                    number = match.group(1)
-                    title = match.group(2).strip()
-
-                    if pending_number is not None and pending_number != number:
-                        self._merge_clause(
-                            clauses_dict,
-                            pending_number,
-                            pending_title or '',
-                            pending_content,
-                            pending_page,
-                        )
-                        pending_content = []
-
-                    pending_number = number
-                    pending_title = title
-                    pending_page = page_idx + 1
-                elif pending_number is not None:
-                    pending_content.append(stripped)
-
-        if pending_number is not None:
-            self._merge_clause(
-                clauses_dict,
-                pending_number,
-                pending_title or '',
-                pending_content,
-                pending_page,
-            )
-
-        clauses = list(clauses_dict.values())
-
-        def sort_key(c: Clause) -> List[int]:
-            parts = c.number.split('.')
-            return [int(p) for p in parts]
-
-        clauses.sort(key=sort_key)
-        return clauses
-
-    def _match_clause_line(self, line: str):
-        """匹配条款行：编号 + 空格 + 标题。
-
-        只匹配 X.Y 格式的条款编号（至少包含一个点），
-        过滤掉单数字格式的章节标题（如 "1 被保险人范围"）。
-        """
-        stripped = line.strip()
-        import re
-        match = re.match(r'^(\d+\.\d+(?:\.\d+)*)\s+(.+)$', stripped)
-        if match:
-            return match
-        return None
-
-    def _extract_unclassified_sections(
+    def _extract_source_records(
         self,
         pages: List,
-        clauses: List[Clause],
-        tables: List[DataTable],
-        sections_data: Dict[str, List[Any]],
-    ) -> List[DocumentSection]:
-        """保留首个编号条款前的正文，并排除已进入其他结构的明显重复行。"""
-        represented: set[str] = set()
+    ) -> tuple[SourceRecord, ...]:
+        """把 PDF 页面转换为与 Word 相同的有序记录。
 
-        def register(value: str) -> None:
-            represented.update(
-                re.sub(r'\s+', ' ', line).strip()
-                for line in value.splitlines()
-                if line.strip()
-            )
-
-        for clause in clauses:
-            register(clause.title)
-            register(clause.text)
-        for table in tables:
-            register(table.raw_text)
-            register(table.remark)
-        for section_name in (
-            'notices',
-            'health_disclosures',
-            'exclusions',
-            'rider_clauses',
-        ):
-            for item in sections_data[section_name]:
-                register(item.title)
-                register(getattr(item, 'content', getattr(item, 'text', '')))
-
-        result: List[DocumentSection] = []
-        seen: set[str] = set()
-        reached_clause = False
-        page_marker = re.compile(
-            r'^(?:第\s*\d+\s*页|Page\s*\d+|共\s*\d+\s*页|\d+\s*/\s*\d+)$',
-            re.IGNORECASE,
-        )
-        for page_idx, page in enumerate(pages):
-            is_toc, _ = self.toc_detector.detect(page, page_idx)
-            if is_toc:
-                continue
-            text = self.header_footer_filter.filter(page)
-            if not text:
-                text = page.extract_text() or ''
-            for line in text.splitlines():
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                if self._match_clause_line(stripped):
-                    reached_clause = True
-                    break
-                normalized = re.sub(r'\s+', ' ', stripped).strip()
-                if (
-                    page_marker.match(normalized)
-                    or self.detector.detect_section_type(stripped)
-                    or normalized in represented
-                    or normalized in seen
-                ):
-                    continue
-                seen.add(normalized)
-                result.append(DocumentSection(
-                    title='',
-                    content=stripped,
-                    section_type=SectionType.UNCLASSIFIED.value,
-                ))
-            if reached_clause:
-                break
-        return result
-
-    def _merge_clause(
-        self,
-        clauses_dict: Dict[str, Clause],
-        number: str,
-        title: str,
-        content_lines: List[str],
-        page_number: int,
-    ) -> None:
-        """合并条款到字典，处理跨页重复和章节标题干扰。"""
-        filtered_lines = [line for line in content_lines if not self._is_chapter_header(line)]
-
-        if number in clauses_dict:
-            existing = clauses_dict[number]
-            combined_text = existing.text
-            if filtered_lines:
-                new_text = '\n'.join(filtered_lines).strip()
-                if new_text:
-                    combined_text = f"{combined_text}\n{new_text}" if combined_text else new_text
-            clauses_dict[number] = Clause(
-                number=existing.number,
-                title=existing.title or title,
-                text=combined_text,
-                page_number=existing.page_number,
-            )
-        else:
-            clause = self._build_clause(number, title, filtered_lines, page_number)
-            clauses_dict[number] = clause
-
-    def _is_chapter_header(self, line: str) -> bool:
-        """检测章节标题行（用于过滤目录页干扰）。"""
-        stripped = line.strip()
-        chapter_titles = [
-            '其他事项', '合同效力', '保险费', '保险金的申请及给付',
-            '名词释义', '投保范围', '保险责任及责任免除',
-        ]
-        return any(stripped.endswith(t) and len(stripped) < 20 for t in chapter_titles)
-
-    def _build_clause(
-        self,
-        number: str,
-        title: str,
-        content_lines: List[str],
-        page_number: int,
-    ) -> Clause:
-        """构建条款对象。"""
-        full_title, extra_text = split_title_and_content(title)
-        all_content = ([extra_text] if extra_text else []) + content_lines
-        text = '\n'.join(all_content).strip()
-
-        return Clause(
-            number=number,
-            title=full_title,
-            text=text,
-            page_number=page_number,
-        )
-
-    def _extract_tables(self, pages: List, warnings: List[str]) -> List[DataTable]:
-        """提取数据表格。
-
-        使用 TableClassifier 分类表格类型。
-        过滤单行表格（装饰性章节标题）。
-        提取表格上方的表名（如"附表一"）作为 remark。
+        被识别为表格的 bbox 会从普通文本行中过滤，避免表格正文重复进入
+        条款和独立表格块。
         """
-        tables: List[DataTable] = []
+        records: list[SourceRecord] = []
+        order = 0
+        previous_table: Optional[DataTable] = None
+        for page_index, page in enumerate(pages):
+            is_toc, clean_toc_text = self.toc_detector.detect(
+                page, page_index,
+            )
+            if is_toc:
+                for line_index, line in enumerate(clean_toc_text.splitlines()):
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    records.append(SourceRecord(
+                        order=order,
+                        kind=SourceRecordKind.TEXT,
+                        fields=(stripped,),
+                        page_number=page_index + 1,
+                        paragraph_index=line_index,
+                    ))
+                    order += 1
+                continue
 
-        for page_idx, page in enumerate(pages):
-            page_text = page.extract_text() or ''
-            page_tables = page.find_tables()
-            for table_idx, table in enumerate(page_tables):
-                classification = self.table_classifier.classify(table)
-
-                rows = table.extract()
-                if not rows or len(rows) < 2:
+            events: list[tuple[float, int, SourceRecord]] = []
+            excluded_bboxes: list[
+                Tuple[float, float, float, float]
+            ] = []
+            found_tables = page.find_tables()
+            for table_index, table in enumerate(found_tables):
+                extracted = table.extract()
+                if not extracted:
                     continue
-
-                header = [str(cell or '').strip() for cell in rows[0]]
-                non_empty_header = [h for h in header if h]
-                if len(non_empty_header) < 2:
-                    continue
-
-                raw_text = '\n'.join(
-                    '\t'.join(str(cell or '') for cell in row)
-                    for row in rows
+                rows = tuple(
+                    tuple(str(cell or "").strip() for cell in row)
+                    for row in extracted
                 )
-                data = [[str(cell or '') for cell in row] for row in rows]
-                bbox = getattr(table, 'bbox', None)
-
-                # 提取表格上方文本作为表名
-                table_title = self._extract_table_title(page, table)
-
-                # 检查是否为跨页续表：从已创建的表格列表中查找同列数的前一个表格
-                # 续表特征：表格在页面顶部，且前一个表格在上一页底部
-                table_type = classification.table_type
-                prev_table: Optional[DataTable] = None
-                if bbox and tables:
-                    page_height = page.height
-                    # 表格顶部靠近页面顶部 → 可能是续表
-                    if bbox[1] < page_height * 0.15:
-                        # 只检查最近创建的表格
-                        last_table = tables[-1]
-                        # 前一个表格在不同页，且列数相同
-                        if last_table.page_number != page_idx + 1 and len(last_table.data[0]) == len(header):
-                            prev_table = last_table
-
-                # 续表处理：继承已创建表格的表头和表名
-                if prev_table:
-                    # 继承表名
-                    if not table_title and prev_table.remark:
-                        table_title = prev_table.remark
-                    # 继承表头
-                    prev_header = prev_table.data[0]
-                    if len(prev_header) == len(data[0]):
-                        data = [prev_header] + data[1:]
-                        raw_text = '\n'.join(
-                            '\t'.join(str(cell or '') for cell in row)
-                            for row in data
+                bbox = tuple(getattr(table, "bbox", (0, 0, 0, 0)))
+                if is_numbering_table_rows(rows):
+                    excluded_bboxes.append(bbox)
+                    table_rows = getattr(table, "rows", ())
+                    for row_index, row in enumerate(rows):
+                        if not any(row):
+                            continue
+                        row_bbox = (
+                            tuple(table_rows[row_index].bbox)
+                            if row_index < len(table_rows)
+                            else bbox
                         )
-
-                # 其他分类逻辑
+                        events.append((
+                            float(row_bbox[1]),
+                            0,
+                            SourceRecord(
+                                order=-1,
+                                kind=SourceRecordKind.TABLE_ROW,
+                                fields=row,
+                                page_number=page_index + 1,
+                                table_index=table_index,
+                                row_index=row_index,
+                                bbox=row_bbox,
+                                numbering_stream=True,
+                            ),
+                        ))
+                    continue
+                if not self._is_structured_pdf_table(rows):
+                    continue
+                excluded_bboxes.append(bbox)
+                classification = self.table_classifier.classify(table)
+                table_type = classification.table_type
+                title = self._extract_table_title(page, table)
+                if (
+                    previous_table is not None
+                    and bbox[1] < page.height * 0.15
+                    and previous_table.page_number == page_index
+                    and len(previous_table.data[0]) == len(rows[0])
+                ):
+                    title = title or previous_table.remark
+                    if table_type == TableType.OTHER:
+                        table_type = previous_table.table_type
                 if table_type == TableType.OTHER:
-                    context_pages = [page_text]
-                    if page_idx > 0:
-                        context_pages.append(pages[page_idx - 1].extract_text() or '')
-                    context_text = '\n'.join(context_pages)
                     table_type = self._classify_by_context(
-                        context_text, data, table_title, prev_table.table_type if prev_table else None
+                        page.extract_text() or "",
+                        [list(row) for row in rows],
+                        title,
+                        previous_table.table_type if previous_table else None,
                     )
-
-                tables.append(DataTable(
-                    data=data,
+                raw_text = "\n".join("\t".join(row) for row in rows)
+                data_table = DataTable(
+                    data=[list(row) for row in rows],
                     table_type=table_type,
                     raw_text=raw_text,
-                    remark=table_title,
-                    page_number=page_idx + 1,
+                    remark=title,
+                    page_number=page_index + 1,
                     bbox=bbox,
-                    table_index=table_idx,
+                    table_index=table_index,
+                )
+                previous_table = data_table
+                events.append((
+                    float(bbox[1]),
+                    1,
+                    SourceRecord(
+                        order=-1,
+                        kind=SourceRecordKind.DATA_TABLE,
+                        page_number=page_index + 1,
+                        table_index=table_index,
+                        bbox=bbox,
+                        data_table=data_table,
+                    ),
                 ))
 
-                if classification.table_type == TableType.UNKNOWN:
-                    warnings.append(
-                        f"Page {page_idx + 1} table {table_idx} 类型未知"
-                    )
+            filtered_page = page
+            if excluded_bboxes:
+                filtered_page = page.filter(
+                    lambda obj: self._outside_bboxes(obj, excluded_bboxes),
+                )
+            for line_index, (top, text) in enumerate(
+                self.header_footer_filter._build_lines_from_chars(
+                    filtered_page,
+                ),
+            ):
+                stripped = text.strip()
+                if not stripped or self._is_pdf_margin_line(
+                    stripped, top, page.height,
+                ):
+                    continue
+                events.append((
+                    float(top),
+                    2,
+                    SourceRecord(
+                        order=-1,
+                        kind=SourceRecordKind.TEXT,
+                        fields=(stripped,),
+                        page_number=page_index + 1,
+                        paragraph_index=line_index,
+                        bbox=(0.0, float(top), float(page.width), float(top)),
+                    ),
+                ))
 
-        return tables
+            for _, _, record in sorted(
+                events,
+                key=lambda item: (item[0], item[1]),
+            ):
+                records.append(replace(record, order=order))
+                order += 1
+        return tuple(records)
+
+    @staticmethod
+    def _is_structured_pdf_table(
+        rows: tuple[tuple[str, ...], ...],
+    ) -> bool:
+        return bool(
+            len(rows) >= 2
+            and rows
+            and sum(bool(cell) for cell in rows[0]) >= 2
+        )
+
+    @staticmethod
+    def _outside_bboxes(
+        obj: Dict[str, Any],
+        bboxes: List[Tuple[float, float, float, float]],
+    ) -> bool:
+        if obj.get("object_type") != "char":
+            return True
+        x = (float(obj.get("x0", 0)) + float(obj.get("x1", 0))) / 2
+        top = float(obj.get("top", 0))
+        bottom = float(obj.get("bottom", top))
+        y = (top + bottom) / 2
+        return not any(
+            left <= x <= right and box_top <= y <= box_bottom
+            for left, box_top, right, box_bottom in bboxes
+        )
+
+    def _is_pdf_margin_line(
+        self,
+        text: str,
+        top: float,
+        page_height: float,
+    ) -> bool:
+        if (
+            top < page_height * self.header_footer_filter.header_region_ratio
+            and self.header_footer_filter._is_header(text)
+        ):
+            return True
+        return bool(
+            top > page_height * (
+                1 - self.header_footer_filter.footer_region_ratio
+            )
+            and self.header_footer_filter._is_footer(text)
+        )
 
     def _classify_by_context(
         self,
@@ -569,88 +419,3 @@ class PdfParser:
                 return line_text
 
         return ''
-
-    def _extract_special_sections(self, pages: List, warnings: List[str]) -> Dict[str, List[Any]]:
-        """提取特殊章节（告知事项、健康告知、附加条款）。
-
-        注意：责任免除条款（如 2.6）已在 clauses 中提取，此处不再重复。
-        exclusions 只用于无编号的独立声明（如投保须知中的免责声明）。
-        """
-        result: Dict[str, List[Any]] = {
-            'notices': [],
-            'health_disclosures': [],
-            'exclusions': [],
-            'rider_clauses': [],
-        }
-
-        current_type: Optional[SectionType] = None
-        current_title = ''
-        current_content: List[str] = []
-
-        for page_idx, page in enumerate(pages):
-            # 目录页整体跳过
-            is_toc, _ = self.toc_detector.detect(page, page_idx)
-            if is_toc:
-                continue
-
-            text = self.header_footer_filter.filter(page)
-            if not text:
-                text = page.extract_text() or ''
-
-            lines = text.split('\n')
-
-            for line in lines:
-                stripped = line.strip()
-                if not stripped:
-                    continue
-
-                detected = self.detector.detect_section_type(stripped)
-                if detected:
-                    if detected == SectionType.EXCLUSION:
-                        if current_type:
-                            add_section(
-                                result,
-                                current_type,
-                                current_title,
-                                '\n'.join(current_content),
-                            )
-                            current_type = None
-                            current_title = ''
-                            current_content = []
-                        if not any(
-                            section.title == stripped
-                            for section in result['exclusions']
-                        ):
-                            result['exclusions'].append(DocumentSection(
-                                title=stripped,
-                                content='',
-                                section_type=SectionType.EXCLUSION.value,
-                            ))
-                        continue
-                    # 同类型章节标题视为延续，不重新开始
-                    if detected == current_type:
-                        if stripped != current_title:
-                            current_content.append(stripped)
-                    else:
-                        if current_type:
-                            add_section(
-                                result,
-                                current_type,
-                                current_title,
-                                '\n'.join(current_content),
-                            )
-                        current_type = detected
-                        current_title = stripped
-                        current_content = []
-                elif current_type:
-                    current_content.append(stripped)
-
-        if current_type:
-            add_section(
-                result,
-                current_type,
-                current_title,
-                '\n'.join(current_content),
-            )
-
-        return result

@@ -305,6 +305,7 @@ export default function CompliancePage() {
         // 审核名称必须与解析凭证绑定的名称完全一致；文件名仅用于界面展示。
         product_name: parsedDocument.product_name || undefined,
         product_name_source: parsedDocument.product_name_source,
+        coverage_attested: parsedDocument.coverage_attested,
         parse_warnings: parsedDocument.warnings,
         category: selectedCategory || undefined,
         clause_topics: Array.from(new Set([

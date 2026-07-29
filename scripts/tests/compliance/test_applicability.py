@@ -6,6 +6,7 @@ from lib.common.product_tags import (
     ProductSubtype,
     ProductTags,
     ProductTermClass,
+    RenewalType,
 )
 from lib.compliance.applicability import (
     MatchStatus,
@@ -135,7 +136,10 @@ def test_not_applicable_design_is_known_and_excludes_designed_product_rule():
 
 def test_metadata_parser_groups_tags_topics_and_unknown_values():
     regulation = RegulationApplicability.from_metadata({
-        "适用标签": "health,medical,short_term,main,internet_exclusive,future_tag",
+        "适用标签": (
+            "health,medical,short_term,main,has_renewal,"
+            "internet_exclusive,future_tag"
+        ),
         "条款主题": "renewal.general,renewal.non_guaranteed",
     })
 
@@ -143,9 +147,36 @@ def test_metadata_parser_groups_tags_topics_and_unknown_values():
     assert regulation.subtypes == {"medical"}
     assert regulation.term_classes == {"short_term"}
     assert regulation.contract_roles == {"main"}
+    assert regulation.renewal_conditions == {"has_renewal"}
     assert regulation.special_features == {"internet_exclusive"}
     assert regulation.clause_topics == {"renewal.general", "renewal.non_guaranteed"}
     assert regulation.unknown_tags == {"future_tag"}
+
+
+def test_renewal_condition_requires_a_known_renewal_responsibility():
+    regulation = RegulationApplicability.from_metadata({
+        "适用标签": "health,short_term,individual,has_renewal",
+    })
+
+    matching = match_regulation_applicability(
+        _health_product(renewal_type=RenewalType.NON_GUARANTEED),
+        regulation,
+    )
+    excluded = match_regulation_applicability(
+        _health_product(renewal_type=RenewalType.NONE),
+        regulation,
+    )
+    unknown = match_regulation_applicability(
+        _health_product(renewal_type=RenewalType.UNKNOWN),
+        regulation,
+    )
+
+    assert matching.status is MatchStatus.APPLICABLE
+    assert "renewal_condition" in matching.matched_dimensions
+    assert excluded.status is MatchStatus.NOT_APPLICABLE
+    assert excluded.excluded_by == ("renewal_condition",)
+    assert unknown.status is MatchStatus.INDETERMINATE
+    assert unknown.indeterminate_dimensions == ("renewal_condition",)
 
 
 def test_related_tags_do_not_constrain_applicability():
@@ -185,6 +216,32 @@ def test_one_year_guaranteed_health_product_keeps_long_term_regulations():
         product,
         short_term_rule,
     ).status is MatchStatus.NOT_APPLICABLE
+
+
+def test_one_year_health_with_unknown_renewal_keeps_both_term_rules():
+    product = build_product_tags(
+        "某某医疗保险条款",
+        "保险期间为一年。保险期间届满后可申请续保。",
+        complete_document=True,
+    )
+    long_term_rule = RegulationApplicability(
+        lines=frozenset({"health"}),
+        term_classes=frozenset({"long_term"}),
+    )
+    short_term_rule = RegulationApplicability(
+        lines=frozenset({"health"}),
+        term_classes=frozenset({"short_term"}),
+    )
+
+    assert product.term_class is ProductTermClass.UNKNOWN
+    assert match_regulation_applicability(
+        product,
+        long_term_rule,
+    ).status is MatchStatus.INDETERMINATE
+    assert match_regulation_applicability(
+        product,
+        short_term_rule,
+    ).status is MatchStatus.INDETERMINATE
 
 
 def test_ordinary_health_product_keeps_ordinary_regulations():

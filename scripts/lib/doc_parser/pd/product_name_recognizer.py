@@ -194,19 +194,17 @@ def _extract_duration_type(product_name: str) -> Optional[str]:
     return None
 
 
-# 险种类别后缀（用于从产品名末尾剥离，识别"吉庆文字"部分）
-# 顺序重要：长的优先，避免"重大疾病"被"疾病"提前截断
-_INSURANCE_CATEGORY_SUFFIXES = [
-    "重大疾病", "重疾", "医疗", "疾病", "护理", "失能收入损失",
-    "意外伤害", "意外", "终身寿险", "定期寿险", "两全保险",
-    "年金保险", "养老保险", "人寿保险", "寿险", "两全", "年金",
-    "养老", "健康保险", "健康",
+_FORMAL_PRODUCT_TYPE_SUFFIXES = [
+    "失能收入损失保险", "意外伤害医疗保险", "重大疾病保险",
+    "医疗意外保险", "意外医疗保险", "意外伤害保险", "终身寿险",
+    "定期寿险", "人寿保险", "两全保险", "年金保险", "医疗保险",
+    "疾病保险", "护理保险", "健康保险",
 ]
 
 # 设计类型 / 修饰词 / 版本号（出现在产品名末尾，需要剥离以定位吉庆文字）
 _NAME_SUFFIX_NOISE = [
     "普通型", "分红型", "万能型", "投资连结型", "变额型",
-    "互联网", "个人",
+    "互联网", "个人", "团体", "长期", "短期", "城市定制型",
 ]
 
 # 标签维度的修饰词（不是吉庆文字）
@@ -216,9 +214,7 @@ _TERM_DURATION_KEYWORDS = ["终身", "定期"]
 
 # 末尾括号内容（版本号、款型、设计类型）：（2025版）、（A款）、(2.0版)、（分红型） 等
 # 需同时匹配设计类型与版本号，避免设计类型被误算入吉庆文字
-_TRAILING_PAREN_PATTERN = re.compile(
-    r'[（(][^（）()]*(?:[版款]|普通型|分红型|万能型|投资连结型|变额型|个人|团体)[^（）()]*[）)]$'
-)
+_TRAILING_PAREN_PATTERN = re.compile(r'(?:[（(][^（）()]*[）)])+$')
 
 
 def _extract_felicity_text(product_name: str) -> Optional[str]:
@@ -230,21 +226,16 @@ def _extract_felicity_text(product_name: str) -> Optional[str]:
     if not product_name:
         return None
     s = product_name
-    # 去掉末尾的"条款"
-    if s.endswith('条款'):
-        s = s[:-len('条款')]
-    # 去掉末尾括号（版本号/款型/设计类型）
+    # 文档类型与款型、设计类型、费率属性不是吉庆/说明性文字。
+    s = re.sub(r'(?:产品)?条款$', '', s).strip()
     s = _TRAILING_PAREN_PATTERN.sub('', s).strip()
-    # 从尾部剥离险种类别（长的优先）；先剥离"保险"再剥离类别后缀
-    # 例：XXX医疗保险 → 剥"保险"→ "XXX医疗" → 不再匹配类别 → 需先剥类别
-    # 例：XXX终身寿险 → 直接匹配"终身寿险"或"寿险"后缀
-    for _ in range(2):
-        s_before_strip = s
-        for suffix in _INSURANCE_CATEGORY_SUFFIXES + ["保险"]:
-            if s.endswith(suffix):
-                s = s[:-len(suffix)].strip()
-                break
-        if s == s_before_strip:
+    for suffix in sorted(
+        _FORMAL_PRODUCT_TYPE_SUFFIXES,
+        key=len,
+        reverse=True,
+    ):
+        if s.endswith(suffix):
+            s = s[:-len(suffix)].strip()
             break
     # 去掉头部保险公司名称（最长匹配优先：先匹配精确公司简称，再兜底"XX保险公司"）
     matched_company = False
@@ -258,29 +249,21 @@ def _extract_felicity_text(product_name: str) -> Optional[str]:
         m = re.match(r'^[\u4e00-\u9fa5A-Za-z]+(?:保险|人寿保险|养老保险|健康保险|农业保险)[\u4e00-\u9fa5]*?(?:股份有限公司|有限责任公司|保险公司)', s)
         if m:
             s = s[m.end():]
-    # 去掉头部的"附加"等修饰
-    for prefix in ("附加",):
-        if s.startswith(prefix):
-            s = s[len(prefix):]
-    # 去掉头部和尾部的修饰词（设计类型、互联网、个人）
-    s = s.strip()
-    for noise in _NAME_SUFFIX_NOISE:
-        if s.startswith(noise):
-            s = s[len(noise):]
-        if s.endswith(noise):
-            s = s[:-len(noise)]
-    # 剥离标签维度修饰词（团体/个人、终身/定期），这些是结构化标签，不算吉庆文字
-    # 头尾各剥一遍，最多重复 3 次以处理多词叠加（如"企业员工团体终身"）
-    for _ in range(3):
+    # 附加、销售方式、期限、客群和城市定制身份均已有独立受控标签，
+    # 只从名称主体两端剥离，保留真正的吉庆/说明性文字。
+    structural_words = (
+        "附加",
+        *_NAME_SUFFIX_NOISE,
+        *_GROUP_INDIVIDUAL_KEYWORDS,
+        *_TERM_DURATION_KEYWORDS,
+    )
+    for _ in range(6):
         s_before = s
-        for kw in _GROUP_INDIVIDUAL_KEYWORDS + _TERM_DURATION_KEYWORDS:
+        for kw in structural_words:
             if s.startswith(kw):
                 s = s[len(kw):]
             elif s.endswith(kw):
                 s = s[:-len(kw)]
-            elif kw in s and len(s) > 0:
-                # 中间也可能存在（如"企业员工团体终身"中"团体"在中间），整词剔除
-                s = s.replace(kw, '', 1)
         s = s.strip()
         if s == s_before:
             break

@@ -1,10 +1,10 @@
 {
   "schema_version": "1",
   "kb_version": "v5",
-  "build_manifest_sha256": "f6ff40509b1237fc88b127f7bf7d6575f8474a9b78b0fa2ad9a4a0893fd29594",
+  "build_manifest_sha256": "82ff39e3f71aa3494307d6bab193327c71b117639675a0684b5cba88a51ce222",
   "source_file": "1.产品开发检查清单2026年.xlsx",
-  "source_sha256": "7917433e40404192fffd5f30c21ffccfb79f8e022b8a7694d35d702f4c8e21d8",
+  "source_sha256": "394e075d22293662619b51e3cffb219b5f0ddce97f1070286f2841cea6ca9d32",
   "documents": 25,
-  "chunks": 171,
-  "catalog_sha256": "3428e545c36baeb0c511fd42b9d056a7efc80e00da50a10954a203211d0ba04e"
+  "chunks": 172,
+  "catalog_sha256": "e30d3172bcb79d09c5c53c0299ef856c51105aee09ead3f65f12d82b0643876b"
 }
