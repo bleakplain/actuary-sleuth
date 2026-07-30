@@ -1,8 +1,8 @@
 """构建与解析结果绑定的候选审核请求。"""
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
 import logging
+from dataclasses import dataclass, fields
 from typing import Mapping, Optional, Tuple
 
 from lib.auth.parse_attestation import (
@@ -36,6 +36,20 @@ class InvalidPipelineRequestError(PipelineRequestError):
 
 class PipelineRequestConflictError(PipelineRequestError):
     """请求内容与解析凭证或绑定原文不一致。"""
+
+
+def _list_product_tag_mismatches(
+    submitted: ProductTags,
+    recomputed: ProductTags,
+) -> Tuple[str, ...]:
+    """列出标签值差异，不把证据文本或完整标签内容写入日志。"""
+    ignored = {"evidence", "warnings"}
+    return tuple(
+        field.name
+        for field in fields(ProductTags)
+        if field.name not in ignored
+        and getattr(submitted, field.name) != getattr(recomputed, field.name)
+    )
 
 
 @dataclass(frozen=True)
@@ -201,16 +215,19 @@ def build_audit_pipeline_request(
         complete_document=verified_attestation.coverage_attested,
     )
     submitted_tags = ProductTags.from_dict(source.product_tags)
-    if (
-        verified_attestation.version == 2
-        and replace(submitted_tags, evidence=(), warnings=()) != replace(
-            product_tags,
-            evidence=(),
-            warnings=(),
-        )
-    ):
-        raise PipelineRequestConflictError(
-            "产品标签与绑定的产品名称及条款原文不一致，请重新解析"
+    tag_mismatches = _list_product_tag_mismatches(
+        submitted_tags,
+        product_tags,
+    )
+    if tag_mismatches:
+        if verified_attestation.version == 2:
+            raise PipelineRequestConflictError(
+                "产品标签与绑定的产品名称及条款原文不一致，请重新解析"
+            )
+        logger.warning(
+            "v1 凭证下提交的产品标签已由服务端重算结果覆盖；"
+            "mismatched_fields=%s",
+            ",".join(tag_mismatches),
         )
     clauses = tuple(
         AuditClauseSnapshot(

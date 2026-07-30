@@ -101,6 +101,40 @@ def _request(user_subject: str = "") -> DocumentCheckRequest:
     )
 
 
+def _issue_v1_attestation(
+    request: DocumentCheckRequest,
+    *,
+    issued_at: int,
+    expires_at: int,
+) -> str:
+    """构造历史版本凭证；生产代码不暴露测试专用签发入口。"""
+    payload = {
+        "v": 1,
+        "iat": issued_at,
+        "exp": expires_at,
+        "parse_id": request.parse_id,
+        "document_fingerprint": request.document_fingerprint,
+        "audit_input_fingerprint": request.audit_input_fingerprint,
+        "product_name_source": request.product_name_source,
+        "parse_warnings_sha256": parse_attestation._warnings_digest(
+            request.parse_warnings,
+        ),
+        "sub": "",
+    }
+    encoded_payload = parse_attestation._encode(json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8"))
+    signature = hmac.new(
+        parse_attestation._signing_key(parse_attestation._V1_DOMAIN),
+        encoded_payload.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    return f"{encoded_payload}.{parse_attestation._encode(signature)}"
+
+
 def _unit() -> RegulationUnit:
     return RegulationUnit(
         unit_id="unit-1",
@@ -369,40 +403,53 @@ def test_v2_request_disables_absence_inference_without_coverage_proof() -> None:
     assert pipeline_request.product_tags.renewal_type.value == "unknown"
 
 
-def test_v1_parse_attestation_is_accepted_without_coverage_inference() -> None:
+def test_v1_attestation_overrides_submitted_tags_and_logs_mismatches(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     request = _request()
     issued_at = int(time.time())
-    payload = {
-        "v": 1,
-        "iat": issued_at,
-        "exp": issued_at + 30 * 60,
-        "parse_id": request.parse_id,
-        "document_fingerprint": request.document_fingerprint,
-        "audit_input_fingerprint": request.audit_input_fingerprint,
-        "product_name_source": request.product_name_source,
-        "parse_warnings_sha256": parse_attestation._warnings_digest(
-            request.parse_warnings,
-        ),
-        "sub": "",
-    }
-    encoded_payload = parse_attestation._encode(json.dumps(
-        payload,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8"))
-    signature = hmac.new(
-        parse_attestation._signing_key(parse_attestation._V1_DOMAIN),
-        encoded_payload.encode("ascii"),
-        hashlib.sha256,
-    ).digest()
-    request.parse_attestation = (
-        f"{encoded_payload}.{parse_attestation._encode(signature)}"
+    request.parse_attestation = _issue_v1_attestation(
+        request,
+        issued_at=issued_at,
+        expires_at=issued_at + 30 * 60,
+    )
+    request.product_tags["line"] = "life"
+
+    with caplog.at_level(
+        "WARNING",
+        logger="lib.compliance.pipeline_request",
+    ):
+        pipeline_request = _pipeline_request(request)
+
+    assert pipeline_request.product_tags.line.value == "health"
+    assert pipeline_request.product_tags.renewal_type.value == "unknown"
+    assert "mismatched_fields=" in caplog.text
+    assert "line" in caplog.text
+
+
+def test_v1_attestation_rejects_duration_over_compatibility_ttl() -> None:
+    request = _request()
+    issued_at = int(time.time())
+    request.parse_attestation = _issue_v1_attestation(
+        request,
+        issued_at=issued_at,
+        expires_at=issued_at + 31 * 60,
     )
 
-    pipeline_request = _pipeline_request(request)
+    with pytest.raises(HTTPException, match="兼容窗口无效"):
+        _pipeline_request(request)
 
-    assert pipeline_request.product_tags.renewal_type.value == "unknown"
+
+def test_v1_attestation_rejects_expired_token() -> None:
+    request = _request()
+    request.parse_attestation = _issue_v1_attestation(
+        request,
+        issued_at=1,
+        expires_at=2,
+    )
+
+    with pytest.raises(HTTPException, match="已过期"):
+        _pipeline_request(request)
 
 
 def test_v2_report_keeps_manual_review_and_incomplete_state() -> None:
