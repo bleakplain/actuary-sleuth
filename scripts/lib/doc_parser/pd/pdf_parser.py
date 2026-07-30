@@ -199,25 +199,32 @@ class PdfParser:
                 classification = self.table_classifier.classify(table)
                 table_type = classification.table_type
                 title = self._extract_table_title(page, table)
-                if (
-                    previous_table is not None
-                    and bbox[1] < page.height * 0.15
-                    and previous_table.page_number == page_index
-                    and len(previous_table.data[0]) == len(rows[0])
-                ):
+                is_continuation = self._is_continuation_table(
+                    previous_table,
+                    current_page_index=page_index,
+                    table_top=float(bbox[1]),
+                    page_height=float(page.height),
+                    column_count=len(rows[0]),
+                )
+                table_data = [list(row) for row in rows]
+                if is_continuation and previous_table is not None:
                     title = title or previous_table.remark
                     if table_type == TableType.OTHER:
                         table_type = previous_table.table_type
+                    table_data = self._inherit_continuation_header(
+                        previous_table.data[0],
+                        table_data,
+                    )
                 if table_type == TableType.OTHER:
                     table_type = self._classify_by_context(
                         page.extract_text() or "",
-                        [list(row) for row in rows],
+                        table_data,
                         title,
                         previous_table.table_type if previous_table else None,
                     )
-                raw_text = "\n".join("\t".join(row) for row in rows)
+                raw_text = "\n".join("\t".join(row) for row in table_data)
                 data_table = DataTable(
-                    data=[list(row) for row in rows],
+                    data=table_data,
                     table_type=table_type,
                     raw_text=raw_text,
                     remark=title,
@@ -274,6 +281,38 @@ class PdfParser:
                 records.append(replace(record, order=order))
                 order += 1
         return tuple(records)
+
+    @staticmethod
+    def _is_continuation_table(
+        previous_table: Optional[DataTable],
+        *,
+        current_page_index: int,
+        table_top: float,
+        page_height: float,
+        column_count: int,
+    ) -> bool:
+        """判断表格是否紧接上一页。
+
+        ``DataTable.page_number`` 是 1-based，而 ``current_page_index`` 是
+        0-based；两者相等恰好表示前表位于当前页的上一页。
+        """
+        return bool(
+            previous_table is not None
+            and previous_table.data
+            and table_top < page_height * 0.15
+            and previous_table.page_number == current_page_index
+            and len(previous_table.data[0]) == column_count
+        )
+
+    @staticmethod
+    def _inherit_continuation_header(
+        previous_header: List[str],
+        current_data: List[List[str]],
+    ) -> List[List[str]]:
+        """续表缺表头时补入上一页表头，已有重复表头时保持原样。"""
+        if not current_data or current_data[0] == previous_header:
+            return current_data
+        return [list(previous_header), *current_data]
 
     @staticmethod
     def _is_structured_pdf_table(

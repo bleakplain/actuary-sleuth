@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import logging
 from typing import Mapping, Optional, Tuple
 
 from lib.auth.parse_attestation import (
@@ -21,6 +22,8 @@ from lib.doc_parser.models import (
 )
 from lib.doc_parser.pd.clause_tagger import tag_clause_topics
 from lib.doc_parser.pd.product_tagging import build_product_tags
+
+logger = logging.getLogger(__name__)
 
 
 class PipelineRequestError(ValueError):
@@ -130,7 +133,7 @@ def build_audit_pipeline_request(
 ) -> AuditPipelineRequest:
     """只接受与服务端解析凭证绑定的完整文档事实。"""
     try:
-        verify_parse_attestation(
+        verified_attestation = verify_parse_attestation(
             source.parse_attestation,
             source.parse_id,
             source.document_fingerprint,
@@ -142,6 +145,10 @@ def build_audit_pipeline_request(
         )
     except ParseAttestationError as exc:
         raise PipelineRequestConflictError(str(exc)) from exc
+    if verified_attestation.version == 1:
+        logger.warning(
+            "接受兼容窗口内的 v1 解析凭证；全文覆盖证明已降级为 False"
+        )
     if not source.audit_blocks:
         raise InvalidPipelineRequestError(
             "候选审核主链需要先调用文档解析接口并提交 audit_blocks"
@@ -191,13 +198,16 @@ def build_audit_pipeline_request(
         source.product_name or None,
         source.document_content,
         product_name_source=source.product_name_source,
-        complete_document=source.coverage_attested,
+        complete_document=verified_attestation.coverage_attested,
     )
     submitted_tags = ProductTags.from_dict(source.product_tags)
-    if replace(submitted_tags, evidence=(), warnings=()) != replace(
-        product_tags,
-        evidence=(),
-        warnings=(),
+    if (
+        verified_attestation.version == 2
+        and replace(submitted_tags, evidence=(), warnings=()) != replace(
+            product_tags,
+            evidence=(),
+            warnings=(),
+        )
     ):
         raise PipelineRequestConflictError(
             "产品标签与绑定的产品名称及条款原文不一致，请重新解析"

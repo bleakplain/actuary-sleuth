@@ -89,7 +89,7 @@
 
 - [x] T042 [US4-US6] 实现旧新链路差异 runner 和版本化 JSON/CSV 指标输出
 - [ ] T043 [US4-US6] 仅在 `compliance-audit-v1` 精算签收后计算 Recall、排除准确率、条款 Recall 和证据完整率
-- [x] T044 [US4-US6] 生产新主链不得导入或合并 `rule_engine.py` 结果，旧实现只允许隔离影子调用
+- [x] T044 [US4-US6] v2 生产新主链模块不得导入或合并 `rule_engine.py` 结果；精算签收前仍由未完成的 T045/T046 保留 v1 旧入口，签收切换后删除
 - [ ] T045 [US4-US6] 搜索并删除生产 `ProductMetadata`、全局聚合 prompt 和平行负面清单调用
 - [ ] T046 [US4-US6] 精算门槛未签收时保持显式 cutover blocked；签收后切换默认入口并删除旧规则文件及专属测试
 - [x] T047 [US4-US6] 补“生产模块不得导入 rule_engine”和差异指标测试

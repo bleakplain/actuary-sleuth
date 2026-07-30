@@ -1,7 +1,10 @@
 import ast
 import asyncio
+import hashlib
+import hmac
 import json
 import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List
@@ -14,6 +17,7 @@ from api.routers.compliance_v2 import _pipeline_request, build_report_data
 from api.schemas.compliance import DocumentCheckRequest
 from api.database import get_compliance_report
 from lib.auth.parse_attestation import issue_parse_attestation
+from lib.auth import parse_attestation
 from lib.common.compliance_audit import (
     AuditStatus,
     RegulationAuditDecision,
@@ -359,6 +363,42 @@ def test_v2_request_disables_absence_inference_without_coverage_proof() -> None:
         request.product_name_source,
         coverage_attested=False,
     ).token
+
+    pipeline_request = _pipeline_request(request)
+
+    assert pipeline_request.product_tags.renewal_type.value == "unknown"
+
+
+def test_v1_parse_attestation_is_accepted_without_coverage_inference() -> None:
+    request = _request()
+    issued_at = int(time.time())
+    payload = {
+        "v": 1,
+        "iat": issued_at,
+        "exp": issued_at + 30 * 60,
+        "parse_id": request.parse_id,
+        "document_fingerprint": request.document_fingerprint,
+        "audit_input_fingerprint": request.audit_input_fingerprint,
+        "product_name_source": request.product_name_source,
+        "parse_warnings_sha256": parse_attestation._warnings_digest(
+            request.parse_warnings,
+        ),
+        "sub": "",
+    }
+    encoded_payload = parse_attestation._encode(json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8"))
+    signature = hmac.new(
+        parse_attestation._signing_key(parse_attestation._V1_DOMAIN),
+        encoded_payload.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    request.parse_attestation = (
+        f"{encoded_payload}.{parse_attestation._encode(signature)}"
+    )
 
     pipeline_request = _pipeline_request(request)
 

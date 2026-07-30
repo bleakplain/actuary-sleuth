@@ -12,7 +12,8 @@ from typing import Any, Mapping, Optional, Sequence
 
 from lib.auth.jwt import get_jwt_signing_secret
 
-_DOMAIN = b"actuary-sleuth/parse-attestation/v2"
+_V1_DOMAIN = b"actuary-sleuth/parse-attestation/v1"
+_V2_DOMAIN = b"actuary-sleuth/parse-attestation/v2"
 _DEFAULT_TTL_SECONDS = 30 * 60
 
 
@@ -26,10 +27,16 @@ class IssuedParseAttestation:
     expires_at: str
 
 
-def _signing_key() -> bytes:
+@dataclass(frozen=True)
+class VerifiedParseAttestation:
+    version: int
+    coverage_attested: bool
+
+
+def _signing_key(domain: bytes = _V2_DOMAIN) -> bytes:
     return hmac.new(
         get_jwt_signing_secret(),
-        _DOMAIN,
+        domain,
         hashlib.sha256,
     ).digest()
 
@@ -118,39 +125,62 @@ def verify_parse_attestation(
     *,
     coverage_attested: bool = False,
     now: Optional[int] = None,
-) -> None:
-    """验证签名、有效期以及审核请求与原始解析快照的全部绑定字段。"""
+) -> VerifiedParseAttestation:
+    """验证解析凭证，并把旧版凭证降级为不具备全文覆盖证明。
+
+    v1 兼容只覆盖其原始最长 30 分钟有效期。它没有绑定
+    ``coverage_attested``，因此即使请求声称完整覆盖，也只能返回 False，
+    禁止下游据此做“全文未出现某词”的负向推断。
+    """
     if not token:
         raise ParseAttestationError("缺少解析凭证")
     try:
         encoded_payload, encoded_signature = token.split(".", 1)
     except ValueError as exc:
         raise ParseAttestationError("解析凭证格式无效") from exc
+    try:
+        payload: Any = json.loads(_decode(encoded_payload))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ParseAttestationError("解析凭证载荷无效") from exc
+    if not isinstance(payload, Mapping) or payload.get("v") not in (1, 2):
+        raise ParseAttestationError("解析凭证版本无效")
+    version = int(payload["v"])
+    domain = _V2_DOMAIN if version == 2 else _V1_DOMAIN
     expected_signature = hmac.new(
-        _signing_key(),
+        _signing_key(domain),
         encoded_payload.encode("ascii"),
         hashlib.sha256,
     ).digest()
     if not hmac.compare_digest(_decode(encoded_signature), expected_signature):
         raise ParseAttestationError("解析凭证签名无效")
-    try:
-        payload: Any = json.loads(_decode(encoded_payload))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise ParseAttestationError("解析凭证载荷无效") from exc
-    if not isinstance(payload, Mapping) or payload.get("v") != 2:
-        raise ParseAttestationError("解析凭证版本无效")
     current_time = int(time.time()) if now is None else int(now)
+    issued_at = payload.get("iat")
     expires_at = payload.get("exp")
     if not isinstance(expires_at, int) or current_time >= expires_at:
         raise ParseAttestationError("解析凭证已过期，请重新解析")
-    expected = {
+    if (
+        version == 1
+        and (
+            not isinstance(issued_at, int)
+            or expires_at - issued_at > _DEFAULT_TTL_SECONDS
+        )
+    ):
+        raise ParseAttestationError("旧版解析凭证兼容窗口无效，请重新解析")
+    expected: dict[str, object] = {
         "parse_id": parse_id,
         "document_fingerprint": document_fingerprint,
         "audit_input_fingerprint": audit_input_fingerprint,
         "product_name_source": product_name_source,
-        "coverage_attested": coverage_attested,
         "parse_warnings_sha256": _warnings_digest(parse_warnings),
         "sub": user_subject,
     }
+    if version == 2:
+        expected["coverage_attested"] = coverage_attested
     if any(payload.get(key) != value for key, value in expected.items()):
         raise ParseAttestationError("解析凭证与审核输入身份不一致，请重新解析")
+    return VerifiedParseAttestation(
+        version=version,
+        coverage_attested=(
+            bool(payload.get("coverage_attested")) if version == 2 else False
+        ),
+    )
