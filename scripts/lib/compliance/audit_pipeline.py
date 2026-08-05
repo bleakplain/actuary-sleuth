@@ -149,26 +149,44 @@ def _routed_clauses(
     clauses: Tuple[AuditClauseSnapshot, ...],
     routing: ClauseRoutingResult,
 ) -> Tuple[RoutedClause, ...]:
-    clause_by_id = {clause.clause_id: clause for clause in clauses}
+    route_by_id = {item.clause_id: item for item in routing.items}
     relation_by_route = {
         ClauseRoute.DIRECT: RoutedClauseRelation.DIRECT,
         ClauseRoute.RELATED: RoutedClauseRelation.RELATED,
         ClauseRoute.UNKNOWN: RoutedClauseRelation.UNKNOWN,
         ClauseRoute.NOT_RELEVANT: RoutedClauseRelation.NOT_RELEVANT,
     }
-    return tuple(
-        RoutedClause(
-            clause=clause_by_id[item.clause_id],
-            relation=relation_by_route[item.route],
-            reasons=(
-                item.reason,
-                *(f"受控排除 fixture: {fixture}" for fixture in item.fixture_ids),
-            ),
-            submitted=item.selected,
+    routed_clauses: list[RoutedClause] = []
+    for clause in clauses:
+        item = route_by_id.get(clause.clause_id)
+        if item is None:
+            routed_clauses.append(RoutedClause(
+                clause=clause,
+                relation=RoutedClauseRelation.UNKNOWN,
+                reasons=("路由结果缺失，完整条款基线保守提交",),
+                submitted=True,
+            ))
+            continue
+        routed_clauses.append(
+            RoutedClause(
+                clause=clause,
+                relation=relation_by_route[item.route],
+                reasons=(
+                    item.reason,
+                    *(
+                        f"受控排除 fixture: {fixture}"
+                        for fixture in item.fixture_ids
+                    ),
+                    *(
+                        ("完整条款基线：路由分类不删除 LLM 上下文",)
+                        if item.route is ClauseRoute.NOT_RELEVANT
+                        else ()
+                    ),
+                ),
+                submitted=True,
+            )
         )
-        for item in routing.items
-        if item.clause_id in clause_by_id
-    )
+    return tuple(routed_clauses)
 
 
 def _build_packages(

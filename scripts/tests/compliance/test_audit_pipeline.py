@@ -9,7 +9,12 @@ from lib.common.compliance_audit import (
     RegulationDecisionStatus,
 )
 from lib.common.product_tags import ProductLine, ProductTags
-from lib.compliance.audit_pipeline import AuditPipelineRequest, run_audit_pipeline
+from lib.compliance.audit_pipeline import (
+    AuditPipelineRequest,
+    _routed_clauses,
+    run_audit_pipeline,
+)
+from lib.compliance.clause_routing import ClauseRoutingResult
 from lib.compliance.regulation_retrieval import (
     RegulationRetrievalCoverage,
     RegulationRetrievalOutcome,
@@ -50,6 +55,14 @@ def _request() -> AuditPipelineRequest:
         document_content="等待期为三十日。其他约定。",
         product_tags=ProductTags(line=ProductLine.HEALTH),
         clauses=(
+            AuditClauseSnapshot(
+                clause_id="clause-assignment",
+                number="2.3",
+                title="合同转让",
+                text="本合同权益转让前的等待期为四十五日。",
+                block_type="clause",
+                topics=("policy.assignment",),
+            ),
             AuditClauseSnapshot(
                 clause_id="clause-waiting",
                 number="2.1",
@@ -97,8 +110,8 @@ def _compliant_auditor(packages, max_concurrency, deadline_seconds, on_decision)
     )
 
 
-def test_pipeline_builds_one_package_per_unit_and_keeps_unknown_clauses() -> None:
-    frozen = []
+def test_pipeline_submits_full_document_while_preserving_route_signals() -> None:
+    frozen: list[RegulationRetrievalOutcome] = []
     result = run_audit_pipeline(
         _request(),
         retriever=_retriever,
@@ -110,14 +123,47 @@ def test_pipeline_builds_one_package_per_unit_and_keeps_unknown_clauses() -> Non
     package = result.records[0].package
     assert package.product_tags is result.request.product_tags
     assert [item.clause.clause_id for item in package.clauses if item.submitted] == [
+        "clause-assignment",
         "clause-waiting",
         "clause-unknown",
     ]
+    assignment = next(
+        item for item in package.clauses
+        if item.clause.clause_id == "clause-assignment"
+    )
+    assert assignment.relation.value == "not_relevant"
+    assert any("完整条款基线" in reason for reason in assignment.reasons)
     assert package.regulation.chunks[0].chunk_id == "chunk-1"
     assert any(fact.value == "30" and fact.unit == "day" for fact in package.facts)
+    assert any(
+        fact.clause_id == "clause-assignment"
+        and fact.value == "45"
+        and fact.unit == "day"
+        for fact in package.facts
+    )
     assert result.summary.audit_status is AuditStatus.COMPLETED
     assert result.summary.compliance_conclusion is ComplianceConclusion.NO_VIOLATION_FOUND
     assert frozen[0].candidate_count == 1
+
+
+def test_missing_route_item_cannot_drop_a_full_document_clause() -> None:
+    clauses = _request().clauses
+    routed = _routed_clauses(
+        clauses,
+        ClauseRoutingResult(
+            regulation_topics=(),
+            topic_schema_version="1.0.0",
+            relation_schema_version="1.0.0",
+            items=(),
+            config_valid=False,
+        ),
+    )
+
+    assert [item.clause.clause_id for item in routed] == [
+        clause.clause_id for clause in clauses
+    ]
+    assert all(item.submitted for item in routed)
+    assert all(item.relation.value == "unknown" for item in routed)
 
 
 def test_missing_auditor_result_is_explicitly_incomplete() -> None:

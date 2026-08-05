@@ -19,6 +19,7 @@ from api.database import get_compliance_report
 from lib.auth.parse_attestation import issue_parse_attestation
 from lib.auth import parse_attestation
 from lib.common.compliance_audit import (
+    AuditClauseSnapshot,
     AuditStatus,
     RegulationAuditDecision,
     RegulationDecisionStatus,
@@ -485,6 +486,20 @@ def test_v1_attestation_rejects_expired_token() -> None:
 
 def test_v2_report_keeps_manual_review_and_incomplete_state() -> None:
     request = _pipeline_request(_request())
+    request = replace(
+        request,
+        clauses=(
+            *request.clauses,
+            AuditClauseSnapshot(
+                clause_id="assignment-clause",
+                number="3.1",
+                title="合同转让",
+                text="本合同权益可以依法转让。",
+                block_type="clause",
+                topics=("policy.assignment",),
+            ),
+        ),
+    )
 
     def retriever(*args):
         return RegulationRetrievalOutcome(
@@ -525,6 +540,13 @@ def test_v2_report_keeps_manual_review_and_incomplete_state() -> None:
     assert report["document_fingerprint"] == request.document_fingerprint
     assert report["audit_input_fingerprint"] == request.audit_input_fingerprint
     assert report["product_name_source"] == request.product_name_source
+    routed = {
+        item["clause_id"]: item
+        for item in report["decisions"][0]["routed_clauses"]
+    }
+    assert routed["assignment-clause"]["relation"] == "not_relevant"
+    assert routed["assignment-clause"]["submitted"] is True
+    assert report["clause_coverage"]["checked"] == report["clause_coverage"]["total"]
 
 
 def test_negative_list_category_does_not_depend_on_law_name_text() -> None:

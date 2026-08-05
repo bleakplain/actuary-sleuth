@@ -80,23 +80,17 @@ def _decision_core(decision: RegulationAuditDecision) -> Dict[str, Any]:
 
 def _record_data(record: RegulationAuditRecord) -> Dict[str, Any]:
     result = _decision_core(record.decision)
-    routed_by_id = {
-        routed.clause.clause_id: routed for routed in record.package.clauses
-    }
     result["routed_clauses"] = [
         {
-            "clause_id": item.clause_id,
-            "number": routed_by_id[item.clause_id].clause.number,
-            "title": routed_by_id[item.clause_id].clause.title,
-            "topics": list(item.clause_topics),
-            "relation": item.route.value,
-            "reasons": [
-                item.reason,
-                *(f"受控排除 fixture: {fixture}" for fixture in item.fixture_ids),
-            ],
-            "submitted": item.selected,
+            "clause_id": routed.clause.clause_id,
+            "number": routed.clause.number,
+            "title": routed.clause.title,
+            "topics": list(routed.clause.topics),
+            "relation": routed.relation.value,
+            "reasons": list(routed.reasons),
+            "submitted": routed.submitted,
         }
-        for item in record.routing.items
+        for routed in record.package.clauses
     ]
     result["facts"] = [_jsonable(asdict(fact)) for fact in record.package.facts]
     return result
