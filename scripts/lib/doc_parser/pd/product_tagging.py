@@ -249,7 +249,9 @@ _SPECIFIC_DISEASE_NAME_PATTERN = re.compile(
     r"(?:特定)?心脑血管(?:疾病)?保险"
 )
 _OUT_OF_HOSPITAL_DRUG_MENTION_PATTERN = re.compile(r"院外购药|药店")
-_INCREASING_SUM_ASSURED_NAME_PATTERN = re.compile(r"增额[^保险\n]{0,20}终身寿险|增额终身寿险")
+_INCREASING_SUM_ASSURED_NAME_PATTERN = re.compile(
+    r"增额(?:(?!保险|\n).){0,20}终身寿险"
+)
 _INCREASING_SUM_ASSURED_CLAUSE_PATTERN = re.compile(
     r"(?:有效保险金额|基本保险金额|保险金额)[^。；\n]{0,50}"
     r"(?:逐年|每年|按年)[^。；\n]{0,30}(?:递增|增加|增长)"

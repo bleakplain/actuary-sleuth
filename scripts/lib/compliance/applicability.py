@@ -1,6 +1,7 @@
 """法规标签解析与产品适用性判断。
 
-只有产品事实与法规限制明确冲突时才排除法规；产品标签未知时返回
+适用性使用“主体范围 OR 风险触发”两条保留路径。只有产品事实与法规限制明确
+冲突，且没有已命中或未知的风险触发旁路时才排除法规。产品事实未知时返回
 indeterminate，避免为了缩短检索上下文而制造漏查。
 """
 from __future__ import annotations
@@ -221,6 +222,8 @@ def _risk_trigger_value(product_tags: ProductTags, trigger: str) -> Optional[boo
     if trigger == "accidental_medical_coverage":
         if "accidental_medical" in product_tags.coverage_components:
             return True
+        # coverage_components 的缺失尚不能证明完整条款中没有意外医疗责任。
+        # 在引入可信的责任覆盖证明前保持 unknown，宁可多检查也不漏掉法规。
         return None
     field_name = _SPECIAL_PRODUCT_FIELDS.get(trigger)
     return getattr(product_tags, field_name) if field_name else None

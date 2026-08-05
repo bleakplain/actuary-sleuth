@@ -25,6 +25,7 @@ from lib.doc_parser.pd.product_tagging import build_product_tags
 
 logger = logging.getLogger(__name__)
 
+# TODO(T046/rollout-complete): 所有解析方已签发新字段后删除此缺失字段豁免。
 _ROLLING_ADDITIVE_PRODUCT_TAG_FIELDS = frozenset({
     "is_specific_disease_product",
     "mentions_out_of_hospital_drug",

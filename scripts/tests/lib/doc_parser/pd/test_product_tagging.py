@@ -743,6 +743,12 @@ def test_increasing_sum_assured_product_is_three_state():
     named = build_product_tags(
         "某增额终身寿险", "完整条款正文。", complete_document=True,
     )
+    named_with_modifier = build_product_tags(
+        "某增额保障型终身寿险", "完整条款正文。", complete_document=True,
+    )
+    crossed_product_name = build_product_tags(
+        "某增额保险计划终身寿险", "完整条款正文。", complete_document=True,
+    )
     clause_based = build_product_tags(
         "某终身寿险",
         "本合同有效保险金额每年按基本保险金额的3%递增。",
@@ -764,6 +770,8 @@ def test_increasing_sum_assured_product_is_three_state():
     )
 
     assert named.is_increasing_sum_assured_product is True
+    assert named_with_modifier.is_increasing_sum_assured_product is True
+    assert crossed_product_name.is_increasing_sum_assured_product is False
     assert clause_based.is_increasing_sum_assured_product is True
     assert ordinary.is_increasing_sum_assured_product is False
     assert incomplete.is_increasing_sum_assured_product is None
