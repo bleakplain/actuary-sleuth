@@ -189,7 +189,7 @@ def _routed_clauses(
     return tuple(routed_clauses)
 
 
-def _build_packages(
+def build_regulation_audit_packages(
     request: AuditPipelineRequest,
     units: Tuple[RegulationUnit, ...],
 ) -> Tuple[
@@ -297,7 +297,7 @@ def run_audit_pipeline(
             on_candidates_frozen(retrieval)
         except Exception as exc:
             logger.warning("法规候选冻结进度回调失败: %s", exc)
-    packages, routing_results, processing_warnings = _build_packages(
+    packages, routing_results, processing_warnings = build_regulation_audit_packages(
         request,
         retrieval.regulation_units,
     )
