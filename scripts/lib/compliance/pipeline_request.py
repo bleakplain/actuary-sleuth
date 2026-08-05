@@ -25,6 +25,14 @@ from lib.doc_parser.pd.product_tagging import build_product_tags
 
 logger = logging.getLogger(__name__)
 
+_ROLLING_ADDITIVE_PRODUCT_TAG_FIELDS = frozenset({
+    "is_specific_disease_product",
+    "mentions_out_of_hospital_drug",
+    "is_cancer_specific_product",
+    "mentions_critical_illness_definition_term",
+    "is_increasing_sum_assured_product",
+})
+
 
 class PipelineRequestError(ValueError):
     """候选审核请求无法由受信解析结果构建。"""
@@ -41,9 +49,10 @@ class PipelineRequestConflictError(PipelineRequestError):
 def _list_product_tag_mismatches(
     submitted: ProductTags,
     recomputed: ProductTags,
+    ignored_fields: frozenset[str] = frozenset(),
 ) -> Tuple[str, ...]:
     """列出标签值差异，不把证据文本或完整标签内容写入日志。"""
-    ignored = {"evidence", "warnings"}
+    ignored = {"evidence", "warnings", *ignored_fields}
     return tuple(
         field.name
         for field in fields(ProductTags)
@@ -215,9 +224,21 @@ def build_audit_pipeline_request(
         complete_document=verified_attestation.coverage_attested,
     )
     submitted_tags = ProductTags.from_dict(source.product_tags)
+    missing_additive_fields = frozenset(
+        field_name
+        for field_name in _ROLLING_ADDITIVE_PRODUCT_TAG_FIELDS
+        if field_name not in source.product_tags
+    )
+    if verified_attestation.version == 2 and missing_additive_fields:
+        logger.warning(
+            "兼容滚动发布期间缺失的新增产品风险事实已由服务端重算；"
+            "missing_fields=%s",
+            ",".join(sorted(missing_additive_fields)),
+        )
     tag_mismatches = _list_product_tag_mismatches(
         submitted_tags,
         product_tags,
+        missing_additive_fields,
     )
     if tag_mismatches:
         if verified_attestation.version == 2:

@@ -10,6 +10,7 @@ from ...common.product_tags import (
     ProductTags, ProductTermClass, ProductTermForm, RenewalType, TagEvidence,
     TermOption,
 )
+from .critical_illness_definitions import find_critical_illness_term
 
 _NAME_TYPES = (
     ("意外伤害医疗保险", ProductLine.HEALTH, ProductSubtype.MEDICAL_ACCIDENT),
@@ -239,6 +240,26 @@ _DISEASE_SINGLE_PAYMENT_PATTERNS = (
         r'(?:仅|只|最多)?\s*(?:给付|支付)\s*(?:一|1)\s*次'
     ),
 )
+
+_CANCER_SPECIFIC_NAME_PATTERN = re.compile(
+    r"(?:恶性肿瘤|癌症|防癌)[^保险\n]{0,30}(?:医疗|疾病)?保险"
+)
+_SPECIFIC_DISEASE_NAME_PATTERN = re.compile(
+    r"特定疾病保险|白血病(?:疾病)?保险|"
+    r"(?:特定)?心脑血管(?:疾病)?保险"
+)
+_OUT_OF_HOSPITAL_DRUG_MENTION_PATTERN = re.compile(r"院外购药|药店")
+_INCREASING_SUM_ASSURED_NAME_PATTERN = re.compile(r"增额[^保险\n]{0,20}终身寿险|增额终身寿险")
+_INCREASING_SUM_ASSURED_CLAUSE_PATTERN = re.compile(
+    r"(?:有效保险金额|基本保险金额|保险金额)[^。；\n]{0,50}"
+    r"(?:逐年|每年|按年)[^。；\n]{0,30}(?:递增|增加|增长)"
+)
+_RELIABLE_PRODUCT_NAME_SOURCES = frozenset({
+    "user_input",
+    "document_content",
+    "file_name",
+    "product_name",
+})
 
 
 def _period_segments(
@@ -542,7 +563,7 @@ def build_product_tags(
     if (
         renewal is RenewalType.UNKNOWN
         and complete_document
-        and line is ProductLine.HEALTH
+        and line is not ProductLine.UNKNOWN
         and document_content.strip()
         and "续保" not in document_content
     ):
@@ -604,6 +625,74 @@ def build_product_tags(
     if product_name:
         customized_match = re.search(r'城市定制(?:型)?', name)
         customized = customized_match is not None
+
+    cancer_specific_match = (
+        _CANCER_SPECIFIC_NAME_PATTERN.search(name)
+        if product_name
+        else None
+    )
+    specific_disease_match = (
+        _SPECIFIC_DISEASE_NAME_PATTERN.search(name)
+        if product_name
+        else None
+    )
+    cancer_specific: Optional[bool] = None
+    specific_disease: Optional[bool] = None
+    reliable_classified_name = bool(
+        product_name
+        and product_name_source in _RELIABLE_PRODUCT_NAME_SOURCES
+        and line is not ProductLine.UNKNOWN
+        and subtype is not ProductSubtype.UNKNOWN
+    )
+    if cancer_specific_match:
+        cancer_specific = True
+        if subtype in (ProductSubtype.DISEASE, ProductSubtype.CRITICAL_ILLNESS):
+            specific_disease = True
+    elif specific_disease_match:
+        specific_disease = True
+    if specific_disease is None and reliable_classified_name and subtype not in (
+        ProductSubtype.DISEASE,
+        ProductSubtype.CRITICAL_ILLNESS,
+    ):
+        specific_disease = False
+    if cancer_specific is None and reliable_classified_name:
+        cancer_specific = False
+
+    increasing_name_match = (
+        _INCREASING_SUM_ASSURED_NAME_PATTERN.search(name)
+        if product_name
+        else None
+    )
+    increasing_clause_match = _INCREASING_SUM_ASSURED_CLAUSE_PATTERN.search(
+        document_content,
+    )
+    increasing_sum_assured: Optional[bool] = None
+    if increasing_name_match or increasing_clause_match:
+        increasing_sum_assured = True
+    elif complete_document and document_content.strip():
+        increasing_sum_assured = False
+
+    out_of_hospital_drug_match = _OUT_OF_HOSPITAL_DRUG_MENTION_PATTERN.search(
+        document_content,
+    )
+    out_of_hospital_drug: Optional[bool] = None
+    if out_of_hospital_drug_match:
+        out_of_hospital_drug = True
+    elif complete_document and document_content.strip():
+        out_of_hospital_drug = False
+
+    reliable_product_name = bool(
+        product_name and product_name_source in _RELIABLE_PRODUCT_NAME_SOURCES
+    )
+    critical_illness_name_match = (
+        re.search(r"重大疾病", name) if reliable_product_name else None
+    )
+    critical_illness_term_match = find_critical_illness_term(document_content)
+    critical_illness_term: Optional[bool] = None
+    if critical_illness_name_match or critical_illness_term_match:
+        critical_illness_term = True
+    elif reliable_product_name and complete_document and document_content.strip():
+        critical_illness_term = False
 
     component_matches: Dict[str, Optional[Match[str]]] = {}
     for key, patterns in _COVERAGE_PATTERNS.items():
@@ -739,6 +828,104 @@ def build_product_tags(
             name,
             customized_match,
         ))
+    for field, fact_value, match in (
+        (
+            "is_specific_disease_product",
+            specific_disease,
+            specific_disease_match or cancer_specific_match,
+        ),
+        (
+            "is_cancer_specific_product",
+            cancer_specific,
+            cancer_specific_match,
+        ),
+    ):
+        if fact_value is True:
+            evidence.append(_evidence(
+                field,
+                "true",
+                product_name_source,
+                name,
+                match,
+            ))
+        elif fact_value is False:
+            evidence.append(TagEvidence(
+                field,
+                "false",
+                product_name_source,
+                (
+                    f"产品名称已可靠识别为 line={line.value}, "
+                    f"subtype={subtype.value}，未识别为对应专项产品"
+                ),
+                1.0,
+            ))
+        elif field == "is_specific_disease_product" and reliable_classified_name:
+            evidence.append(TagEvidence(
+                field,
+                "unknown",
+                product_name_source,
+                (
+                    f"产品名称已可靠识别为 line={line.value}, "
+                    f"subtype={subtype.value}，但未明确限定专项疾病，保守保持未知"
+                ),
+                1.0,
+            ))
+    if out_of_hospital_drug is True:
+        evidence.append(_evidence(
+            "mentions_out_of_hospital_drug",
+            "true",
+            "product_clause",
+            document_content,
+            out_of_hospital_drug_match,
+        ))
+    elif out_of_hospital_drug is False:
+        evidence.append(TagEvidence(
+            "mentions_out_of_hospital_drug",
+            "false",
+            "document_coverage_attestation",
+            "完整产品条款已覆盖，未出现“院外购药”或“药店”表述",
+            1.0,
+        ))
+    if critical_illness_name_match:
+        evidence.append(_evidence(
+            "mentions_critical_illness_definition_term",
+            "true",
+            product_name_source,
+            name,
+            critical_illness_name_match,
+        ))
+    elif critical_illness_term is True and critical_illness_term_match:
+        evidence.append(_evidence(
+            "mentions_critical_illness_definition_term",
+            "true",
+            "product_clause",
+            document_content,
+            critical_illness_term_match.matched_term,
+        ))
+    elif critical_illness_term is False:
+        evidence.append(TagEvidence(
+            "mentions_critical_illness_definition_term",
+            "false",
+            "document_coverage_attestation",
+            "可靠产品名称和完整产品条款均未出现“重大疾病”或2020版规范列明疾病名称",
+            1.0,
+        ))
+    if increasing_sum_assured is True:
+        evidence.append(_evidence(
+            "is_increasing_sum_assured_product",
+            "true",
+            product_name_source if increasing_name_match else "product_clause",
+            name if increasing_name_match else document_content,
+            increasing_name_match or increasing_clause_match,
+        ))
+    elif increasing_sum_assured is False:
+        evidence.append(TagEvidence(
+            "is_increasing_sum_assured_product",
+            "false",
+            "document_coverage_attestation",
+            "完整产品条款已覆盖，未识别到保额逐年递增设计",
+            1.0,
+        ))
     for component in components:
         if component == primary_component:
             evidence.append(_evidence(
@@ -819,7 +1006,13 @@ def build_product_tags(
         health_term_class=health_term, customer_scope=customer, contract_role=role,
         renewal_type=renewal, is_internet_exclusive=internet,
         is_rate_adjustable=adjustable, is_tax_advantaged_health=tax,
-        is_city_customized_medical=customized, coverage_components=components,
+        is_city_customized_medical=customized,
+        is_specific_disease_product=specific_disease,
+        mentions_out_of_hospital_drug=out_of_hospital_drug,
+        is_cancer_specific_product=cancer_specific,
+        mentions_critical_illness_definition_term=critical_illness_term,
+        is_increasing_sum_assured_product=increasing_sum_assured,
+        coverage_components=components,
         medical_benefit_basis=medical_benefit,
         disease_payment_pattern=disease_payment,
         evidence=tuple(evidence), warnings=tuple(warnings),

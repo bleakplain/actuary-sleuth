@@ -93,6 +93,7 @@ def _manifest(*, accepted: bool) -> Dict[str, Any]:
             "status": status,
             "fields": {
                 "product_tags": status,
+                "product_risk_facts": status,
                 "regulation_applicability": status,
                 "clause_routing": status,
                 "audit_decisions": status,
@@ -181,6 +182,19 @@ def test_pending_manifest_outputs_differences_but_never_business_metrics(
     assert difference.clause_added == ("clause-core",)
     assert difference.decision_added == ("reg-applicable",)
     assert difference.decision_removed == ("reg-old-only",)
+
+
+def test_pending_product_risk_facts_keep_signed_manifest_blocked(
+    tmp_path: Path,
+) -> None:
+    old, new = _load_pair(tmp_path)
+    manifest = _manifest(accepted=True)
+    manifest["annotations"]["fields"]["product_risk_facts"] = "pending"
+
+    gate = evaluate_manifest_gate(manifest, old, new)
+
+    assert gate.accepted is False
+    assert "人工标注字段尚未签收: product_risk_facts" in gate.reasons
 
 
 def test_signed_manifest_calculates_all_four_business_metrics(

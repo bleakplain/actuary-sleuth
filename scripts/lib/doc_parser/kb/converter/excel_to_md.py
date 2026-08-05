@@ -51,6 +51,10 @@ _METADATA_HEADERS = {
     "涉及团体个人": "团体个人",
     "特殊属性": "特殊属性",
     "适用条件": "适用条件",
+    "风险触发条件": "风险触发标签",
+    "风险触发标签": "风险触发标签",
+    "合规检查目标": "检查目标标签",
+    "检查目标标签": "检查目标标签",
     "标签语义": "适用标签语义",
     "适用范围性质": "适用标签语义",
     "逻辑": "规则逻辑",
@@ -63,14 +67,42 @@ _VALUE_CODES = {
     "定期寿险": "term_life", "终身寿险": "whole_life", "两全保险": "endowment",
     "年金保险": "annuity", "疾病保险": "disease", "重大疾病保险": "critical_illness",
     "医疗保险": "medical", "失能收入损失保险": "disability_income", "护理保险": "nursing",
-    "医疗意外保险": "medical_accident", "长期": "long_term", "短期": "short_term",
+    "医疗意外保险": "medical_accident", "其他健康保险": "other_health",
+    "长期": "long_term", "短期": "short_term",
     "主险": "main", "附加险": "rider", "个人": "individual", "团体": "group",
     "普通型": "ordinary", "分红型": "participating", "万能型": "universal",
     "投连型": "unit_linked", "投资连结型": "unit_linked",
     "互联网产品": "internet_exclusive", "税优健康险": "tax_advantaged_health",
-    "费率可调": "rate_adjustable",
+    "费率可调": "rate_adjustable", "费率可调产品": "rate_adjustable",
+    "团体保险": "group", "个人保险": "individual",
     "设置续保责任": "has_renewal", "未设置续保责任": "no_renewal",
+    "保证续保": "guaranteed_renewal", "不保证续保": "non_guaranteed_renewal",
+    "无保证续保": "non_guaranteed_renewal", "增额产品": "increasing_sum_assured",
 }
+
+_RISK_TRIGGER_CODES = {
+    "费率可调": "rate_adjustable",
+    "费率可调产品": "rate_adjustable",
+    "保证续保": "guaranteed_renewal",
+    "特定疾病产品": "specific_disease",
+    "院外购药责任": "out_of_hospital_drug",
+    "涉及院外购药": "out_of_hospital_drug",
+    "恶性肿瘤专项产品": "cancer_specific",
+    "意外医疗责任": "accidental_medical_coverage",
+    "涉及新版重疾定义疾病名称": "critical_illness_definition_term",
+    "新版重疾定义疾病名称": "critical_illness_definition_term",
+}
+
+_APPLICABILITY_METADATA_FIELDS = frozenset({
+    "险种大类",
+    "险种类型",
+    "险种分型",
+    "保险期限",
+    "主附险",
+    "团体个人",
+    "特殊属性",
+    "适用条件",
+})
 
 
 @dataclass(frozen=True)
@@ -237,6 +269,8 @@ def extract_clauses(sheet, structure: SheetStructure) -> List[ClauseEntry]:
         if _is_number(cell_a):
             metadata["原序号"] = str(cell_a)
         standard_codes: List[str] = []
+        risk_trigger_codes: List[str] = []
+        check_target_codes: List[str] = []
         for col_idx, header in structure.headers.items():
             target_name = _METADATA_HEADERS.get(header)
             if not target_name or col_idx >= len(row) or not row[col_idx]:
@@ -246,7 +280,19 @@ def extract_clauses(sheet, structure: SheetStructure) -> List[ClauseEntry]:
                 continue
             metadata[target_name] = value
             values = [item.strip() for item in re.split(r"[\n,，、]", value) if item.strip()]
-            standard_codes.extend(_VALUE_CODES[item] for item in values if item in _VALUE_CODES)
+            if target_name == "风险触发标签":
+                risk_trigger_codes.extend(
+                    _RISK_TRIGGER_CODES.get(item, item)
+                    for item in values
+                )
+            elif target_name == "检查目标标签":
+                check_target_codes.extend(_VALUE_CODES.get(item, item) for item in values)
+            elif target_name in _APPLICABILITY_METADATA_FIELDS:
+                standard_codes.extend(
+                    _VALUE_CODES[item]
+                    for item in values
+                    if item in _VALUE_CODES
+                )
         if standard_codes:
             tag_codes = ",".join(dict.fromkeys(standard_codes))
             if metadata.get("适用标签语义") == "涉及":
@@ -254,6 +300,10 @@ def extract_clauses(sheet, structure: SheetStructure) -> List[ClauseEntry]:
             else:
                 metadata["适用标签"] = tag_codes
                 metadata["适用标签语义"] = "限定"
+        if risk_trigger_codes:
+            metadata["风险触发标签"] = ",".join(dict.fromkeys(risk_trigger_codes))
+        if check_target_codes:
+            metadata["检查目标标签"] = ",".join(dict.fromkeys(check_target_codes))
         check_requirement = metadata.get("检查要求", "")
         if check_requirement and check_requirement not in content:
             content = f"{content}\n具体检查要求：{check_requirement}"

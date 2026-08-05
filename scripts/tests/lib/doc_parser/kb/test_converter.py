@@ -173,6 +173,97 @@ class TestClauseExtraction:
             "health,short_term,individual,has_renewal"
         )
 
+    def test_risk_triggers_and_check_targets_are_not_mixed_into_scope_tags(self):
+        from openpyxl import Workbook
+        from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure, extract_clauses
+
+        wb = Workbook()
+        sheet = wb.active
+        sheet.title = "02. test"
+        sheet.append([
+            "序号",
+            "项目",
+            "涉及险种大类",
+            "涉及险种类型",
+            "风险触发条件",
+            "合规检查目标",
+        ])
+        sheet.append(["测试法规", None, None, None, None, None])
+        sheet.append([
+            1,
+            "费率可调产品仅限长期医疗保险。",
+            "健康保险",
+            "医疗保险",
+            "费率可调产品",
+            "长期",
+        ])
+
+        clauses = extract_clauses(sheet, parse_sheet_structure(sheet, sheet.title))
+
+        assert clauses[0].metadata["适用标签"] == "health,medical"
+        assert clauses[0].metadata["风险触发标签"] == "rate_adjustable"
+        assert clauses[0].metadata["检查目标标签"] == "long_term"
+
+    def test_increasing_whole_life_and_renewal_conditions_are_scope_tags(self):
+        from openpyxl import Workbook
+        from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure, extract_clauses
+
+        wb = Workbook()
+        sheet = wb.active
+        sheet.title = "01. test"
+        sheet.append([
+            "序号", "项目", "涉及险种大类", "涉及险种类型",
+            "特殊属性", "适用条件",
+        ])
+        sheet.append(["测试法规", None, None, None, None, None])
+        sheet.append([
+            1, "增额终身寿险测试", "人寿保险", "终身寿险",
+            "增额产品", "保证续保",
+        ])
+
+        clauses = extract_clauses(sheet, parse_sheet_structure(sheet, sheet.title))
+
+        assert clauses[0].metadata["适用标签"] == (
+            "life,whole_life,increasing_sum_assured,guaranteed_renewal"
+        )
+
+    def test_other_health_scope_maps_all_non_disease_subtypes(self):
+        from openpyxl import Workbook
+        from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure, extract_clauses
+
+        wb = Workbook()
+        sheet = wb.active
+        sheet.title = "02. test"
+        sheet.append(["序号", "项目", "涉及险种大类", "涉及险种类型"])
+        sheet.append(["测试法规", None, None, None])
+        sheet.append([
+            1,
+            "除疾病保险外的其他健康保险规则",
+            "健康保险",
+            "医疗保险\n失能收入损失保险\n护理保险\n医疗意外保险\n其他健康保险",
+        ])
+
+        clauses = extract_clauses(sheet, parse_sheet_structure(sheet, sheet.title))
+
+        assert clauses[0].metadata["适用标签"] == (
+            "health,medical,disability_income,nursing,medical_accident,other_health"
+        )
+
+    def test_unknown_risk_trigger_remains_observable_and_conservative(self):
+        from openpyxl import Workbook
+        from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure, extract_clauses
+
+        wb = Workbook()
+        sheet = wb.active
+        sheet.title = "03. test"
+        sheet.append(["序号", "项目", "风险触发条件"])
+        sheet.append(["测试法规", None, None])
+        sheet.append([1, "测试规则", "未来受控事实"])
+
+        clauses = extract_clauses(sheet, parse_sheet_structure(sheet, sheet.title))
+
+        assert clauses[0].metadata["风险触发标签"] == "未来受控事实"
+
     @requires_excel_data
     def test_extract_clauses_returns_entries(self, excel_workbook):
         """Should extract non-empty clause entries with sequence numbers."""
@@ -232,9 +323,7 @@ class TestClauseExtraction:
         assert "renewal.general" in topics
         assert "renewal.non_guaranteed" in topics
         assert "renewal.guaranteed" not in topics
-        assert renewal.metadata["适用标签"] == (
-            "health,short_term,individual,has_renewal"
-        )
+        assert renewal.metadata["适用标签"] == "health,individual,has_renewal"
 
         confusing_wording = next(
             c for c in clauses if "自动续保" in c.content and c is not renewal

@@ -202,6 +202,37 @@ def test_v2_request_rejects_product_tags_from_another_document() -> None:
         _pipeline_request(request)
 
 
+def test_v2_request_accepts_missing_additive_risk_facts_during_rollout(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    request = _request()
+    for field_name in (
+        "is_specific_disease_product",
+        "mentions_out_of_hospital_drug",
+        "is_cancer_specific_product",
+        "mentions_critical_illness_definition_term",
+        "is_increasing_sum_assured_product",
+    ):
+        request.product_tags.pop(field_name)
+
+    with caplog.at_level(
+        "WARNING",
+        logger="lib.compliance.pipeline_request",
+    ):
+        pipeline_request = _pipeline_request(request)
+
+    assert pipeline_request.product_tags.mentions_out_of_hospital_drug is False
+    assert "missing_fields=" in caplog.text
+
+
+def test_v2_request_rejects_explicitly_forged_additive_risk_fact() -> None:
+    request = _request()
+    request.product_tags["is_specific_disease_product"] = True
+
+    with pytest.raises(HTTPException, match="产品标签"):
+        _pipeline_request(request)
+
+
 def test_v2_request_rejects_missing_parse_attestation() -> None:
     request = _request()
     request.parse_attestation = ""

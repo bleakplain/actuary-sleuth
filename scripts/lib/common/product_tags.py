@@ -197,7 +197,7 @@ PRODUCT_TERM_FORM_LABELS = {
     "fixed_duration": "固定年期",
     "to_age": "保至约定年龄",
     "whole_life": "终身",
-    "guaranteed_renewal_period": "保证续保期间",
+    "guaranteed_renewal_period": "保证续保",
     "multiple_options": "多期限选项",
 }
 
@@ -351,6 +351,11 @@ class ProductTags:
     is_rate_adjustable: Optional[bool] = None
     is_tax_advantaged_health: Optional[bool] = None
     is_city_customized_medical: Optional[bool] = None
+    is_specific_disease_product: Optional[bool] = None
+    mentions_out_of_hospital_drug: Optional[bool] = None
+    is_cancer_specific_product: Optional[bool] = None
+    mentions_critical_illness_definition_term: Optional[bool] = None
+    is_increasing_sum_assured_product: Optional[bool] = None
     coverage_components: Tuple[str, ...] = ()
     medical_benefit_basis: MedicalBenefitBasis = MedicalBenefitBasis.UNKNOWN
     disease_payment_pattern: DiseasePaymentPattern = DiseasePaymentPattern.UNKNOWN
@@ -469,6 +474,21 @@ class ProductTags:
             is_rate_adjustable=_optional_bool(raw.get("is_rate_adjustable")),
             is_tax_advantaged_health=_optional_bool(raw.get("is_tax_advantaged_health")),
             is_city_customized_medical=_optional_bool(raw.get("is_city_customized_medical")),
+            is_specific_disease_product=_optional_bool(
+                raw.get("is_specific_disease_product"),
+            ),
+            mentions_out_of_hospital_drug=_optional_bool(
+                raw.get("mentions_out_of_hospital_drug"),
+            ),
+            is_cancer_specific_product=_optional_bool(
+                raw.get("is_cancer_specific_product"),
+            ),
+            mentions_critical_illness_definition_term=_optional_bool(
+                raw.get("mentions_critical_illness_definition_term"),
+            ),
+            is_increasing_sum_assured_product=_optional_bool(
+                raw.get("is_increasing_sum_assured_product"),
+            ),
             coverage_components=strings("coverage_components"),
             medical_benefit_basis=_enum_or_default(
                 MedicalBenefitBasis,
@@ -510,6 +530,15 @@ class ProductTags:
             "is_rate_adjustable": self.is_rate_adjustable,
             "is_tax_advantaged_health": self.is_tax_advantaged_health,
             "is_city_customized_medical": self.is_city_customized_medical,
+            "is_specific_disease_product": self.is_specific_disease_product,
+            "mentions_out_of_hospital_drug": self.mentions_out_of_hospital_drug,
+            "is_cancer_specific_product": self.is_cancer_specific_product,
+            "mentions_critical_illness_definition_term": (
+                self.mentions_critical_illness_definition_term
+            ),
+            "is_increasing_sum_assured_product": (
+                self.is_increasing_sum_assured_product
+            ),
             "coverage_components": list(self.coverage_components),
             "multiple_health_coverages": self.multiple_health_coverages,
             "medical_benefit_basis": self.medical_benefit_basis.value,
@@ -549,6 +578,21 @@ class ProductTags:
             ),
             "is_city_customized_medical": _optional_bool_display(
                 self.is_city_customized_medical,
+            ),
+            "is_specific_disease_product": _optional_bool_display(
+                self.is_specific_disease_product,
+            ),
+            "mentions_out_of_hospital_drug": _optional_bool_display(
+                self.mentions_out_of_hospital_drug,
+            ),
+            "is_cancer_specific_product": _optional_bool_display(
+                self.is_cancer_specific_product,
+            ),
+            "mentions_critical_illness_definition_term": _optional_bool_display(
+                self.mentions_critical_illness_definition_term,
+            ),
+            "is_increasing_sum_assured_product": _optional_bool_display(
+                self.is_increasing_sum_assured_product,
             ),
             "coverage_components": [
                 PRODUCT_COVERAGE_COMPONENT_LABELS.get(item, item)

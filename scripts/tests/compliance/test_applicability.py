@@ -153,6 +153,282 @@ def test_metadata_parser_groups_tags_topics_and_unknown_values():
     assert regulation.unknown_tags == {"future_tag"}
 
 
+def test_metadata_parser_separates_risk_triggers_and_check_targets():
+    regulation = RegulationApplicability.from_metadata({
+        "适用标签": "health,medical,long_term",
+        "风险触发标签": "rate_adjustable,future_trigger",
+        "检查目标标签": "long_term,rate_adjustment_interval",
+    })
+
+    assert regulation.term_classes == {"long_term"}
+    assert regulation.risk_triggers == {"rate_adjustable", "future_trigger"}
+    assert regulation.normative_requirements == {
+        "long_term",
+        "rate_adjustment_interval",
+    }
+    assert regulation.unknown_tags == set()
+    assert regulation.unknown_risk_triggers == {"future_trigger"}
+
+
+def test_critical_illness_definition_term_risk_trigger_is_three_state():
+    regulation = RegulationApplicability.from_metadata({
+        "风险触发标签": "critical_illness_definition_term",
+    })
+
+    assert match_regulation_applicability(
+        _health_product(mentions_critical_illness_definition_term=True),
+        regulation,
+    ).status is MatchStatus.APPLICABLE
+    assert match_regulation_applicability(
+        _health_product(mentions_critical_illness_definition_term=False),
+        regulation,
+    ).status is MatchStatus.NOT_APPLICABLE
+    assert match_regulation_applicability(
+        _health_product(mentions_critical_illness_definition_term=None),
+        regulation,
+    ).status is MatchStatus.INDETERMINATE
+
+
+def test_increasing_whole_life_requires_all_three_strict_dimensions():
+    regulation = RegulationApplicability.from_metadata({
+        "适用标签": "life,whole_life,increasing_sum_assured",
+    })
+
+    assert match_regulation_applicability(
+        ProductTags(
+            line=ProductLine.LIFE,
+            primary_subtype=ProductSubtype.WHOLE_LIFE,
+            is_increasing_sum_assured_product=True,
+        ),
+        regulation,
+    ).status is MatchStatus.APPLICABLE
+    assert match_regulation_applicability(
+        ProductTags(
+            line=ProductLine.LIFE,
+            primary_subtype=ProductSubtype.ENDOWMENT,
+            is_increasing_sum_assured_product=True,
+        ),
+        regulation,
+    ).status is MatchStatus.NOT_APPLICABLE
+    assert match_regulation_applicability(
+        ProductTags(
+            line=ProductLine.LIFE,
+            primary_subtype=ProductSubtype.WHOLE_LIFE,
+            is_increasing_sum_assured_product=None,
+        ),
+        regulation,
+    ).status is MatchStatus.INDETERMINATE
+
+
+def test_other_health_scope_excludes_disease_family_but_keeps_unknown():
+    regulation = RegulationApplicability.from_metadata({
+        "适用标签": (
+            "health,medical,disability_income,nursing,medical_accident,other_health"
+        ),
+    })
+
+    assert match_regulation_applicability(
+        _health_product(primary_subtype=ProductSubtype.MEDICAL), regulation,
+    ).status is MatchStatus.APPLICABLE
+    assert match_regulation_applicability(
+        _health_product(primary_subtype=ProductSubtype.NURSING), regulation,
+    ).status is MatchStatus.APPLICABLE
+    assert match_regulation_applicability(
+        _health_product(primary_subtype=ProductSubtype.DISEASE), regulation,
+    ).status is MatchStatus.NOT_APPLICABLE
+    assert match_regulation_applicability(
+        _health_product(primary_subtype=ProductSubtype.CRITICAL_ILLNESS), regulation,
+    ).status is MatchStatus.NOT_APPLICABLE
+    assert match_regulation_applicability(
+        _health_product(primary_subtype=ProductSubtype.UNKNOWN), regulation,
+    ).status is MatchStatus.INDETERMINATE
+
+
+def test_guaranteed_and_non_guaranteed_are_strict_renewal_conditions():
+    guaranteed = RegulationApplicability.from_metadata({
+        "适用标签": "health,guaranteed_renewal",
+    })
+    non_guaranteed = RegulationApplicability.from_metadata({
+        "适用标签": "health,non_guaranteed_renewal",
+    })
+
+    assert match_regulation_applicability(
+        _health_product(renewal_type=RenewalType.GUARANTEED), guaranteed,
+    ).status is MatchStatus.APPLICABLE
+    assert match_regulation_applicability(
+        _health_product(renewal_type=RenewalType.NON_GUARANTEED), guaranteed,
+    ).status is MatchStatus.NOT_APPLICABLE
+    assert match_regulation_applicability(
+        _health_product(renewal_type=RenewalType.NON_GUARANTEED), non_guaranteed,
+    ).status is MatchStatus.APPLICABLE
+
+
+def test_unknown_risk_trigger_bypasses_conflict_as_indeterminate():
+    regulation = RegulationApplicability.from_metadata({
+        "适用标签": "life",
+        "风险触发标签": "future_trigger",
+    })
+
+    result = match_regulation_applicability(_health_product(), regulation)
+
+    assert result.status is MatchStatus.INDETERMINATE
+    assert result.excluded_by == ()
+    assert "risk_trigger" in result.indeterminate_dimensions
+
+
+def test_unknown_risk_trigger_does_not_downgrade_matched_subject():
+    regulation = RegulationApplicability.from_metadata({
+        "适用标签": "health",
+        "风险触发标签": "future_trigger",
+    })
+
+    result = match_regulation_applicability(_health_product(), regulation)
+
+    assert result.status is MatchStatus.APPLICABLE
+    assert result.indeterminate_dimensions == ()
+    assert any("未识别风险触发标签" in reason for reason in result.reasons)
+
+
+def test_risk_trigger_bypasses_conflicting_subject_for_abnormal_product():
+    regulation = RegulationApplicability.from_metadata({
+        "适用标签": "health,medical,long_term",
+        "风险触发标签": "rate_adjustable",
+        "检查目标标签": "long_term",
+    })
+    product = _health_product(
+        term_class=ProductTermClass.SHORT_TERM,
+        is_rate_adjustable=True,
+    )
+
+    result = match_regulation_applicability(product, regulation)
+
+    assert result.status is MatchStatus.APPLICABLE
+    assert "risk_trigger" in result.matched_dimensions
+    assert result.excluded_by == ()
+    assert any("检查目标标签仅供审核判断" in reason for reason in result.reasons)
+
+
+def test_risk_trigger_unknown_keeps_conflicting_subject_indeterminate():
+    regulation = RegulationApplicability.from_metadata({
+        "适用标签": "health,medical,long_term",
+        "风险触发标签": "rate_adjustable",
+    })
+
+    result = match_regulation_applicability(
+        _health_product(
+            term_class=ProductTermClass.SHORT_TERM,
+            is_rate_adjustable=None,
+        ),
+        regulation,
+    )
+
+    assert result.status is MatchStatus.INDETERMINATE
+    assert "risk_trigger" in result.indeterminate_dimensions
+    assert result.excluded_by == ()
+
+
+def test_subject_match_does_not_require_optional_risk_trigger():
+    regulation = RegulationApplicability.from_metadata({
+        "适用标签": "health,medical,long_term",
+        "风险触发标签": "rate_adjustable",
+    })
+
+    result = match_regulation_applicability(
+        _health_product(
+            term_class=ProductTermClass.LONG_TERM,
+            is_rate_adjustable=False,
+        ),
+        regulation,
+    )
+
+    assert result.status is MatchStatus.APPLICABLE
+    assert result.excluded_by == ()
+
+
+def test_trigger_only_rule_uses_three_state_product_fact():
+    regulation = RegulationApplicability.from_metadata({
+        "风险触发标签": "specific_disease",
+    })
+
+    matched = match_regulation_applicability(
+        _health_product(is_specific_disease_product=True),
+        regulation,
+    )
+    excluded = match_regulation_applicability(
+        _health_product(is_specific_disease_product=False),
+        regulation,
+    )
+    unknown = match_regulation_applicability(
+        _health_product(is_specific_disease_product=None),
+        regulation,
+    )
+
+    assert matched.status is MatchStatus.APPLICABLE
+    assert excluded.status is MatchStatus.NOT_APPLICABLE
+    assert excluded.excluded_by == ("risk_trigger",)
+    assert unknown.status is MatchStatus.INDETERMINATE
+
+
+def test_out_of_hospital_trigger_uses_clause_mention_fact():
+    regulation = RegulationApplicability.from_metadata({
+        "风险触发标签": "out_of_hospital_drug",
+    })
+
+    matched = match_regulation_applicability(
+        _health_product(mentions_out_of_hospital_drug=True),
+        regulation,
+    )
+    excluded = match_regulation_applicability(
+        _health_product(mentions_out_of_hospital_drug=False),
+        regulation,
+    )
+    unknown = match_regulation_applicability(
+        _health_product(mentions_out_of_hospital_drug=None),
+        regulation,
+    )
+
+    assert matched.status is MatchStatus.APPLICABLE
+    assert excluded.status is MatchStatus.NOT_APPLICABLE
+    assert unknown.status is MatchStatus.INDETERMINATE
+
+
+def test_guaranteed_renewal_trigger_can_retain_life_product():
+    regulation = RegulationApplicability.from_metadata({
+        "适用标签": "health",
+        "风险触发标签": "guaranteed_renewal",
+    })
+    product = ProductTags(
+        line=ProductLine.LIFE,
+        primary_subtype=ProductSubtype.WHOLE_LIFE,
+        renewal_type=RenewalType.GUARANTEED,
+    )
+
+    result = match_regulation_applicability(product, regulation)
+
+    assert result.status is MatchStatus.APPLICABLE
+    assert "risk_trigger" in result.matched_dimensions
+    assert result.excluded_by == ()
+
+
+def test_critical_illness_matches_disease_parent_but_not_reverse():
+    disease_rule = RegulationApplicability(subtypes=frozenset({"disease"}))
+    critical_rule = RegulationApplicability(
+        subtypes=frozenset({"critical_illness"}),
+    )
+
+    critical = match_regulation_applicability(
+        _health_product(primary_subtype=ProductSubtype.CRITICAL_ILLNESS),
+        disease_rule,
+    )
+    disease = match_regulation_applicability(
+        _health_product(primary_subtype=ProductSubtype.DISEASE),
+        critical_rule,
+    )
+
+    assert critical.status is MatchStatus.APPLICABLE
+    assert disease.status is MatchStatus.NOT_APPLICABLE
+
+
 def test_renewal_condition_requires_a_known_renewal_responsibility():
     regulation = RegulationApplicability.from_metadata({
         "适用标签": "health,short_term,individual,has_renewal",

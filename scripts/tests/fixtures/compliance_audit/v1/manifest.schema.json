@@ -10,6 +10,7 @@
     "dataset_status",
     "kb",
     "annotations",
+    "accepted_baselines",
     "actuary_review",
     "cutover_gate",
     "products",
@@ -52,6 +53,14 @@
           "additionalProperties": {"enum": ["pending", "accepted", "rejected"]},
           "minProperties": 1
         }
+      }
+    },
+    "accepted_baselines": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase1_v7"],
+      "properties": {
+        "phase1_v7": {"$ref": "#/$defs/acceptedBaseline"}
       }
     },
     "actuary_review": {
@@ -114,6 +123,34 @@
         "sha256": {"$ref": "#/$defs/sha256"},
         "source_kind": {"const": "real"},
         "annotation_status": {"enum": ["pending", "accepted", "rejected"]}
+      }
+    },
+    "acceptedBaseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseline_id",
+        "file",
+        "sha256",
+        "product_tag_sample_count",
+        "risk_fact_sample_count",
+        "applicability_sample_count",
+        "regulation_unit_count",
+        "product_tag_count",
+        "risk_fact_count",
+        "applicability_count"
+      ],
+      "properties": {
+        "baseline_id": {"type": "string", "minLength": 1},
+        "file": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "product_tag_sample_count": {"type": "integer", "minimum": 1},
+        "risk_fact_sample_count": {"type": "integer", "minimum": 1},
+        "applicability_sample_count": {"type": "integer", "minimum": 1},
+        "regulation_unit_count": {"type": "integer", "minimum": 1},
+        "product_tag_count": {"type": "integer", "minimum": 1},
+        "risk_fact_count": {"type": "integer", "minimum": 1},
+        "applicability_count": {"type": "integer", "minimum": 1}
       }
     },
     "boundaryCase": {

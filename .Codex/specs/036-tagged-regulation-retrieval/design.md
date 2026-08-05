@@ -56,6 +56,14 @@ BM25 + 向量召回 → RRF
 
 例如短期健康险规则的 Excel 栏目为“保证续保”，但正文要求写明“不保证续保”。该法规的产品适用条件是 `health + short_term`，条款主题应包含 `renewal.non_guaranteed`，而不是仅依据栏目名称标记 `renewal.guaranteed`。
 
+### 3.4 合规要求不能充当前置过滤条件
+
+法规条件分为主体范围、风险触发事实和合规要求。主体范围回答“法规规范谁”，风险触发事实回答“产品是否出现法规关注的设计”，合规要求回答“该设计必须满足什么”。
+
+法规要求“费率可调产品仅限长期医疗保险”时，`rate_adjustable` 是触发事实，`long_term` 是待审核要求；短期费率可调医疗险必须被保留并形成违规候选，不能因 `term_class=short_term` 提前排除。同理，任何产品出现保证续保事实时，都应进入保证续保相关检查，不能先假设只有正确分类的健康险才可能出现该设计。
+
+风险触发标签只用于阻止错误排除，不直接形成合规结论。触发命中时，即使常规主体标签冲突也保守保留；触发未知时返回 `indeterminate`；只有触发明确不满足且主体范围明确冲突时才允许排除。
+
 ## 4. 数据模型
 
 ### 4.1 法规适用性
@@ -72,6 +80,7 @@ class RegulationApplicability:
     customer_scopes: frozenset[str]
     contract_roles: frozenset[str]
     special_features: frozenset[str]
+    risk_triggers: frozenset[str]
     clause_topics: frozenset[str]
 ```
 
@@ -122,7 +131,7 @@ class ApplicabilityResult:
 
 ### 6.1 第一版采用检索后过滤
 
-当前 v5 有 172 个 chunk，第一版先让 BM25 和向量各自扩大召回，再对融合候选执行确定性适用性和主题分层。这样不需要改变 LanceDB 查询表达式，也不会因标签缺失在召回前永久丢失法规。
+当前 v5 有 174 个 chunk，第一版先让 BM25 和向量各自扩大召回，再对融合候选执行确定性适用性和主题分层。这样不需要改变 LanceDB 查询表达式，也不会因标签缺失在召回前永久丢失法规。
 
 合规候选检索刻意不调用外部 LLM 做 query rewrite 或 rerank：产品标签和法规元数据已经提供了确定性的缩小范围依据，外部模型不可用时也不应阻断法规召回。后续法规内容审核本身仍可使用 LLM。
 

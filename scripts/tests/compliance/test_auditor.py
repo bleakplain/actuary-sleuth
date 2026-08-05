@@ -179,6 +179,7 @@ def test_prompt_contains_only_one_regulation_unit() -> None:
     assert len(messages) == 2
     assert package.regulation.regulation_unit_id in messages[1]["content"]
     assert package.clauses[0].clause.clause_id in messages[1]["content"]
+    assert "风险触发标签只表示该法规必须进入审核" in messages[0]["content"]
 
 
 def test_valid_non_compliance_requires_both_evidence_types() -> None:

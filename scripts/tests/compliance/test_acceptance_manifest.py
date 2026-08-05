@@ -7,16 +7,20 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from jsonschema import Draft202012Validator
 
+from lib.config import get_kb_version_dir, get_regulations_dir
 from lib.compliance.regulation_retrieval import _validate_catalog_identity
 
 FIXTURE_DIR = Path(__file__).parents[1] / "fixtures" / "compliance_audit" / "v1"
 MANIFEST_PATH = FIXTURE_DIR / "manifest.json"
 SCHEMA_PATH = FIXTURE_DIR / "manifest.schema.json"
 BASELINE_TEST_REPORT_PATH = FIXTURE_DIR / "baseline-test-report.json"
-PRODUCTS_DIR = Path("/Users/plain/work/actuary-assets/products")
-KB_MANIFEST_PATH = Path("/Users/plain/work/actuary-assets/kb/references/v5-build-manifest.json")
-KB_LANCEDB_PATH = Path("/Users/plain/work/actuary-assets/kb/v5/lancedb")
+ACCEPTED_BASELINE_PATH = FIXTURE_DIR / "applicability-baseline-v7.json"
+KB_ROOT = Path(get_kb_version_dir())
+PRODUCTS_DIR = KB_ROOT.parent / "products"
+KB_MANIFEST_PATH = Path(get_regulations_dir()) / "v5-build-manifest.json"
+KB_LANCEDB_PATH = KB_ROOT / "v5" / "lancedb"
 
 
 def _load_json(path: Path) -> dict:
@@ -33,22 +37,48 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def test_manifest_has_versioned_pending_cutover_gate() -> None:
+def test_manifest_has_versioned_partial_acceptance_and_blocked_cutover() -> None:
     manifest = _load_json(MANIFEST_PATH)
     schema = _load_json(SCHEMA_PATH)
 
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+    Draft202012Validator.check_schema(schema)
+    Draft202012Validator(schema).validate(manifest)
     assert manifest["schema_version"] == "1"
     assert manifest["dataset_id"] == "compliance-audit-v1"
     assert manifest["dataset_status"] == "pending"
     assert manifest["kb"]["version"] == "v5"
-    assert manifest["annotations"]["version"] == "compliance-audit-v1-annotations-draft.1"
+    assert manifest["annotations"]["version"] == "compliance-audit-v1-annotations-v7"
     assert manifest["annotations"]["status"] == "pending"
-    assert set(manifest["annotations"]["fields"].values()) == {"pending"}
+    assert manifest["annotations"]["fields"] == {
+        "product_tags": "accepted",
+        "product_risk_facts": "accepted",
+        "regulation_applicability": "accepted",
+        "clause_routing": "pending",
+        "audit_decisions": "pending",
+    }
     assert manifest["actuary_review"]["status"] == "pending"
-    assert manifest["actuary_review"]["reviewer"] is None
-    assert manifest["actuary_review"]["reviewed_at"] is None
+    assert manifest["actuary_review"]["reviewer"] == "project_actuary"
+    assert manifest["actuary_review"]["reviewed_at"] == "2026-08-05"
     assert manifest["cutover_gate"]["status"] == "blocked"
+
+
+def test_manifest_freezes_signed_phase1_v7_baseline() -> None:
+    manifest = _load_json(MANIFEST_PATH)
+    accepted = manifest["accepted_baselines"]["phase1_v7"]
+
+    assert accepted == {
+        "baseline_id": "compliance-audit-v1-applicability-v7",
+        "file": "applicability-baseline-v7.json",
+        "sha256": _sha256(ACCEPTED_BASELINE_PATH),
+        "product_tag_sample_count": 10,
+        "risk_fact_sample_count": 23,
+        "applicability_sample_count": 10,
+        "regulation_unit_count": 174,
+        "product_tag_count": 170,
+        "risk_fact_count": 115,
+        "applicability_count": 1740,
+    }
 
 
 def test_manifest_freezes_all_23_real_product_fingerprints() -> None:

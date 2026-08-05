@@ -33,6 +33,7 @@ ACCEPTANCE_DATASET_ID = "compliance-audit-v1"
 _ACCEPTED_ANNOTATION_FIELDS = frozenset(
     {
         "product_tags",
+        "product_risk_facts",
         "regulation_applicability",
         "clause_routing",
         "audit_decisions",

@@ -78,6 +78,7 @@ def test_parse_response_serializes_stable_ids_and_all_audit_blocks() -> None:
         file_name="医疗保险条款.docx",
         file_type=".docx",
         product_name=product_name,
+        product_name_source="document_content",
         unclassified_sections=[
             DocumentSection("", "未编号产品原文", "unclassified"),
         ],
@@ -98,6 +99,7 @@ def test_parse_response_serializes_stable_ids_and_all_audit_blocks() -> None:
         product_tags=build_product_tags(
             product_name,
             document.canonical_text,
+            product_name_source=document.product_name_source,
             complete_document=True,
         ),
     )

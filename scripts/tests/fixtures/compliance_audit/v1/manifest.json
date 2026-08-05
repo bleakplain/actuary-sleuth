@@ -4,31 +4,46 @@
   "dataset_status": "pending",
   "kb": {
     "version": "v5",
-    "build_manifest_sha256": "82ff39e3f71aa3494307d6bab193327c71b117639675a0684b5cba88a51ce222",
+    "build_manifest_sha256": "e1e45285220e2e1db995c45dee48fa45754fb6f97ffc4b18ae23f8e709edfc8c",
     "source_file": "1.产品开发检查清单2026年.xlsx",
-    "source_sha256": "394e075d22293662619b51e3cffb219b5f0ddce97f1070286f2841cea6ca9d32",
+    "source_sha256": "9e59b96afbe9b3157ccfb05b0b405667a98aadd65366b9e712a806ffbb136731",
     "documents": 25,
-    "chunks": 172
+    "chunks": 174
   },
   "annotations": {
-    "version": "compliance-audit-v1-annotations-draft.1",
+    "version": "compliance-audit-v1-annotations-v7",
     "status": "pending",
     "fields": {
-      "product_tags": "pending",
-      "regulation_applicability": "pending",
+      "product_tags": "accepted",
+      "product_risk_facts": "accepted",
+      "regulation_applicability": "accepted",
       "clause_routing": "pending",
       "audit_decisions": "pending"
     }
   },
+  "accepted_baselines": {
+    "phase1_v7": {
+      "baseline_id": "compliance-audit-v1-applicability-v7",
+      "file": "applicability-baseline-v7.json",
+      "sha256": "accf3e78bc9ca2e5c86c70d52cb1895b3b7463e0b03d2aa1a338e15be2afdaab",
+      "product_tag_sample_count": 10,
+      "risk_fact_sample_count": 23,
+      "applicability_sample_count": 10,
+      "regulation_unit_count": 174,
+      "product_tag_count": 170,
+      "risk_fact_count": 115,
+      "applicability_count": 1740
+    }
+  },
   "actuary_review": {
     "status": "pending",
-    "reviewer": null,
-    "reviewed_at": null,
-    "comment": "尚未录入精算验收结论；本清单只冻结输入和候选边界。"
+    "reviewer": "project_actuary",
+    "reviewed_at": "2026-08-05",
+    "comment": "产品标签、产品风险事实和法规适用性已按阶段一 v7 签收；条款路由和审核结论仍待签收。"
   },
   "cutover_gate": {
     "status": "blocked",
-    "reason": "compliance-audit-v1 尚未由精算师签收，Phase 7 不得自动切换。"
+    "reason": "条款路由、审核结论和线上影子运行尚未验收，Phase 7 不得自动切换。"
   },
   "products": [
     {

@@ -122,6 +122,7 @@ def build_audit_messages(
         "你是保险产品条款合规审核员。只能使用用户消息中的法规原文、产品标签、"
         "产品条款和确定性事实。一次只判断一个 regulation_unit。"
         "不得使用外部法规，不得把适用性改为 not_applicable。"
+        "风险触发标签只表示该法规必须进入审核，不表示产品已经满足检查目标。"
     )
     instruction = """请输出一个 JSON 对象，且不得输出 Markdown：
 {

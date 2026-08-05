@@ -330,6 +330,34 @@ def test_complete_one_year_document_without_renewal_is_short_health():
     )
 
 
+def test_complete_life_document_without_renewal_maps_to_none():
+    tags = build_product_tags(
+        "某某两全保险（分红型）条款",
+        "保险期间为二十年，保险责任包括身故保险金和满期保险金。",
+        complete_document=True,
+    )
+
+    assert tags.line is ProductLine.LIFE
+    assert tags.primary_subtype is ProductSubtype.ENDOWMENT
+    assert tags.renewal_type is RenewalType.NONE
+    assert any(
+        item.field_name == "renewal_type"
+        and item.value == "none"
+        and item.source == "document_coverage_attestation"
+        for item in tags.evidence
+    )
+
+
+def test_incomplete_life_excerpt_without_renewal_stays_unknown():
+    tags = build_product_tags(
+        "某某两全保险（分红型）条款",
+        "保险责任包括身故保险金和满期保险金。",
+        complete_document=False,
+    )
+
+    assert tags.renewal_type is RenewalType.UNKNOWN
+
+
 def test_incomplete_one_year_excerpt_keeps_health_term_unknown():
     tags = build_product_tags(
         "某某医疗保险条款",
@@ -547,10 +575,212 @@ def test_complex_product_tags_have_controlled_chinese_display_labels():
     assert display["term_forms"] == [
         "固定年期",
         "一年及以下",
-        "保证续保期间",
+        "保证续保",
     ]
     assert display["term_options"] == ["保险期间1年", "保证续保20年"]
     assert display["coverage_components"] == ["医疗责任"]
     assert display["medical_benefit_basis"] == "费用补偿型"
     assert display["disease_payment_pattern"] == "不适用"
     assert display["is_tax_advantaged_health"] == "否"
+
+
+def test_specific_disease_fact_uses_product_family_before_negative_inference():
+    cancer = build_product_tags("某某恶性肿瘤疾病保险条款")
+    specific = build_product_tags("某某白血病疾病保险条款")
+    critical = build_product_tags("某某重大疾病保险条款")
+    medical = build_product_tags("某某医疗保险条款")
+
+    assert cancer.is_specific_disease_product is True
+    assert specific.is_specific_disease_product is True
+    assert critical.is_specific_disease_product is None
+    assert medical.is_specific_disease_product is False
+
+
+def test_cancer_specific_fact_uses_reliably_recognized_product_name():
+    cancer_disease = build_product_tags("某某恶性肿瘤疾病保险条款")
+    cancer_medical = build_product_tags("某某恶性肿瘤特定药品费用医疗保险条款")
+    medical = build_product_tags("某某医疗保险条款")
+    ambiguous = build_product_tags("某某保障计划")
+    untrusted = build_product_tags(
+        "某某医疗保险条款",
+        product_name_source="unknown",
+    )
+
+    assert cancer_disease.is_cancer_specific_product is True
+    assert cancer_medical.is_cancer_specific_product is True
+    assert medical.is_cancer_specific_product is False
+    assert ambiguous.is_cancer_specific_product is None
+    assert untrusted.is_cancer_specific_product is None
+    assert untrusted.is_specific_disease_product is None
+
+
+def test_special_product_negative_evidence_records_reliable_name_classification():
+    tags = build_product_tags("某某医疗保险条款")
+    evidence = {
+        item.field_name: item
+        for item in tags.evidence
+        if item.field_name in {
+            "is_specific_disease_product",
+            "is_cancer_specific_product",
+        }
+    }
+
+    assert evidence["is_specific_disease_product"].value == "false"
+    assert evidence["is_cancer_specific_product"].value == "false"
+    assert "subtype=medical" in evidence["is_specific_disease_product"].evidence
+
+
+def test_out_of_hospital_drug_mention_uses_controlled_terms_and_coverage():
+    mentioned = build_product_tags(
+        "某某医疗保险条款",
+        "本合同不承担院外购药产生的费用。",
+        complete_document=True,
+    )
+    pharmacy = build_product_tags(
+        "某某医疗保险条款",
+        "本合同承担指定药店购买特定药品的费用。",
+        complete_document=True,
+    )
+    absent = build_product_tags(
+        "某某医疗保险条款",
+        "本合同承担住院医疗费用保险金责任。",
+        complete_document=True,
+    )
+    incomplete = build_product_tags(
+        "某某医疗保险条款",
+        "本合同承担住院医疗费用保险金责任。",
+        complete_document=False,
+    )
+
+    assert mentioned.mentions_out_of_hospital_drug is True
+    assert pharmacy.mentions_out_of_hospital_drug is True
+    assert absent.mentions_out_of_hospital_drug is False
+    assert incomplete.mentions_out_of_hospital_drug is None
+    evidence = next(
+        item
+        for item in mentioned.evidence
+        if item.field_name == "mentions_out_of_hospital_drug"
+    )
+    assert evidence.source == "product_clause"
+    assert "院外购药" in evidence.evidence
+
+
+def test_critical_illness_definition_term_uses_standard_name_library():
+    product_name = build_product_tags(
+        "某重大疾病保险",
+        "本合同提供保险保障。",
+        complete_document=True,
+    )
+    general = build_product_tags(
+        "某医疗保险", "本合同所称重大疾病按照约定定义。", complete_document=True,
+    )
+    standard_name = build_product_tags(
+        "某医疗保险", "被保险人经诊断发生严重克罗恩病。", complete_document=True,
+    )
+    absent = build_product_tags(
+        "某医疗保险", "本合同承担住院医疗费用。", complete_document=True,
+    )
+    incomplete = build_product_tags(
+        "某医疗保险", "本段承担住院医疗费用。", complete_document=False,
+    )
+    missing_name = build_product_tags(
+        None,
+        "本合同承担住院医疗费用。",
+        complete_document=True,
+    )
+
+    assert product_name.mentions_critical_illness_definition_term is True
+    assert general.mentions_critical_illness_definition_term is True
+    assert standard_name.mentions_critical_illness_definition_term is True
+    assert absent.mentions_critical_illness_definition_term is False
+    assert incomplete.mentions_critical_illness_definition_term is None
+    assert missing_name.mentions_critical_illness_definition_term is None
+    name_evidence = next(
+        item
+        for item in product_name.evidence
+        if item.field_name == "mentions_critical_illness_definition_term"
+    )
+    assert name_evidence.source == "product_name"
+    assert "重大疾病" in name_evidence.evidence
+    evidence = {item.field_name: item for item in standard_name.evidence}
+    assert "严重克罗恩病" in evidence[
+        "mentions_critical_illness_definition_term"
+    ].evidence
+
+
+def test_specific_disease_product_requires_disease_subtype():
+    medical = build_product_tags(
+        "某附加恶性肿瘤特定药品费用医疗保险",
+        "本合同承担特定药品费用。",
+        complete_document=True,
+    )
+    disease = build_product_tags(
+        "某重度恶性肿瘤疾病保险",
+        "本合同承担恶性肿瘤疾病保险金。",
+        complete_document=True,
+    )
+    unspecified = build_product_tags(
+        "某重大疾病保险",
+        "本合同承担重大疾病保险金。",
+        complete_document=True,
+    )
+
+    assert medical.is_cancer_specific_product is True
+    assert medical.is_specific_disease_product is False
+    assert disease.is_cancer_specific_product is True
+    assert disease.is_specific_disease_product is True
+    assert unspecified.is_specific_disease_product is None
+    evidence = next(
+        item
+        for item in unspecified.evidence
+        if item.field_name == "is_specific_disease_product"
+    )
+    assert evidence.value == "unknown"
+    assert "保守保持未知" in evidence.evidence
+
+
+def test_increasing_sum_assured_product_is_three_state():
+    named = build_product_tags(
+        "某增额终身寿险", "完整条款正文。", complete_document=True,
+    )
+    clause_based = build_product_tags(
+        "某终身寿险",
+        "本合同有效保险金额每年按基本保险金额的3%递增。",
+        complete_document=True,
+    )
+    ordinary = build_product_tags(
+        "某终身寿险", "本合同保险金额保持不变。", complete_document=True,
+    )
+    incomplete = build_product_tags(
+        "某终身寿险", "本段未提及保额变化。", complete_document=False,
+    )
+    non_life_clause_based = build_product_tags(
+        "某护理保险",
+        "本合同有效保险金额每年按基本保险金额的3%递增。",
+        complete_document=True,
+    )
+    non_life_incomplete = build_product_tags(
+        "某护理保险", "本段未提及保额变化。", complete_document=False,
+    )
+
+    assert named.is_increasing_sum_assured_product is True
+    assert clause_based.is_increasing_sum_assured_product is True
+    assert ordinary.is_increasing_sum_assured_product is False
+    assert incomplete.is_increasing_sum_assured_product is None
+    assert non_life_clause_based.is_increasing_sum_assured_product is True
+    assert non_life_incomplete.is_increasing_sum_assured_product is None
+def test_out_of_hospital_drug_absence_has_coverage_evidence():
+    tags = build_product_tags(
+        "某某医疗保险条款",
+        "本合同仅承担住院医疗费用保险金责任。",
+        complete_document=True,
+    )
+    evidence = next(
+        item
+        for item in tags.evidence
+        if item.field_name == "mentions_out_of_hospital_drug"
+    )
+
+    assert tags.mentions_out_of_hospital_drug is False
+    assert evidence.source == "document_coverage_attestation"
+    assert "未出现“院外购药”或“药店”表述" in evidence.evidence

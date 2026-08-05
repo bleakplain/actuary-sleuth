@@ -55,6 +55,8 @@ def test_inspect_knowledge_base_rows_counts_tag_semantics() -> None:
             适用标签="health,medical",
             适用标签语义="限定",
             条款主题="coverage.waiting_period",
+            风险触发标签="rate_adjustable",
+            检查目标标签="long_term",
         ),
         _row(
             1,
@@ -74,6 +76,8 @@ def test_inspect_knowledge_base_rows_counts_tag_semantics() -> None:
     assert result.applicability_tagged_chunks == 3
     assert result.limited_tagged_chunks == 1
     assert result.involved_tagged_chunks == 1
+    assert result.risk_trigger_tagged_chunks == 1
+    assert result.check_target_tagged_chunks == 1
     assert result.ambiguous_semantics_chunks == 1
     assert result.regulation_topic_tagged_chunks == 1
     assert result.manifest_matches
@@ -109,6 +113,8 @@ def test_report_separates_known_gaps_from_blockers() -> None:
         applicability_tagged_chunks=125,
         limited_tagged_chunks=125,
         involved_tagged_chunks=0,
+        risk_trigger_tagged_chunks=0,
+        check_target_tagged_chunks=0,
         ambiguous_semantics_chunks=0,
         regulation_topic_tagged_chunks=29,
         missing_section_path_chunks=0,

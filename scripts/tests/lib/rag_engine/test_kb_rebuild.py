@@ -43,6 +43,8 @@ def _catalog_row(
             "section_path": f"第{chunk_index}条检核规则",
             "chunk_id": chunk_index,
             "适用标签": "health",
+            "风险触发标签": "rate_adjustable",
+            "检查目标标签": "long_term",
         },
     }
 
@@ -178,6 +180,8 @@ def test_manifest_and_identity_are_derived_from_catalog():
     assert manifest["documents"] == 2
     assert manifest["chunks"] == 2
     assert manifest["metadata_coverage"]["适用标签"] == 2
+    assert manifest["metadata_coverage"]["风险触发标签"] == 2
+    assert manifest["metadata_coverage"]["检查目标标签"] == 2
     assert identity["kb_version"] == "v5"
     assert identity["catalog_sha256"]
 

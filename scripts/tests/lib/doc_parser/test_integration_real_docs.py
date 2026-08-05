@@ -139,6 +139,73 @@ class TestRealDocuments:
                 _assert_full_source_coverage(document, member.filename)
 
     @pytest.mark.parametrize(
+        (
+            "file_name", "out_of_hospital_drug", "cancer_specific",
+            "specific_disease", "critical_illness_term",
+        ),
+        (
+            (
+                "125904《人保健康悠优保互联网医疗保险（费率可调）》条款v4.doc",
+                True,
+                False,
+                False,
+                True,
+            ),
+            (
+                "《人保健康温暖常伴互联网意外伤害保险（2.0版）》条款.docx",
+                False,
+                False,
+                False,
+                False,
+            ),
+            (
+                "《人保健康附加互联网恶性肿瘤特定药品费用医疗保险》条款.pdf",
+                False,
+                True,
+                False,
+                True,
+            ),
+            (
+                "《人保健康附加互联网特定药品费用医疗保险（B款）》条款.doc",
+                True,
+                False,
+                False,
+                True,
+            ),
+            (
+                "《人保健康附加团体终身重度恶性肿瘤疾病保险》条款.docx",
+                False,
+                True,
+                True,
+                True,
+            ),
+        ),
+    )
+    def test_real_product_risk_facts_follow_controlled_three_state_rules(
+        self,
+        file_name,
+        out_of_hospital_drug,
+        cancer_specific,
+        specific_disease,
+        critical_illness_term,
+    ):
+        path = PRODUCTS_DIR / file_name
+        _require_product(path)
+        if path.suffix.lower() == ".doc":
+            if not (shutil.which("soffice") or shutil.which("libreoffice")):
+                pytest.skip("旧版 DOC 解析需要 LibreOffice")
+
+        tags = parse_product_document(str(path)).product_tags
+
+        assert tags.mentions_out_of_hospital_drug is out_of_hospital_drug
+        assert tags.is_cancer_specific_product is cancer_specific
+        assert tags.is_specific_disease_product is specific_disease
+        assert (
+            tags.mentions_critical_illness_definition_term
+            is critical_illness_term
+        )
+
+    @pytest.mark.parametrize(
         ("file_name", "number", "parent", "ancestors", "title"),
         (
             (

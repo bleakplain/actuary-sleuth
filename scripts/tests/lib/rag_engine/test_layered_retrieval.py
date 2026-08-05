@@ -28,13 +28,18 @@ def _candidate(
     score: float = 0.1,
     chunk_id: str = "",
     content: str = "",
+    risk_triggers: str = "",
 ) -> dict:
     candidate = {
         "law_name": "测试法规",
         "article_number": article,
         "content": content or article,
         "score": score,
-        "metadata": {"适用标签": tags, "条款主题": topics},
+        "metadata": {
+            "适用标签": tags,
+            "条款主题": topics,
+            "风险触发标签": risk_triggers,
+        },
     }
     if chunk_id:
         candidate["id"] = chunk_id
@@ -137,5 +142,41 @@ def test_unknown_regulation_tag_is_safe_fallback():
 
     result = layer_regulation_candidates([candidate], _product(), top_k=1)
 
+    assert result.chunks[0]["applicability_status"] == "indeterminate"
+    assert result.fallback_used is True
+
+
+def test_risk_trigger_bypass_candidate_is_not_excluded():
+    candidate = _candidate(
+        "费率可调规则",
+        "health,medical,long_term",
+        risk_triggers="rate_adjustable",
+    )
+
+    result = layer_regulation_candidates(
+        [candidate],
+        _product(is_rate_adjustable=True),
+        top_k=None,
+    )
+
+    assert result.excluded_count == 0
+    assert result.chunks[0]["applicability_status"] == "applicable"
+    assert "risk_trigger" in result.chunks[0]["matched_dimensions"]
+
+
+def test_unknown_risk_trigger_keeps_candidate_as_safety_fallback():
+    candidate = _candidate(
+        "费率可调规则",
+        "health,medical,long_term",
+        risk_triggers="rate_adjustable",
+    )
+
+    result = layer_regulation_candidates(
+        [candidate],
+        _product(is_rate_adjustable=None),
+        top_k=None,
+    )
+
+    assert result.excluded_count == 0
     assert result.chunks[0]["applicability_status"] == "indeterminate"
     assert result.fallback_used is True

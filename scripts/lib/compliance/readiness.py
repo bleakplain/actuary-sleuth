@@ -36,6 +36,8 @@ class KnowledgeBaseReadiness:
     applicability_tagged_chunks: int
     limited_tagged_chunks: int
     involved_tagged_chunks: int
+    risk_trigger_tagged_chunks: int
+    check_target_tagged_chunks: int
     ambiguous_semantics_chunks: int
     regulation_topic_tagged_chunks: int
     missing_section_path_chunks: int
@@ -67,6 +69,8 @@ class KnowledgeBaseReadiness:
             "applicability_tagged_chunks": self.applicability_tagged_chunks,
             "limited_tagged_chunks": self.limited_tagged_chunks,
             "involved_tagged_chunks": self.involved_tagged_chunks,
+            "risk_trigger_tagged_chunks": self.risk_trigger_tagged_chunks,
+            "check_target_tagged_chunks": self.check_target_tagged_chunks,
             "ambiguous_semantics_chunks": self.ambiguous_semantics_chunks,
             "regulation_topic_tagged_chunks": self.regulation_topic_tagged_chunks,
             "missing_section_path_chunks": self.missing_section_path_chunks,
@@ -179,6 +183,8 @@ def inspect_knowledge_base_rows(
     applicability_count = 0
     limited_count = 0
     involved_count = 0
+    risk_trigger_count = 0
+    check_target_count = 0
     ambiguous_count = 0
     topic_count = 0
     missing_section_count = 0
@@ -201,6 +207,10 @@ def inspect_knowledge_base_rows(
                 ambiguous_count += 1
         if is_involved:
             involved_count += 1
+        if _text(metadata.get("风险触发标签")):
+            risk_trigger_count += 1
+        if _text(metadata.get("检查目标标签")):
+            check_target_count += 1
         if _text(metadata.get("条款主题")):
             topic_count += 1
         section_path = _text(metadata.get("section_path"))
@@ -252,6 +262,8 @@ def inspect_knowledge_base_rows(
         applicability_tagged_chunks=applicability_count,
         limited_tagged_chunks=limited_count,
         involved_tagged_chunks=involved_count,
+        risk_trigger_tagged_chunks=risk_trigger_count,
+        check_target_tagged_chunks=check_target_count,
         ambiguous_semantics_chunks=ambiguous_count,
         regulation_topic_tagged_chunks=topic_count,
         missing_section_path_chunks=missing_section_count,
