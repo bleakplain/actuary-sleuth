@@ -141,6 +141,15 @@ class RegulationAuditDecision:
 
 
 @dataclass(frozen=True)
+class BatchAuditAttemptTrace:
+    attempt: int
+    requested_unit_ids: Tuple[str, ...]
+    returned_unit_ids: Tuple[str, ...]
+    validation_errors: Tuple[str, ...]
+    raw_response: str
+
+
+@dataclass(frozen=True)
 class AuditRunSummary:
     audit_status: AuditStatus
     compliance_conclusion: ComplianceConclusion

@@ -1,0 +1,72 @@
+{
+  "schema_version": "1",
+  "endpoint": "standard",
+  "model": "glm-4-flash-250414",
+  "sample_id": "real-001",
+  "source_file": "中华人民共和国保险法2015年修订版.md",
+  "results": [
+    {
+      "batch_size": 1,
+      "elapsed_seconds": 23.134,
+      "requested": 1,
+      "returned": 1,
+      "complete_ids": 1,
+      "status_counts": {
+        "insufficient_information": 1
+      },
+      "error_counts": {},
+      "incomplete_count": 0,
+      "fatal_error": "",
+      "usage": {
+        "response_count": 2,
+        "prompt_tokens": 65452,
+        "completion_tokens": 600,
+        "total_tokens": 66052
+      }
+    },
+    {
+      "batch_size": 3,
+      "elapsed_seconds": 64.096,
+      "requested": 3,
+      "returned": 3,
+      "complete_ids": 3,
+      "status_counts": {
+        "manual_review": 1,
+        "compliant": 2
+      },
+      "error_counts": {
+        "invalid_structured_output": 1
+      },
+      "incomplete_count": 1,
+      "fatal_error": "",
+      "usage": {
+        "response_count": 5,
+        "prompt_tokens": 165386,
+        "completion_tokens": 3525,
+        "total_tokens": 168911
+      }
+    },
+    {
+      "batch_size": 5,
+      "elapsed_seconds": 120.797,
+      "requested": 5,
+      "returned": 5,
+      "complete_ids": 5,
+      "status_counts": {
+        "manual_review": 3,
+        "compliant": 2
+      },
+      "error_counts": {
+        "invalid_structured_output": 3
+      },
+      "incomplete_count": 3,
+      "fatal_error": "",
+      "usage": {
+        "response_count": 7,
+        "prompt_tokens": 233259,
+        "completion_tokens": 5812,
+        "total_tokens": 239071
+      }
+    }
+  ]
+}

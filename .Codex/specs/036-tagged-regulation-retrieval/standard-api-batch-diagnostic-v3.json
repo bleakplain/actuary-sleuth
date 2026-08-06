@@ -1,0 +1,39 @@
+{
+  "elapsed_seconds": 20.533,
+  "statuses": [
+    "compliant",
+    "compliant",
+    "compliant"
+  ],
+  "confidences": [
+    0.95,
+    0.95,
+    0.95
+  ],
+  "errors": [
+    "",
+    "",
+    ""
+  ],
+  "evidence_counts": [
+    [
+      1,
+      1
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      1,
+      1
+    ]
+  ],
+  "attempt_errors": [
+    []
+  ],
+  "usage": {
+    "responses": 1,
+    "total_tokens": 35607
+  }
+}

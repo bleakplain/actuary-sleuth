@@ -19,6 +19,9 @@ from enum import Enum
 logger = logging.getLogger(__name__)
 
 
+class LLMRateLimitError(requests.exceptions.RequestException):
+    """供应商明确拒绝当前调用速率；它不是服务健康故障。"""
+
 
 class CircuitState(Enum):
     """熔断器状态"""
@@ -213,7 +216,7 @@ def _retry_with_backoff(
                 except requests.exceptions.RequestException as e:
                     last_exception = e
 
-                    is_rate_limit = False
+                    is_rate_limit = isinstance(e, LLMRateLimitError)
                     is_server_error = False
                     is_timeout = False
 
@@ -271,8 +274,11 @@ def _with_circuit_breaker(circuit_key: str) -> Callable[[Callable], Callable]:
                 result = func(*args, **kwargs)
                 breaker.record_success()
                 return result
-            except Exception:
-                breaker.record_failure()
+            except Exception as exc:
+                # 限流反映的是调用节奏，不代表供应商服务不可用。把它累计为
+                # 普通故障会使一个批次的瞬时拥塞熔断所有后续审核。
+                if not isinstance(exc, LLMRateLimitError):
+                    breaker.record_failure()
                 raise
 
         return wrapper

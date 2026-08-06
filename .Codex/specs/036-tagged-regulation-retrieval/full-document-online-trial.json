@@ -1,0 +1,84 @@
+{
+  "schema_version": "1",
+  "kb_version": "v5",
+  "provider": "zhipu",
+  "model": "glm-4-flash",
+  "trial_status": "invalid_provider_rate_limited",
+  "quality_results_usable": false,
+  "failure_summary": "首批5个并发请求持续返回1305/429；连续5次失败触发全局zhipu熔断器，后续任务未实际调用模型。",
+  "max_concurrency": 5,
+  "deadline_seconds_per_product": 300,
+  "token_usage": "provider client currently does not expose usage",
+  "products": [
+    {
+      "sample_id": "real-001",
+      "file_name": "125904《人保健康悠优保互联网医疗保险（费率可调）》条款v4.doc",
+      "model": "glm-4-flash",
+      "package_count": 96,
+      "elapsed_seconds": 22.531,
+      "status_counts": {
+        "manual_review": 96
+      },
+      "error_counts": {
+        "llm_call_failed": 96
+      },
+      "incomplete_count": 96
+    },
+    {
+      "sample_id": "real-005",
+      "file_name": "《人保健康互联网重大疾病保险（A款）》条款V5 - 无修订.docx",
+      "model": "glm-4-flash",
+      "package_count": 96,
+      "elapsed_seconds": 0.04,
+      "status_counts": {
+        "manual_review": 96
+      },
+      "error_counts": {
+        "llm_call_failed": 96
+      },
+      "incomplete_count": 96
+    },
+    {
+      "sample_id": "real-015",
+      "file_name": "《人保健康长期补充团体医疗保险（D款）》条款-无标记v3.docx",
+      "model": "glm-4-flash",
+      "package_count": 86,
+      "elapsed_seconds": 0.049,
+      "status_counts": {
+        "manual_review": 86
+      },
+      "error_counts": {
+        "llm_call_failed": 86
+      },
+      "incomplete_count": 86
+    },
+    {
+      "sample_id": "real-019",
+      "file_name": "《人保健康附加出境人员团体意外医疗保险》条款v2-无标记.docx",
+      "model": "glm-4-flash",
+      "package_count": 75,
+      "elapsed_seconds": 0.025,
+      "status_counts": {
+        "manual_review": 75
+      },
+      "error_counts": {
+        "llm_call_failed": 75
+      },
+      "incomplete_count": 75
+    },
+    {
+      "sample_id": "real-022",
+      "file_name": "《人保健康鸿利来两全保险（分红型）》条款.doc",
+      "model": "glm-4-flash",
+      "package_count": 62,
+      "elapsed_seconds": 0.02,
+      "status_counts": {
+        "manual_review": 62
+      },
+      "error_counts": {
+        "llm_call_failed": 62
+      },
+      "incomplete_count": 62
+    }
+  ]
+}

@@ -7,12 +7,13 @@ import re
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from lib.common.compliance_audit import (
+    BatchAuditAttemptTrace,
     ProductClauseEvidence,
     RegulationAuditDecision,
     RegulationAuditPackage,
@@ -56,7 +57,117 @@ class _DecisionOutput(BaseModel):
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
 
+@dataclass(frozen=True)
+class _BatchAttemptResult:
+    decisions: Dict[str, RegulationAuditDecision]
+    draft_statuses: Dict[str, RegulationDecisionStatus]
+    trace: BatchAuditAttemptTrace
+
+
+def _regulation_evidence_refs(
+    package: RegulationAuditPackage,
+) -> Dict[str, RegulationChunkSnapshot]:
+    return {
+        f"R{index:03d}": chunk
+        for index, chunk in enumerate(package.regulation.chunks, start=1)
+    }
+
+
+def _product_evidence_refs(
+    package: RegulationAuditPackage,
+) -> Dict[str, RoutedClause]:
+    submitted = (item for item in package.clauses if item.submitted)
+    return {
+        f"P{index:03d}": routed
+        for index, routed in enumerate(submitted, start=1)
+    }
+
+
+def _batch_payload(
+    packages: Tuple[RegulationAuditPackage, ...],
+) -> Dict[str, object]:
+    first = _package_payload(packages[0])
+    return {
+        "batch_id": f"{packages[0].regulation.source_file}:{packages[0].input_index}",
+        "required_unit_ids": [
+            package.regulation.regulation_unit_id for package in packages
+        ],
+        "product": first["product"],
+        "regulation_tasks": [
+            {
+                "task_id": package.task_id,
+                "regulation_unit": _package_payload(package)["regulation_unit"],
+                "priority_product_clauses": [
+                    {
+                        "evidence_ref": evidence_ref,
+                        "clause_id": routed.clause.clause_id,
+                        "number": routed.clause.number,
+                        "title": routed.clause.title,
+                        "text": routed.clause.text,
+                        "relation": routed.relation.value,
+                    }
+                    for evidence_ref, routed in _product_evidence_refs(package).items()
+                    if routed.submitted and routed.relation.value in {"direct", "related"}
+                ],
+            }
+            for package in packages
+        ],
+    }
+
+
+def build_batch_audit_messages(
+    packages: Tuple[RegulationAuditPackage, ...],
+    repair_feedback: Tuple[str, ...] = (),
+) -> List[Dict[str, str]]:
+    """同一法规文件共享一次产品全文，但每个法规单元必须独立回答。"""
+    if not packages:
+        raise ValueError("批量审核至少需要一个法规单元")
+    source_files = {package.regulation.source_file for package in packages}
+    if len(source_files) != 1:
+        raise ValueError("一个审核批次只能包含同一法规文件的法规单元")
+    _validate_batch_product_context(packages)
+    payload = json.dumps(_batch_payload(packages), ensure_ascii=False)
+    system = (
+        "你是保险产品条款合规审核员。只能使用审核包提供的法规和产品原文。"
+        "必须逐一回答 required_unit_ids 中的每个法规单元，不得省略、合并或新增ID。"
+    )
+    instruction = """输出一个 JSON 对象，不得输出 Markdown：
+{"results": [{
+  "task_id": "<对应task_id>",
+  "regulation_unit_id": "<对应regulation_unit_id>",
+  "status": "compliant|non_compliant|insufficient_information|manual_review",
+  "reasoning": "<理由>", "suggestion": "<建议>",
+  "regulation_evidence": [{"evidence_id": "<R001等evidence_ref>", "quote": "<逐字摘录>"}],
+  "product_evidence": [{"evidence_id": "<P001等evidence_ref或PNAME>", "quote": "<逐字摘录>"}],
+  "applicability_dispute": false, "confidence": 0.95
+}]}
+
+每个 required_unit_id 必须且只能出现一次。证据、状态和引用规则与单条审核一致；
+不能证明符合时必须输出 insufficient_information，不能直接省略。
+confidence 必须根据本条证据充分程度独立评估，不得机械复制示例值；能够由法规和
+产品逐字证据直接证明的结论应给出与证据强度一致的置信度。
+evidence_id 必须逐字复制审核包中短 evidence_ref（法规R001…；产品P001…；产品名称
+PNAME），不得复制内部哈希或使用product_clause等占位名称。若状态为 insufficient_information，
+可以返回空证据数组，但仍必须给出该法规单元的明确回答。
+每个法规单元应先检查其 priority_product_clauses，再检查完整产品条款；重点条款
+只是证据定位提示，不限制使用其他真实条款。
+
+"""
+    if repair_feedback:
+        instruction += (
+            "\n\n上一轮回答未通过程序校验。只修复本批次中的以下问题，仍须完整回答"
+            " required_unit_ids：\n- " + "\n- ".join(repair_feedback)
+        )
+    instruction += "\n\n审核包：\n" + payload
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": instruction},
+    ]
+
+
 def _package_payload(package: RegulationAuditPackage) -> Dict[str, object]:
+    regulation_refs = _regulation_evidence_refs(package)
+    product_refs = _product_evidence_refs(package)
     return {
         "task_id": package.task_id,
         "regulation_unit": {
@@ -70,17 +181,20 @@ def _package_payload(package: RegulationAuditPackage) -> Dict[str, object]:
             "applicability_reasons": list(package.regulation.applicability_reasons),
             "chunks": [
                 {
+                    "evidence_ref": evidence_ref,
                     "chunk_id": chunk.chunk_id,
                     "content": chunk.content,
                 }
-                for chunk in package.regulation.chunks
+                for evidence_ref, chunk in regulation_refs.items()
             ],
         },
         "product": {
             "name": package.product_name,
+            "name_evidence_ref": "PNAME",
             "tags": package.product_tags.to_dict(),
             "clauses": [
                 {
+                    "evidence_ref": evidence_ref,
                     "clause_id": routed.clause.clause_id,
                     "number": routed.clause.number,
                     "title": routed.clause.title,
@@ -96,8 +210,7 @@ def _package_payload(package: RegulationAuditPackage) -> Dict[str, object]:
                     "relation": routed.relation.value,
                     "routing_reasons": list(routed.reasons),
                 }
-                for routed in package.clauses
-                if routed.submitted
+                for evidence_ref, routed in product_refs.items()
             ],
             "facts": [
                 {
@@ -131,10 +244,10 @@ def build_audit_messages(
   "status": "compliant|non_compliant|insufficient_information|manual_review",
   "reasoning": "<依据法规和产品原文的理由>",
   "suggestion": "<必要时的修改建议>",
-  "regulation_evidence": [{"evidence_id": "<chunk_id>", "quote": "<逐字摘录>"}],
-  "product_evidence": [{"evidence_id": "<clause_id；仅名称类法规可用 product-name>", "quote": "<逐字摘录>"}],
+  "regulation_evidence": [{"evidence_id": "<R001等evidence_ref>", "quote": "<逐字摘录>"}],
+  "product_evidence": [{"evidence_id": "<P001等evidence_ref或PNAME>", "quote": "<逐字摘录>"}],
   "applicability_dispute": false,
-  "confidence": 0.0
+  "confidence": 0.95
 }
 
 约束：
@@ -143,9 +256,9 @@ def build_audit_messages(
    输出 insufficient_information。
 3. 法规适用性存在争议时输出 manual_review，并将 applicability_dispute 设为 true。
 4. quote 必须是对应 evidence_id 原文中的连续逐字摘录。
-5. 不得引用未提供的 evidence_id。
+5. evidence_id 只能使用审核包提供的短 evidence_ref：法规使用R001…，产品条款使用P001…，产品名称使用PNAME。
 6. 产品条款证据必须摘录条款正文，不得只引用条款标题；摘录至少包含一个完整事实或要求。
-7. 只有法规条款主题包含 contract.name 时，才可以把 product-name 作为产品证据。
+7. 产品名称确实能够证明产品身份或名称明示属性时，可以使用PNAME；不得用产品名称证明条款正文必须包含的表述。
 
 审核包：
 """ + payload
@@ -195,10 +308,28 @@ def _validate_evidence(
     regulation_content = {
         chunk.chunk_id: chunk.content for chunk in package.regulation.chunks
     }
+    regulation_refs = _regulation_evidence_refs(package)
+    regulation_content.update({
+        evidence_ref: chunk.content
+        for evidence_ref, chunk in regulation_refs.items()
+    })
+    regulation_ids = {
+        evidence_ref: chunk.chunk_id
+        for evidence_ref, chunk in regulation_refs.items()
+    }
     product_content = {
         routed.clause.clause_id: routed.clause.text
         for routed in package.clauses
         if routed.submitted
+    }
+    product_refs = _product_evidence_refs(package)
+    product_content.update({
+        evidence_ref: routed.clause.text
+        for evidence_ref, routed in product_refs.items()
+    })
+    product_ids = {
+        evidence_ref: routed.clause.clause_id
+        for evidence_ref, routed in product_refs.items()
     }
 
     def require_substantive_quote(quote: str, evidence_type: str) -> str:
@@ -217,7 +348,7 @@ def _validate_evidence(
         if content is None or evidence.quote not in content:
             raise ValueError(f"无效法规证据: {evidence.evidence_id}")
         regulation_evidence.append(RegulationEvidence(
-            chunk_id=evidence.evidence_id,
+            chunk_id=regulation_ids.get(evidence.evidence_id, evidence.evidence_id),
             quote=require_substantive_quote(evidence.quote, "法规证据"),
         ))
     product_evidence: List[ProductClauseEvidence] = []
@@ -231,10 +362,17 @@ def _validate_evidence(
                 raise ValueError("当前法规主题不允许使用 product-name 作为结论证据")
             source_kind = "product_name"
             content = package.product_name
+        elif evidence.evidence_id == "PNAME":
+            source_kind = "product_name"
+            content = package.product_name
         if content is None or evidence.quote not in content:
             raise ValueError(f"无效产品条款证据: {evidence.evidence_id}")
         product_evidence.append(ProductClauseEvidence(
-            clause_id=evidence.evidence_id,
+            clause_id=(
+                "product-name"
+                if source_kind == "product_name"
+                else product_ids.get(evidence.evidence_id, evidence.evidence_id)
+            ),
             quote=require_substantive_quote(evidence.quote, "产品证据"),
             source_kind=source_kind,
         ))
@@ -304,6 +442,7 @@ def _audit_atomic_package(
             build_audit_messages(package),
             temperature=0.0,
             max_tokens=4096,
+            response_format={"type": "json_object"},
             timeout=request_timeout,
             _retry_deadline=time.monotonic() + max(0.001, timeout_seconds),
         )
@@ -320,6 +459,180 @@ def _audit_atomic_package(
             exc,
         )
         return _failure_decision(package, "llm_call_failed", f"模型调用失败：{exc}")
+
+
+def _request_batch_decisions(
+    packages: Tuple[RegulationAuditPackage, ...],
+    llm: BaseLLMClient,
+    timeout_seconds: float,
+    *,
+    attempt: int,
+    repair_feedback: Tuple[str, ...] = (),
+    required_statuses: Optional[Dict[str, RegulationDecisionStatus]] = None,
+) -> _BatchAttemptResult:
+    request_timeout = max(1.0, min(45.0, timeout_seconds / 3))
+    raw = llm.chat(
+        build_batch_audit_messages(packages, repair_feedback),
+        temperature=0.0,
+        max_tokens=min(16_384, max(4096, len(packages) * 2048)),
+        response_format={"type": "json_object"},
+        timeout=request_timeout,
+        _retry_deadline=time.monotonic() + max(0.001, timeout_seconds),
+    )
+    requested_ids = tuple(
+        package.regulation.regulation_unit_id for package in packages
+    )
+    errors: List[str] = []
+    try:
+        parsed = json.loads(_strip_code_fence(raw))
+    except json.JSONDecodeError as exc:
+        return _BatchAttemptResult({}, {}, BatchAuditAttemptTrace(
+            attempt, requested_ids, (), (f"JSON解析失败: {exc}",), raw,
+        ))
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("results"), list):
+        return _BatchAttemptResult({}, {}, BatchAuditAttemptTrace(
+            attempt, requested_ids, (), ("顶层必须是包含results数组的对象",), raw,
+        ))
+    by_unit = {
+        package.regulation.regulation_unit_id: package for package in packages
+    }
+    raw_by_unit: Dict[str, List[object]] = {}
+    for item in parsed["results"]:
+        if not isinstance(item, dict):
+            continue
+        unit_id = item.get("regulation_unit_id")
+        if isinstance(unit_id, str) and unit_id in by_unit:
+            raw_by_unit.setdefault(unit_id, []).append(item)
+        elif isinstance(unit_id, str):
+            errors.append(f"返回未知regulation_unit_id: {unit_id}")
+    decisions: Dict[str, RegulationAuditDecision] = {}
+    draft_statuses: Dict[str, RegulationDecisionStatus] = {}
+    for unit_id, items in raw_by_unit.items():
+        if len(items) != 1:
+            errors.append(f"{unit_id}: 重复返回{len(items)}次")
+            continue
+        try:
+            output = _DecisionOutput.model_validate(items[0])
+            draft_statuses[unit_id] = output.status
+            required_status = (required_statuses or {}).get(unit_id)
+            if required_status is not None and output.status is not required_status:
+                raise ValueError(
+                    f"证据修复不得把status从{required_status.value}改为{output.status.value}"
+                )
+            decisions[unit_id] = _validate_evidence(by_unit[unit_id], output)
+        except (ValidationError, ValueError) as exc:
+            errors.append(f"{unit_id}: {exc}")
+            continue
+    missing = tuple(unit_id for unit_id in requested_ids if unit_id not in decisions)
+    errors.extend(f"{unit_id}: 缺失或未通过校验" for unit_id in missing)
+    return _BatchAttemptResult(decisions, draft_statuses, BatchAuditAttemptTrace(
+        attempt=attempt,
+        requested_unit_ids=requested_ids,
+        returned_unit_ids=tuple(raw_by_unit),
+        validation_errors=tuple(errors),
+        raw_response=raw,
+    ))
+
+
+def audit_regulation_package_batch(
+    packages: Iterable[RegulationAuditPackage],
+    llm: BaseLLMClient,
+    timeout_seconds: float,
+    *,
+    max_batch_size: int = 8,
+    on_attempt: Optional[Callable[[BatchAuditAttemptTrace], None]] = None,
+) -> Tuple[RegulationAuditDecision, ...]:
+    """批量审核同一产品与法规；有响应时补问漏答，无响应时停止扇出。"""
+    ordered = tuple(sorted(packages, key=lambda item: item.input_index))
+    if not ordered:
+        return ()
+    if len(ordered) > max_batch_size:
+        raise ValueError(f"批量审核最多允许 {max_batch_size} 个法规单元")
+    source_files = {package.regulation.source_file for package in ordered}
+    if len(source_files) != 1:
+        raise ValueError("一个审核批次只能包含同一法规文件的法规单元")
+    _validate_batch_product_context(ordered)
+    deadline = time.monotonic() + max(0.001, timeout_seconds)
+    accepted: Dict[str, RegulationAuditDecision] = {}
+    pending = ordered
+    batch_response_received = False
+    repair_feedback: Tuple[str, ...] = ()
+    required_statuses: Dict[str, RegulationDecisionStatus] = {}
+    for attempt in range(1, 3):
+        remaining = deadline - time.monotonic()
+        if not pending or remaining <= 0:
+            break
+        try:
+            result = _request_batch_decisions(
+                pending,
+                llm,
+                remaining,
+                attempt=attempt,
+                repair_feedback=(
+                    *repair_feedback,
+                    *(
+                        f"{unit_id}: 本轮仅修复证据，status必须保持{status.value}"
+                        for unit_id, status in required_statuses.items()
+                    ),
+                ),
+                required_statuses=required_statuses,
+            )
+            batch_response_received = True
+            accepted.update(result.decisions)
+            repair_feedback = result.trace.validation_errors
+            required_statuses.update(result.draft_statuses)
+            if on_attempt is not None:
+                on_attempt(result.trace)
+        except Exception as exc:
+            logger.warning("法规批量审核失败: source=%s error=%s", ordered[0].regulation.source_file, exc)
+        pending = tuple(
+            package for package in pending
+            if package.regulation.regulation_unit_id not in accepted
+        )
+    if pending and not batch_response_received:
+        for package in pending:
+            accepted[package.regulation.regulation_unit_id] = _failure_decision(
+                package,
+                "batch_llm_call_failed",
+                "批量模型调用未收到有效响应；为避免供应商故障引发逐条请求风暴，未继续单条补问。",
+            )
+        pending = ()
+    for package in pending:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            decision = _failure_decision(
+                package,
+                "batch_audit_incomplete",
+                "批量审核漏答且未能在时间预算内完成单条补问。",
+            )
+        else:
+            decision = audit_regulation_package(package, llm, remaining)
+        accepted[package.regulation.regulation_unit_id] = decision
+    return tuple(
+        accepted[package.regulation.regulation_unit_id] for package in ordered
+    )
+
+
+def _validate_batch_product_context(
+    packages: Tuple[RegulationAuditPackage, ...],
+) -> None:
+    """共享产品全文只在产品事实和条款序列完全一致时才安全。"""
+    first = packages[0]
+    first_clauses = tuple(
+        (routed.clause.number, routed.clause.title, routed.clause.text)
+        for routed in first.clauses if routed.submitted
+    )
+    for package in packages[1:]:
+        clauses = tuple(
+            (routed.clause.number, routed.clause.title, routed.clause.text)
+            for routed in package.clauses if routed.submitted
+        )
+        if (
+            package.product_name != first.product_name
+            or package.product_tags != first.product_tags
+            or clauses != first_clauses
+        ):
+            raise ValueError("一个审核批次只能共享同一份产品事实和产品条款")
 
 
 def _package_length(package: RegulationAuditPackage) -> int:

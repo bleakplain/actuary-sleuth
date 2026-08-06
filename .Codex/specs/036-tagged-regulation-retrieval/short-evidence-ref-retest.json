@@ -1,0 +1,130 @@
+{
+  "schema_version": "1",
+  "results": [
+    {
+      "sample_id": "real-001",
+      "source_file": "关于长期医疗保险产品费率调整有关问题的通知.md",
+      "elapsed_seconds": 39.888,
+      "statuses": [
+        "compliant",
+        "compliant",
+        "compliant"
+      ],
+      "errors": [
+        "",
+        "",
+        ""
+      ],
+      "confidences": [
+        0.95,
+        0.95,
+        0.95
+      ],
+      "evidence_counts": [
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "attempt_errors": [
+        [
+          "regulation-unit:016cee60953e13b743abf40e0f8f64b7eb4edceb509a400be03038e21bafc5a5: 无效产品条款证据: PNAME",
+          "regulation-unit:1eaabf6dcf068b4108d8268e9c317fcb4ff2dd7685be010dc21d7e179b1d32f1: 无效产品条款证据: PNAME",
+          "regulation-unit:2aeabccb65ebb8bf692709fb4de7e08ccef2880428ea0b931dbee600bdea917f: 无效产品条款证据: PNAME",
+          "regulation-unit:016cee60953e13b743abf40e0f8f64b7eb4edceb509a400be03038e21bafc5a5: 缺失或未通过校验",
+          "regulation-unit:1eaabf6dcf068b4108d8268e9c317fcb4ff2dd7685be010dc21d7e179b1d32f1: 缺失或未通过校验",
+          "regulation-unit:2aeabccb65ebb8bf692709fb4de7e08ccef2880428ea0b931dbee600bdea917f: 缺失或未通过校验"
+        ],
+        []
+      ],
+      "responses": 2,
+      "total_tokens": 72506
+    },
+    {
+      "sample_id": "real-015",
+      "source_file": "健康保险管理办法.md",
+      "elapsed_seconds": 28.618,
+      "statuses": [
+        "compliant",
+        "compliant",
+        "compliant"
+      ],
+      "errors": [
+        "",
+        "",
+        ""
+      ],
+      "confidences": [
+        0.95,
+        0.95,
+        0.95
+      ],
+      "evidence_counts": [
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "attempt_errors": [
+        []
+      ],
+      "responses": 1,
+      "total_tokens": 48017
+    },
+    {
+      "sample_id": "real-019",
+      "source_file": "产品责任设计.md",
+      "elapsed_seconds": 28.734,
+      "statuses": [
+        "manual_review",
+        "manual_review",
+        "manual_review"
+      ],
+      "errors": [
+        "missing_compliance_evidence",
+        "missing_compliance_evidence",
+        "missing_compliance_evidence"
+      ],
+      "confidences": [
+        0.95,
+        0.95,
+        0.95
+      ],
+      "evidence_counts": [
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          0
+        ]
+      ],
+      "attempt_errors": [
+        []
+      ],
+      "responses": 1,
+      "total_tokens": 19152
+    }
+  ]
+}

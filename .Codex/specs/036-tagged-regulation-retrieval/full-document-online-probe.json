@@ -1,0 +1,23 @@
+{
+  "schema_version": "1",
+  "sample_id": "real-001",
+  "file_name": "125904《人保健康悠优保互联网医疗保险（费率可调）》条款v4.doc",
+  "provider": "zhipu",
+  "model": "glm-4-flash",
+  "concurrency": 1,
+  "package_count": 5,
+  "elapsed_seconds": 289.604,
+  "status_counts": {
+    "manual_review": 5
+  },
+  "error_counts": {
+    "llm_call_failed": 4,
+    "invalid_structured_output": 1
+  },
+  "usage": {
+    "response_count": 1,
+    "prompt_tokens": 32956,
+    "completion_tokens": 390,
+    "total_tokens": 33346
+  }
+}

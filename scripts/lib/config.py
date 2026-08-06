@@ -264,8 +264,8 @@ class LLMConfig:
         p = self._provider(provider)
         return SimpleNamespace(
             provider=provider,
-            base_url=p.base_url,
-            api_key=p.api_key,
+            base_url=scene_cfg.get('base_url') or p.base_url,
+            api_key=scene_cfg.get('api_key') or p.api_key,
             model=scene_cfg.get('model', ''),
             temperature=p.temperature,
             timeout=scene_cfg.get('timeout') or p.timeout,
@@ -346,6 +346,8 @@ class Config:
                     'provider': os.getenv('LLM_AUDIT_PROVIDER', 'zhipu'),
                     'model': os.getenv('LLM_AUDIT_MODEL', 'glm-4-flash'),
                     'timeout': int(os.getenv('LLM_AUDIT_TIMEOUT', '120')),
+                    'base_url': os.getenv('LLM_AUDIT_BASE_URL', ''),
+                    'api_key': os.getenv('LLM_AUDIT_API_KEY', ''),
                 },
                 'qa': {
                     'provider': os.getenv('LLM_QA_PROVIDER', 'zhipu'),

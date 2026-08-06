@@ -7,14 +7,32 @@ import logging
 import requests  # type: ignore[import-untyped]
 import threading
 import weakref
-from typing import Dict, Iterator, List, Optional
+from dataclasses import dataclass
+from typing import Dict, Iterator, List, Mapping, Optional, Tuple
 
 from .base import BaseLLMClient
-from .metrics import _track_timing, _with_circuit_breaker, _retry_with_backoff
+from .metrics import (
+    LLMRateLimitError,
+    _track_timing,
+    _with_circuit_breaker,
+    _retry_with_backoff,
+)
 from lib.common.constants import LLMConstants
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ZhipuUsage:
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+def _usage_value(usage: Mapping[str, object], name: str) -> int:
+    value = usage.get(name, 0)
+    return value if isinstance(value, int) else 0
 
 
 class ZhipuClient(BaseLLMClient):
@@ -36,7 +54,28 @@ class ZhipuClient(BaseLLMClient):
         self.base_url = base_url.rstrip('/')
         self._session = None
         self._session_lock = threading.Lock()
+        self._usage_lock = threading.Lock()
+        self._usage_records: List[ZhipuUsage] = []
         self._register_cleanup()
+
+    @property
+    def usage_records(self) -> Tuple[ZhipuUsage, ...]:
+        with self._usage_lock:
+            return tuple(self._usage_records)
+
+    def _record_usage(self, result: object) -> None:
+        if not isinstance(result, Mapping):
+            return
+        usage = result.get("usage")
+        if not isinstance(usage, Mapping):
+            return
+        record = ZhipuUsage(
+            prompt_tokens=_usage_value(usage, "prompt_tokens"),
+            completion_tokens=_usage_value(usage, "completion_tokens"),
+            total_tokens=_usage_value(usage, "total_tokens"),
+        )
+        with self._usage_lock:
+            self._usage_records.append(record)
 
     def _get_session(self) -> requests.Session:
         if self._session is None:
@@ -97,6 +136,8 @@ class ZhipuClient(BaseLLMClient):
             "max_tokens": kwargs.get('max_tokens', 8192),
             "top_p": kwargs.get('top_p', 0.7)
         }
+        if "response_format" in kwargs:
+            data["response_format"] = kwargs["response_format"]
         if "4.5" in model or "4.6" in model or "4.7" in model:
             data["thinking"] = {"type": "disabled"}
 
@@ -104,12 +145,13 @@ class ZhipuClient(BaseLLMClient):
         response = session.post(url, json=data, timeout=kwargs.get("timeout", self.timeout))
 
         if response.status_code == 429:
-            raise requests.exceptions.RequestException(f"429 Rate limit exceeded: {response.text[:200]}")
+            raise LLMRateLimitError(f"429 Rate limit exceeded: {response.text[:200]}")
         if response.status_code >= 500:
             raise requests.exceptions.RequestException(f"{response.status_code} Server error: {response.text[:200]}")
 
         response.raise_for_status()
         result = response.json()
+        self._record_usage(result)
 
         if 'choices' not in result or len(result['choices']) == 0:
             raise ValueError(f"Unexpected response format: 'choices' field missing or empty. Response keys: {list(result.keys()) if isinstance(result, dict) else type(result)}")
@@ -152,6 +194,8 @@ class ZhipuClient(BaseLLMClient):
             "max_tokens": kwargs.get('max_tokens', 8192),
             "top_p": kwargs.get('top_p', 0.7)
         }
+        if "response_format" in kwargs:
+            data["response_format"] = kwargs["response_format"]
         if "4.5" in model or "4.6" in model or "4.7" in model:
             data["thinking"] = {"type": "disabled"}
 
@@ -159,12 +203,13 @@ class ZhipuClient(BaseLLMClient):
         response = session.post(url, json=data, timeout=kwargs.get("timeout", self.timeout))
 
         if response.status_code == 429:
-            raise requests.exceptions.RequestException(f"429 Rate limit exceeded: {response.text[:200]}")
+            raise LLMRateLimitError(f"429 Rate limit exceeded: {response.text[:200]}")
         if response.status_code >= 500:
             raise requests.exceptions.RequestException(f"{response.status_code} Server error: {response.text[:200]}")
 
         response.raise_for_status()
         result = response.json()
+        self._record_usage(result)
 
         if 'choices' not in result or len(result['choices']) == 0:
             raise ValueError(f"Unexpected response format: 'choices' field missing or empty. Response keys: {list(result.keys()) if isinstance(result, dict) else type(result)}")
@@ -204,7 +249,7 @@ class ZhipuClient(BaseLLMClient):
         response = session.post(url, json=data, stream=True, timeout=self.timeout)
 
         if response.status_code == 429:
-            raise requests.exceptions.RequestException(
+            raise LLMRateLimitError(
                 f"429 Rate limit exceeded: {response.text[:200]}"
             )
         if response.status_code >= 500:

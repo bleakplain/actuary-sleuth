@@ -1,0 +1,34 @@
+{
+  "schema_version": "1",
+  "sample_id": "real-001",
+  "source_file": "中华人民共和国保险法2015年修订版.md",
+  "law_name": "中华人民共和国保险法（2015年修订版）",
+  "requested_unit_ids": [
+    "regulation-unit:df1ae66969f6ac08d12d05bccdf82ba0f0c46e330cd19292c089464e6b4c95e3",
+    "regulation-unit:ff02aae137988d0a6322b448991e924b64fc567c9e2199da606da46554c580bb",
+    "regulation-unit:b3ef98b683bb3484be65654da0f372124764fdd877fa110737d3355d3eb1aaf1",
+    "regulation-unit:7c2a66766afbed343d30603959e06a207b317223d7eb303da0b7ee413ff02807",
+    "regulation-unit:fbc580ff577fd6d3ffcdefe7ef6018606824983f7386ff7176a7bcdf7bf3165b"
+  ],
+  "returned_unit_ids": [
+    "regulation-unit:df1ae66969f6ac08d12d05bccdf82ba0f0c46e330cd19292c089464e6b4c95e3",
+    "regulation-unit:ff02aae137988d0a6322b448991e924b64fc567c9e2199da606da46554c580bb",
+    "regulation-unit:b3ef98b683bb3484be65654da0f372124764fdd877fa110737d3355d3eb1aaf1",
+    "regulation-unit:7c2a66766afbed343d30603959e06a207b317223d7eb303da0b7ee413ff02807",
+    "regulation-unit:fbc580ff577fd6d3ffcdefe7ef6018606824983f7386ff7176a7bcdf7bf3165b"
+  ],
+  "elapsed_seconds": 274.203,
+  "status_counts": {
+    "manual_review": 5
+  },
+  "error_counts": {
+    "llm_call_failed": 5
+  },
+  "incomplete_count": 5,
+  "usage": {
+    "response_count": 0,
+    "prompt_tokens": 0,
+    "completion_tokens": 0,
+    "total_tokens": 0
+  }
+}

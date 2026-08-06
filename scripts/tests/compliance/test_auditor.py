@@ -5,6 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from typing import Dict, List
 
+import pytest
+
 from lib.common.compliance_audit import (
     AuditClauseSnapshot,
     RegulationAuditPackage,
@@ -17,6 +19,7 @@ from lib.common.compliance_audit import (
 from lib.common.product_tags import ProductTags
 from lib.compliance.auditor import (
     _merge_segment_decisions,
+    audit_regulation_package_batch,
     audit_regulation_package,
     audit_regulation_packages,
     build_audit_messages,
@@ -119,6 +122,48 @@ class _CloseFailureClient(_Client):
         raise RuntimeError("close failed")
 
 
+class _BatchClient(BaseLLMClient):
+    def __init__(self, omit_first: str = ""):
+        super().__init__("test")
+        self.omit_first = omit_first
+        self.calls = 0
+        self.last_prompt = ""
+
+    def _do_generate(self, prompt: str, **kwargs) -> str:
+        return "{}"
+
+    def _do_chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
+        self.calls += 1
+        self.last_prompt = messages[1]["content"]
+        payload = json.loads(messages[1]["content"].split("审核包：\n", 1)[1])
+        results = []
+        for task in payload["regulation_tasks"]:
+            unit_id = task["regulation_unit"]["regulation_unit_id"]
+            if self.calls == 1 and unit_id == self.omit_first:
+                continue
+            results.append({
+                "task_id": task["task_id"],
+                "regulation_unit_id": unit_id,
+                "status": "insufficient_information",
+                "reasoning": "产品条款不足以判断",
+                "suggestion": "人工补充材料",
+                "regulation_evidence": [],
+                "product_evidence": [],
+                "applicability_dispute": False,
+                "confidence": 0.8,
+            })
+        return json.dumps({"results": results}, ensure_ascii=False)
+
+    def health_check(self) -> bool:
+        return True
+
+
+class _FailingBatchClient(_BatchClient):
+    def _do_chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
+        self.calls += 1
+        raise RuntimeError("provider unavailable")
+
+
 def _package(index: int = 0) -> RegulationAuditPackage:
     regulation = RegulationUnitSnapshot(
         regulation_unit_id=f"v5:law:{index}",
@@ -151,6 +196,110 @@ def _package(index: int = 0) -> RegulationAuditPackage:
         ),),
         facts=(),
     )
+
+
+def test_batch_audit_requires_and_returns_every_unit() -> None:
+    packages = (_package(0), _package(1), _package(2))
+    client = _BatchClient()
+
+    decisions = audit_regulation_package_batch(packages, client, 5)
+
+    assert client.calls == 1
+    assert [item.regulation_unit_id for item in decisions] == [
+        "v5:law:0", "v5:law:1", "v5:law:2",
+    ]
+
+
+def test_audit_prompts_do_not_anchor_confidence_at_zero() -> None:
+    from lib.compliance.auditor import build_batch_audit_messages
+
+    assert '"confidence": 0.0' not in build_audit_messages(_package())[1]["content"]
+    assert '"confidence": 0.0' not in build_batch_audit_messages(
+        (_package(),),
+    )[1]["content"]
+
+
+def test_short_evidence_refs_map_back_to_real_ids() -> None:
+    package = _package()
+    payload = json.loads(
+        build_audit_messages(package)[1]["content"].split("审核包：\n", 1)[1],
+    )
+    assert payload["regulation_unit"]["chunks"][0]["evidence_ref"] == "R001"
+    assert payload["product"]["clauses"][0]["evidence_ref"] == "P001"
+    response = json.dumps({
+        "task_id": package.task_id,
+        "regulation_unit_id": package.regulation.regulation_unit_id,
+        "status": "non_compliant",
+        "reasoning": "等待期超过法规上限。",
+        "suggestion": "修改等待期。",
+        "regulation_evidence": [{
+            "evidence_id": "R001",
+            "quote": package.regulation.chunks[0].content[:12],
+        }],
+        "product_evidence": [{
+            "evidence_id": "P001",
+            "quote": package.clauses[0].clause.text,
+        }],
+        "confidence": 0.95,
+    }, ensure_ascii=False)
+
+    decision = audit_regulation_package(package, _Client(response), 5)
+
+    assert decision.regulation_evidence[0].chunk_id == "r-1"
+    assert decision.product_evidence[0].clause_id == "c-0"
+
+
+def test_batch_audit_reasks_only_missing_units() -> None:
+    packages = (_package(0), _package(1), _package(2))
+    client = _BatchClient(omit_first="v5:law:1")
+    traces = []
+
+    decisions = audit_regulation_package_batch(
+        packages, client, 5, on_attempt=traces.append,
+    )
+
+    assert client.calls == 2
+    assert len(decisions) == 3
+    assert all(not item.incomplete for item in decisions)
+    assert traces[0].attempt == 1
+    assert any("v5:law:1" in error for error in traces[0].validation_errors)
+    assert "上一轮回答未通过程序校验" in client.last_prompt
+
+
+def test_batch_audit_rejects_cross_document_group() -> None:
+    packages = (_package(0), replace(
+        _package(1),
+        regulation=replace(_package(1).regulation, source_file="other.md"),
+    ))
+
+    try:
+        audit_regulation_package_batch(packages, _BatchClient(), 5)
+    except ValueError as exc:
+        assert "同一法规文件" in str(exc)
+    else:
+        raise AssertionError("跨法规文件批次必须被拒绝")
+
+
+def test_batch_audit_rejects_different_product_context() -> None:
+    packages = (
+        _package(0),
+        replace(_package(1), product_name="另一份产品条款"),
+    )
+
+    with pytest.raises(ValueError, match="同一份产品事实"):
+        audit_regulation_package_batch(packages, _BatchClient(), 5)
+
+
+def test_batch_provider_failure_does_not_fan_out_to_single_calls() -> None:
+    client = _FailingBatchClient()
+
+    decisions = audit_regulation_package_batch(
+        (_package(0), _package(1), _package(2)), client, 5,
+    )
+
+    assert client.calls == 2
+    assert {item.error_code for item in decisions} == {"batch_llm_call_failed"}
+    assert all(item.incomplete for item in decisions)
 
 
 def _response(package: RegulationAuditPackage, **overrides) -> str:
