@@ -110,6 +110,7 @@ class RegulationAuditPackage:
     regulation: RegulationUnitSnapshot
     clauses: Tuple[RoutedClause, ...]
     facts: Tuple[ExtractedFact, ...]
+    complete_document: bool = False
 
 
 @dataclass(frozen=True)

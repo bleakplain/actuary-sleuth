@@ -395,6 +395,147 @@ def test_compliant_without_product_evidence_is_not_green() -> None:
     assert decision.error_code == "missing_compliance_evidence"
 
 
+def test_complete_document_prohibition_allows_zero_hit_compliance() -> None:
+    package = replace(
+        _package(),
+        complete_document=True,
+        regulation=replace(
+            _package().regulation,
+            chunks=(RegulationChunkSnapshot(
+                chunk_id="r-prohibition",
+                content="条款中不得包含续保时重新核保等类似表述。",
+                chunk_index=0,
+            ),),
+        ),
+    )
+    response = _response(
+        package,
+        status="compliant",
+        reasoning="已检查完整产品条款，未发现法规禁止的相关表述。",
+        suggestion="",
+        regulation_evidence=[{
+            "evidence_id": "R001",
+            "quote": "条款中不得包含续保时重新核保等类似表述",
+        }],
+        product_evidence=[],
+    )
+
+    decision = audit_regulation_package(package, _Client(response), 10)
+
+    assert decision.status is RegulationDecisionStatus.COMPLIANT
+    assert not decision.incomplete
+    assert decision.error_code == ""
+    assert decision.product_evidence == ()
+
+
+def test_prohibition_zero_hit_requires_complete_document() -> None:
+    package = replace(
+        _package(),
+        regulation=replace(
+            _package().regulation,
+            chunks=(RegulationChunkSnapshot(
+                chunk_id="r-prohibition",
+                content="条款中不得出现误导性表述。",
+                chunk_index=0,
+            ),),
+        ),
+    )
+    response = _response(
+        package,
+        status="compliant",
+        reasoning="未发现误导性表述。",
+        suggestion="",
+        regulation_evidence=[{
+            "evidence_id": "R001",
+            "quote": "条款中不得出现误导性表述",
+        }],
+        product_evidence=[],
+    )
+
+    decision = audit_regulation_package(package, _Client(response), 10)
+
+    assert decision.status is RegulationDecisionStatus.MANUAL_REVIEW
+    assert decision.error_code == "missing_compliance_evidence"
+
+
+def test_numeric_prohibition_cannot_use_zero_hit_exception() -> None:
+    package = replace(_package(), complete_document=True)
+    response = _response(
+        package,
+        status="compliant",
+        reasoning="已检查完整产品条款，未发现等待期超过限制。",
+        suggestion="",
+        product_evidence=[],
+    )
+
+    decision = audit_regulation_package(package, _Client(response), 10)
+
+    assert decision.status is RegulationDecisionStatus.MANUAL_REVIEW
+    assert decision.error_code == "missing_compliance_evidence"
+
+
+def test_prohibited_design_allows_zero_hit_compliance() -> None:
+    package = replace(
+        _package(),
+        complete_document=True,
+        regulation=replace(
+            _package().regulation,
+            chunks=(RegulationChunkSnapshot(
+                chunk_id="r-design-prohibition",
+                content="保险产品不得通过调整保险金额变相延长等待期。",
+                chunk_index=0,
+            ),),
+        ),
+    )
+    response = _response(
+        package,
+        status="compliant",
+        reasoning="已检查完整产品条款，未通过调整保险金额变相延长等待期。",
+        suggestion="",
+        regulation_evidence=[{
+            "evidence_id": "R001",
+            "quote": "保险产品不得通过调整保险金额变相延长等待期",
+        }],
+        product_evidence=[],
+    )
+
+    decision = audit_regulation_package(package, _Client(response), 10)
+
+    assert decision.status is RegulationDecisionStatus.COMPLIANT
+    assert decision.error_code == ""
+
+
+def test_compound_positive_obligation_cannot_use_zero_hit_exception() -> None:
+    package = replace(
+        _package(),
+        complete_document=True,
+        regulation=replace(
+            _package().regulation,
+            chunks=(RegulationChunkSnapshot(
+                chunk_id="r-compound",
+                content="产品不得包含误导表述，并且必须明确列明等待期。",
+                chunk_index=0,
+            ),),
+        ),
+    )
+    response = _response(
+        package,
+        status="compliant",
+        reasoning="已检查完整产品条款，未发现误导表述。",
+        suggestion="",
+        regulation_evidence=[{
+            "evidence_id": "R001",
+            "quote": "产品不得包含误导表述，并且必须明确列明等待期",
+        }],
+        product_evidence=[],
+    )
+
+    decision = audit_regulation_package(package, _Client(response), 10)
+
+    assert decision.status is RegulationDecisionStatus.MANUAL_REVIEW
+    assert decision.error_code == "missing_compliance_evidence"
+
+
 def test_compliant_cannot_use_clause_title_as_body_evidence() -> None:
     package = _package()
     response = _response(

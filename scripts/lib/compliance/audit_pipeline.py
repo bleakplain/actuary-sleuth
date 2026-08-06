@@ -48,6 +48,7 @@ class AuditPipelineRequest:
     audit_input_fingerprint: str = ""
     product_name_source: str = "unknown"
     parse_warnings: Tuple[str, ...] = ()
+    coverage_attested: bool = False
 
 
 @dataclass(frozen=True)
@@ -222,6 +223,7 @@ def build_regulation_audit_packages(
             regulation=_unit_snapshot(unit),
             clauses=routed,
             facts=facts,
+            complete_document=request.coverage_attested,
         ))
         routing_results.append(routing)
     return tuple(packages), tuple(routing_results), tuple(warnings)

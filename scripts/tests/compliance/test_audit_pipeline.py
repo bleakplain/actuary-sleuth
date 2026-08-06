@@ -12,6 +12,7 @@ from lib.common.product_tags import ProductLine, ProductTags
 from lib.compliance.audit_pipeline import (
     AuditPipelineRequest,
     _routed_clauses,
+    build_regulation_audit_packages,
     run_audit_pipeline,
 )
 from lib.compliance.clause_routing import ClauseRoutingResult
@@ -108,6 +109,14 @@ def _compliant_auditor(packages, max_concurrency, deadline_seconds, on_decision)
             product_evidence=(),
         ),
     )
+
+
+def test_complete_document_attestation_reaches_audit_package() -> None:
+    request = replace(_request(), coverage_attested=True)
+
+    packages, _, _ = build_regulation_audit_packages(request, (_unit(),))
+
+    assert packages[0].complete_document is True
 
 
 def test_pipeline_submits_full_document_while_preserving_route_signals() -> None:

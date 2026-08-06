@@ -31,6 +31,17 @@ logger = logging.getLogger(__name__)
 _PROMPT_SAFETY_MARGIN = 10_000
 _MIN_EVIDENCE_CHARACTERS = 6
 _MIN_AUTOMATED_DECISION_CONFIDENCE = 0.7
+_PROHIBITION_PATTERN = re.compile(
+    r"(?:不得|严禁|禁止)"
+    r"(?![^。；\n]{0,8}(?:超过|低于|少于|高于|短于|长于|早于|晚于|过高|过低))"
+)
+_ABSENCE_FINDING_PATTERN = re.compile(
+    r"(?:未发现|没有发现|未检出|不存在|不包含|不含|"
+    r"未(?:包含|出现|使用|采用|约定|通过|混淆|提供|设置|设计|自定义))"
+)
+_EVIDENCE_REQUIRED_PATTERN = re.compile(
+    r"(?:应当|必须|不超过|不低于|不少于|不高于|不短于|不长于|不早于|不晚于)"
+)
 _GLOBAL_AUDIT_SLOTS = threading.BoundedSemaphore(
     ComplianceConstants.AUDIT_MAX_CONCURRENCY
 )
@@ -191,6 +202,7 @@ def _package_payload(package: RegulationAuditPackage) -> Dict[str, object]:
         "product": {
             "name": package.product_name,
             "name_evidence_ref": "PNAME",
+            "complete_document": package.complete_document,
             "tags": package.product_tags.to_dict(),
             "clauses": [
                 {
@@ -252,13 +264,15 @@ def build_audit_messages(
 
 约束：
 1. non_compliant 必须同时引用至少一条法规证据和一条产品条款证据。
-2. compliant 必须同时有法规证据和产品条款证据；若无法用产品原文证明已满足要求，
-   输出 insufficient_information。
+2. compliant 必须同时有法规证据和产品条款证据；只有第8项允许产品证据为空。
 3. 法规适用性存在争议时输出 manual_review，并将 applicability_dispute 设为 true。
 4. quote 必须是对应 evidence_id 原文中的连续逐字摘录。
 5. evidence_id 只能使用审核包提供的短 evidence_ref：法规使用R001…，产品条款使用P001…，产品名称使用PNAME。
 6. 产品条款证据必须摘录条款正文，不得只引用条款标题；摘录至少包含一个完整事实或要求。
 7. 产品名称确实能够证明产品身份或名称明示属性时，可以使用PNAME；不得用产品名称证明条款正文必须包含的表述。
+8. 若法规明确禁止特定表述、责任或设计，且product.complete_document为true，逐块检查完整
+   产品条款后未发现禁止事项，可以将product_evidence留空，但reasoning必须明确写明“已检查
+   完整产品条款，未发现……”；数值上下限和“应当/必须”义务不得使用此例外。
 
 审核包：
 """ + payload
@@ -409,8 +423,20 @@ def _validate_evidence(
         incomplete = True
         error_code = "missing_non_compliance_evidence"
         reasoning = f"{reasoning}；模型未提供完整的法规与产品条款证据。"
+    regulation_text = "\n".join(
+        chunk.content for chunk in package.regulation.chunks
+    )
+    absence_compliance = (
+        status is RegulationDecisionStatus.COMPLIANT
+        and package.complete_document
+        and bool(regulation_evidence)
+        and not product_evidence
+        and _PROHIBITION_PATTERN.search(regulation_text) is not None
+        and _EVIDENCE_REQUIRED_PATTERN.search(regulation_text) is None
+        and _ABSENCE_FINDING_PATTERN.search(reasoning) is not None
+    )
     if status is RegulationDecisionStatus.COMPLIANT and (
-        not regulation_evidence or not product_evidence
+        not regulation_evidence or (not product_evidence and not absence_compliance)
     ):
         status = RegulationDecisionStatus.MANUAL_REVIEW
         incomplete = True
@@ -630,6 +656,7 @@ def _validate_batch_product_context(
         if (
             package.product_name != first.product_name
             or package.product_tags != first.product_tags
+            or package.complete_document != first.complete_document
             or clauses != first_clauses
         ):
             raise ValueError("一个审核批次只能共享同一份产品事实和产品条款")
@@ -659,6 +686,7 @@ def _segment_package(
         regulation=replace(package.regulation, chunks=chunks),
         clauses=clauses,
         facts=facts,
+        complete_document=False,
     )
 
 

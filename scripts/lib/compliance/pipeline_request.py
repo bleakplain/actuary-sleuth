@@ -277,4 +277,5 @@ def build_audit_pipeline_request(
         audit_input_fingerprint=source.audit_input_fingerprint,
         product_name_source=source.product_name_source,
         parse_warnings=source.parse_warnings,
+        coverage_attested=verified_attestation.coverage_attested,
     )

@@ -173,6 +173,7 @@ async def _event_payloads(response: Any) -> List[Dict[str, Any]]:
 def test_v2_request_rebuilds_authoritative_tags_and_keeps_stable_blocks() -> None:
     request = _pipeline_request(_request())
 
+    assert request.coverage_attested is True
     assert request.product_tags.line.value == "health"
     assert request.product_tags.primary_subtype.value == "medical"
     assert {
