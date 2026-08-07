@@ -1,0 +1,359 @@
+# Implementation Plan: 产品事实驱动的法规触发与动态证据检索
+
+**Date**: 2026-08-07  
+**Status**: Review Draft — 未执行  
+**Input**: `research.md`、036 审核主链规格与 real-019 原型结果
+
+## 1. Summary
+
+在现有主链中增加可审计的法规触发事实，并用触发结果约束动态条款检索：
+
+```text
+文档结构解析
+→ 一次性产品通用事实账本
+→ 产品标签过滤法规
+→ 汇总并去重候选法规的触发事实需求
+→ 确定性提取 + 少量批量 GLM 事实补充
+→ triggered / not_triggered / indeterminate
+→ 主题、事实、受控关系和带门槛文本检索
+→ 按需扩大证据
+→ 云端 GLM-4 最终法规判断
+```
+
+本计划不修改法规原文，不让旧 `rule_engine.py` 提供监管语义，不允许事实层直接输出合规结论。
+
+## 2. Technical Context
+
+**Language**: Python 3.14  
+**Existing modules**: `scripts/lib/compliance/`、`scripts/lib/doc_parser/pd/`、`scripts/lib/llm/`  
+**Retrieval**: 受控主题、BM25、现有 embedding/reranker  
+**LLM**: 云端 GLM-4，复用现有客户端、超时、重试和计量  
+**Testing**: pytest、冻结真实产品验收表、离线模型桩  
+**Performance goal**: 单份产品暂定不超过 5 分钟；触发事实不得按法规逐条调用 LLM。
+
+## 3. Constitution Check
+
+- [x] **Library-First**：复用 `ProductTags`、`ExtractedFact`、条款路由、检索器和 LLM 工厂。
+- [x] **测试优先**：先冻结触发事实和法规—证据真值，再接生产调用。
+- [x] **简单优先**：第一版只支持少量显式运算符和证明策略，不建设通用规则语言。
+- [x] **显式优于隐式**：触发结果记录事实、证据、方法、置信度和三态原因。
+- [x] **可追溯性**：各阶段回溯 036 的 US2—US6。
+- [x] **独立可测试**：事实提取、触发求值、证据检索和 GLM 判断分别测试。
+
+## 4. 方案权衡
+
+| 方案 | 做法 | 优点 | 缺点 | 结论 |
+|---|---|---|---|---|
+| A. 全确定性规则 | 用关键词、正则覆盖全部触发事实 | 快、可解释 | 无法穷举复杂表达，容易误判 false | 不采用 |
+| B. 每法规 LLM 判断触发 | 每条法规单独让 GLM 读产品 | 实现直观 | 调用数接近翻倍，慢且不可审计 | 不采用 |
+| C. 共享事实账本 + 按需 GLM | 通用事实一次提取，未决事实合并补充 | 可复用、可追溯、时间可控 | 需要触发元数据和验收集 | 采用 |
+
+## 5. 核心数据合同
+
+### 5.1 法规触发规格
+
+第一版只支持有限运算符：`equals / exists / contains_any / less_than_or_equal`；证明策略限于：
+
+- `explicit_presence`：有明确正面证据；
+- `explicit_negation`：有明确否定证据；
+- `closed_phrase_scan`：封闭词表全文扫描；
+- `numeric_fact`：带单位的数值事实；
+- `semantic_fact`：规则不能确定时的语义事实。
+
+每个法规条款单元保存：
+
+```text
+fact_name
+operator
+expected_value
+target_topics
+required_facts
+proof_strategy
+search_all_terms
+search_any_terms
+```
+
+第一版不执行任意 Python 表达式，也不支持任意嵌套布尔逻辑。复杂条件拆成多个受控条件按 AND 求值，确有已验收需求后再扩展。
+
+### 5.2 产品事实账本
+
+每个事实保存：
+
+```text
+name
+truth = true | false | unknown
+value
+unit
+method
+confidence
+evidence(clause_id, quote)
+reason
+```
+
+账本按产品审核请求生成一次，所有法规共享。
+
+### 5.3 触发求值结果
+
+```text
+status = triggered | not_triggered | indeterminate
+fact_names
+reasons
+evidence_clause_ids
+```
+
+只有 `not_triggered` 才停止该具体检查；`indeterminate` 必须保留法规。
+
+## 6. 数据来源与治理
+
+推荐在法规 Excel 增加受控列，作为精算维护源：
+
+- 触发事实；
+- 触发运算符；
+- 触发期望值；
+- 目标条款主题；
+- 证明策略；
+- 检索必含词组；
+- 检索任一词组；
+- 触发条件说明。
+
+Excel 转换器把这些列编译进 KB metadata。空值表示“没有触发规格”，不是 false；未配置的法规继续进入审核。触发 schema 具有独立版本，并写入 KB 构建清单和报告。
+
+## 7. Implementation Phases
+
+### Phase 0：冻结试点真值与性能基线
+
+**回溯**：US3、US5、US6。
+
+1. 选择 10—20 条试点法规，覆盖保单贷款、等待期、宽限期、续保、费率可调、院外购药、身故责任、现金价值、重疾定义和固定禁止表述。
+2. 每条由精算确认：触发事实、false 的证明标准、正确产品证据块、没有相关条款时的期望行为。
+3. 至少使用 5 份产品，覆盖触发、明确不触发和未知。
+4. 冻结 `trigger-truth-v1.xlsx/json`、文件指纹和 KB 版本。
+5. 记录完整条款基线：法规数、调用数、Token、耗时和结论完整率。
+
+**Gate**：没有精算真值的法规不得用于动态剔除验收。
+
+### Phase 1：触发 schema 与 Excel 转换
+
+**回溯**：US2、US5、US6。
+
+涉及：`scripts/lib/common/compliance_audit.py`、实际 2026 Excel 转换入口、`scripts/lib/rag_engine/kb_rebuild.py` 和 metadata 测试。
+
+1. 增加冻结触发模型和 schema 版本。
+2. 转换 Excel 受控列并校验运算符、事实名、主题和证明策略。
+3. 非法值阻止构建，不得静默忽略。
+4. KB catalog 和法规条款单元保留触发规格。
+
+**验收**：相同 Excel 稳定生成相同 metadata；非法配置不能进入 KB。
+
+### Phase 2：一次性产品事实账本
+
+**回溯**：US1、US5。
+
+涉及：`scripts/lib/common/compliance_audit.py`、`scripts/lib/compliance/fact_extraction.py`、`scripts/lib/doc_parser/pd/clause_tagger.py`、`scripts/lib/compliance/audit_pipeline.py`。
+
+1. 将事实提取从“每法规包重复执行”提升为“每产品一次”。
+2. 汇总候选法规需要的 `fact_name` 并去重。
+3. 依次复用产品名称标签、标题主题、正文词组和现有确定性事实。
+4. `true / false / unknown` 均记录证据、方法、置信度和原因。
+5. 不从“没有命中关键词”直接推出 false。
+6. 冲突证据返回 unknown，并保留冲突条款。
+
+**验收**：同一事实只提取一次；所有 true 有逐字证据；不安全负向推断均为 unknown。
+
+### Phase 3：确定性触发求值器
+
+**回溯**：US2、US5。
+
+新增 `scripts/lib/compliance/regulation_triggers.py`，接入 `audit_pipeline.py`。
+
+1. 用受控运算符求值，不执行任意表达式。
+2. 满足期望值输出 triggered。
+3. 只有明确否定、互斥分类或封闭扫描才能输出 not_triggered。
+4. 缺失、低置信度或冲突事实输出 indeterminate。
+5. indeterminate 保留法规；报告记录状态和理由。
+
+**验收**：试点真值中 not_triggered 精确率 100%；unknown 不造成排除。
+
+### Phase 4：安全动态条款证据检索
+
+**回溯**：US3、US5。
+
+涉及 `clause_routing.py`、`tokenizer.py`；仅在职责需要时新增 `scripts/lib/compliance/clause_evidence.py`，词组和阈值放在 `scripts/lib/compliance/data/`。
+
+第一轮正文候选按证据强度组成：
+
+1. 触发事实的证据条款；
+2. 与 `target_topics` 精确匹配的条款；
+3. 受控关联主题条款；
+4. 满足业务对象词组约束的条款；
+5. 达到最低 BM25/语义分数门槛的条款。
+
+约束：
+
+- 不再无条件 Top K；全部低于门槛时返回“未找到相关条款”。
+- 父级只提供编号、标题和路径，不自动提交整个子树正文。
+- “保单贷款”不能只凭“现金价值”命中。
+- unknown 条款保留在完整目录，可供二次请求，但第一轮不全部提交正文。
+- 结果记录选择原因、分数和来源。
+
+**验收**：试点法规正确条款召回率 100%；错误业务对象不得因单一共同词进入第一轮。
+
+### Phase 5：未决事实的批量 GLM 提取
+
+**回溯**：US4、US5、US6。
+
+复用 `scripts/lib/llm/`，在事实提取和审核编排中实现：
+
+1. 所有 unresolved fact 按产品去重。
+2. 一次请求包含多个独立事实任务，结果与证据逐任务隔离。
+3. 只发送相关候选条款，不发送全部法规。
+4. 输出限于 true / false / unknown 和产品证据 ID。
+5. 校验证据 ID、原文、任务完整性和冲突。
+6. 无响应、漏答、低置信度或无证据保持 unknown。
+7. 一份产品默认最多 1—2 个事实补充请求，不按法规扇出。
+
+**验收**：GLM 失败不排除法规；并发不改变事实和证据归属。
+
+### Phase 6：按需扩大上下文与最终 GLM 审核
+
+**回溯**：US3、US4、US6。
+
+涉及 `scripts/lib/compliance/auditor.py`、`audit_pipeline.py` 和公共审核模型。
+
+1. 第一轮提交触发证据、检索正文和完整编号目录。
+2. 模型只返回证据 ID，原文由程序解析。
+3. `needs_more_context=true` 时不得形成确定结论。
+4. 补充编号必须真实、一次最多 5 个，只允许一次扩展。
+5. 禁止性固定表述使用经精算确认的封闭词表全文扫描；解析不完整时不能形成零命中符合。
+6. 正向义务 compliant 必须有产品事实或条款证据。
+7. 二次扩展仍不足则输出 insufficient_information，不无限追问。
+
+**验收**：无虚构编号、自相矛盾状态或模型改写证据；确定结论全部通过程序校验。
+
+### Phase 7：准确率、性能和降级验收
+
+**回溯**：US3、US4、US6。
+
+对比完整条款基线和动态链路：触发事实准确率、not_triggered 精确率、法规保留召回率、产品证据召回率、调用数、Token、耗时、限流和 incomplete 数量。相同输入并发重复运行时，结论、证据 ID 和失败状态必须一致。
+
+**上线门槛**：
+
+- not_triggered 精确率 100%；
+- 核心法规保留召回率 100%；
+- 核心法规证据条款召回率 100%；
+- 无证据不合规结论为 0；
+- 5 分钟内完成，或如实标记 incomplete；
+- 精算签署试点验收表。
+
+### Phase 8：影子运行与生产切换
+
+**回溯**：US4、US6。
+
+1. 动态链路先与完整条款链路影子对照，不影响正式结果。
+2. 差异按触发、检索、模型、系统失败分类。
+3. Phase 7 全部通过后才切换默认路径。
+4. 动态链路失败时回退完整条款并标记 degraded。
+5. 稳定期后删除原型和临时兼容逻辑，不长期保留双轨死代码。
+
+## 8. Test Plan
+
+### 单元测试
+
+- 触发 schema 合法/非法输入；
+- true、false、unknown 与冲突证据；
+- 明确否定、互斥分类、封闭扫描三类安全 false；
+- 运算符求值；
+- BM25 零分/低分不返回；
+- “现金价值”不能单独命中保单贷款；
+- 父子层级不扩展整章；
+- GLM 漏答、无效 ID、低置信度、超时；
+- 补充编号真实且不超过 5；
+- needs_more_context 与确定结论互斥。
+
+### 集成与真实产品测试
+
+- 上传产品只生成一份事实账本；
+- 多法规共享事实，不重复提取；
+- unknown 触发保留法规；
+- 未配置触发规格保持现有行为；
+- 动态检索失败回退全文并标记 degraded；
+- API 报告包含事实、触发、检索和版本 trace；
+- 真实产品覆盖有/无保单贷款、有/无等待期、保证/不保证续保、费率可调、禁止词命中/未命中。
+
+## 9. Performance Budget
+
+```text
+总时间
+= 文档解析
++ 本地事实与检索
++ 最多 1—2 次未决事实补充
++ 最终法规审核
+```
+
+- 本地事实与触发求值目标为秒级；
+- 事实补充请求默认上限 2；
+- 最终判断最大并发初始保持 5；
+- 达到 5 分钟时，剩余法规标记未完成，不输出虚假合规。
+
+## 10. Risks
+
+| 风险 | 影响 | 缓解 |
+|---|---|---|
+| 触发 metadata 错误 | 错误排除法规 | 精算验收；unknown 保留；not_triggered 精确率 100% |
+| 无关键词被误作 false | 漏检 | 仅安全负向证明可输出 false |
+| 主题覆盖率低 | 证据遗漏 | 事实优先、语义检索、按需扩展、全文回退 |
+| 共同词误召回 | 错误证据 | 业务对象词组和最低阈值 |
+| GLM 事实幻觉 | 错误触发 | 证据 ID 校验；无证据保持 unknown |
+| 合批漏答 | 部分事实缺失 | required IDs 校验；漏答保持 unknown |
+| 账户限流 | 超时 | 事实复用、短上下文、全局并发和 incomplete |
+
+## 11. Complexity Tracking
+
+| 项目 | 必要性 | 更简单方案及排除理由 |
+|---|---|---|
+| 三态事实账本 | 未命中不能普遍证明不存在 | 布尔值简单但会把 unknown 当 false |
+| 触发 metadata | 静态适用标签无法表达功能触发 | 每次让 GLM 理解慢且不可审计 |
+| 二次按需扩展 | 第一轮短上下文可能缺证据 | 永远全文无法降低 Token |
+| 批量未决事实 | 避免逐法规 LLM 调用 | 每法规单独提取调用数不可控 |
+
+不引入工作流框架、独立微服务、任意表达式执行或长期双轨配置。
+
+## 12. Execution Order
+
+```text
+Phase 0 精算真值
+→ Phase 1 触发 schema
+→ Phase 2 产品事实账本
+→ Phase 3 触发求值
+→ Phase 4 动态证据检索
+→ Phase 5 未决事实 GLM
+→ Phase 6 最终审核与按需扩展
+→ Phase 7 验收
+→ Phase 8 影子切换
+```
+
+Phase 0—4 可完全离线交付；Phase 5 后才需要在线 GLM。
+
+## 13. Review Gates
+
+1. 是否接受触发事实三态，并且只有明确 false 才不触发；
+2. 法规 Excel 是否作为触发条件的精算维护源；
+3. 第一批是否只做 10—20 条代表法规，而非一次覆盖全部；
+4. 未配置触发条件的法规是否继续全部进入审核；
+5. unresolved 事实是否最多合并为 1—2 次 GLM 提取；
+6. 动态证据未达到 100% 核心召回前，生产是否继续完整条款模式；
+7. 完整解析证明成立时，固定禁止表述是否采用封闭词表全文扫描；
+8. 是否继续使用云端 GLM-4 形成最终法规结论；
+9. 是否维持端到端 5 分钟、最大并发 5 的目标。
+
+## 14. Acceptance Summary
+
+| 能力 | 验收标准 |
+|---|---|
+| 产品事实 | true 有证据；不安全 false 为 unknown |
+| 触发判断 | not_triggered 精确率 100%；unknown 不排除 |
+| 条款证据 | 核心正确条款召回率 100% |
+| GLM 补充 | 无效、漏答、低置信度不改变 unknown |
+| 最终判断 | 确定结论均有有效证据；无自相矛盾状态 |
+| 性能 | 5 分钟内完成或明确 incomplete |
+
