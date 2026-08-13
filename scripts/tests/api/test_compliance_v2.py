@@ -16,7 +16,11 @@ from api.routers import compliance_v2
 from api.routers.compliance_v2 import _pipeline_request, build_report_data
 from api.schemas.compliance import DocumentCheckRequest
 from api.database import get_compliance_report
-from lib.auth.parse_attestation import issue_parse_attestation
+from lib.auth.parse_attestation import (
+    ParseAttestationError,
+    issue_parse_attestation,
+    verify_parse_attestation,
+)
 from lib.auth import parse_attestation
 from lib.common.compliance_audit import (
     AuditClauseSnapshot,
@@ -24,8 +28,12 @@ from lib.common.compliance_audit import (
     RegulationAuditDecision,
     RegulationDecisionStatus,
 )
+from lib.common.constants import CoverageFactKeys
 from lib.compliance.audit_pipeline import run_audit_pipeline
-from lib.compliance.regulation_retrieval import RegulationRetrievalOutcome
+from lib.compliance.regulation_retrieval import (
+    AuditRegulationItem,
+    RegulationRetrievalOutcome,
+)
 from lib.compliance.regulation_units import RegulationChunk, RegulationUnit
 from lib.doc_parser.models import (
     calculate_audit_input_fingerprint,
@@ -136,6 +144,40 @@ def _issue_v1_attestation(
     return f"{encoded_payload}.{parse_attestation._encode(signature)}"
 
 
+def _issue_v2_attestation(
+    request: DocumentCheckRequest,
+    *,
+    coverage_attested: bool,
+) -> str:
+    issued_at = int(time.time())
+    payload = {
+        "v": 2,
+        "iat": issued_at,
+        "exp": issued_at + 30 * 60,
+        "parse_id": request.parse_id,
+        "document_fingerprint": request.document_fingerprint,
+        "audit_input_fingerprint": request.audit_input_fingerprint,
+        "product_name_source": request.product_name_source,
+        "coverage_attested": coverage_attested,
+        "parse_warnings_sha256": parse_attestation._warnings_digest(
+            request.parse_warnings,
+        ),
+        "sub": "",
+    }
+    encoded_payload = parse_attestation._encode(json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8"))
+    signature = hmac.new(
+        parse_attestation._signing_key(parse_attestation._V2_DOMAIN),
+        encoded_payload.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    return f"{encoded_payload}.{parse_attestation._encode(signature)}"
+
+
 def _unit() -> RegulationUnit:
     return RegulationUnit(
         unit_id="unit-1",
@@ -160,6 +202,51 @@ def _unit() -> RegulationUnit:
         applicability_status="applicable",
         regulation_topics=("coverage.waiting_period",),
     )
+
+
+def test_v3_attestation_signs_sorted_deduplicated_fact_coverage() -> None:
+    issued = issue_parse_attestation(
+        "parse-facts",
+        "document-fingerprint",
+        "audit-input-fingerprint",
+        "document_content",
+        coverage_attested=False,
+        coverage_attested_facts=(
+            CoverageFactKeys.TAX_ADVANTAGED_TEXT,
+            CoverageFactKeys.RENEWAL_TEXT,
+            CoverageFactKeys.TAX_ADVANTAGED_TEXT,
+        ),
+    )
+
+    verified = verify_parse_attestation(
+        issued.token,
+        "parse-facts",
+        "document-fingerprint",
+        "audit-input-fingerprint",
+        "document_content",
+        coverage_attested=False,
+        coverage_attested_facts=(
+            CoverageFactKeys.RENEWAL_TEXT,
+            CoverageFactKeys.TAX_ADVANTAGED_TEXT,
+        ),
+    )
+
+    assert verified.version == 3
+    assert verified.coverage_attested_facts == tuple(sorted((
+        CoverageFactKeys.RENEWAL_TEXT,
+        CoverageFactKeys.TAX_ADVANTAGED_TEXT,
+    )))
+
+
+def test_v3_attestation_rejects_unknown_fact_coverage_key() -> None:
+    with pytest.raises(ParseAttestationError, match="未知事实键"):
+        issue_parse_attestation(
+            "parse-facts",
+            "document-fingerprint",
+            "audit-input-fingerprint",
+            "document_content",
+            coverage_attested_facts=("renewel_text",),
+        )
 
 
 async def _event_payloads(response: Any) -> List[Dict[str, Any]]:
@@ -436,6 +523,73 @@ def test_v2_request_disables_absence_inference_without_coverage_proof() -> None:
     assert pipeline_request.product_tags.renewal_type.value == "unknown"
 
 
+def test_v3_request_uses_signed_per_fact_coverage() -> None:
+    request = _request()
+    request.coverage_attested = False
+    request.coverage_attested_facts = [
+        CoverageFactKeys.OUT_OF_HOSPITAL_DRUG_TEXT,
+    ]
+    request.product_tags = build_product_tags(
+        request.product_name,
+        request.document_content,
+        product_name_source=request.product_name_source,
+        complete_document=False,
+        coverage_attested_facts=tuple(request.coverage_attested_facts),
+    ).to_dict()
+    request.parse_attestation = issue_parse_attestation(
+        request.parse_id,
+        request.document_fingerprint,
+        request.audit_input_fingerprint,
+        request.product_name_source,
+        coverage_attested=False,
+        coverage_attested_facts=request.coverage_attested_facts,
+    ).token
+
+    pipeline_request = _pipeline_request(request)
+
+    assert pipeline_request.coverage_attested is False
+    assert pipeline_request.coverage_attested_facts == (
+        CoverageFactKeys.OUT_OF_HOSPITAL_DRUG_TEXT,
+    )
+    assert pipeline_request.product_tags.mentions_out_of_hospital_drug is False
+    assert pipeline_request.product_tags.renewal_type.value == "unknown"
+
+
+def test_v3_request_uses_signed_facts_when_legacy_client_omits_field() -> None:
+    request = _request()
+    signed_facts = (CoverageFactKeys.OUT_OF_HOSPITAL_DRUG_TEXT,)
+    request.coverage_attested = False
+    request.coverage_attested_facts = None
+    request.product_tags = build_product_tags(
+        request.product_name,
+        request.document_content,
+        product_name_source=request.product_name_source,
+        complete_document=False,
+        coverage_attested_facts=signed_facts,
+    ).to_dict()
+    request.parse_attestation = issue_parse_attestation(
+        request.parse_id,
+        request.document_fingerprint,
+        request.audit_input_fingerprint,
+        request.product_name_source,
+        coverage_attested=False,
+        coverage_attested_facts=signed_facts,
+    ).token
+
+    pipeline_request = _pipeline_request(request)
+
+    assert pipeline_request.coverage_attested_facts == signed_facts
+    assert pipeline_request.product_tags.mentions_out_of_hospital_drug is False
+
+
+def test_v3_request_rejects_tampered_per_fact_coverage() -> None:
+    request = _request()
+    request.coverage_attested_facts = [CoverageFactKeys.RENEWAL_TEXT]
+
+    with pytest.raises(HTTPException, match="审核输入身份不一致"):
+        _pipeline_request(request)
+
+
 def test_v1_attestation_overrides_submitted_tags_and_logs_mismatches(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -458,6 +612,43 @@ def test_v1_attestation_overrides_submitted_tags_and_logs_mismatches(
     assert pipeline_request.product_tags.renewal_type.value == "unknown"
     assert "mismatched_fields=" in caplog.text
     assert "line" in caplog.text
+
+
+def test_v1_attestation_cannot_elevate_per_fact_coverage() -> None:
+    request = _request()
+    issued_at = int(time.time())
+    request.parse_attestation = _issue_v1_attestation(
+        request,
+        issued_at=issued_at,
+        expires_at=issued_at + 30 * 60,
+    )
+    request.coverage_attested_facts = [CoverageFactKeys.RENEWAL_TEXT]
+
+    pipeline_request = _pipeline_request(request)
+
+    assert pipeline_request.coverage_attested_facts == ()
+    assert pipeline_request.product_tags.renewal_type.value == "unknown"
+
+
+def test_v2_attestation_cannot_elevate_per_fact_coverage() -> None:
+    request = _request()
+    request.coverage_attested = False
+    request.coverage_attested_facts = [CoverageFactKeys.RENEWAL_TEXT]
+    request.product_tags = build_product_tags(
+        request.product_name,
+        request.document_content,
+        product_name_source=request.product_name_source,
+        complete_document=False,
+    ).to_dict()
+    request.parse_attestation = _issue_v2_attestation(
+        request,
+        coverage_attested=False,
+    )
+
+    pipeline_request = _pipeline_request(request)
+
+    assert pipeline_request.coverage_attested_facts == ()
+    assert pipeline_request.product_tags.renewal_type.value == "unknown"
 
 
 def test_v1_attestation_rejects_duration_over_compatibility_ttl() -> None:
@@ -548,6 +739,91 @@ def test_v2_report_keeps_manual_review_and_incomplete_state() -> None:
     assert routed["assignment-clause"]["relation"] == "not_relevant"
     assert routed["assignment-clause"]["submitted"] is True
     assert report["clause_coverage"]["checked"] == report["clause_coverage"]["total"]
+    assert report["regulation_trigger_schema_version"] == "unavailable"
+    assert report["regulation_catalog_sha256"] == "unavailable"
+    assert report["approved_regulation_trigger_catalog_sha256"] == (
+        "unavailable"
+    )
+    assert report["supported_regulation_trigger_schema_version"] == "1.0.0"
+    assert report["trigger_exclusion_mode"] == "shadow"
+    assert report["trigger_exclusion_ready"] is False
+    assert "生产切换门禁尚未通过" in report[
+        "trigger_exclusion_blockers"
+    ]
+    assert report["product_fact_resolution"]["attempted"] is False
+    assert report["coverage_attested"] is request.coverage_attested
+    assert report["coverage_attested_facts"] == list(
+        request.coverage_attested_facts
+    )
+    trigger_record = report["trigger_evaluations"][0]
+    assert trigger_record["kb_version"] == "v5"
+    assert trigger_record["source_file"] == "健康险.md"
+    assert trigger_record["chunk_ids"] == ["chunk-1"]
+    assert report["trigger_evaluations"][0]["evaluation"]["status"] == (
+        "triggered"
+    )
+    assert report["dynamic_evidence_mode"] == (
+        "shadow_full_document_baseline"
+    )
+    assert report["decisions"][0]["dynamic_evidence_shadow"] is not None
+
+
+def test_report_separates_retrieved_and_retained_regulations() -> None:
+    request = _pipeline_request(_request())
+    unit = _unit()
+
+    def retriever(*args):
+        return RegulationRetrievalOutcome(
+            regulations=(),
+            regulation_units=(unit,),
+            candidate_count=1,
+        )
+
+    result = run_audit_pipeline(
+        request,
+        retriever=retriever,
+        package_auditor=lambda packages, *args: tuple(
+            RegulationAuditDecision(
+                task_id=package.task_id,
+                regulation_unit_id=package.regulation.regulation_unit_id,
+                status=RegulationDecisionStatus.COMPLIANT,
+                reasoning="符合要求。",
+                suggestion="",
+                regulation_evidence=(),
+                product_evidence=(),
+            )
+            for package in packages
+        ),
+    )
+    active = AuditRegulationItem(
+        chunk_id="chunk-active",
+        law_name="保留法规",
+        article_number="第一条",
+        content="法规正文",
+        source_type="catalog",
+        regulation_unit_id=unit.unit_id,
+    )
+    excluded = replace(
+        active,
+        chunk_id="chunk-excluded",
+        law_name="触发排除法规",
+        regulation_unit_id="regulation-unit:excluded",
+    )
+    result = replace(
+        result,
+        retrieval=replace(result.retrieval, regulations=(active, excluded)),
+    )
+
+    report = build_report_data(result)
+
+    assert [item["chunk_id"] for item in report["retrieved_regulations"]] == [
+        "chunk-active",
+        "chunk-excluded",
+    ]
+    assert [item["chunk_id"] for item in report["regulations"]] == [
+        "chunk-active",
+    ]
+    assert report["regulation_sources"] == {"全库候选": ["保留法规"]}
 
 
 def test_negative_list_category_does_not_depend_on_law_name_text() -> None:

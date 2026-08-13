@@ -45,6 +45,11 @@ def _catalog_row(
             "适用标签": "health",
             "风险触发标签": "rate_adjustable",
             "检查目标标签": "long_term",
+            "触发事实": "has_policy_loan",
+            "触发运算符": "equals",
+            "触发期望值": "true",
+            "目标条款主题": "policy.loan",
+            "证明策略": "explicit_presence",
         },
     }
 
@@ -182,6 +187,9 @@ def test_manifest_and_identity_are_derived_from_catalog():
     assert manifest["metadata_coverage"]["适用标签"] == 2
     assert manifest["metadata_coverage"]["风险触发标签"] == 2
     assert manifest["metadata_coverage"]["检查目标标签"] == 2
+    assert manifest["metadata_coverage"]["触发事实"] == 2
+    assert manifest["metadata_coverage"]["触发运算符"] == 2
+    assert manifest["regulation_trigger_schema_version"] == "1.0.0"
     assert identity["kb_version"] == "v5"
     assert identity["catalog_sha256"]
 
@@ -209,6 +217,46 @@ def test_staged_validation_rejects_duplicate_or_random_ids():
     assert not result.valid
     assert any("重复" in error for error in result.errors)
     assert any("非确定性" in error for error in result.errors)
+
+
+def test_staged_validation_rejects_invalid_trigger_metadata():
+    catalog = [_catalog_row("kb-chunk:first", 1)]
+    catalog[0]["metadata"]["触发运算符"] = "python_eval"
+
+    result = validate_staged_catalog(
+        version="v5",
+        catalog=catalog,
+        bm25_nodes=catalog,
+        stats={"parsed": 1, "quality_passed": 1, "vector": 1, "bm25": 1},
+        expected_documents=1,
+        expected_chunks=1,
+    )
+
+    assert not result.valid
+    assert any("法规触发规格非法" in error for error in result.errors)
+
+
+def test_staged_validation_rejects_inconsistent_unit_trigger_specs():
+    first = _catalog_row("kb-chunk:first", 1)
+    second = _catalog_row("kb-chunk:second", 2)
+    second["article_number"] = "第1条检核规则"
+    second["section_path"] = "第1条检核规则"
+    second["metadata"]["article_number"] = "第1条检核规则"
+    second["metadata"]["section_path"] = "第1条检核规则"
+    second["metadata"]["触发期望值"] = "false"
+    catalog = [first, second]
+
+    result = validate_staged_catalog(
+        version="v5",
+        catalog=catalog,
+        bm25_nodes=catalog,
+        stats={"parsed": 1, "quality_passed": 1, "vector": 2, "bm25": 2},
+        expected_documents=1,
+        expected_chunks=2,
+    )
+
+    assert not result.valid
+    assert any("触发规格不一致" in error for error in result.errors)
 
 
 def test_staged_validation_still_rejects_legacy_metadata():

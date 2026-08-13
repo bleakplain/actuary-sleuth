@@ -8,7 +8,7 @@ import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, replace
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 _PROMPT_SAFETY_MARGIN = 10_000
 _MIN_EVIDENCE_CHARACTERS = 6
 _MIN_AUTOMATED_DECISION_CONFIDENCE = 0.7
+_MAX_CONTEXT_REQUEST_NUMBERS = 5
 _PROHIBITION_PATTERN = re.compile(
     r"(?:不得|严禁|禁止)"
     r"(?![^。；\n]{0,8}(?:超过|低于|少于|高于|短于|长于|早于|晚于|过高|过低))"
@@ -40,7 +41,8 @@ _ABSENCE_FINDING_PATTERN = re.compile(
     r"未(?:包含|出现|使用|采用|约定|通过|混淆|提供|设置|设计|自定义))"
 )
 _EVIDENCE_REQUIRED_PATTERN = re.compile(
-    r"(?:应当|必须|不超过|不低于|不少于|不高于|不短于|不长于|不早于|不晚于)"
+    r"(?:应当|必须|应|须|需|至少|至多|不超过|不低于|不少于|"
+    r"不高于|不短于|不长于|不早于|不晚于)"
 )
 _GLOBAL_AUDIT_SLOTS = threading.BoundedSemaphore(
     ComplianceConstants.AUDIT_MAX_CONCURRENCY
@@ -66,6 +68,8 @@ class _DecisionOutput(BaseModel):
     product_evidence: Tuple[_EvidenceOutput, ...] = ()
     applicability_dispute: bool = False
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    needs_more_context: bool = False
+    requested_outline_refs: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -87,23 +91,69 @@ def _regulation_evidence_refs(
 def _product_evidence_refs(
     package: RegulationAuditPackage,
 ) -> Dict[str, RoutedClause]:
-    submitted = (item for item in package.clauses if item.submitted)
+    submitted = (
+        item
+        for item in package.clauses
+        if item.submitted and _has_clause_body(item)
+    )
     return {
         f"P{index:03d}": routed
         for index, routed in enumerate(submitted, start=1)
     }
 
 
+def _has_clause_body(routed: RoutedClause) -> bool:
+    return not routed.clause.container_only and bool(routed.clause.text.strip())
+
+
+def _outline_refs(package: RegulationAuditPackage) -> Dict[str, RoutedClause]:
+    return {
+        f"O{index:03d}": routed
+        for index, routed in enumerate(package.clauses, start=1)
+    }
+
+
+def _has_complete_submitted_document(package: RegulationAuditPackage) -> bool:
+    body_clauses = tuple(
+        routed for routed in package.clauses if _has_clause_body(routed)
+    )
+    return (
+        package.complete_document
+        and bool(body_clauses)
+        and all(routed.submitted for routed in body_clauses)
+    )
+
+
 def _batch_payload(
     packages: Tuple[RegulationAuditPackage, ...],
 ) -> Dict[str, object]:
     first = _package_payload(packages[0])
+    product = first.get("product")
+    if not isinstance(product, Mapping):
+        raise ValueError("审核包缺少结构化产品上下文")
+    shared_product: Dict[str, object] = dict(product)
+    raw_clauses = shared_product.get("clauses")
+    if not isinstance(raw_clauses, list):
+        raise ValueError("审核包产品条款必须是结构化列表")
+    structured_clauses = tuple(
+        clause for clause in raw_clauses if isinstance(clause, Mapping)
+    )
+    if len(structured_clauses) != len(raw_clauses):
+        raise ValueError("审核包产品条款必须是结构化列表")
+    shared_product["clauses"] = [
+        {
+            key: value
+            for key, value in clause.items()
+            if key not in {"relation", "routing_reasons"}
+        }
+        for clause in structured_clauses
+    ]
     return {
         "batch_id": f"{packages[0].regulation.source_file}:{packages[0].input_index}",
         "required_unit_ids": [
             package.regulation.regulation_unit_id for package in packages
         ],
-        "product": first["product"],
+        "product": shared_product,
         "regulation_tasks": [
             {
                 "task_id": package.task_id,
@@ -141,6 +191,7 @@ def build_batch_audit_messages(
     system = (
         "你是保险产品条款合规审核员。只能使用审核包提供的法规和产品原文。"
         "必须逐一回答 required_unit_ids 中的每个法规单元，不得省略、合并或新增ID。"
+        "产品事实和触发结果只是可审计trace，不得用它们改写法规适用性。"
     )
     instruction = """输出一个 JSON 对象，不得输出 Markdown：
 {"results": [{
@@ -179,6 +230,7 @@ PNAME），不得复制内部哈希或使用product_clause等占位名称。若�
 def _package_payload(package: RegulationAuditPackage) -> Dict[str, object]:
     regulation_refs = _regulation_evidence_refs(package)
     product_refs = _product_evidence_refs(package)
+    outline_refs = _outline_refs(package)
     return {
         "task_id": package.task_id,
         "regulation_unit": {
@@ -198,11 +250,26 @@ def _package_payload(package: RegulationAuditPackage) -> Dict[str, object]:
                 }
                 for evidence_ref, chunk in regulation_refs.items()
             ],
+            "trigger_evaluation": (
+                {
+                    "status": package.trigger_evaluation.status.value,
+                    "fact_names": [
+                        name.value
+                        for name in package.trigger_evaluation.fact_names
+                    ],
+                    "reasons": list(package.trigger_evaluation.reasons),
+                    "evidence_clause_ids": list(
+                        package.trigger_evaluation.evidence_clause_ids
+                    ),
+                }
+                if package.trigger_evaluation is not None
+                else None
+            ),
         },
         "product": {
             "name": package.product_name,
             "name_evidence_ref": "PNAME",
-            "complete_document": package.complete_document,
+            "complete_document": _has_complete_submitted_document(package),
             "tags": package.product_tags.to_dict(),
             "clauses": [
                 {
@@ -224,6 +291,21 @@ def _package_payload(package: RegulationAuditPackage) -> Dict[str, object]:
                 }
                 for evidence_ref, routed in product_refs.items()
             ],
+            "clause_outline": [
+                {
+                    "outline_ref": outline_ref,
+                    "number": routed.clause.number,
+                    "title": routed.clause.title,
+                    "hierarchy_level": routed.clause.hierarchy_level,
+                    "parent_number": routed.clause.parent_number,
+                    "ancestor_numbers": list(routed.clause.ancestor_numbers),
+                    "hierarchy_path": routed.clause.hierarchy_path,
+                    "body_submitted": routed.submitted,
+                    "body_available": _has_clause_body(routed),
+                    "container_only": routed.clause.container_only,
+                }
+                for outline_ref, routed in outline_refs.items()
+            ],
             "facts": [
                 {
                     "kind": fact.kind.value,
@@ -235,12 +317,34 @@ def _package_payload(package: RegulationAuditPackage) -> Dict[str, object]:
                 }
                 for fact in package.facts
             ],
+            "product_facts": [
+                {
+                    "name": fact.name.value,
+                    "truth": fact.truth.value,
+                    "value": fact.value,
+                    "unit": fact.unit,
+                    "method": fact.method,
+                    "confidence": fact.confidence,
+                    "evidence": [
+                        {
+                            "clause_id": evidence.clause_id,
+                            "quote": evidence.quote,
+                        }
+                        for evidence in fact.evidence
+                    ],
+                    "reason": fact.reason,
+                    "safe_for_exclusion": fact.safe_for_exclusion,
+                }
+                for fact in package.product_facts
+            ],
         },
     }
 
 
 def build_audit_messages(
     package: RegulationAuditPackage,
+    *,
+    allow_context_request: bool = True,
 ) -> List[Dict[str, str]]:
     payload = json.dumps(_package_payload(package), ensure_ascii=False)
     system = (
@@ -248,6 +352,7 @@ def build_audit_messages(
         "产品条款和确定性事实。一次只判断一个 regulation_unit。"
         "不得使用外部法规，不得把适用性改为 not_applicable。"
         "风险触发标签只表示该法规必须进入审核，不表示产品已经满足检查目标。"
+        "产品事实和触发结果只是可审计trace，不得用它们改写法规适用性。"
     )
     instruction = """请输出一个 JSON 对象，且不得输出 Markdown：
 {
@@ -259,7 +364,9 @@ def build_audit_messages(
   "regulation_evidence": [{"evidence_id": "<R001等evidence_ref>", "quote": "<逐字摘录>"}],
   "product_evidence": [{"evidence_id": "<P001等evidence_ref或PNAME>", "quote": "<逐字摘录>"}],
   "applicability_dispute": false,
-  "confidence": 0.95
+  "confidence": 0.95,
+  "needs_more_context": false,
+  "requested_outline_refs": []
 }
 
 约束：
@@ -274,8 +381,23 @@ def build_audit_messages(
    产品条款后未发现禁止事项，可以将product_evidence留空，但reasoning必须明确写明“已检查
    完整产品条款，未发现……”；数值上下限和“应当/必须”义务不得使用此例外。
 
-审核包：
-""" + payload
+product.clause_outline 是完整条款目录，只用于定位可能需要补充的正文，不是结论证据。
+"""
+    if allow_context_request:
+        instruction += """
+9. 只有当已提交正文不足以判断、且目录中存在明确值得补充的条款时，才可设置
+   needs_more_context=true。此时status必须为insufficient_information，不得同时形成
+   compliant/non_compliant结论，regulation_evidence和product_evidence必须为空。
+10. requested_outline_refs只能填写clause_outline中真实、正文可用且尚未提交的O001等
+    outline_ref，必须去重，最多5个；不得填写number或编造ref。
+"""
+    else:
+        instruction += """
+9. 本轮已是唯一一次上下文扩展后的最终判断。不得再请求补充条款；
+   needs_more_context必须为false，requested_outline_refs必须为空。若仍不足以
+   判断，直接输出status=insufficient_information。
+"""
+    instruction += "\n审核包：\n" + payload
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": instruction},
@@ -313,10 +435,107 @@ def _failure_decision(
     )
 
 
+def _insufficient_context_decision(
+    package: RegulationAuditPackage,
+    reasoning: str,
+) -> RegulationAuditDecision:
+    return RegulationAuditDecision(
+        task_id=package.task_id,
+        regulation_unit_id=package.regulation.regulation_unit_id,
+        status=RegulationDecisionStatus.INSUFFICIENT_INFORMATION,
+        reasoning=reasoning,
+        suggestion="请人工核对完整产品条款或补充必要材料。",
+        regulation_evidence=(),
+        product_evidence=(),
+        incomplete=False,
+        error_code="context_expansion_exhausted",
+    )
+
+
+def _validate_output_identity(
+    package: RegulationAuditPackage,
+    output: _DecisionOutput,
+) -> None:
+    if output.task_id != package.task_id:
+        raise ValueError("task_id 与审核包不一致")
+    if output.regulation_unit_id != package.regulation.regulation_unit_id:
+        raise ValueError("regulation_unit_id 与审核包不一致")
+
+
+def _validate_context_request(
+    package: RegulationAuditPackage,
+    output: _DecisionOutput,
+) -> Tuple[str, ...]:
+    _validate_output_identity(package, output)
+    requested = tuple(ref.strip() for ref in output.requested_outline_refs)
+    if not output.needs_more_context:
+        if requested:
+            raise ValueError(
+                "needs_more_context=false时不得请求补充条款"
+            )
+        return ()
+    if output.status is not RegulationDecisionStatus.INSUFFICIENT_INFORMATION:
+        raise ValueError(
+            "请求补充上下文时status必须为insufficient_information"
+        )
+    if output.applicability_dispute:
+        raise ValueError("请求补充上下文时不得同时提出适用性争议")
+    if output.regulation_evidence or output.product_evidence:
+        raise ValueError("请求补充上下文时不得同时形成证据结论")
+    if not requested or any(not number for number in requested):
+        raise ValueError("请求补充上下文时必须提供非空条款编号")
+    if len(requested) > _MAX_CONTEXT_REQUEST_NUMBERS:
+        raise ValueError(
+            f"一次最多请求{_MAX_CONTEXT_REQUEST_NUMBERS}个条款编号"
+        )
+    if len(set(requested)) != len(requested):
+        raise ValueError("请求的条款编号必须去重")
+    available = {
+        outline_ref
+        for outline_ref, routed in _outline_refs(package).items()
+        if not routed.submitted and _has_clause_body(routed)
+    }
+    invalid = tuple(number for number in requested if number not in available)
+    if invalid:
+        raise ValueError(
+            "请求了不存在、无正文或已提交的条款目录ref: " + ", ".join(invalid)
+        )
+    return requested
+
+
+def _expand_context_by_outline_refs(
+    package: RegulationAuditPackage,
+    requested_refs: Tuple[str, ...],
+) -> RegulationAuditPackage:
+    requested_clause_ids = {
+        routed.clause.clause_id
+        for outline_ref, routed in _outline_refs(package).items()
+        if outline_ref in set(requested_refs)
+    }
+    return replace(
+        package,
+        clauses=tuple(
+            replace(
+                routed,
+                submitted=True,
+                reasons=(*routed.reasons, "模型按目录编号请求补充上下文"),
+            )
+            if (
+                not routed.submitted
+                and routed.clause.clause_id in requested_clause_ids
+            )
+            else routed
+            for routed in package.clauses
+        ),
+    )
+
+
 def _validate_evidence(
     package: RegulationAuditPackage,
     output: _DecisionOutput,
 ) -> RegulationAuditDecision:
+    if _validate_context_request(package, output):
+        raise ValueError("上下文请求必须由单条审核编排流程处理")
     if not output.reasoning.strip():
         raise ValueError("reasoning 不能为空")
     regulation_content = {
@@ -371,12 +590,9 @@ def _validate_evidence(
             raise ValueError("产品证据 ID 和摘录不能为空")
         source_kind = "clause_body"
         content = product_content.get(evidence.evidence_id)
-        if evidence.evidence_id == "product-name":
+        if evidence.evidence_id in {"product-name", "PNAME"}:
             if "contract.name" not in package.regulation.topics:
-                raise ValueError("当前法规主题不允许使用 product-name 作为结论证据")
-            source_kind = "product_name"
-            content = package.product_name
-        elif evidence.evidence_id == "PNAME":
+                raise ValueError("当前法规主题不允许使用产品名称作为结论证据")
             source_kind = "product_name"
             content = package.product_name
         if content is None or evidence.quote not in content:
@@ -395,10 +611,7 @@ def _validate_evidence(
     incomplete = False
     error_code = ""
     reasoning = output.reasoning
-    if output.task_id != package.task_id:
-        raise ValueError("task_id 与审核包不一致")
-    if output.regulation_unit_id != package.regulation.regulation_unit_id:
-        raise ValueError("regulation_unit_id 与审核包不一致")
+    _validate_output_identity(package, output)
     if output.applicability_dispute:
         status = RegulationDecisionStatus.MANUAL_REVIEW
     if (
@@ -428,7 +641,7 @@ def _validate_evidence(
     )
     absence_compliance = (
         status is RegulationDecisionStatus.COMPLIANT
-        and package.complete_document
+        and _has_complete_submitted_document(package)
         and bool(regulation_evidence)
         and not product_evidence
         and _PROHIBITION_PATTERN.search(regulation_text) is not None
@@ -462,18 +675,56 @@ def _audit_atomic_package(
     llm: BaseLLMClient,
     timeout_seconds: float,
 ) -> RegulationAuditDecision:
-    try:
-        request_timeout = max(1.0, min(45.0, timeout_seconds / 3))
+    deadline = time.monotonic() + max(0.001, timeout_seconds)
+
+    def request_output(
+        current_package: RegulationAuditPackage,
+        *,
+        allow_context_request: bool,
+    ) -> _DecisionOutput:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("法规条款单元审核已超过时间预算")
+        request_timeout = max(1.0, min(45.0, remaining / 3))
         raw = llm.chat(
-            build_audit_messages(package),
+            build_audit_messages(
+                current_package,
+                allow_context_request=allow_context_request,
+            ),
             temperature=0.0,
             max_tokens=4096,
             response_format={"type": "json_object"},
             timeout=request_timeout,
-            _retry_deadline=time.monotonic() + max(0.001, timeout_seconds),
+            _retry_deadline=time.monotonic() + max(0.001, remaining),
         )
-        output = _DecisionOutput.model_validate_json(_strip_code_fence(raw))
-        return _validate_evidence(package, output)
+        return _DecisionOutput.model_validate_json(_strip_code_fence(raw))
+
+    try:
+        output = request_output(package, allow_context_request=True)
+        requested = _validate_context_request(package, output)
+        if not requested:
+            return _validate_evidence(package, output)
+        expanded = _expand_context_by_outline_refs(package, requested)
+        second_output = request_output(expanded, allow_context_request=False)
+        if second_output.needs_more_context:
+            # 第二轮只校验请求是否属于原始可用目录；第一轮已
+            # 展开的 ref 在 expanded 中会变成 submitted，不应因重复请求
+            # 被误报为结构化输出非法。
+            _validate_context_request(package, second_output)
+            return _insufficient_context_decision(
+                package,
+                "已按目录编号执行唯一一次上下文扩展，模型仍请求补充信息。",
+            )
+        decision = _validate_evidence(expanded, second_output)
+        if decision.error_code in {
+            "missing_compliance_evidence",
+            "missing_non_compliance_evidence",
+        }:
+            return _insufficient_context_decision(
+                package,
+                f"已按目录编号执行唯一一次上下文扩展，仍缺少形成结论所需的证据；{decision.reasoning}",
+            )
+        return replace(decision, task_id=package.task_id)
     except (ValidationError, ValueError, json.JSONDecodeError) as exc:
         return _failure_decision(
             package, "invalid_structured_output", f"模型输出无法验证：{exc}",
@@ -645,19 +896,39 @@ def _validate_batch_product_context(
     """共享产品全文只在产品事实和条款序列完全一致时才安全。"""
     first = packages[0]
     first_clauses = tuple(
-        (routed.clause.number, routed.clause.title, routed.clause.text)
-        for routed in first.clauses if routed.submitted
+        (
+            routed.clause.clause_id,
+            routed.clause.number,
+            routed.clause.title,
+            routed.clause.text,
+            routed.clause.topics,
+            routed.clause.hierarchy_path,
+            routed.clause.container_only,
+        )
+        for routed in first.clauses
+        if routed.submitted and _has_clause_body(routed)
     )
     for package in packages[1:]:
         clauses = tuple(
-            (routed.clause.number, routed.clause.title, routed.clause.text)
-            for routed in package.clauses if routed.submitted
+            (
+                routed.clause.clause_id,
+                routed.clause.number,
+                routed.clause.title,
+                routed.clause.text,
+                routed.clause.topics,
+                routed.clause.hierarchy_path,
+                routed.clause.container_only,
+            )
+            for routed in package.clauses
+            if routed.submitted and _has_clause_body(routed)
         )
         if (
             package.product_name != first.product_name
             or package.product_tags != first.product_tags
             or package.complete_document != first.complete_document
             or clauses != first_clauses
+            or package.facts != first.facts
+            or package.product_facts != first.product_facts
         ):
             raise ValueError("一个审核批次只能共享同一份产品事实和产品条款")
 

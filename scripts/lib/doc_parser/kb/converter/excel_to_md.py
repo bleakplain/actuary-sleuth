@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Excel 产品开发检查清单 → Markdown 知识库转换脚本。
 
-将 references/1.产品开发检查清单2025年.xlsx 转换为结构化 Markdown 知识库。
+将受控产品开发检查清单 Excel 转换为结构化 Markdown 知识库。
 每个 sheet 按法规粒度拆分，提取元数据标签，处理内嵌表格图片。
 """
 import argparse
@@ -57,10 +57,36 @@ _METADATA_HEADERS = {
     "检查目标标签": "检查目标标签",
     "标签语义": "适用标签语义",
     "适用范围性质": "适用标签语义",
+    "触发事实": "触发事实",
+    "触发运算符": "触发运算符",
+    "触发期望值": "触发期望值",
+    "目标条款主题": "目标条款主题",
+    "所需事实": "所需事实",
+    "证明策略": "证明策略",
+    "检索必含词组": "检索必含词组",
+    "检索任一词组": "检索任一词组",
+    "触发条件说明": "触发条件说明",
+    "触发排除验收状态": "触发排除验收状态",
     "逻辑": "规则逻辑",
     "检查项目": "检查要求",
     "备注": "备注",
 }
+_NUMBERED_TRIGGER_HEADERS = (
+    "触发事实",
+    "触发运算符",
+    "触发期望值",
+    "目标条款主题",
+    "所需事实",
+    "证明策略",
+    "检索必含词组",
+    "检索任一词组",
+    "触发条件说明",
+    "触发排除验收状态",
+)
+_NUMBERED_TRIGGER_HEADER_PATTERN = re.compile(
+    rf"^({'|'.join(re.escape(header) for header in _NUMBERED_TRIGGER_HEADERS)})"
+    r"([1-9]\d*)$"
+)
 
 _VALUE_CODES = {
     "人寿保险": "life", "健康保险": "health", "意外伤害保险": "accident",
@@ -158,6 +184,16 @@ def _is_number(value) -> bool:
     return False
 
 
+def _metadata_target_name(header: str) -> Optional[str]:
+    direct = _METADATA_HEADERS.get(header)
+    if direct is not None:
+        return direct
+    match = _NUMBERED_TRIGGER_HEADER_PATTERN.fullmatch(header)
+    if match is None:
+        return None
+    return f"{_METADATA_HEADERS[match.group(1)]}{match.group(2)}"
+
+
 def _list_content_sheets(excel_path: str) -> List[Dict]:
     """列出 Excel 中的内容 sheet（跳过'分工'和'相关法规'）。"""
     import openpyxl
@@ -199,7 +235,7 @@ def parse_sheet_structure(sheet, sheet_name: str) -> SheetStructure:
     for row in rows[header_row:header_row + 2]:
         for idx, val in enumerate(row):
             normalized = str(val).strip() if val is not None else ""
-            if idx not in headers and normalized in _METADATA_HEADERS:
+            if idx not in headers and _metadata_target_name(normalized) is not None:
                 headers[idx] = normalized
 
     regulation_name = ""
@@ -272,12 +308,21 @@ def extract_clauses(sheet, structure: SheetStructure) -> List[ClauseEntry]:
         risk_trigger_codes: List[str] = []
         check_target_codes: List[str] = []
         for col_idx, header in structure.headers.items():
-            target_name = _METADATA_HEADERS.get(header)
-            if not target_name or col_idx >= len(row) or not row[col_idx]:
+            target_name = _metadata_target_name(header)
+            if not target_name or col_idx >= len(row):
                 continue
-            value = str(row[col_idx]).strip()
+            raw_value = row[col_idx]
+            if raw_value is None or (
+                isinstance(raw_value, str) and not raw_value.strip()
+            ):
+                continue
+            value = str(raw_value).strip()
             if not value or value == "全部":
                 continue
+            if "|" in value:
+                raise ValueError(
+                    f"第{row_idx}行“{header}”不能包含竖线 |，请使用逗号或顿号"
+                )
             metadata[target_name] = value
             values = [item.strip() for item in re.split(r"[\n,，、]", value) if item.strip()]
             if target_name == "风险触发标签":
@@ -304,6 +349,12 @@ def extract_clauses(sheet, structure: SheetStructure) -> List[ClauseEntry]:
             metadata["风险触发标签"] = ",".join(dict.fromkeys(risk_trigger_codes))
         if check_target_codes:
             metadata["检查目标标签"] = ",".join(dict.fromkeys(check_target_codes))
+        # Excel 是触发规则的精算维护源。转换阶段即校验受控值，避免非法配置
+        # 被静默写入 Markdown，直到线上聚合时才暴露。
+        from lib.compliance.regulation_trigger_metadata import (
+            parse_regulation_trigger_metadata,
+        )
+        parse_regulation_trigger_metadata(metadata)
         check_requirement = metadata.get("检查要求", "")
         if check_requirement and check_requirement not in content:
             content = f"{content}\n具体检查要求：{check_requirement}"
@@ -327,6 +378,8 @@ def format_metadata_block(metadata: Dict[str, str]) -> str:
     """将元数据字典格式化为 blockquote 格式。"""
     if not metadata:
         return ""
+    if any("|" in key or "|" in value for key, value in metadata.items()):
+        raise ValueError("元数据键和值不能包含竖线 |，请使用逗号或顿号")
     parts = [f"{k}={re.sub(r'[\r\n]+', '、', v)}" for k, v in metadata.items()]
     return f"\n> **元数据**: {' | '.join(parts)}\n"
 

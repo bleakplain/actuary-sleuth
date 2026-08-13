@@ -3,8 +3,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Dict, Iterable, Mapping, Optional, Tuple
+
+from lib.common.compliance_audit import RegulationTriggerSpec
+from lib.compliance.regulation_trigger_metadata import (
+    RegulationTriggerMetadataError,
+    parse_regulation_trigger_metadata,
+)
 
 
 def _metadata(candidate: Mapping[str, object]) -> Mapping[str, object]:
@@ -79,6 +85,7 @@ class RegulationChunk:
     retrieval_sources: Tuple[str, ...] = ()
     source_type: str = ""
     category: str = ""
+    trigger_specs: Tuple[RegulationTriggerSpec, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -100,6 +107,7 @@ class RegulationUnit:
     regulation_topics: Tuple[str, ...] = ()
     retrieval_sources: Tuple[str, ...] = ()
     category: str = ""
+    trigger_specs: Tuple[RegulationTriggerSpec, ...] = ()
 
     @property
     def chunk_ids(self) -> Tuple[str, ...]:
@@ -136,9 +144,13 @@ class _UnitAccumulator:
     applicability_reasons: list[Tuple[str, ...]]
     regulation_topics: list[Tuple[str, ...]]
     retrieval_sources: list[Tuple[str, ...]]
+    trigger_specs: list[Tuple[RegulationTriggerSpec, ...]]
 
 
-def _candidate_chunk(candidate: Mapping[str, object]) -> RegulationChunk:
+def _candidate_chunk(
+    candidate: Mapping[str, object],
+    trigger_specs: Tuple[RegulationTriggerSpec, ...],
+) -> RegulationChunk:
     metadata = _metadata(candidate)
     topics = candidate.get("regulation_topics")
     if topics is None:
@@ -155,6 +167,7 @@ def _candidate_chunk(candidate: Mapping[str, object]) -> RegulationChunk:
         regulation_topics=_strings(topics),
         retrieval_sources=_strings(candidate.get("retrieval_sources")),
         source_type=_text(candidate, "_source_type") or _text(candidate, "source_type"),
+        trigger_specs=trigger_specs,
     )
 
 
@@ -164,24 +177,26 @@ def aggregate_regulation_units(
 ) -> RegulationUnitBuildResult:
     """按版本、源文件和条款定位符聚合，并保留所有不同的物理 chunk。"""
     grouped: Dict[Tuple[str, str, str], _UnitAccumulator] = {}
+    invalid_trigger_units: set[Tuple[str, str, str]] = set()
     rejected: list[str] = []
     errors: list[str] = []
 
     for rank, candidate in enumerate(candidates):
-        chunk = _candidate_chunk(candidate)
         candidate_version = _text(candidate, "kb_version") or kb_version
         article_number = _text(candidate, "article_number")
         section_path = _text(candidate, "section_path")
         locator = article_number or section_path
         locator_type = "article_number" if article_number else "section_path"
-        chunk_ref = chunk.chunk_id or f"candidate:{rank}"
+        source_file = _text(candidate, "source_file")
+        chunk_id = _text(candidate, "id") or _text(candidate, "chunk_id")
+        chunk_ref = chunk_id or f"candidate:{rank}"
         missing = tuple(
             field
             for field, value in (
                 ("kb_version", candidate_version),
-                ("source_file", chunk.source_file),
+                ("source_file", source_file),
                 ("article_number/section_path", locator),
-                ("chunk_id", chunk.chunk_id),
+                ("chunk_id", chunk_id),
             )
             if not value
         )
@@ -190,7 +205,14 @@ def aggregate_regulation_units(
             errors.append(f"{chunk_ref}: 缺少法规单元身份字段 {', '.join(missing)}")
             continue
 
-        key = (candidate_version, chunk.source_file, locator)
+        key = (candidate_version, source_file, locator)
+        try:
+            trigger_specs = parse_regulation_trigger_metadata(_metadata(candidate))
+        except RegulationTriggerMetadataError as exc:
+            errors.append(f"{chunk_ref}: 法规触发规格非法: {exc}")
+            invalid_trigger_units.add(key)
+            trigger_specs = ()
+        chunk = _candidate_chunk(candidate, trigger_specs)
         status = _text(candidate, "applicability_status")
         matched_dimensions = _strings(candidate.get("matched_dimensions"))
         indeterminate_dimensions = _strings(candidate.get("indeterminate_dimensions"))
@@ -215,6 +237,7 @@ def aggregate_regulation_units(
                 applicability_reasons=[],
                 regulation_topics=[],
                 retrieval_sources=[],
+                trigger_specs=[],
             )
         accumulator = grouped[key]
         if chunk.chunk_id not in {current.chunk_id for _, current in accumulator.chunks}:
@@ -227,9 +250,31 @@ def aggregate_regulation_units(
         accumulator.categories.append(chunk.category)
         accumulator.regulation_topics.append(chunk.regulation_topics)
         accumulator.retrieval_sources.append(chunk.retrieval_sources)
+        accumulator.trigger_specs.append(chunk.trigger_specs)
 
     units: list[RegulationUnit] = []
-    for accumulator in sorted(grouped.values(), key=lambda item: item.first_rank):
+    ordered_groups = sorted(
+        grouped.items(),
+        key=lambda item: item[1].first_rank,
+    )
+    for key, accumulator in ordered_groups:
+        trigger_spec_groups = tuple(dict.fromkeys(accumulator.trigger_specs))
+        trigger_configuration_invalid = key in invalid_trigger_units
+        if len(trigger_spec_groups) != 1:
+            errors.append(
+                f"{accumulator.source_file}:{accumulator.locator}: "
+                "同一法规条款单元的物理 chunk 触发规格不一致"
+            )
+            trigger_configuration_invalid = True
+        trigger_specs = (
+            ()
+            if trigger_configuration_invalid
+            else trigger_spec_groups[0]
+        )
+        if trigger_configuration_invalid:
+            accumulator.applicability_reasons.append((
+                "法规触发规格非法或不一致，已忽略触发条件并保守保留法规",
+            ))
         statuses = tuple(status for status in dict.fromkeys(accumulator.statuses) if status)
         if len(statuses) == 1:
             status = statuses[0]
@@ -239,7 +284,9 @@ def aggregate_regulation_units(
                 ("同一法规条款单元的物理 chunk 适用性状态不一致，保守保留",)
             )
         ordered_chunks = tuple(
-            chunk
+            replace(chunk, trigger_specs=())
+            if trigger_configuration_invalid
+            else chunk
             for _, chunk in sorted(
                 accumulator.chunks,
                 key=lambda item: (
@@ -274,9 +321,10 @@ def aggregate_regulation_units(
             applicability_reasons=_ordered_union(accumulator.applicability_reasons),
             regulation_topics=_ordered_union(accumulator.regulation_topics),
             retrieval_sources=_ordered_union(accumulator.retrieval_sources),
+            trigger_specs=trigger_specs,
         ))
     return RegulationUnitBuildResult(
         units=tuple(units),
-        rejected_chunk_ids=tuple(rejected),
+        rejected_chunk_ids=tuple(dict.fromkeys(rejected)),
         errors=tuple(errors),
     )

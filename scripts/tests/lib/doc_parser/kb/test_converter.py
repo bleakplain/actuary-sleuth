@@ -204,6 +204,149 @@ class TestClauseExtraction:
         assert clauses[0].metadata["风险触发标签"] == "rate_adjustable"
         assert clauses[0].metadata["检查目标标签"] == "long_term"
 
+    def test_controlled_trigger_columns_are_preserved_and_validated(self):
+        from openpyxl import Workbook
+        from lib.doc_parser.kb.converter.excel_to_md import (
+            extract_clauses,
+            parse_sheet_structure,
+        )
+
+        wb = Workbook()
+        sheet = wb.active
+        sheet.title = "02. test"
+        sheet.append([
+            "序号", "项目", "触发事实", "触发运算符", "触发期望值",
+            "目标条款主题", "所需事实", "证明策略", "检索必含词组",
+            "检索任一词组", "触发条件说明",
+        ])
+        sheet.append(["测试法规", None, None, None, None, None, None, None, None, None, None])
+        sheet.append([
+            1, "涉及院外购药时应符合本条要求。", "mentions_out_of_hospital_drug",
+            "equals", "true", "coverage.medical", "", "closed_phrase_scan",
+            "院外购药", "药店", "产品涉及院外购药时触发",
+        ])
+
+        clauses = extract_clauses(sheet, parse_sheet_structure(sheet, sheet.title))
+
+        assert clauses[0].metadata["触发事实"] == "mentions_out_of_hospital_drug"
+        assert clauses[0].metadata["触发运算符"] == "equals"
+        assert clauses[0].metadata["触发期望值"] == "true"
+        assert clauses[0].metadata["目标条款主题"] == "coverage.medical"
+        assert clauses[0].metadata["证明策略"] == "closed_phrase_scan"
+        assert clauses[0].metadata["检索任一词组"] == "药店"
+
+    def test_native_false_trigger_value_is_not_dropped(self):
+        from openpyxl import Workbook
+        from lib.doc_parser.kb.converter.excel_to_md import (
+            extract_clauses,
+            parse_sheet_structure,
+        )
+
+        wb = Workbook()
+        sheet = wb.active
+        sheet.title = "02. test"
+        sheet.append([
+            "序号", "项目", "触发事实", "触发运算符", "触发期望值",
+            "目标条款主题", "证明策略",
+        ])
+        sheet.append(["测试法规", None, None, None, None, None, None])
+        sheet.append([
+            1, "测试规则", "has_policy_loan", "equals", False,
+            "policy.loan", "explicit_negation",
+        ])
+
+        clauses = extract_clauses(sheet, parse_sheet_structure(sheet, sheet.title))
+
+        assert clauses[0].metadata["触发期望值"] == "False"
+
+    def test_numbered_trigger_columns_are_preserved(self):
+        from openpyxl import Workbook
+        from lib.doc_parser.kb.converter.excel_to_md import (
+            extract_clauses,
+            parse_sheet_structure,
+        )
+
+        wb = Workbook()
+        sheet = wb.active
+        sheet.title = "02. test"
+        sheet.append([
+            "序号", "项目", "触发事实1", "触发运算符1", "触发期望值1",
+            "证明策略1", "触发事实2", "触发运算符2", "触发期望值2",
+            "证明策略2",
+        ])
+        sheet.append(["测试法规", None, None, None, None, None, None, None, None, None])
+        sheet.append([
+            1, "测试规则", "has_renewal", "equals", True, "semantic_fact",
+            "is_rate_adjustable", "equals", True, "semantic_fact",
+        ])
+
+        clauses = extract_clauses(sheet, parse_sheet_structure(sheet, sheet.title))
+
+        assert clauses[0].metadata["触发事实1"] == "has_renewal"
+        assert clauses[0].metadata["触发事实2"] == "is_rate_adjustable"
+
+    @pytest.mark.parametrize(("expected_value", "serialized"), [
+        (0, "0"),
+        (0.0, "0.0"),
+    ])
+    def test_native_zero_trigger_values_are_not_dropped(
+        self, expected_value, serialized,
+    ):
+        from openpyxl import Workbook
+        from lib.doc_parser.kb.converter.excel_to_md import (
+            extract_clauses,
+            parse_sheet_structure,
+        )
+
+        wb = Workbook()
+        sheet = wb.active
+        sheet.title = "02. test"
+        sheet.append([
+            "序号", "项目", "触发事实", "触发运算符", "触发期望值",
+            "目标条款主题", "证明策略",
+        ])
+        sheet.append(["测试法规", None, None, None, None, None, None])
+        sheet.append([
+            1, "测试规则", "waiting_period_days", "less_than_or_equal",
+            expected_value, "coverage.waiting_period", "numeric_fact",
+        ])
+
+        clauses = extract_clauses(sheet, parse_sheet_structure(sheet, sheet.title))
+
+        assert clauses[0].metadata["触发期望值"] == serialized
+
+    def test_pipe_in_metadata_is_rejected_instead_of_truncated(self):
+        from lib.doc_parser.kb.converter.excel_to_md import format_metadata_block
+
+        with pytest.raises(ValueError, match="不能包含竖线"):
+            format_metadata_block({"检索任一词组": "保单贷款|保单借款"})
+
+    def test_invalid_trigger_columns_stop_excel_conversion(self):
+        from openpyxl import Workbook
+        from lib.compliance.regulation_trigger_metadata import (
+            RegulationTriggerMetadataError,
+        )
+        from lib.doc_parser.kb.converter.excel_to_md import (
+            extract_clauses,
+            parse_sheet_structure,
+        )
+
+        wb = Workbook()
+        sheet = wb.active
+        sheet.title = "02. test"
+        sheet.append([
+            "序号", "项目", "触发事实", "触发运算符", "触发期望值",
+            "目标条款主题", "证明策略",
+        ])
+        sheet.append(["测试法规", None, None, None, None, None, None])
+        sheet.append([
+            1, "非法触发规则", "has_policy_loan", "python_eval", "true",
+            "policy.loan", "explicit_presence",
+        ])
+
+        with pytest.raises(RegulationTriggerMetadataError, match="触发运算符非法"):
+            extract_clauses(sheet, parse_sheet_structure(sheet, sheet.title))
+
     def test_increasing_whole_life_and_renewal_conditions_are_scope_tags(self):
         from openpyxl import Workbook
         from lib.doc_parser.kb.converter.excel_to_md import parse_sheet_structure, extract_clauses

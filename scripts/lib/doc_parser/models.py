@@ -239,9 +239,11 @@ class DocumentSection:
 class CoverageAttestation:
     """证明解析后的审核块完整覆盖了格式适配器产出的有效原文记录。
 
-    该证明只在每条有效 ``SourceRecord`` 恰好归属一个输出块、且没有
-    截断时成立。调用方只能在 ``coverage_attested`` 为真时启用基于
-    “全文未出现某词”的负向产品标签推断。
+    全局证明只在格式适配器没有发现未读取的正式合同内容、每条有效
+    ``SourceRecord`` 恰好归属一个输出块且没有截断时成立。页眉、页脚和
+    已确认二维码不属于产品条款审核范围。调用方可依据
+    ``coverage_attested_facts`` 对已证明范围内的特定事实做零命中推断；任意
+    禁止性全文扫描仍必须要求全局 ``coverage_attested`` 成立。
     """
 
     coverage_attested: bool = False
@@ -251,6 +253,33 @@ class CoverageAttestation:
     multiply_assigned_orders: Tuple[int, ...] = ()
     duplicate_source_orders: Tuple[int, ...] = ()
     truncated_orders: Tuple[int, ...] = ()
+    unreadable_pages: Tuple[int, ...] = ()
+    coverage_attested_facts: Tuple[str, ...] = ()
+    unparsed_text_box_count: int = 0
+    unparsed_image_count: int = 0
+    unparsed_header_footer_part_count: int = 0
+    unparsed_auxiliary_part_count: int = 0
+    ignored_header_footer_part_count: int = 0
+    ignored_qr_image_count: int = 0
+    ignored_navigation_text_box_count: int = 0
+
+
+@dataclass(frozen=True)
+class DocumentAnnotation:
+    """不属于正式产品条款正文、但需供人工复核追溯的批注。
+
+    锚点按主 ``document.xml`` 内全部段落的零基顺序记录，避免遗漏表格内
+    批注；``paragraph_index`` 保留为开始锚点优先的兼容定位字段。
+    """
+
+    kind: str
+    annotation_id: str
+    text: str
+    author: Optional[str] = None
+    created_at: Optional[str] = None
+    anchor_start_paragraph_index: Optional[int] = None
+    anchor_end_paragraph_index: Optional[int] = None
+    paragraph_index: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -318,6 +347,7 @@ class AuditDocument:
     health_disclosures: Sequence[DocumentSection] = ()
     exclusions: Sequence[DocumentSection] = ()
     rider_clauses: Sequence[Clause] = ()
+    annotations: Sequence[DocumentAnnotation] = ()
     coverage_attestation: CoverageAttestation = field(
         default_factory=CoverageAttestation,
     )
@@ -345,6 +375,11 @@ class AuditDocument:
         return self.coverage_attestation.coverage_attested
 
     @property
+    def coverage_attested_facts(self) -> Tuple[str, ...]:
+        """可安全使用全文零命中证明的受控事实键。"""
+        return self.coverage_attestation.coverage_attested_facts
+
+    @property
     def canonical_text(self) -> str:
         """返回解析、API 回传和审核重验共用的规范化全文。"""
         return render_audit_document_text(
@@ -367,6 +402,7 @@ class AuditDocument:
             "health_disclosures",
             "exclusions",
             "rider_clauses",
+            "annotations",
         ):
             object.__setattr__(self, field_name, tuple(getattr(self, field_name)))
         fingerprint, blocks = _build_audit_blocks(self)

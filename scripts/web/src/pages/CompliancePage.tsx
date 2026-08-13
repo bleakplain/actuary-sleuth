@@ -306,6 +306,7 @@ export default function CompliancePage() {
         product_name: parsedDocument.product_name || undefined,
         product_name_source: parsedDocument.product_name_source,
         coverage_attested: parsedDocument.coverage_attested,
+        coverage_attested_facts: parsedDocument.coverage_attested_facts,
         parse_warnings: parsedDocument.warnings,
         category: selectedCategory || undefined,
         clause_topics: Array.from(new Set([

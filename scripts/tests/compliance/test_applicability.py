@@ -170,6 +170,70 @@ def test_metadata_parser_separates_risk_triggers_and_check_targets():
     assert regulation.unknown_risk_triggers == {"future_trigger"}
 
 
+def test_fact_trigger_prevents_old_subject_tag_from_excluding_early():
+    regulation = RegulationApplicability.from_metadata({
+        "适用标签": "health",
+        "触发事实": "has_renewal",
+    })
+    life_product = ProductTags(
+        line=ProductLine.LIFE,
+        renewal_type=RenewalType.GUARANTEED,
+    )
+
+    result = match_regulation_applicability(life_product, regulation)
+
+    assert regulation.has_fact_triggers
+    assert result.status is MatchStatus.INDETERMINATE
+    assert result.excluded_by == ()
+    assert "fact_trigger" in result.indeterminate_dimensions
+
+
+def test_old_subject_tag_still_excludes_without_fact_trigger():
+    regulation = RegulationApplicability.from_metadata({"适用标签": "health"})
+    life_product = ProductTags(
+        line=ProductLine.LIFE,
+        renewal_type=RenewalType.GUARANTEED,
+    )
+
+    result = match_regulation_applicability(life_product, regulation)
+
+    assert not regulation.has_fact_triggers
+    assert result.status is MatchStatus.NOT_APPLICABLE
+    assert result.excluded_by == ("line",)
+
+
+def test_numbered_fact_trigger_metadata_also_prevents_early_exclusion():
+    regulation = RegulationApplicability.from_metadata({
+        "适用标签": "health",
+        "触发事实2": "has_renewal",
+    })
+
+    result = match_regulation_applicability(
+        ProductTags(line=ProductLine.LIFE),
+        regulation,
+    )
+
+    assert regulation.has_fact_triggers
+    assert result.status is MatchStatus.INDETERMINATE
+
+
+def test_incomplete_fact_trigger_metadata_prevents_early_exclusion():
+    regulation = RegulationApplicability.from_metadata({
+        "适用标签": "health",
+        "触发运算符": "exists",
+        "证明策略": "explicit_negation",
+    })
+
+    result = match_regulation_applicability(
+        ProductTags(line=ProductLine.LIFE),
+        regulation,
+    )
+
+    assert regulation.has_fact_triggers
+    assert result.status is MatchStatus.INDETERMINATE
+    assert result.excluded_by == ()
+
+
 def test_critical_illness_definition_term_risk_trigger_is_three_state():
     regulation = RegulationApplicability.from_metadata({
         "风险触发标签": "critical_illness_definition_term",

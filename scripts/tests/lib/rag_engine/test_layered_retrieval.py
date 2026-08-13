@@ -29,6 +29,7 @@ def _candidate(
     chunk_id: str = "",
     content: str = "",
     risk_triggers: str = "",
+    fact_trigger: str = "",
 ) -> dict:
     candidate = {
         "law_name": "测试法规",
@@ -39,6 +40,7 @@ def _candidate(
             "适用标签": tags,
             "条款主题": topics,
             "风险触发标签": risk_triggers,
+            "触发事实": fact_trigger,
         },
     }
     if chunk_id:
@@ -180,3 +182,39 @@ def test_unknown_risk_trigger_keeps_candidate_as_safety_fallback():
     assert result.excluded_count == 0
     assert result.chunks[0]["applicability_status"] == "indeterminate"
     assert result.fallback_used is True
+
+
+def test_fact_trigger_keeps_candidate_before_trigger_evaluation_layer():
+    candidate = _candidate(
+        "续保责任规则",
+        "health",
+        fact_trigger="has_renewal",
+    )
+
+    result = layer_regulation_candidates(
+        [candidate],
+        _product(line=ProductLine.LIFE),
+        top_k=None,
+    )
+
+    assert result.excluded_count == 0
+    assert result.chunks[0]["applicability_status"] == "indeterminate"
+    assert "fact_trigger" in result.chunks[0]["indeterminate_dimensions"]
+
+
+def test_incomplete_fact_trigger_configuration_is_not_filtered_early():
+    candidate = _candidate("缺少触发事实的规则", "health")
+    candidate["metadata"].update({
+        "触发运算符": "exists",
+        "证明策略": "explicit_negation",
+    })
+
+    result = layer_regulation_candidates(
+        [candidate],
+        _product(line=ProductLine.LIFE),
+        top_k=None,
+    )
+
+    assert result.excluded_count == 0
+    assert result.chunks[0]["applicability_status"] == "indeterminate"
+    assert "fact_trigger" in result.chunks[0]["indeterminate_dimensions"]

@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Iterable, Optional, Sequence, Tuple
 
+from ...common.constants import CoverageFactKeys
 from ..models import (
     Clause,
     CoverageAttestation,
@@ -29,6 +30,7 @@ class SourceRecordKind(str, Enum):
     TEXT = "text"
     TABLE_ROW = "table_row"
     DATA_TABLE = "data_table"
+    AUXILIARY_TEXT = "auxiliary_text"
 
 
 @dataclass(frozen=True)
@@ -163,7 +165,10 @@ def is_numbering_table_rows(rows: Sequence[Sequence[str]]) -> bool:
 
 
 def _raw_marker(record: SourceRecord) -> Optional[_NumberMarker]:
-    if record.kind is SourceRecordKind.DATA_TABLE or not record.fields:
+    if record.kind in {
+        SourceRecordKind.DATA_TABLE,
+        SourceRecordKind.AUXILIARY_TEXT,
+    } or not record.fields:
         return None
     first = unicodedata.normalize("NFKC", record.fields[0] or "").strip()
     exact = normalize_clause_number(first)
@@ -586,6 +591,34 @@ def assemble_numbered_content(
             )
             continue
 
+        if record.kind is SourceRecordKind.AUXILIARY_TEXT:
+            text = record.text
+            if not text:
+                continue
+            if current_clause is not None:
+                _append_line(current_clause.lines, text)
+                current_clause.end_order = record.order
+                current_clause.end_page_number = (
+                    record.page_number or current_clause.end_page_number
+                )
+                claim(record)
+                continue
+            if current_section is not None:
+                _append_line(current_section.lines, text)
+                current_section.end_order = record.order
+                claim(record)
+                continue
+            unclassified.append(DocumentSection(
+                title="",
+                content=text,
+                section_type=SectionType.UNCLASSIFIED.value,
+                document_order=record.order,
+                source_start_order=record.order,
+                source_end_order=record.order,
+            ))
+            claim(record)
+            continue
+
         text = record.text
         if not text:
             continue
@@ -684,6 +717,7 @@ def assemble_numbered_content(
     ))
     coverage = CoverageAttestation(
         coverage_attested=coverage_attested,
+        coverage_attested_facts=(CoverageFactKeys.ALL if coverage_attested else ()),
         source_record_count=len(ordered),
         assigned_record_count=assigned_record_count,
         unassigned_orders=unassigned_orders,

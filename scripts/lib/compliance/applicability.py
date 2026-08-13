@@ -6,6 +6,7 @@ indeterminate，避免为了缩短检索上下文而制造漏查。
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, FrozenSet, Iterable, Mapping, Optional, Tuple
@@ -82,6 +83,11 @@ _RISK_TRIGGER_TAGS = frozenset({
 _SUBTYPE_ANCESTORS = {
     "critical_illness": frozenset({"disease"}),
 }
+_FACT_TRIGGER_METADATA_KEY = re.compile(
+    r"(?:触发事实|触发运算符|触发期望值|目标条款主题|所需事实|证明策略|"
+    r"检索必含词组|检索任一词组|触发条件说明|触发排除验收状态)"
+    r"(?:[1-9]\d*)?"
+)
 
 
 def _split_values(raw: Any) -> Tuple[str, ...]:
@@ -107,6 +113,9 @@ class RegulationApplicability:
     special_features: FrozenSet[str] = frozenset()
     risk_triggers: FrozenSet[str] = frozenset()
     unknown_risk_triggers: FrozenSet[str] = frozenset()
+    # 任一受控触发字段存在即为 True；包括缺少“触发事实”的
+    # 不完整配置，防止其在后续校验报错前被旧标签过滤掉。
+    has_fact_triggers: bool = False
     normative_requirements: FrozenSet[str] = frozenset()
     clause_topics: FrozenSet[str] = frozenset()
     unknown_tags: FrozenSet[str] = frozenset()
@@ -148,6 +157,11 @@ class RegulationApplicability:
             special_features=frozenset(grouped["special_feature"]),
             risk_triggers=frozenset(risk_triggers),
             unknown_risk_triggers=frozenset(unknown_risk_triggers),
+            has_fact_triggers=any(
+                _FACT_TRIGGER_METADATA_KEY.fullmatch(str(key).strip())
+                and bool(_split_values(value))
+                for key, value in metadata.items()
+            ),
             normative_requirements=frozenset(
                 _split_values(metadata.get("检查目标标签"))
             ),
@@ -362,6 +376,17 @@ def match_regulation_applicability(
         reasons.append("常规主体路径未冲突，无需依赖未知的风险触发旁路")
     elif risk_explicitly_absent and not subject_excluded:
         reasons.append("风险触发明确未命中，但常规主体路径仍成立")
+
+    if regulation.has_fact_triggers and excluded:
+        bypassed_by_fact_trigger = tuple(excluded)
+        excluded.clear()
+        if "fact_trigger" not in indeterminate:
+            indeterminate.append("fact_trigger")
+        reasons.append(
+            "已配置产品事实触发条件，前置标签冲突不提前排除；"
+            "留给触发事实层求值: "
+            f"{list(bypassed_by_fact_trigger)}"
+        )
 
     if excluded:
         status = MatchStatus.NOT_APPLICABLE

@@ -9,12 +9,18 @@ import pytest
 
 from lib.common.compliance_audit import (
     AuditClauseSnapshot,
+    FactTruth,
+    ProductFact,
+    ProductFactEvidence,
     RegulationAuditPackage,
     RegulationChunkSnapshot,
     RegulationDecisionStatus,
     RegulationUnitSnapshot,
     RoutedClause,
     RoutedClauseRelation,
+    TriggerEvaluation,
+    TriggerFactName,
+    TriggerStatus,
 )
 from lib.common.product_tags import ProductTags
 from lib.compliance.auditor import (
@@ -41,6 +47,25 @@ class _Client(BaseLLMClient):
         if self.delay:
             time.sleep(self.delay)
         return self.response
+
+    def health_check(self) -> bool:
+        return True
+
+
+class _SequenceClient(BaseLLMClient):
+    def __init__(self, responses: List[str]):
+        super().__init__("test")
+        self.responses = list(responses)
+        self.prompts: List[str] = []
+        self.calls = 0
+
+    def _do_generate(self, prompt: str, **kwargs) -> str:
+        return "{}"
+
+    def _do_chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
+        self.calls += 1
+        self.prompts.append(messages[1]["content"])
+        return self.responses.pop(0)
 
     def health_check(self) -> bool:
         return True
@@ -198,8 +223,75 @@ def _package(index: int = 0) -> RegulationAuditPackage:
     )
 
 
+def _same_product_packages(count: int) -> tuple[RegulationAuditPackage, ...]:
+    """批量审核单元共享同一份产品条款，仅法规不同。"""
+    shared = _package(0)
+    return tuple(
+        replace(
+            _package(index),
+            clauses=shared.clauses,
+            facts=shared.facts,
+            product_facts=shared.product_facts,
+        )
+        for index in range(count)
+    )
+
+
+def _package_with_unsubmitted(count: int = 1) -> RegulationAuditPackage:
+    package = _package()
+    initial = replace(
+        package.clauses[0],
+        clause=replace(
+            package.clauses[0].clause,
+            text="等待期的具体约定详见补充条款。",
+        ),
+    )
+    unsubmitted = tuple(
+        RoutedClause(
+            clause=AuditClauseSnapshot(
+                clause_id=f"hidden-{index}",
+                number=f"3.{index}",
+                title=f"等待期补充约定{index}",
+                text=f"本合同补充等待期为{270 + index}天。",
+                block_type="clause",
+                topics=("coverage.waiting_period",),
+                hierarchy_level=2,
+                parent_number="3",
+                ancestor_numbers=("3",),
+                hierarchy_path=f"3 > 3.{index}",
+            ),
+            relation=RoutedClauseRelation.UNKNOWN,
+            reasons=("首轮未命中",),
+            submitted=False,
+        )
+        for index in range(1, count + 1)
+    )
+    return replace(package, clauses=(initial, *unsubmitted))
+
+
+def _context_request_response(
+    package: RegulationAuditPackage,
+    refs: List[str],
+    *,
+    status: str = "insufficient_information",
+) -> str:
+    return json.dumps({
+        "task_id": package.task_id,
+        "regulation_unit_id": package.regulation.regulation_unit_id,
+        "status": status,
+        "reasoning": "需要补充目录中的相关条款正文。",
+        "suggestion": "",
+        "regulation_evidence": [],
+        "product_evidence": [],
+        "applicability_dispute": False,
+        "confidence": 0.8,
+        "needs_more_context": True,
+        "requested_outline_refs": refs,
+    }, ensure_ascii=False)
+
+
 def test_batch_audit_requires_and_returns_every_unit() -> None:
-    packages = (_package(0), _package(1), _package(2))
+    packages = _same_product_packages(3)
     client = _BatchClient()
 
     decisions = audit_regulation_package_batch(packages, client, 5)
@@ -250,7 +342,7 @@ def test_short_evidence_refs_map_back_to_real_ids() -> None:
 
 
 def test_batch_audit_reasks_only_missing_units() -> None:
-    packages = (_package(0), _package(1), _package(2))
+    packages = _same_product_packages(3)
     client = _BatchClient(omit_first="v5:law:1")
     traces = []
 
@@ -290,11 +382,35 @@ def test_batch_audit_rejects_different_product_context() -> None:
         audit_regulation_package_batch(packages, _BatchClient(), 5)
 
 
+def test_batch_shared_product_does_not_leak_first_units_routing() -> None:
+    from lib.compliance.auditor import build_batch_audit_messages
+
+    first, base_second = _same_product_packages(2)
+    second = replace(
+        base_second,
+        clauses=(replace(
+            base_second.clauses[0],
+            relation=RoutedClauseRelation.RELATED,
+            reasons=("第二条法规的关联路由",),
+        ),),
+    )
+    payload = json.loads(
+        build_batch_audit_messages((first, second))[1]["content"]
+        .split("审核包：\n", 1)[1]
+    )
+
+    assert "relation" not in payload["product"]["clauses"][0]
+    assert "routing_reasons" not in payload["product"]["clauses"][0]
+    assert payload["regulation_tasks"][1]["priority_product_clauses"][0][
+        "relation"
+    ] == "related"
+
+
 def test_batch_provider_failure_does_not_fan_out_to_single_calls() -> None:
     client = _FailingBatchClient()
 
     decisions = audit_regulation_package_batch(
-        (_package(0), _package(1), _package(2)), client, 5,
+        _same_product_packages(3), client, 5,
     )
 
     assert client.calls == 2
@@ -303,6 +419,14 @@ def test_batch_provider_failure_does_not_fan_out_to_single_calls() -> None:
 
 
 def _response(package: RegulationAuditPackage, **overrides) -> str:
+    default_product_evidence = (
+        [{
+            "evidence_id": package.clauses[0].clause.clause_id,
+            "quote": "等待期为270天",
+        }]
+        if package.clauses
+        else []
+    )
     payload = {
         "task_id": package.task_id,
         "regulation_unit_id": package.regulation.regulation_unit_id,
@@ -312,14 +436,261 @@ def _response(package: RegulationAuditPackage, **overrides) -> str:
         "regulation_evidence": [
             {"evidence_id": "r-1", "quote": "等待期不得超过180天"}
         ],
-        "product_evidence": [
-            {"evidence_id": package.clauses[0].clause.clause_id, "quote": "等待期为270天"}
-        ],
+        "product_evidence": default_product_evidence,
         "applicability_dispute": False,
         "confidence": 0.99,
     }
     payload.update(overrides)
     return json.dumps(payload, ensure_ascii=False)
+
+
+def test_prompt_contains_full_outline_without_unsubmitted_body() -> None:
+    package = replace(_package_with_unsubmitted(), complete_document=True)
+    prompt = build_audit_messages(package)[1]["content"]
+    payload = json.loads(prompt.split("审核包：\n", 1)[1])
+
+    assert [item["number"] for item in payload["product"]["clause_outline"]] == [
+        "2.1", "3.1",
+    ]
+    assert payload["product"]["clause_outline"][1] == {
+        "outline_ref": "O002",
+        "number": "3.1",
+        "title": "等待期补充约定1",
+        "hierarchy_level": 2,
+        "parent_number": "3",
+        "ancestor_numbers": ["3"],
+        "hierarchy_path": "3 > 3.1",
+        "body_submitted": False,
+        "body_available": True,
+        "container_only": False,
+    }
+    assert len(payload["product"]["clauses"]) == 1
+    assert payload["product"]["complete_document"] is False
+    assert package.clauses[1].clause.text not in prompt
+
+
+def test_prompt_serializes_product_fact_and_trigger_traces() -> None:
+    package = replace(
+        _package(),
+        product_facts=(ProductFact(
+            name=TriggerFactName.HAS_WAITING_PERIOD,
+            truth=FactTruth.TRUE,
+            value=True,
+            method="deterministic_clause_scan",
+            confidence=0.95,
+            evidence=(ProductFactEvidence("c-0", "本合同等待期为270天"),),
+            reason="条款明确约定等待期",
+        ),),
+        trigger_evaluation=TriggerEvaluation(
+            status=TriggerStatus.TRIGGERED,
+            fact_names=(TriggerFactName.HAS_WAITING_PERIOD,),
+            reasons=("已明确设置等待期",),
+            evidence_clause_ids=("c-0",),
+        ),
+    )
+
+    payload = json.loads(
+        build_audit_messages(package)[1]["content"].split("审核包：\n", 1)[1],
+    )
+
+    assert payload["product"]["product_facts"][0]["truth"] == "true"
+    assert payload["regulation_unit"]["trigger_evaluation"]["status"] == "triggered"
+
+
+def test_context_request_rejects_fabricated_outline_ref() -> None:
+    package = _package_with_unsubmitted()
+    client = _SequenceClient([
+        _context_request_response(package, ["O999"]),
+    ])
+
+    decision = audit_regulation_package(package, client, 5)
+
+    assert client.calls == 1
+    assert decision.status is RegulationDecisionStatus.MANUAL_REVIEW
+    assert decision.error_code == "invalid_structured_output"
+
+
+def test_context_request_rejects_more_than_five_numbers() -> None:
+    package = _package_with_unsubmitted(6)
+    client = _SequenceClient([
+        _context_request_response(
+            package,
+            [f"O{index:03d}" for index in range(2, 8)],
+        ),
+    ])
+
+    decision = audit_regulation_package(package, client, 5)
+
+    assert client.calls == 1
+    assert decision.status is RegulationDecisionStatus.MANUAL_REVIEW
+    assert decision.error_code == "invalid_structured_output"
+
+
+def test_context_request_rejects_duplicate_numbers() -> None:
+    package = _package_with_unsubmitted()
+    client = _SequenceClient([
+        _context_request_response(package, ["O002", "O002"]),
+    ])
+
+    decision = audit_regulation_package(package, client, 5)
+
+    assert client.calls == 1
+    assert decision.error_code == "invalid_structured_output"
+
+
+def test_context_request_cannot_form_definitive_status() -> None:
+    package = _package_with_unsubmitted()
+    client = _SequenceClient([
+        _context_request_response(package, ["O002"], status="compliant"),
+    ])
+
+    decision = audit_regulation_package(package, client, 5)
+
+    assert client.calls == 1
+    assert decision.status is RegulationDecisionStatus.MANUAL_REVIEW
+    assert decision.error_code == "invalid_structured_output"
+
+
+def test_context_request_expands_once_and_accepts_verified_evidence() -> None:
+    package = _package_with_unsubmitted()
+    final_response = _response(
+        package,
+        product_evidence=[{
+            "evidence_id": "P002",
+            "quote": "补充等待期为271天",
+        }],
+    )
+    client = _SequenceClient([
+        _context_request_response(package, ["O002"]),
+        final_response,
+    ])
+
+    decision = audit_regulation_package(package, client, 5)
+
+    assert client.calls == 2
+    assert package.clauses[1].clause.text not in client.prompts[0]
+    assert package.clauses[1].clause.text in client.prompts[1]
+    assert "本轮已是唯一一次上下文扩展" in client.prompts[1]
+    assert decision.status is RegulationDecisionStatus.NON_COMPLIANT
+    assert decision.product_evidence[0].clause_id == "hidden-1"
+
+
+def test_outline_ref_expands_only_one_clause_when_numbers_repeat() -> None:
+    package = _package_with_unsubmitted(2)
+    duplicate_number = replace(
+        package.clauses[2],
+        clause=replace(package.clauses[2].clause, number="3.1"),
+    )
+    package = replace(package, clauses=(*package.clauses[:2], duplicate_number))
+    final_response = _response(
+        package,
+        product_evidence=[{
+            "evidence_id": "P002",
+            "quote": "补充等待期为271天",
+        }],
+    )
+    client = _SequenceClient([
+        _context_request_response(package, ["O002"]),
+        final_response,
+    ])
+
+    decision = audit_regulation_package(package, client, 5)
+
+    assert decision.status is RegulationDecisionStatus.NON_COMPLIANT
+    assert package.clauses[1].clause.text in client.prompts[1]
+    assert package.clauses[2].clause.text not in client.prompts[1]
+
+
+def test_context_request_rejects_container_without_body() -> None:
+    package = _package_with_unsubmitted()
+    container = RoutedClause(
+        clause=AuditClauseSnapshot(
+            clause_id="container",
+            number="3",
+            title="保险责任",
+            text="",
+            block_type="clause",
+            container_only=True,
+        ),
+        relation=RoutedClauseRelation.UNKNOWN,
+        reasons=("目录父节点",),
+        submitted=False,
+    )
+    package = replace(package, clauses=(package.clauses[0], container, package.clauses[1]))
+    client = _SequenceClient([_context_request_response(package, ["O002"])])
+
+    decision = audit_regulation_package(package, client, 5)
+
+    assert client.calls == 1
+    assert decision.error_code == "invalid_structured_output"
+
+
+def test_context_request_validates_task_and_unit_identity_before_expansion() -> None:
+    package = _package_with_unsubmitted()
+    response = json.loads(_context_request_response(package, ["O002"]))
+    response["task_id"] = "other-task"
+    client = _SequenceClient([json.dumps(response, ensure_ascii=False)])
+
+    decision = audit_regulation_package(package, client, 5)
+
+    assert client.calls == 1
+    assert decision.error_code == "invalid_structured_output"
+
+
+def test_second_context_request_returns_insufficient_without_third_call() -> None:
+    package = _package_with_unsubmitted(2)
+    client = _SequenceClient([
+        _context_request_response(package, ["O002"]),
+        _context_request_response(package, ["O003"]),
+    ])
+
+    decision = audit_regulation_package(package, client, 5)
+
+    assert client.calls == 2
+    assert decision.status is RegulationDecisionStatus.INSUFFICIENT_INFORMATION
+    assert decision.error_code == "context_expansion_exhausted"
+
+
+def test_second_context_request_can_repeat_expanded_ref_without_third_call() -> None:
+    package = _package_with_unsubmitted()
+    repeated = _context_request_response(package, ["O002"])
+    client = _SequenceClient([repeated, repeated])
+
+    decision = audit_regulation_package(package, client, 5)
+
+    assert client.calls == 2
+    assert decision.status is RegulationDecisionStatus.INSUFFICIENT_INFORMATION
+    assert decision.error_code == "context_expansion_exhausted"
+
+
+def test_second_context_request_with_wrong_identity_is_rejected() -> None:
+    package = _package_with_unsubmitted(2)
+    second = json.loads(_context_request_response(package, ["O003"]))
+    second["regulation_unit_id"] = "wrong-unit"
+    client = _SequenceClient([
+        _context_request_response(package, ["O002"]),
+        json.dumps(second, ensure_ascii=False),
+    ])
+
+    decision = audit_regulation_package(package, client, 5)
+
+    assert client.calls == 2
+    assert decision.error_code == "invalid_structured_output"
+
+
+def test_second_decision_with_missing_evidence_returns_insufficient() -> None:
+    package = _package_with_unsubmitted()
+    missing_evidence = _response(package, product_evidence=[])
+    client = _SequenceClient([
+        _context_request_response(package, ["O002"]),
+        missing_evidence,
+    ])
+
+    decision = audit_regulation_package(package, client, 5)
+
+    assert client.calls == 2
+    assert decision.status is RegulationDecisionStatus.INSUFFICIENT_INFORMATION
+    assert decision.error_code == "context_expansion_exhausted"
 
 
 def test_prompt_contains_only_one_regulation_unit() -> None:
@@ -353,6 +724,19 @@ def test_product_name_cannot_prove_non_name_regulation() -> None:
     assert decision.error_code == "invalid_structured_output"
 
 
+def test_pname_alias_cannot_prove_non_name_regulation() -> None:
+    package = _package()
+    response = _response(package, product_evidence=[{
+        "evidence_id": "PNAME",
+        "quote": "测试医疗保险",
+    }])
+
+    decision = audit_regulation_package(package, _Client(response), 10)
+
+    assert decision.status is RegulationDecisionStatus.MANUAL_REVIEW
+    assert decision.error_code == "invalid_structured_output"
+
+
 def test_product_name_can_prove_contract_name_regulation() -> None:
     package = _package()
     package = replace(
@@ -361,6 +745,23 @@ def test_product_name_can_prove_contract_name_regulation() -> None:
     )
     response = _response(package, product_evidence=[{
         "evidence_id": "product-name",
+        "quote": "测试医疗保险",
+    }])
+
+    decision = audit_regulation_package(package, _Client(response), 10)
+
+    assert decision.status is RegulationDecisionStatus.NON_COMPLIANT
+    assert decision.product_evidence[0].source_kind == "product_name"
+
+
+def test_pname_alias_can_prove_contract_name_regulation() -> None:
+    package = _package()
+    package = replace(
+        package,
+        regulation=replace(package.regulation, topics=("contract.name",)),
+    )
+    response = _response(package, product_evidence=[{
+        "evidence_id": "PNAME",
         "quote": "测试医疗保险",
     }])
 
@@ -458,6 +859,39 @@ def test_prohibition_zero_hit_requires_complete_document() -> None:
     assert decision.error_code == "missing_compliance_evidence"
 
 
+def test_empty_complete_document_cannot_use_prohibition_zero_hit() -> None:
+    base = _package()
+    package = replace(
+        base,
+        clauses=(),
+        complete_document=True,
+        regulation=replace(
+            base.regulation,
+            chunks=(RegulationChunkSnapshot(
+                chunk_id="r-prohibition",
+                content="条款中不得出现误导性表述。",
+                chunk_index=0,
+            ),),
+        ),
+    )
+    response = _response(
+        package,
+        status="compliant",
+        reasoning="已检查完整产品条款，未发现误导性表述。",
+        suggestion="",
+        regulation_evidence=[{
+            "evidence_id": "R001",
+            "quote": "条款中不得出现误导性表述",
+        }],
+        product_evidence=[],
+    )
+
+    decision = audit_regulation_package(package, _Client(response), 10)
+
+    assert decision.status is RegulationDecisionStatus.MANUAL_REVIEW
+    assert decision.error_code == "missing_compliance_evidence"
+
+
 def test_numeric_prohibition_cannot_use_zero_hit_exception() -> None:
     package = replace(_package(), complete_document=True)
     response = _response(
@@ -526,6 +960,37 @@ def test_compound_positive_obligation_cannot_use_zero_hit_exception() -> None:
         regulation_evidence=[{
             "evidence_id": "R001",
             "quote": "产品不得包含误导表述，并且必须明确列明等待期",
+        }],
+        product_evidence=[],
+    )
+
+    decision = audit_regulation_package(package, _Client(response), 10)
+
+    assert decision.status is RegulationDecisionStatus.MANUAL_REVIEW
+    assert decision.error_code == "missing_compliance_evidence"
+
+
+def test_compound_short_positive_obligation_cannot_use_zero_hit_exception() -> None:
+    package = replace(
+        _package(),
+        complete_document=True,
+        regulation=replace(
+            _package().regulation,
+            chunks=(RegulationChunkSnapshot(
+                chunk_id="r-compound-short",
+                content="不得包含自动续保表述；续保条件应明确说明。",
+                chunk_index=0,
+            ),),
+        ),
+    )
+    response = _response(
+        package,
+        status="compliant",
+        reasoning="已检查完整产品条款，未发现自动续保表述。",
+        suggestion="",
+        regulation_evidence=[{
+            "evidence_id": "R001",
+            "quote": "不得包含自动续保表述；续保条件应明确说明",
         }],
         product_evidence=[],
     )

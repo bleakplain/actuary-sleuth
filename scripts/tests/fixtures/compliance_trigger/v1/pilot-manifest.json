@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0.0",
+  "dataset_id": "regulation-trigger-pilot-v1",
+  "annotation_status": "pending_actuary_review",
+  "kb_version": "v5",
+  "fact_registry": [
+    "has_waiting_period",
+    "waiting_period_days",
+    "has_hesitation_period",
+    "hesitation_period_days",
+    "has_policy_loan",
+    "has_cash_value",
+    "has_grace_period",
+    "has_renewal",
+    "is_rate_adjustable",
+    "first_rate_adjustment_interval_years",
+    "subsequent_rate_adjustment_interval_years",
+    "mentions_out_of_hospital_drug",
+    "has_death_benefit",
+    "mentions_critical_illness_definition_term"
+  ],
+  "products": [
+    {
+      "sample_id": "real-001",
+      "file_name": "125904《人保健康悠优保互联网医疗保险（费率可调）》条款v4.doc",
+      "sha256": "8b9a49e926a734ee8ec3ea32aaa805feeb65876ecec282d914be11b8b5d33ace"
+    },
+    {
+      "sample_id": "real-003",
+      "file_name": "《人保健康互联网失能收入损失保险（2025版）》条款.docx",
+      "sha256": "8b6e3434270b5c0821bfc72eddad6a81d805d486fae93908d606a191f1add656"
+    },
+    {
+      "sample_id": "real-014",
+      "file_name": "《人保健康玺悦一生互联网重大疾病保险（2025版）》条款.docx",
+      "sha256": "e7937d55612b43cda9c45bc9aa3c23bc04771313f482c8fba3e19462edfe5681"
+    },
+    {
+      "sample_id": "real-017",
+      "file_name": "《人保健康附加互联网恶性肿瘤特定药品费用医疗保险》条款.pdf",
+      "sha256": "7c991ca7285a71226c936d1c705bbb06c0c61e82197b8f234733eb76ebaa5b6c"
+    },
+    {
+      "sample_id": "real-019",
+      "file_name": "《人保健康附加出境人员团体意外医疗保险》条款v2-无标记.docx",
+      "sha256": "da5bf033921283a9c91ec4923b572e9ab904281d47368a5474ac77c256421bb7"
+    }
+  ],
+  "baseline": {
+    "status": "measured_engineering_baseline_pending_actuary_review",
+    "sample_id": "real-019",
+    "report_json": ".Codex/specs/037-regulation-trigger-facts/real019-trigger-evidence-v1.json",
+    "configured_trigger_units": 0,
+    "candidate_regulation_units": 75,
+    "dynamic_context_reduction_percent": 59.7,
+    "source_note": "该结果只验证工程链路和上下文体量，不是精算真值或 LLM 合规结论。"
+  }
+}

@@ -150,3 +150,33 @@ regulation: 测试法规
     ))
 
     assert first[0].node_id != second[0].node_id
+
+
+def test_trigger_metadata_survives_markdown_chunking():
+    document = Document(
+        text="""---
+regulation: 测试法规
+---
+
+# 测试法规
+
+## 第1条检核规则
+
+> **元数据**: 触发事实=has_policy_loan | 触发运算符=equals | 触发期望值=true | 目标条款主题=policy.loan | 证明策略=explicit_presence
+
+提供保单贷款时应符合本条要求。
+""",
+        metadata={
+            "file_name": "test.md",
+            "source_path": "00_保险法/test.md",
+            "kb_version": "v5",
+        },
+    )
+
+    node = MdParser(min_chunk_chars=1).parse_document(document)[0]
+
+    assert node.metadata["触发事实"] == "has_policy_loan"
+    assert node.metadata["触发运算符"] == "equals"
+    assert node.metadata["触发期望值"] == "true"
+    assert node.metadata["目标条款主题"] == "policy.loan"
+    assert node.metadata["证明策略"] == "explicit_presence"

@@ -8,12 +8,14 @@ import json
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence, Tuple
 
 from lib.auth.jwt import get_jwt_signing_secret
+from lib.common.constants import CoverageFactKeys
 
 _V1_DOMAIN = b"actuary-sleuth/parse-attestation/v1"
 _V2_DOMAIN = b"actuary-sleuth/parse-attestation/v2"
+_V3_DOMAIN = b"actuary-sleuth/parse-attestation/v3"
 _DEFAULT_TTL_SECONDS = 30 * 60
 
 
@@ -31,9 +33,10 @@ class IssuedParseAttestation:
 class VerifiedParseAttestation:
     version: int
     coverage_attested: bool
+    coverage_attested_facts: Tuple[str, ...] = ()
 
 
-def _signing_key(domain: bytes = _V2_DOMAIN) -> bytes:
+def _signing_key(domain: bytes = _V3_DOMAIN) -> bytes:
     return hmac.new(
         get_jwt_signing_secret(),
         domain,
@@ -66,6 +69,18 @@ def _warnings_digest(parse_warnings: Sequence[str]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _normalize_coverage_facts(values: Sequence[str]) -> Tuple[str, ...]:
+    allowed = frozenset(CoverageFactKeys.ALL)
+    unknown = tuple(sorted({
+        str(value) for value in values if value not in allowed
+    }))
+    if unknown:
+        raise ParseAttestationError(
+            "逐事实覆盖证明包含未知事实键: " + ", ".join(unknown)
+        )
+    return tuple(sorted(set(values)))
+
+
 def issue_parse_attestation(
     parse_id: str,
     document_fingerprint: str,
@@ -75,6 +90,7 @@ def issue_parse_attestation(
     user_subject: str = "",
     *,
     coverage_attested: bool = False,
+    coverage_attested_facts: Sequence[str] = (),
     now: Optional[int] = None,
     ttl_seconds: int = _DEFAULT_TTL_SECONDS,
 ) -> IssuedParseAttestation:
@@ -82,7 +98,7 @@ def issue_parse_attestation(
     issued_at = int(time.time()) if now is None else int(now)
     expires_epoch = issued_at + max(int(ttl_seconds), 1)
     payload = {
-        "v": 2,
+        "v": 3,
         "iat": issued_at,
         "exp": expires_epoch,
         "parse_id": parse_id,
@@ -90,6 +106,9 @@ def issue_parse_attestation(
         "audit_input_fingerprint": audit_input_fingerprint,
         "product_name_source": product_name_source,
         "coverage_attested": coverage_attested,
+        "coverage_attested_facts": list(_normalize_coverage_facts(
+            coverage_attested_facts,
+        )),
         "parse_warnings_sha256": _warnings_digest(parse_warnings),
         "sub": user_subject,
     }
@@ -124,13 +143,15 @@ def verify_parse_attestation(
     user_subject: str = "",
     *,
     coverage_attested: bool = False,
+    coverage_attested_facts: Optional[Sequence[str]] = (),
     now: Optional[int] = None,
 ) -> VerifiedParseAttestation:
     """验证解析凭证，并把旧版凭证降级为不具备全文覆盖证明。
 
-    v1 兼容只覆盖其原始最长 30 分钟有效期。它没有绑定
-    ``coverage_attested``，因此即使请求声称完整覆盖，也只能返回 False，
-    禁止下游据此做“全文未出现某词”的负向推断。
+    v1 兼容只覆盖其原始最长 30 分钟有效期，且不绑定全文覆盖。
+    v1/v2 都未绑定逐事实覆盖清单，因此即使客户端提交该清单也会丢弃；
+    只有 v3 可以授权局部正文范围上的零命中负向推断。兼容旧客户端时
+    ``coverage_attested_facts=None``，由已验签载荷作为唯一权威值。
     """
     if not token:
         raise ParseAttestationError("缺少解析凭证")
@@ -142,10 +163,14 @@ def verify_parse_attestation(
         payload: Any = json.loads(_decode(encoded_payload))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ParseAttestationError("解析凭证载荷无效") from exc
-    if not isinstance(payload, Mapping) or payload.get("v") not in (1, 2):
+    if not isinstance(payload, Mapping) or payload.get("v") not in (1, 2, 3):
         raise ParseAttestationError("解析凭证版本无效")
     version = int(payload["v"])
-    domain = _V2_DOMAIN if version == 2 else _V1_DOMAIN
+    domain = {
+        1: _V1_DOMAIN,
+        2: _V2_DOMAIN,
+        3: _V3_DOMAIN,
+    }[version]
     expected_signature = hmac.new(
         _signing_key(domain),
         encoded_payload.encode("ascii"),
@@ -174,13 +199,26 @@ def verify_parse_attestation(
         "parse_warnings_sha256": _warnings_digest(parse_warnings),
         "sub": user_subject,
     }
-    if version == 2:
+    if version in (2, 3):
         expected["coverage_attested"] = coverage_attested
+    if version == 3 and coverage_attested_facts is not None:
+        expected["coverage_attested_facts"] = list(
+            _normalize_coverage_facts(coverage_attested_facts)
+        )
     if any(payload.get(key) != value for key, value in expected.items()):
         raise ParseAttestationError("解析凭证与审核输入身份不一致，请重新解析")
     return VerifiedParseAttestation(
         version=version,
         coverage_attested=(
-            bool(payload.get("coverage_attested")) if version == 2 else False
+            bool(payload.get("coverage_attested"))
+            if version in (2, 3)
+            else False
+        ),
+        coverage_attested_facts=(
+            _normalize_coverage_facts(
+                payload.get("coverage_attested_facts", ())
+            )
+            if version == 3
+            else ()
         ),
     )

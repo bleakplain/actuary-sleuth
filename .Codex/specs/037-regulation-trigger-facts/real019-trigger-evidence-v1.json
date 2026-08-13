@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0.0",
+  "measurement_kind": "offline_trigger_and_dynamic_evidence_shadow",
+  "formal_audit_result": false,
+  "input": {
+    "product": "《人保健康附加出境人员团体意外医疗保险》条款v2-无标记.docx",
+    "product_name": "人保健康附加出境人员团体意外医疗保险条款",
+    "kb_version": "v5",
+    "coverage_attested": true,
+    "parsed_clause_count": 60,
+    "candidate_regulation_unit_count": 75
+  },
+  "trigger_readiness": {
+    "configured_regulation_unit_count": 0,
+    "unconfigured_regulation_unit_count": 75,
+    "status_counts": {
+      "triggered": 75,
+      "not_triggered": 0,
+      "indeterminate": 0
+    },
+    "product_fact_count": 0,
+    "note": "未配置触发规格的法规按 triggered 保守保留；configured=0 时只能验证链路，不能验证额外法规过滤收益。"
+  },
+  "dynamic_evidence": {
+    "formal_submission_mode": "full_document",
+    "shadow_record_count": 75,
+    "selected_clauses_per_unit_mean": 5.08,
+    "selected_clauses_per_unit_p95": 6,
+    "selected_clauses_per_unit_max": 7,
+    "zero_selection_unit_count": 1,
+    "zero_selection_units": [
+      {
+        "regulation_unit_id": "regulation-unit:5003c66808cf0dfe694f3855c89bc7d0415ff246dcb0642ef78828992e108f6c",
+        "law_name": "“负面清单”（2026版）：产品责任设计",
+        "article_number": "第14条检核规则",
+        "topics": [
+          "policy.loan"
+        ]
+      }
+    ],
+    "full_product_context_chars": 901575,
+    "dynamic_outline_and_body_chars": 363299,
+    "context_reduction_percent": 59.7,
+    "shadow_warning_count": 1
+  },
+  "limitations": [
+    "离线 auditor 只生成占位状态，不代表法规判断准确率。",
+    "动态证据仍处于影子模式，正式 LLM 输入保持完整产品条款。",
+    "法规触发规格须由精算在 Excel 验收后才能用于生产排除。",
+    "当前知识库没有触发规格，因此未调用产品事实补充模型，也不能测量第二轮法规过滤收益。"
+  ]
+}

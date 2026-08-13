@@ -9,6 +9,7 @@ import pytest
 
 from lib.common.product_tags import ProductLine, ProductTags
 from lib.compliance.regulation_retrieval import (
+    _kb_trigger_manifest_identity,
     _stable_catalog_sha256,
     _validate_candidate_identity_conservation,
     _validate_catalog_identity,
@@ -97,6 +98,30 @@ def test_catalog_identity_detects_applicability_tag_tampering(
     )
 
     assert "知识库目录内容指纹与受控 v5 不一致" in errors
+
+
+def test_trigger_manifest_identity_reads_schema_and_source_hash(
+    tmp_path: Path,
+) -> None:
+    lancedb = tmp_path / "v5" / "lancedb"
+    references = tmp_path / "references"
+    lancedb.mkdir(parents=True)
+    references.mkdir()
+    (references / "v5-build-manifest.json").write_text(
+        json.dumps({
+            "regulation_trigger_schema_version": "1.0.0",
+            "source_sha256": "source-sha",
+        }),
+        encoding="utf-8",
+    )
+    engine = SimpleNamespace(
+        config=SimpleNamespace(vector_db_path=str(lancedb))
+    )
+
+    assert _kb_trigger_manifest_identity(engine, "v5") == (
+        "1.0.0",
+        "source-sha",
+    )
 
 
 def test_catalog_hash_normalizes_arrow_pandas_nullable_integer_drift() -> None:
@@ -245,6 +270,7 @@ def test_full_catalog_is_not_truncated_by_semantic_top_k(
     assert outcome.excluded_regulation_units[0].excluded_by == ("line",)
     assert outcome.coverage is not None
     assert outcome.coverage.complete_candidate_freeze
+    assert outcome.kb_catalog_sha256 == _stable_catalog_sha256(catalog)
     assert engine.search_by_metadata.call_count == 1
 
 
@@ -342,6 +368,7 @@ def test_missing_engine_is_explicitly_degraded(_mock_engine) -> None:
 
     assert outcome.regulations == ()
     assert outcome.regulation_units == ()
+    assert outcome.kb_catalog_sha256 == ""
     assert outcome.degraded
     assert outcome.coverage is not None
     assert not outcome.coverage.complete_candidate_freeze

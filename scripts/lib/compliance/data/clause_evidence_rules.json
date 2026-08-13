@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0.0",
+  "default_min_bm25_score": 1.0,
+  "default_max_bm25_candidates": 5,
+  "topic_constraints": [
+    {
+      "topic": "policy.loan",
+      "required_any_groups": [
+        [
+          "保单贷款",
+          "保单借款",
+          "保险单贷款",
+          "保险单借款",
+          "保险单质押贷款",
+          "质押贷款",
+          "贷款",
+          "借款"
+        ]
+      ]
+    }
+  ]
+}

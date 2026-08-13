@@ -12,10 +12,12 @@ from lib.doc_parser.models import (
     Clause,
     CoverageAttestation,
     DataTable,
+    DocumentAnnotation,
     DocumentSection,
     TableType,
     render_audit_document_text,
 )
+from lib.common.constants import CoverageFactKeys
 from lib.doc_parser.pd.product_tagging import build_product_tags
 
 
@@ -88,8 +90,19 @@ def test_parse_response_serializes_stable_ids_and_all_audit_blocks() -> None:
             TableType.PREMIUM,
             remark="保证续保期间为六年",
         )],
+        annotations=[DocumentAnnotation(
+            kind="comment",
+            annotation_id="comment-1",
+            text="仅供内部复核",
+            author="精算复核员",
+            created_at="2026-08-13T09:30:00Z",
+            anchor_start_paragraph_index=2,
+            anchor_end_paragraph_index=2,
+            paragraph_index=2,
+        )],
         coverage_attestation=CoverageAttestation(
             coverage_attested=True,
+            coverage_attested_facts=CoverageFactKeys.ALL,
             source_record_count=3,
             assigned_record_count=3,
         ),
@@ -111,6 +124,13 @@ def test_parse_response_serializes_stable_ids_and_all_audit_blocks() -> None:
     assert response.parse_attestation
     assert response.product_name_source == document.product_name_source
     assert response.coverage_attested is True
+    assert response.coverage_attested_facts == list(CoverageFactKeys.ALL)
+    assert response.coverage_attestation["coverage_attested"] is True
+    assert response.annotations[0].text == "仅供内部复核"
+    assert response.annotations[0].author == "精算复核员"
+    assert response.annotations[0].created_at == "2026-08-13T09:30:00Z"
+    assert response.annotations[0].anchor_start_paragraph_index == 2
+    assert response.annotations[0].anchor_end_paragraph_index == 2
     assert [block.clause_id for block in response.audit_blocks] == [
         block.clause_id for block in document.audit_blocks
     ]
@@ -148,11 +168,13 @@ def test_parse_response_serializes_stable_ids_and_all_audit_blocks() -> None:
         product_name=response.product_name or "",
         product_name_source=response.product_name_source,
         coverage_attested=response.coverage_attested,
+        coverage_attested_facts=response.coverage_attested_facts,
         parse_warnings=response.warnings,
         product_tags=response.product_tags,
         audit_blocks=response.audit_blocks,
     )
     pipeline_request = _pipeline_request(request)
+    assert "仅供内部复核" not in pipeline_request.document_content
     assert len(pipeline_request.clauses) == 3
     clause = next(
         item for item in pipeline_request.clauses

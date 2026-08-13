@@ -28,13 +28,12 @@ ACCEPTANCE_MANIFEST = (
 PRODUCT_ARCHIVE = PRODUCTS_DIR / "条款(1).zip"
 
 
-def _assert_full_source_coverage(
+def _assert_source_record_assignment(
     document: AuditDocument,
     source_name: str,
 ) -> None:
-    """真实产品的每条有效来源记录必须恰好归属一个审核块。"""
+    """正文记录必须唯一归属；未解析内容必须撤销全文覆盖证明。"""
     attestation = document.coverage_attestation
-    assert attestation.coverage_attested, source_name
     assert attestation.source_record_count > 0, source_name
     assert attestation.assigned_record_count == attestation.source_record_count, (
         source_name
@@ -43,6 +42,19 @@ def _assert_full_source_coverage(
     assert attestation.multiply_assigned_orders == (), source_name
     assert attestation.duplicate_source_orders == (), source_name
     assert attestation.truncated_orders == (), source_name
+    has_unparsed_content = bool(
+        attestation.unreadable_pages
+        or attestation.unparsed_text_box_count
+        or attestation.unparsed_image_count
+        or attestation.unparsed_header_footer_part_count
+        or attestation.unparsed_auxiliary_part_count
+    )
+    assert attestation.coverage_attested is not has_unparsed_content, source_name
+    if has_unparsed_content:
+        assert any(
+            "已禁用依赖全文零命中的负向推断" in warning
+            for warning in document.warnings
+        ), source_name
 
 
 def _require_product(path: Path) -> None:
@@ -107,7 +119,7 @@ class TestRealDocuments:
             assert document.file_name == path.name
             assert document.file_type == path.suffix.lower()
             assert audit_content_count > 0, f"{path.name} 未提取到审核内容"
-            _assert_full_source_coverage(document, path.name)
+            _assert_source_record_assignment(document, path.name)
             if path.suffix.lower() == ".doc":
                 parsed_legacy_docs += 1
                 assert any("临时转换" in warning for warning in document.warnings)
@@ -136,7 +148,7 @@ class TestRealDocuments:
                 document = parse_product_document(str(source))
                 assert document.audit_blocks, member.filename
                 assert document.product_tags.primary_subtype.value != "unknown"
-                _assert_full_source_coverage(document, member.filename)
+                _assert_source_record_assignment(document, member.filename)
 
     @pytest.mark.parametrize(
         (
@@ -258,7 +270,7 @@ class TestRealDocuments:
         assert clause.parent_number == parent
         assert clause.ancestor_numbers == ancestors
         assert clause.hierarchy_path == " > ".join((*ancestors, number))
-        _assert_full_source_coverage(document, path.name)
+        _assert_source_record_assignment(document, path.name)
 
     def test_yoyou_numbered_rows_keep_continuations_and_hierarchy(self):
         """悠优保空编号续接行必须归回对应编号，合并格不得污染标题。"""
@@ -312,7 +324,7 @@ class TestRealDocuments:
             if block.block_type.value == "clause"
         }
         assert positions["2"] < positions["2.1"] < positions["2.5.4"]
-        _assert_full_source_coverage(document, path.name)
+        _assert_source_record_assignment(document, path.name)
 
     def test_parse_real_pdfs(self, real_pdf_files):
         """测试解析真实 PDF 文件"""

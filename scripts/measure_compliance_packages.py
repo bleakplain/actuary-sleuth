@@ -9,23 +9,18 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Sequence
 
-from lib.common.compliance_audit import AuditClauseSnapshot
 from lib.config import get_kb_version_dir
-from lib.compliance.applicability import (
-    MatchStatus,
-    RegulationApplicability,
-    match_regulation_applicability,
-)
 from lib.compliance.audit_pipeline import (
     AuditPipelineRequest,
     build_regulation_audit_packages,
 )
 from lib.compliance.package_measurement import (
+    build_audit_clause_snapshots,
     build_measurement_report,
+    list_applicable_regulation_units,
     measure_product_packages,
     render_measurement_markdown,
 )
-from lib.compliance.regulation_units import aggregate_regulation_units
 from lib.doc_parser import parse_product_document
 from lib.rag_engine.kb_rebuild import load_catalog_rows
 
@@ -47,49 +42,6 @@ def _mapping(value: object, label: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
         raise ValueError(f"{label} 必须是对象")
     return value
-
-
-def _clauses(document) -> tuple[AuditClauseSnapshot, ...]:
-    return tuple(
-        AuditClauseSnapshot(
-            clause_id=block.clause_id,
-            number=block.number,
-            title=block.title,
-            text=block.content,
-            block_type=block.block_type.value,
-            topics=block.topics,
-            hierarchy_level=block.hierarchy_level,
-            parent_number=block.parent_number,
-            ancestor_numbers=block.ancestor_numbers,
-            hierarchy_path=block.hierarchy_path,
-            container_only=block.container_only,
-        )
-        for block in document.audit_blocks
-    )
-
-
-def _audit_units(catalog, product_tags, kb_version: str):
-    candidates = []
-    for row in catalog:
-        candidate = dict(row)
-        metadata = _mapping(candidate.get("metadata"), "法规元数据")
-        result = match_regulation_applicability(
-            product_tags,
-            RegulationApplicability.from_metadata(metadata),
-        )
-        candidate.update({
-            "applicability_status": result.status.value,
-            "matched_dimensions": result.matched_dimensions,
-            "indeterminate_dimensions": result.indeterminate_dimensions,
-            "excluded_by": result.excluded_by,
-            "applicability_reasons": result.reasons,
-        })
-        candidates.append(candidate)
-    units = aggregate_regulation_units(candidates, kb_version).units
-    return tuple(
-        unit for unit in units
-        if unit.applicability_status != MatchStatus.NOT_APPLICABLE.value
-    )
 
 
 def run_measurement(
@@ -117,8 +69,12 @@ def run_measurement(
         if _sha256(source) != str(product.get("sha256", "")):
             raise ValueError(f"产品文件指纹不一致: {file_name}")
         document = parse_product_document(str(source))
-        clauses = _clauses(document)
-        units = _audit_units(catalog, document.product_tags, kb_version)
+        clauses = build_audit_clause_snapshots(document)
+        units = list_applicable_regulation_units(
+            catalog,
+            document.product_tags,
+            kb_version,
+        )
         request = AuditPipelineRequest(
             product_name=document.product_name or file_name,
             document_content=document.canonical_text,

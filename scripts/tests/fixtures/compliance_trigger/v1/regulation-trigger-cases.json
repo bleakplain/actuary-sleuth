@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.0.0",
+  "annotation_status": "engineering_fixture_not_actuary_truth",
+  "cases": [
+    {
+      "case_id": "waiting-period-present",
+      "regulation_topics": ["coverage.waiting_period"],
+      "trigger": {
+        "fact_name": "has_waiting_period",
+        "operator": "equals",
+        "expected_value": true,
+        "target_topics": ["coverage.waiting_period"],
+        "required_facts": ["waiting_period_days"],
+        "proof_strategy": "explicit_presence"
+      },
+      "product_clauses": [
+        {
+          "clause_id": "c-waiting",
+          "number": "2.4",
+          "title": "等待期",
+          "text": "自本合同生效之日起三十日为等待期。",
+          "topics": ["coverage.waiting_period"]
+        }
+      ],
+      "expected_trigger_status": "triggered",
+      "expected_evidence_clause_ids": ["c-waiting"]
+    },
+    {
+      "case_id": "out-of-hospital-drug-closed-scan-negative",
+      "regulation_topics": ["coverage.medical"],
+      "trigger": {
+        "fact_name": "mentions_out_of_hospital_drug",
+        "operator": "equals",
+        "expected_value": true,
+        "target_topics": ["coverage.medical"],
+        "required_facts": [],
+        "proof_strategy": "closed_phrase_scan",
+        "search_any_terms": ["院外购药", "药店"]
+      },
+      "product_clauses": [
+        {
+          "clause_id": "c-cash-value",
+          "number": "5.2",
+          "title": "现金价值",
+          "text": "本合同现金价值见现金价值表。",
+          "topics": ["policy.cash_value"]
+        }
+      ],
+      "complete_document": true,
+      "expected_trigger_status": "not_triggered",
+      "expected_evidence_clause_ids": []
+    },
+    {
+      "case_id": "policy-loan-cash-value-is-not-enough",
+      "regulation_topics": ["policy.loan"],
+      "trigger": {
+        "fact_name": "has_policy_loan",
+        "operator": "equals",
+        "expected_value": true,
+        "target_topics": ["policy.loan"],
+        "required_facts": [],
+        "proof_strategy": "explicit_presence",
+        "search_any_terms": ["保单贷款", "保单借款", "保险单贷款"]
+      },
+      "product_clauses": [
+        {
+          "clause_id": "c-cash-value",
+          "number": "5.2",
+          "title": "现金价值",
+          "text": "本合同现金价值见现金价值表。",
+          "topics": ["policy.cash_value"]
+        }
+      ],
+      "complete_document": false,
+      "expected_trigger_status": "indeterminate",
+      "expected_evidence_clause_ids": []
+    },
+    {
+      "case_id": "unknown-never-excludes",
+      "regulation_topics": ["renewal.general"],
+      "trigger": {
+        "fact_name": "has_renewal",
+        "operator": "equals",
+        "expected_value": true,
+        "target_topics": ["renewal.general"],
+        "required_facts": [],
+        "proof_strategy": "semantic_fact"
+      },
+      "product_clauses": [],
+      "complete_document": false,
+      "expected_trigger_status": "indeterminate",
+      "expected_evidence_clause_ids": []
+    }
+  ]
+}

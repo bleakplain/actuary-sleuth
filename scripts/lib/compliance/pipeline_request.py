@@ -87,6 +87,7 @@ class PipelineRequestInput:
     product_name: str
     product_name_source: str
     coverage_attested: bool
+    coverage_attested_facts: Optional[Tuple[str, ...]]
     parse_warnings: Tuple[str, ...]
     category: str
     audit_blocks: Tuple[ParsedAuditBlockInput, ...]
@@ -166,12 +167,18 @@ def build_audit_pipeline_request(
             source.parse_warnings,
             user_subject,
             coverage_attested=source.coverage_attested,
+            coverage_attested_facts=source.coverage_attested_facts,
         )
     except ParseAttestationError as exc:
         raise PipelineRequestConflictError(str(exc)) from exc
     if verified_attestation.version == 1:
         logger.warning(
             "接受兼容窗口内的 v1 解析凭证；全文覆盖证明已降级为 False"
+        )
+    if verified_attestation.version < 3 and source.coverage_attested_facts:
+        logger.warning(
+            "v%s 解析凭证未绑定逐事实覆盖证明；客户端提交值已忽略",
+            verified_attestation.version,
         )
     if not source.audit_blocks:
         raise InvalidPipelineRequestError(
@@ -223,6 +230,9 @@ def build_audit_pipeline_request(
         source.document_content,
         product_name_source=source.product_name_source,
         complete_document=verified_attestation.coverage_attested,
+        coverage_attested_facts=(
+            verified_attestation.coverage_attested_facts
+        ),
     )
     submitted_tags = ProductTags.from_dict(source.product_tags)
     missing_additive_fields = frozenset(
@@ -230,7 +240,7 @@ def build_audit_pipeline_request(
         for field_name in _ROLLING_ADDITIVE_PRODUCT_TAG_FIELDS
         if field_name not in source.product_tags
     )
-    if verified_attestation.version == 2 and missing_additive_fields:
+    if verified_attestation.version in (2, 3) and missing_additive_fields:
         logger.warning(
             "兼容滚动发布期间缺失的新增产品风险事实已由服务端重算；"
             "missing_fields=%s",
@@ -242,7 +252,7 @@ def build_audit_pipeline_request(
         missing_additive_fields,
     )
     if tag_mismatches:
-        if verified_attestation.version == 2:
+        if verified_attestation.version in (2, 3):
             raise PipelineRequestConflictError(
                 "产品标签与绑定的产品名称及条款原文不一致，请重新解析"
             )
@@ -278,4 +288,7 @@ def build_audit_pipeline_request(
         product_name_source=source.product_name_source,
         parse_warnings=source.parse_warnings,
         coverage_attested=verified_attestation.coverage_attested,
+        coverage_attested_facts=(
+            verified_attestation.coverage_attested_facts
+        ),
     )

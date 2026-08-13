@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0.0",
+  "semantic_boolean_facts": {
+    "has_waiting_period": {
+      "description": "产品条款是否设置等待期；仅提到等待期概念但明确不设等待期时为 false。",
+      "evidence_any_terms": ["等待期"]
+    },
+    "has_hesitation_period": {
+      "description": "产品条款是否设置犹豫期。",
+      "evidence_any_terms": ["犹豫期"]
+    },
+    "has_policy_loan": {
+      "description": "产品条款是否赋予投保人保单贷款、保单借款或保险单质押借款权利；仅有现金价值不等于有保单贷款。",
+      "evidence_any_terms": ["保单贷款", "保单借款", "保险单贷款", "保险单借款", "质押贷款", "合同借款"]
+    },
+    "has_cash_value": {
+      "description": "产品条款是否明确合同具有现金价值或提供现金价值表。",
+      "evidence_any_terms": ["现金价值"]
+    },
+    "has_grace_period": {
+      "description": "产品条款是否对续期保险费设置宽限期。",
+      "evidence_any_terms": ["宽限期"]
+    },
+    "has_renewal": {
+      "description": "产品是否存在续保、重新投保或保险期间届满后继续承保安排；不保证续保仍属于存在续保安排，只有明确不提供或不得续保才是 false。",
+      "evidence_any_terms": ["续保", "重新投保", "继续承保"]
+    },
+    "is_rate_adjustable": {
+      "description": "产品是否允许保险公司在合同约定条件下调整费率；仅出现固定费率表不等于费率可调。",
+      "evidence_any_terms": ["费率可调", "调整费率", "调整保险费率"]
+    },
+    "mentions_out_of_hospital_drug": {
+      "description": "产品条款是否出现院外购药、指定药店或药店购药相关责任或约定。",
+      "evidence_any_terms": ["院外购药", "药店"]
+    },
+    "has_death_benefit": {
+      "description": "产品是否包含身故保险金、死亡保险金或因死亡产生的保险给付责任。",
+      "evidence_any_terms": ["身故保险金", "死亡保险金", "死亡给付", "身故责任"]
+    },
+    "mentions_critical_illness_definition_term": {
+      "description": "产品名称或条款是否使用重大疾病字样，或使用新版重大疾病定义规范列明的疾病名称。",
+      "evidence_any_terms": ["重大疾病", "恶性肿瘤", "急性心肌梗死", "脑中风后遗症"]
+    }
+  }
+}

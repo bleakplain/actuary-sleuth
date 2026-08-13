@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
+from lib.common.constants import ComplianceConstants
+
 from .kb_identity import (
     sha256_file,
     stable_catalog_sha256,
@@ -29,6 +31,16 @@ _MANIFEST_COVERAGE_FIELDS = (
     "涉及标签",
     "风险触发标签",
     "检查目标标签",
+    "触发事实",
+    "触发运算符",
+    "触发期望值",
+    "目标条款主题",
+    "所需事实",
+    "证明策略",
+    "检索必含词组",
+    "检索任一词组",
+    "触发条件说明",
+    "触发排除验收状态",
     "特殊属性",
     "规则逻辑",
     "团体个人",
@@ -197,6 +209,23 @@ def _metadata_text(row: Mapping[str, Any], key: str) -> str:
     return str(value).strip() if value not in (None, "") else ""
 
 
+def _has_manifest_metadata_field(
+    metadata: Mapping[str, Any],
+    field: str,
+) -> bool:
+    if str(metadata.get(field, "") or "").strip():
+        return True
+    if not field.startswith(("触发", "目标条款", "所需事实", "证明策略", "检索")):
+        return False
+    pattern = re.compile(rf"^{re.escape(field)}[1-9]\d*$")
+    return any(
+        isinstance(key, str)
+        and pattern.fullmatch(key)
+        and str(value or "").strip()
+        for key, value in metadata.items()
+    )
+
+
 def build_manifest_payload(
     source_file: str,
     source_sha256: str,
@@ -216,7 +245,7 @@ def build_manifest_payload(
         count = sum(
             1
             for row in rows
-            if str(_metadata(row).get(field, "") or "").strip()
+            if _has_manifest_metadata_field(_metadata(row), field)
         )
         if count:
             coverage[field] = count
@@ -228,6 +257,9 @@ def build_manifest_payload(
         "chunks": len(rows),
         "failed_documents": list(failed_documents),
         "metadata_coverage": coverage,
+        "regulation_trigger_schema_version": (
+            ComplianceConstants.REGULATION_TRIGGER_SCHEMA_VERSION
+        ),
     }
 
 
@@ -343,6 +375,23 @@ def validate_staged_catalog(
             "chunk 数偏离受控基线: "
             f"actual={len(rows)}, expected={expected_chunks}"
         )
+    # 构建阶段必须阻止不完整或越过受控枚举的触发配置。运行时仍会再次
+    # 校验，以防外部或旧索引绕过标准 staging 流程。
+    from lib.compliance.regulation_trigger_metadata import (
+        RegulationTriggerMetadataError,
+        parse_regulation_trigger_metadata,
+    )
+    for index, row in enumerate(rows):
+        try:
+            parse_regulation_trigger_metadata(_metadata(row))
+        except RegulationTriggerMetadataError as exc:
+            errors.append(f"法规触发规格非法: row={index}: {exc}")
+    from lib.compliance.regulation_units import aggregate_regulation_units
+    unit_validation = aggregate_regulation_units(rows, version)
+    errors.extend(
+        f"法规单元聚合校验失败: {error}"
+        for error in unit_validation.errors
+    )
     return StagedValidation(
         valid=not errors,
         version=version,

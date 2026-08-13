@@ -1,6 +1,23 @@
 """应用常量定义"""
 
-from typing import Dict, List
+from typing import Dict, List, Tuple
+
+
+class CoverageFactKeys:
+    """可由完整正文零命中证明为假的稳定事实键。"""
+
+    RENEWAL_TEXT = "renewal_text"
+    TAX_ADVANTAGED_TEXT = "tax_advantaged_text"
+    OUT_OF_HOSPITAL_DRUG_TEXT = "out_of_hospital_drug_text"
+    CRITICAL_ILLNESS_TERM_TEXT = "critical_illness_term_text"
+    INCREASING_SUM_ASSURED_TEXT = "increasing_sum_assured_text"
+    ALL: Tuple[str, ...] = (
+        RENEWAL_TEXT,
+        TAX_ADVANTAGED_TEXT,
+        OUT_OF_HOSPITAL_DRUG_TEXT,
+        CRITICAL_ILLNESS_TERM_TEXT,
+        INCREASING_SUM_ASSURED_TEXT,
+    )
 
 
 class DocumentValidation:
@@ -91,9 +108,14 @@ class ComplianceConstants:
     """合规检查常量"""
 
     EVALUATION_DATASET_VERSION = "compliance-audit-v1"
+    REGULATION_TRIGGER_SCHEMA_VERSION = "1.0.0"
+    REGULATION_TRIGGER_EXCLUSION_MODE = "shadow"
     EVALUATION_DATASET_STATUS = "pending"
     CUTOVER_GATE_STATUS = "blocked"
+    APPROVED_REGULATION_TRIGGER_SOURCE_SHA256 = ""
+    APPROVED_REGULATION_TRIGGER_CATALOG_SHA256 = ""
     AUDIT_TOTAL_DEADLINE_SECONDS = 300.0
+    AUDIT_FACT_RESOLUTION_MAX_SECONDS = 45.0
     AUDIT_REPORT_PERSISTENCE_RESERVE_SECONDS = 5.0
     AUDIT_MAX_CONCURRENCY = 5
     MAX_PRODUCT_DOCUMENT_BYTES = 25 * 1024 * 1024

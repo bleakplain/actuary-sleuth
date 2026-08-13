@@ -5,8 +5,70 @@ import math
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Tuple
 
-from lib.common.compliance_audit import RegulationAuditPackage
+from lib.common.compliance_audit import (
+    AuditClauseSnapshot,
+    RegulationAuditPackage,
+)
+from lib.common.product_tags import ProductTags
+from lib.compliance.applicability import (
+    MatchStatus,
+    RegulationApplicability,
+    match_regulation_applicability,
+)
 from lib.compliance.auditor import build_audit_messages, split_audit_package
+from lib.compliance.regulation_units import RegulationUnit, aggregate_regulation_units
+from lib.doc_parser.models import AuditDocument
+
+
+def build_audit_clause_snapshots(
+    document: AuditDocument,
+) -> Tuple[AuditClauseSnapshot, ...]:
+    return tuple(
+        AuditClauseSnapshot(
+            clause_id=block.clause_id,
+            number=block.number,
+            title=block.title,
+            text=block.content,
+            block_type=block.block_type.value,
+            topics=block.topics,
+            hierarchy_level=block.hierarchy_level,
+            parent_number=block.parent_number,
+            ancestor_numbers=block.ancestor_numbers,
+            hierarchy_path=block.hierarchy_path,
+            container_only=block.container_only,
+        )
+        for block in document.audit_blocks
+    )
+
+
+def list_applicable_regulation_units(
+    catalog: Iterable[Mapping[str, object]],
+    product_tags: ProductTags,
+    kb_version: str,
+) -> Tuple[RegulationUnit, ...]:
+    candidates = []
+    for row in catalog:
+        candidate = dict(row)
+        metadata = candidate.get("metadata")
+        if not isinstance(metadata, Mapping):
+            raise ValueError("法规元数据必须是对象")
+        result = match_regulation_applicability(
+            product_tags,
+            RegulationApplicability.from_metadata(metadata),
+        )
+        candidate.update({
+            "applicability_status": result.status.value,
+            "matched_dimensions": result.matched_dimensions,
+            "indeterminate_dimensions": result.indeterminate_dimensions,
+            "excluded_by": result.excluded_by,
+            "applicability_reasons": result.reasons,
+        })
+        candidates.append(candidate)
+    units = aggregate_regulation_units(candidates, kb_version).units
+    return tuple(
+        unit for unit in units
+        if unit.applicability_status != MatchStatus.NOT_APPLICABLE.value
+    )
 
 
 def _prompt_chars(package: RegulationAuditPackage) -> int:

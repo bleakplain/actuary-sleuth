@@ -76,6 +76,131 @@ export interface ExtractedFact {
   confidence: number;
 }
 
+export type TriggerFactName =
+  | 'has_waiting_period'
+  | 'has_hesitation_period'
+  | 'has_policy_loan'
+  | 'has_cash_value'
+  | 'has_grace_period'
+  | 'has_renewal'
+  | 'is_rate_adjustable'
+  | 'mentions_out_of_hospital_drug'
+  | 'has_death_benefit'
+  | 'mentions_critical_illness_definition_term'
+  | 'waiting_period_days'
+  | 'hesitation_period_days'
+  | 'first_rate_adjustment_interval_years'
+  | 'subsequent_rate_adjustment_interval_years';
+
+export type TriggerOperator =
+  | 'equals'
+  | 'exists'
+  | 'contains_any'
+  | 'less_than_or_equal';
+
+export type ProofStrategy =
+  | 'explicit_presence'
+  | 'explicit_negation'
+  | 'controlled_classification'
+  | 'closed_phrase_scan'
+  | 'numeric_fact'
+  | 'semantic_fact';
+
+export interface RegulationTriggerSpecTrace {
+  fact_name: TriggerFactName;
+  operator: TriggerOperator;
+  expected_value: boolean | number | string | string[] | null;
+  target_topics: string[];
+  required_facts: TriggerFactName[];
+  proof_strategy: ProofStrategy;
+  search_all_terms: string[];
+  search_any_terms: string[];
+  description: string;
+  exclusion_approved: boolean;
+}
+
+export interface ProductFactEvidenceTrace {
+  clause_id: string;
+  quote: string;
+}
+
+export interface ProductFactTrace {
+  name: TriggerFactName;
+  truth: 'true' | 'false' | 'unknown';
+  value: boolean | number | string | string[] | null;
+  unit: string;
+  method: string;
+  confidence: number;
+  evidence: ProductFactEvidenceTrace[];
+  reason: string;
+  safe_for_exclusion: boolean;
+  proof_strategy: ProofStrategy | null;
+  proof_terms: string[];
+  complete_document_proof: boolean;
+}
+
+export interface TriggerEvaluationTrace {
+  status: 'triggered' | 'not_triggered' | 'indeterminate';
+  fact_names: TriggerFactName[];
+  reasons: string[];
+  evidence_clause_ids: string[];
+}
+
+export interface RegulationTriggerRecordTrace {
+  regulation_unit_id: string;
+  kb_version: string;
+  source_file: string;
+  section_path: string;
+  chunk_ids: string[];
+  law_name: string;
+  article_number: string;
+  trigger_specs: RegulationTriggerSpecTrace[];
+  evaluation: TriggerEvaluationTrace;
+  exclusion_approved: boolean;
+  exclusion_applied: boolean;
+}
+
+export interface ProductFactResolutionTrace {
+  facts: ProductFactTrace[];
+  requested_fact_names: TriggerFactName[];
+  resolved_fact_names: TriggerFactName[];
+  validation_errors: string[];
+  attempted: boolean;
+}
+
+export interface DynamicEvidenceMatchTrace {
+  clause_id: string;
+  source_layer:
+    | 'trigger_fact'
+    | 'exact_topic'
+    | 'related_topic'
+    | 'business_terms'
+    | 'bm25';
+  selection_reason: string;
+  score: number;
+  matched_values: string[];
+}
+
+export interface DynamicEvidenceSelectionTrace {
+  regulation_topics: string[];
+  selected_clause_ids: string[];
+  matches: DynamicEvidenceMatchTrace[];
+  relation_schema_version: string;
+  rule_schema_version: string;
+  config_valid: boolean;
+  warnings: string[];
+}
+
+export interface ProductClauseOutlineTrace {
+  clause_id: string;
+  number: string;
+  title: string;
+  topics: string[];
+  parent_number: string | null;
+  ancestor_numbers: string[];
+  hierarchy_path: string;
+}
+
 export interface RoutedClause {
   clause_id: string;
   number: string;
@@ -100,6 +225,8 @@ export interface RegulationDecision {
   error_code: string;
   routed_clauses: RoutedClause[];
   facts: ExtractedFact[];
+  trigger_evaluation?: TriggerEvaluationTrace | null;
+  dynamic_evidence_shadow?: DynamicEvidenceSelectionTrace | null;
 }
 
 export type RegulationDecisionProgress = Omit<
@@ -141,12 +268,25 @@ export interface ComplianceResult {
   summary: Record<string, number>;
   items: AuditResultItem[];
   regulations: AuditRegulationItem[];
+  retrieved_regulations?: AuditRegulationItem[];
   excluded_regulations?: ExcludedRegulationUnit[];
   decisions?: RegulationDecision[];
   product_tags?: Record<string, unknown>;
+  product_fact_ledger?: ProductFactTrace[];
+  product_fact_resolution?: ProductFactResolutionTrace | null;
+  trigger_evaluations?: RegulationTriggerRecordTrace[];
+  trigger_excluded_regulations?: RegulationTriggerRecordTrace[];
+  trigger_exclusion_mode?: string;
+  trigger_exclusion_ready?: boolean;
+  trigger_exclusion_blockers?: string[];
+  dynamic_evidence_mode?: string;
+  dynamic_evidence_shadow_warnings?: string[];
+  product_clause_outline?: ProductClauseOutlineTrace[];
   document_fingerprint?: string;
   audit_input_fingerprint?: string;
   product_name_source?: string;
+  coverage_attested?: boolean;
+  coverage_attested_facts?: string[];
   parse_warnings?: string[];
   regulation_sources: Record<string, string[]>;
   category: string | null;
@@ -158,6 +298,12 @@ export interface ComplianceResult {
   kb_version?: string;
   topic_taxonomy_version?: string;
   topic_relations_version?: string;
+  regulation_trigger_schema_version?: string;
+  regulation_source_sha256?: string;
+  regulation_catalog_sha256?: string;
+  approved_regulation_trigger_source_sha256?: string;
+  approved_regulation_trigger_catalog_sha256?: string;
+  supported_regulation_trigger_schema_version?: string;
   evaluation_dataset_version?: string;
   evaluation_dataset_status?: string;
   cutover_gate_status?: string;
@@ -214,6 +360,36 @@ export interface ParsedSection {
   content: string;
 }
 
+export interface ParsedDocumentAnnotation {
+  kind: string;
+  annotation_id: string;
+  text: string;
+  author: string | null;
+  created_at: string | null;
+  anchor_start_paragraph_index: number | null;
+  anchor_end_paragraph_index: number | null;
+  paragraph_index: number | null;
+}
+
+export interface CoverageAttestationTrace {
+  coverage_attested: boolean;
+  coverage_attested_facts: string[];
+  source_record_count: number;
+  assigned_record_count: number;
+  unassigned_orders: number[];
+  multiply_assigned_orders: number[];
+  duplicate_source_orders: number[];
+  truncated_orders: number[];
+  unreadable_pages: number[];
+  unparsed_text_box_count: number;
+  unparsed_image_count: number;
+  unparsed_header_footer_part_count: number;
+  unparsed_auxiliary_part_count: number;
+  ignored_header_footer_part_count: number;
+  ignored_qr_image_count: number;
+  ignored_navigation_text_box_count: number;
+}
+
 export interface ParsedAuditBlock {
   clause_id: string;
   block_type: string;
@@ -242,6 +418,7 @@ export interface ParsedDocument {
   exclusions: ParsedSection[];
   unclassified_sections: ParsedSection[];
   rider_clauses: ParsedClause[];
+  annotations: ParsedDocumentAnnotation[];
   audit_blocks: ParsedAuditBlock[];
   document_fingerprint: string;
   audit_input_fingerprint: string;
@@ -253,6 +430,8 @@ export interface ParsedDocument {
   product_name?: string | null;
   product_name_source: string;
   coverage_attested: boolean;
+  coverage_attested_facts: string[];
+  coverage_attestation: CoverageAttestationTrace;
   is_rider?: boolean;
   group_or_individual?: string | null;
   duration_type?: string | null;

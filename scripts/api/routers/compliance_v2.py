@@ -93,6 +93,27 @@ def _record_data(record: RegulationAuditRecord) -> Dict[str, Any]:
         for routed in record.package.clauses
     ]
     result["facts"] = [_jsonable(asdict(fact)) for fact in record.package.facts]
+    result["trigger_evaluation"] = (
+        _jsonable(asdict(record.package.trigger_evaluation))
+        if record.package.trigger_evaluation is not None
+        else None
+    )
+    selection = record.evidence_selection
+    result["dynamic_evidence_shadow"] = (
+        {
+            "regulation_topics": list(selection.regulation_topics),
+            "selected_clause_ids": list(selection.selected_clause_ids),
+            "matches": [
+                _jsonable(asdict(item)) for item in selection.matches
+            ],
+            "relation_schema_version": selection.relation_schema_version,
+            "rule_schema_version": selection.rule_schema_version,
+            "config_valid": selection.config_valid,
+            "warnings": list(selection.warnings),
+        }
+        if selection is not None
+        else None
+    )
     return result
 
 
@@ -221,6 +242,23 @@ def _clause_coverage(result: AuditPipelineResult) -> Dict[str, Any]:
     }
 
 
+def _retained_regulations(
+    result: AuditPipelineResult,
+) -> Tuple[AuditRegulationItem, ...]:
+    retained_unit_ids = frozenset(
+        record.package.regulation.regulation_unit_id
+        for record in result.records
+    )
+    return tuple(
+        regulation
+        for regulation in result.retrieval.regulations
+        if (
+            not regulation.regulation_unit_id
+            or regulation.regulation_unit_id in retained_unit_ids
+        )
+    )
+
+
 def build_report_data(result: AuditPipelineResult) -> Dict[str, Any]:
     decisions = [_record_data(record) for record in result.records]
     summary = {
@@ -253,10 +291,15 @@ def build_report_data(result: AuditPipelineResult) -> Dict[str, Any]:
             if record.decision.incomplete
         ),
     )))
+    retained_regulations = _retained_regulations(result)
     return {
         "summary": summary,
         "items": _legacy_items(result),
         "regulations": [
+            _jsonable(asdict(regulation))
+            for regulation in retained_regulations
+        ],
+        "retrieved_regulations": [
             _jsonable(asdict(regulation))
             for regulation in result.retrieval.regulations
         ],
@@ -266,11 +309,48 @@ def build_report_data(result: AuditPipelineResult) -> Dict[str, Any]:
         ],
         "decisions": decisions,
         "product_tags": result.request.product_tags.to_dict(),
+        "product_fact_ledger": [
+            _jsonable(asdict(fact)) for fact in result.product_facts
+        ],
+        "product_fact_resolution": (
+            _jsonable(asdict(result.fact_resolution))
+            if result.fact_resolution is not None
+            else None
+        ),
+        "trigger_evaluations": [
+            _jsonable(asdict(record)) for record in result.trigger_records
+        ],
+        "trigger_excluded_regulations": [
+            _jsonable(asdict(record))
+            for record in result.trigger_records
+            if record.exclusion_applied
+        ],
+        "trigger_exclusion_mode": result.trigger_exclusion_mode,
+        "trigger_exclusion_ready": result.trigger_exclusion_ready,
+        "trigger_exclusion_blockers": list(result.trigger_exclusion_blockers),
+        "dynamic_evidence_mode": "shadow_full_document_baseline",
+        "dynamic_evidence_shadow_warnings": list(result.shadow_warnings),
+        "product_clause_outline": [
+            {
+                "clause_id": clause.clause_id,
+                "number": clause.number,
+                "title": clause.title,
+                "topics": list(clause.topics),
+                "parent_number": clause.parent_number,
+                "ancestor_numbers": list(clause.ancestor_numbers),
+                "hierarchy_path": clause.hierarchy_path,
+            }
+            for clause in result.request.clauses
+        ],
         "document_fingerprint": result.request.document_fingerprint,
         "audit_input_fingerprint": result.request.audit_input_fingerprint,
         "product_name_source": result.request.product_name_source,
+        "coverage_attested": result.request.coverage_attested,
+        "coverage_attested_facts": list(
+            result.request.coverage_attested_facts
+        ),
         "parse_warnings": list(result.request.parse_warnings),
-        "regulation_sources": _regulation_sources(result.retrieval.regulations),
+        "regulation_sources": _regulation_sources(retained_regulations),
         "category": (
             result.request.category
             or infer_category_from_product_tags(result.request.product_tags)
@@ -285,6 +365,26 @@ def build_report_data(result: AuditPipelineResult) -> Dict[str, Any]:
         "kb_version": ",".join(kb_versions),
         "topic_taxonomy_version": result.topic_taxonomy_version,
         "topic_relations_version": result.topic_relations_version,
+        "regulation_trigger_schema_version": (
+            result.retrieval.kb_trigger_schema_version or "unavailable"
+        ),
+        "regulation_source_sha256": (
+            result.retrieval.kb_source_sha256 or "unavailable"
+        ),
+        "regulation_catalog_sha256": (
+            result.retrieval.kb_catalog_sha256 or "unavailable"
+        ),
+        "approved_regulation_trigger_source_sha256": (
+            ComplianceConstants.APPROVED_REGULATION_TRIGGER_SOURCE_SHA256
+            or "unavailable"
+        ),
+        "approved_regulation_trigger_catalog_sha256": (
+            ComplianceConstants.APPROVED_REGULATION_TRIGGER_CATALOG_SHA256
+            or "unavailable"
+        ),
+        "supported_regulation_trigger_schema_version": (
+            ComplianceConstants.REGULATION_TRIGGER_SCHEMA_VERSION
+        ),
         "evaluation_dataset_version": ComplianceConstants.EVALUATION_DATASET_VERSION,
         "evaluation_dataset_status": ComplianceConstants.EVALUATION_DATASET_STATUS,
         "cutover_gate_status": ComplianceConstants.CUTOVER_GATE_STATUS,
@@ -305,11 +405,24 @@ def _incomplete_report(
         "summary": {"compliant": 0, "non_compliant": 0, "attention": 0},
         "items": [],
         "regulations": [],
+        "retrieved_regulations": [],
         "excluded_regulations": [],
         "decisions": [],
         "product_tags": (
             request.product_tags.to_dict() if request is not None else {}
         ),
+        "product_fact_ledger": [],
+        "product_fact_resolution": None,
+        "trigger_evaluations": [],
+        "trigger_excluded_regulations": [],
+        "trigger_exclusion_mode": (
+            ComplianceConstants.REGULATION_TRIGGER_EXCLUSION_MODE
+        ),
+        "trigger_exclusion_ready": False,
+        "trigger_exclusion_blockers": [message],
+        "dynamic_evidence_mode": "unavailable",
+        "dynamic_evidence_shadow_warnings": [],
+        "product_clause_outline": [],
         "document_fingerprint": (
             request.document_fingerprint if request is not None else ""
         ),
@@ -318,6 +431,14 @@ def _incomplete_report(
         ),
         "product_name_source": (
             request.product_name_source if request is not None else "unknown"
+        ),
+        "coverage_attested": (
+            request.coverage_attested if request is not None else False
+        ),
+        "coverage_attested_facts": (
+            list(request.coverage_attested_facts)
+            if request is not None
+            else []
         ),
         "parse_warnings": (
             list(request.parse_warnings) if request is not None else []
@@ -333,6 +454,20 @@ def _incomplete_report(
         "kb_version": "",
         "topic_taxonomy_version": "unavailable",
         "topic_relations_version": "unavailable",
+        "regulation_trigger_schema_version": "unavailable",
+        "regulation_source_sha256": "unavailable",
+        "regulation_catalog_sha256": "unavailable",
+        "approved_regulation_trigger_source_sha256": (
+            ComplianceConstants.APPROVED_REGULATION_TRIGGER_SOURCE_SHA256
+            or "unavailable"
+        ),
+        "approved_regulation_trigger_catalog_sha256": (
+            ComplianceConstants.APPROVED_REGULATION_TRIGGER_CATALOG_SHA256
+            or "unavailable"
+        ),
+        "supported_regulation_trigger_schema_version": (
+            ComplianceConstants.REGULATION_TRIGGER_SCHEMA_VERSION
+        ),
         "evaluation_dataset_version": ComplianceConstants.EVALUATION_DATASET_VERSION,
         "evaluation_dataset_status": ComplianceConstants.EVALUATION_DATASET_STATUS,
         "cutover_gate_status": ComplianceConstants.CUTOVER_GATE_STATUS,
@@ -359,6 +494,11 @@ def _pipeline_request(
                 product_name=req.product_name,
                 product_name_source=req.product_name_source,
                 coverage_attested=req.coverage_attested,
+                coverage_attested_facts=(
+                    tuple(req.coverage_attested_facts)
+                    if req.coverage_attested_facts is not None
+                    else None
+                ),
                 parse_warnings=tuple(req.parse_warnings),
                 category=req.category,
                 audit_blocks=tuple(

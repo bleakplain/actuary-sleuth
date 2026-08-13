@@ -3,7 +3,7 @@
 import os
 import uuid
 import asyncio
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 import logging
 import tempfile
@@ -17,7 +17,7 @@ from api.database import get_connection, list_compliance_reports, get_compliance
 from api.schemas.compliance import (
     DocumentCheckRequest, ComplianceReportResponse,
     ParsedDocumentResponse, ParsedClause, ParsedDataTable, ParsedSection,
-    ParsedAuditBlock, RichTextParseRequest,
+    ParsedAuditBlock, ParsedDocumentAnnotation, RichTextParseRequest,
 )
 from lib.common.constants import ComplianceConstants
 from lib.common.html_converter import html_to_docx
@@ -73,6 +73,7 @@ def _apply_requested_product_name(
             document_content,
             product_name_source="user_input",
             complete_document=audit_doc.coverage_attested,
+            coverage_attested_facts=audit_doc.coverage_attested_facts,
         ),
         is_rider=recognition.is_rider,
         group_or_individual=recognition.group_or_individual,
@@ -501,6 +502,7 @@ def _audit_doc_to_response(audit_doc, file_type: str,
         tuple(audit_doc.warnings),
         user_subject,
         coverage_attested=audit_doc.coverage_attested,
+        coverage_attested_facts=audit_doc.coverage_attested_facts,
     )
 
     return ParsedDocumentResponse(
@@ -512,6 +514,23 @@ def _audit_doc_to_response(audit_doc, file_type: str,
         clauses=clauses, data_tables=tables,
         unclassified_sections=unclassified, notices=notices,
         health_disclosures=health, exclusions=exclusions, rider_clauses=riders,
+        annotations=[
+            ParsedDocumentAnnotation(
+                kind=annotation.kind,
+                annotation_id=annotation.annotation_id,
+                text=annotation.text,
+                author=annotation.author,
+                created_at=annotation.created_at,
+                anchor_start_paragraph_index=(
+                    annotation.anchor_start_paragraph_index
+                ),
+                anchor_end_paragraph_index=(
+                    annotation.anchor_end_paragraph_index
+                ),
+                paragraph_index=annotation.paragraph_index,
+            )
+            for annotation in audit_doc.annotations
+        ],
         audit_blocks=audit_blocks,
         document_fingerprint=audit_doc.document_fingerprint,
         audit_input_fingerprint=audit_doc.audit_input_fingerprint,
@@ -523,6 +542,8 @@ def _audit_doc_to_response(audit_doc, file_type: str,
         product_name=audit_doc.product_name,
         product_name_source=audit_doc.product_name_source,
         coverage_attested=audit_doc.coverage_attested,
+        coverage_attested_facts=list(audit_doc.coverage_attested_facts),
+        coverage_attestation=asdict(audit_doc.coverage_attestation),
         is_rider=audit_doc.is_rider,
         group_or_individual=audit_doc.group_or_individual,
         duration_type=audit_doc.duration_type,

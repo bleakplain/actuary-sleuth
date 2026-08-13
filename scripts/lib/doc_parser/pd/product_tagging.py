@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Dict, List, Match, Optional, Tuple, Union
 
+from ...common.constants import CoverageFactKeys
 from ...common.product_tags import (
     ContractRole, CustomerScope, DiseasePaymentPattern, HealthTermClass,
     MedicalBenefitBasis, ProductDesignType, ProductLine, ProductSubtype,
@@ -264,6 +266,15 @@ _RELIABLE_PRODUCT_NAME_SOURCES = frozenset({
 })
 
 
+def _has_attested_coverage(
+    fact_key: str,
+    complete_document: bool,
+    coverage_attested_facts: Tuple[str, ...],
+) -> bool:
+    """全文证明兼容旧调用；局部证明只授权对应的负向事实。"""
+    return complete_document or fact_key in coverage_attested_facts
+
+
 def _period_segments(
     text: str,
     label: str,
@@ -484,8 +495,9 @@ def build_product_tags(
     *,
     product_name_source: str = "product_name",
     complete_document: bool = False,
+    coverage_attested_facts: Tuple[str, ...] = (),
 ) -> ProductTags:
-    """构建产品标签；负向推断只在完整原文覆盖已由调用方确认时启用。"""
+    """构建产品标签；负向推断只使用对应事实的正文覆盖证明。"""
     name = product_name or ""
     line, subtype = _classify_name(name)
     evidence: List[TagEvidence] = []
@@ -562,12 +574,19 @@ def build_product_tags(
     if renewal_match and renewal is RenewalType.UNKNOWN:
         renewal = RenewalType.GUARANTEED
     renewal_from_absence = False
+    normalized_document_content = re.sub(
+        r"\s+", "", unicodedata.normalize("NFKC", document_content)
+    )
     if (
         renewal is RenewalType.UNKNOWN
-        and complete_document
+        and _has_attested_coverage(
+            CoverageFactKeys.RENEWAL_TEXT,
+            complete_document,
+            coverage_attested_facts,
+        )
         and line is not ProductLine.UNKNOWN
         and document_content.strip()
-        and "续保" not in document_content
+        and "续保" not in normalized_document_content
     ):
         renewal = RenewalType.NONE
         renewal_from_absence = True
@@ -620,7 +639,11 @@ def build_product_tags(
     tax: Optional[bool] = None
     if tax_match:
         tax = True
-    elif complete_document and document_content.strip():
+    elif _has_attested_coverage(
+        CoverageFactKeys.TAX_ADVANTAGED_TEXT,
+        complete_document,
+        coverage_attested_facts,
+    ) and document_content.strip():
         tax = False
     customized = None
     customized_match = None
@@ -671,7 +694,11 @@ def build_product_tags(
     increasing_sum_assured: Optional[bool] = None
     if increasing_name_match or increasing_clause_match:
         increasing_sum_assured = True
-    elif complete_document and document_content.strip():
+    elif _has_attested_coverage(
+        CoverageFactKeys.INCREASING_SUM_ASSURED_TEXT,
+        complete_document,
+        coverage_attested_facts,
+    ) and document_content.strip():
         increasing_sum_assured = False
 
     out_of_hospital_drug_match = _OUT_OF_HOSPITAL_DRUG_MENTION_PATTERN.search(
@@ -680,7 +707,11 @@ def build_product_tags(
     out_of_hospital_drug: Optional[bool] = None
     if out_of_hospital_drug_match:
         out_of_hospital_drug = True
-    elif complete_document and document_content.strip():
+    elif _has_attested_coverage(
+        CoverageFactKeys.OUT_OF_HOSPITAL_DRUG_TEXT,
+        complete_document,
+        coverage_attested_facts,
+    ) and document_content.strip():
         out_of_hospital_drug = False
 
     reliable_product_name = bool(
@@ -693,7 +724,15 @@ def build_product_tags(
     critical_illness_term: Optional[bool] = None
     if critical_illness_name_match or critical_illness_term_match:
         critical_illness_term = True
-    elif reliable_product_name and complete_document and document_content.strip():
+    elif (
+        reliable_product_name
+        and _has_attested_coverage(
+            CoverageFactKeys.CRITICAL_ILLNESS_TERM_TEXT,
+            complete_document,
+            coverage_attested_facts,
+        )
+        and document_content.strip()
+    ):
         critical_illness_term = False
 
     component_matches: Dict[str, Optional[Match[str]]] = {}
@@ -771,7 +810,7 @@ def build_product_tags(
                 "renewal_type",
                 renewal.value,
                 "document_coverage_attestation",
-                "完整产品条款已覆盖，未出现续保约定",
+                "续保事实相关正文已覆盖，未出现续保约定",
                 1.0,
             ))
         else:
@@ -819,7 +858,7 @@ def build_product_tags(
             "is_tax_advantaged_health",
             "false",
             "document_coverage_attestation",
-            "完整产品条款已覆盖，未出现税收优惠表述",
+            "税优事实相关正文已覆盖，未出现税收优惠表述",
             1.0,
         ))
     if customized is not None:
@@ -885,7 +924,7 @@ def build_product_tags(
             "mentions_out_of_hospital_drug",
             "false",
             "document_coverage_attestation",
-            "完整产品条款已覆盖，未出现“院外购药”或“药店”表述",
+            "院外购药事实相关正文已覆盖，未出现“院外购药”或“药店”表述",
             1.0,
         ))
     if critical_illness_name_match:
@@ -909,7 +948,7 @@ def build_product_tags(
             "mentions_critical_illness_definition_term",
             "false",
             "document_coverage_attestation",
-            "可靠产品名称和完整产品条款均未出现“重大疾病”或2020版规范列明疾病名称",
+            "可靠产品名称和重疾术语相关正文均未出现“重大疾病”或2020版规范列明疾病名称",
             1.0,
         ))
     if increasing_sum_assured is True:
@@ -925,7 +964,7 @@ def build_product_tags(
             "is_increasing_sum_assured_product",
             "false",
             "document_coverage_attestation",
-            "完整产品条款已覆盖，未识别到保额逐年递增设计",
+            "保额递增事实相关正文已覆盖，未识别到保额逐年递增设计",
             1.0,
         ))
     for component in components:

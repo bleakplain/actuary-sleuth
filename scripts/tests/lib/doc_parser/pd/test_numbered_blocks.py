@@ -385,6 +385,40 @@ def test_detected_section_heading_inside_clause_is_content_not_boundary():
     assert content.coverage_attestation.coverage_attested
 
 
+def test_numbered_note_text_attaches_to_referenced_clause_not_new_boundary():
+    content = assemble_numbered_content((
+        _row(0, "2", "保险责任"),
+        _row(1, "2.1", "医疗保险金\n正文第一段"),
+        SourceRecord(
+            2,
+            SourceRecordKind.AUXILIARY_TEXT,
+            fields=("【脚注 1】1.1 此编号属于脚注，不是产品条款",),
+        ),
+        _row(3, "2.2", "责任免除\n免责正文"),
+    ))
+
+    assert [clause.number for clause in content.clauses] == ["2", "2.1", "2.2"]
+    assert content.clauses[1].text == (
+        "正文第一段\n【脚注 1】1.1 此编号属于脚注，不是产品条款"
+    )
+    assert content.unclassified_sections == ()
+    assert content.coverage_attestation.coverage_attested
+
+
+def test_note_without_active_clause_remains_standalone_evidence():
+    content = assemble_numbered_content((
+        SourceRecord(
+            0,
+            SourceRecordKind.AUXILIARY_TEXT,
+            fields=("【脚注 1】前置说明",),
+        ),
+        _row(1, "1", "保险责任\n正文"),
+    ))
+
+    assert content.clauses[0].text == "正文"
+    assert content.unclassified_sections[0].content == "【脚注 1】前置说明"
+
+
 def test_reading_guide_and_appendix_are_auxiliary_blocks_in_source_order():
     table = DataTable(
         data=[["保障责任", "限额"], ["医疗", "100万"]],

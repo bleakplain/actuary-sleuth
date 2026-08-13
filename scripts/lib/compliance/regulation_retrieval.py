@@ -102,6 +102,9 @@ class RegulationRetrievalOutcome:
     coverage: Optional[RegulationRetrievalCoverage] = None
     candidate_count: int = 0
     excluded_count: int = 0
+    kb_trigger_schema_version: str = ""
+    kb_source_sha256: str = ""
+    kb_catalog_sha256: str = ""
 
 
 def infer_category_from_product_tags(product_tags: ProductTags) -> Optional[str]:
@@ -406,6 +409,38 @@ def _kb_version(engine: Any, candidates: Iterable[Mapping[str, Any]]) -> str:
     return path.parent.name if path.name == "lancedb" else path.name
 
 
+def _kb_trigger_manifest_identity(
+    engine: Any,
+    version: str,
+) -> Tuple[str, str]:
+    """读取触发 schema 与法规源指纹，使验收不能跨 Excel 版本复用。"""
+    if not version:
+        return "", ""
+    config = getattr(engine, "config", None)
+    vector_db_path = getattr(config, "vector_db_path", None)
+    if not isinstance(vector_db_path, str) or not vector_db_path:
+        return "", ""
+    vector_path = Path(vector_db_path)
+    kb_root = (
+        vector_path.parent.parent
+        if vector_path.name == "lancedb"
+        else vector_path.parent
+    )
+    manifest_path = kb_root / "references" / f"{version}-build-manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "", ""
+    if not isinstance(manifest, Mapping):
+        return "", ""
+    schema = manifest.get("regulation_trigger_schema_version")
+    source_sha256 = manifest.get("source_sha256")
+    return (
+        str(schema).strip() if schema not in (None, "") else "",
+        str(source_sha256).strip() if source_sha256 not in (None, "") else "",
+    )
+
+
 def _merge_candidates(
     catalog: Iterable[Dict[str, Any]],
     semantic: Iterable[Dict[str, Any]],
@@ -631,9 +666,13 @@ def retrieve_regulation_candidates(
     all_units = aggregate_regulation_units(candidates, version)
     if all_units.errors:
         warnings.append(
-            f"{len(all_units.errors)} 个原始法规 chunk 缺少稳定身份字段"
+            f"法规单元聚合存在 {len(all_units.errors)} 个身份或触发配置错误；"
+            "非法触发条件已忽略并保守保留法规"
         )
-        uncovered.append("regulation_unit_identity")
+        warnings.extend(all_units.errors[:5])
+        if any("身份字段" in error for error in all_units.errors):
+            uncovered.append("regulation_unit_identity")
+        uncovered.append("regulation_unit_build")
     identity_errors = _validate_catalog_identity(
         engine,
         tuple(catalog),
@@ -660,9 +699,13 @@ def retrieve_regulation_candidates(
     excluded_units = _excluded_units(layered.trace, version)
     if units.errors:
         warnings.append(
-            f"{len(units.errors)} 个法规 chunk 因身份字段缺失未形成审核单元"
+            f"法规候选聚合存在 {len(units.errors)} 个身份或触发配置错误；"
+            "非法触发条件已忽略并保守保留法规"
         )
-        uncovered.append("regulation_unit_identity")
+        warnings.extend(units.errors[:5])
+        if any("身份字段" in error for error in units.errors):
+            uncovered.append("regulation_unit_identity")
+        uncovered.append("regulation_unit_build")
     unit_by_chunk = {
         chunk_id: unit
         for unit in units.units
@@ -696,6 +739,10 @@ def retrieve_regulation_candidates(
         registered_candidate_count=len(registered),
         uncovered_scopes=tuple(dict.fromkeys(uncovered)),
     )
+    trigger_schema_version, source_sha256 = _kb_trigger_manifest_identity(
+        engine,
+        version,
+    )
     return RegulationRetrievalOutcome(
         regulations=tuple(_regulation_item(item) for item in enriched),
         regulation_units=units.units,
@@ -705,4 +752,9 @@ def retrieve_regulation_candidates(
         coverage=coverage,
         candidate_count=len(units.units),
         excluded_count=len(excluded_units),
+        kb_trigger_schema_version=trigger_schema_version,
+        kb_source_sha256=source_sha256,
+        kb_catalog_sha256=(
+            _stable_catalog_sha256(catalog) if catalog else ""
+        ),
     )

@@ -1,5 +1,6 @@
 import pytest
 
+from lib.common.constants import CoverageFactKeys
 from lib.common.product_tags import (
     ContractRole, CustomerScope, DiseasePaymentPattern, HealthTermClass,
     MedicalBenefitBasis, ProductDesignType, ProductLine, ProductSubtype,
@@ -792,3 +793,20 @@ def test_out_of_hospital_drug_absence_has_coverage_evidence():
     assert tags.mentions_out_of_hospital_drug is False
     assert evidence.source == "document_coverage_attestation"
     assert "未出现“院外购药”或“药店”表述" in evidence.evidence
+
+
+def test_partial_coverage_only_authorizes_matching_negative_tags():
+    tags = build_product_tags(
+        "某医疗保险",
+        "本合同承担住院医疗费用。",
+        complete_document=False,
+        coverage_attested_facts=(
+            CoverageFactKeys.OUT_OF_HOSPITAL_DRUG_TEXT,
+        ),
+    )
+
+    assert tags.mentions_out_of_hospital_drug is False
+    assert tags.renewal_type is RenewalType.UNKNOWN
+    assert tags.is_tax_advantaged_health is None
+    assert tags.mentions_critical_illness_definition_term is None
+    assert tags.is_increasing_sum_assured_product is None

@@ -115,6 +115,8 @@ class RegulationDecisionResponse(BaseModel):
     error_code: str = ""
     routed_clauses: List[RoutedClauseResponse] = Field(default_factory=list)
     facts: List[ExtractedFactResponse] = Field(default_factory=list)
+    trigger_evaluation: Optional[Dict[str, object]] = None
+    dynamic_evidence_shadow: Optional[Dict[str, object]] = None
 
 
 class ComplianceReportDataResponse(BaseModel):
@@ -122,12 +124,29 @@ class ComplianceReportDataResponse(BaseModel):
     summary: Dict[str, int] = Field(default_factory=dict)
     items: List[AuditResultItemResponse] = Field(default_factory=list)
     regulations: List[AuditRegulationItemResponse] = Field(default_factory=list)
+    retrieved_regulations: List[AuditRegulationItemResponse] = Field(
+        default_factory=list
+    )
     excluded_regulations: List[ExcludedRegulationUnitResponse] = Field(default_factory=list)
     decisions: List[RegulationDecisionResponse] = Field(default_factory=list)
     product_tags: Dict[str, object] = Field(default_factory=dict)
+    product_fact_ledger: List[Dict[str, object]] = Field(default_factory=list)
+    product_fact_resolution: Optional[Dict[str, object]] = None
+    trigger_evaluations: List[Dict[str, object]] = Field(default_factory=list)
+    trigger_excluded_regulations: List[Dict[str, object]] = Field(
+        default_factory=list
+    )
+    trigger_exclusion_mode: str = "shadow"
+    trigger_exclusion_ready: bool = False
+    trigger_exclusion_blockers: List[str] = Field(default_factory=list)
+    dynamic_evidence_mode: str = ""
+    dynamic_evidence_shadow_warnings: List[str] = Field(default_factory=list)
+    product_clause_outline: List[Dict[str, object]] = Field(default_factory=list)
     document_fingerprint: str = ""
     audit_input_fingerprint: str = ""
     product_name_source: str = "unknown"
+    coverage_attested: bool = False
+    coverage_attested_facts: List[str] = Field(default_factory=list)
     parse_warnings: List[str] = Field(default_factory=list)
     regulation_sources: Dict[str, List[str]] = Field(default_factory=dict)
     category: Optional[str] = ""
@@ -145,6 +164,12 @@ class ComplianceReportDataResponse(BaseModel):
     kb_version: str = ""
     topic_taxonomy_version: str = ""
     topic_relations_version: str = ""
+    regulation_trigger_schema_version: str = ""
+    regulation_source_sha256: str = ""
+    regulation_catalog_sha256: str = ""
+    approved_regulation_trigger_source_sha256: str = ""
+    approved_regulation_trigger_catalog_sha256: str = ""
+    supported_regulation_trigger_schema_version: str = ""
     evaluation_dataset_version: str = ""
     evaluation_dataset_status: str = ""
     cutover_gate_status: str = ""
@@ -189,6 +214,7 @@ class DocumentCheckRequest(BaseModel):
     product_name: str = ""
     product_name_source: str = "unknown"
     coverage_attested: bool = False
+    coverage_attested_facts: Optional[List[str]] = None
     parse_warnings: List[str] = Field(default_factory=list)
     category: str = ""
     clause_topics: List[str] = Field(default_factory=list)
@@ -223,6 +249,17 @@ class ParsedSection(BaseModel):
     content: str
 
 
+class ParsedDocumentAnnotation(BaseModel):
+    kind: str
+    annotation_id: str
+    text: str
+    author: Optional[str] = None
+    created_at: Optional[str] = None
+    anchor_start_paragraph_index: Optional[int] = None
+    anchor_end_paragraph_index: Optional[int] = None
+    paragraph_index: Optional[int] = None
+
+
 class ParsedDocumentResponse(BaseModel):
     parse_id: str
     parse_attestation: str
@@ -236,6 +273,7 @@ class ParsedDocumentResponse(BaseModel):
     health_disclosures: List[ParsedSection] = Field(default_factory=list)
     exclusions: List[ParsedSection] = Field(default_factory=list)
     rider_clauses: List[ParsedClause] = Field(default_factory=list)
+    annotations: List[ParsedDocumentAnnotation] = Field(default_factory=list)
     audit_blocks: List[ParsedAuditBlock] = Field(default_factory=list)
     document_fingerprint: str = ""
     audit_input_fingerprint: str = ""
@@ -248,6 +286,8 @@ class ParsedDocumentResponse(BaseModel):
     product_name: Optional[str] = None
     product_name_source: str = "unknown"
     coverage_attested: bool = False
+    coverage_attested_facts: List[str] = Field(default_factory=list)
+    coverage_attestation: Dict[str, object] = Field(default_factory=dict)
     is_rider: bool = False
     # 结构化标签维度（供前端展示与后续标签化法规筛选）
     group_or_individual: Optional[str] = None

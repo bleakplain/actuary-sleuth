@@ -6,11 +6,15 @@ import type {
   CandidateFreezeProgress,
   ComplianceConclusion,
   ComplianceReport,
+  ProductClauseOutlineTrace,
+  ProductFactResolutionTrace,
+  ProductFactTrace,
   ExcludedRegulationUnit,
   ParsedAuditBlock,
   ParsedDocument,
   RegulationDecision,
   RegulationDecisionProgress,
+  RegulationTriggerRecordTrace,
 } from '../types';
 
 export interface DoneData {
@@ -20,12 +24,25 @@ export interface DoneData {
   summary: { compliant: number; non_compliant: number; attention: number };
   negative_list_result: string | null;
   regulations: AuditRegulationItem[];
+  retrieved_regulations?: AuditRegulationItem[];
   excluded_regulations: ExcludedRegulationUnit[];
   decisions: RegulationDecision[];
   product_tags: Record<string, unknown>;
+  product_fact_ledger: ProductFactTrace[];
+  product_fact_resolution: ProductFactResolutionTrace | null;
+  trigger_evaluations: RegulationTriggerRecordTrace[];
+  trigger_excluded_regulations: RegulationTriggerRecordTrace[];
+  trigger_exclusion_mode: string;
+  trigger_exclusion_ready: boolean;
+  trigger_exclusion_blockers: string[];
+  dynamic_evidence_mode: string;
+  dynamic_evidence_shadow_warnings: string[];
+  product_clause_outline: ProductClauseOutlineTrace[];
   document_fingerprint: string;
   audit_input_fingerprint: string;
   product_name_source: string;
+  coverage_attested: boolean;
+  coverage_attested_facts: string[];
   parse_warnings: string[];
   regulation_sources: Record<string, string[]>;
   retrieval_degraded: boolean;
@@ -35,6 +52,12 @@ export interface DoneData {
   kb_version: string;
   topic_taxonomy_version: string;
   topic_relations_version: string;
+  regulation_trigger_schema_version?: string;
+  regulation_source_sha256?: string;
+  regulation_catalog_sha256?: string;
+  approved_regulation_trigger_source_sha256?: string;
+  approved_regulation_trigger_catalog_sha256?: string;
+  supported_regulation_trigger_schema_version?: string;
   evaluation_dataset_version: string;
   evaluation_dataset_status?: string;
   cutover_gate_status?: string;
@@ -66,6 +89,7 @@ type StreamParams = {
   product_name?: string;
   product_name_source?: string;
   coverage_attested?: boolean;
+  coverage_attested_facts?: string[];
   parse_warnings?: string[];
   category?: string;
   clause_topics?: string[];
