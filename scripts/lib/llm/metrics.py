@@ -15,8 +15,11 @@ from collections import deque
 from typing import Callable, Dict, Any, Optional
 from enum import Enum
 
+from .call_budget import CallBudgetExceededError
+
 
 logger = logging.getLogger(__name__)
+_UNSET_ATTEMPT_LIMIT = object()
 
 
 class LLMRateLimitError(requests.exceptions.RequestException):
@@ -202,17 +205,42 @@ def _retry_with_backoff(
         def wrapper(*args, **kwargs):
             last_exception = None
             retry_deadline = kwargs.pop("_retry_deadline", None)
+            attempt_limit = kwargs.pop("_max_attempts", _UNSET_ATTEMPT_LIMIT)
+            if attempt_limit is _UNSET_ATTEMPT_LIMIT:
+                attempt_limit = (
+                    getattr(args[0], "_retry_attempt_limit", None)
+                    if args else None
+                )
+                if attempt_limit is None:
+                    attempt_limit = max_retries
+            if (
+                not isinstance(attempt_limit, int)
+                or isinstance(attempt_limit, bool)
+                or not 1 <= attempt_limit <= max_retries
+            ):
+                raise ValueError(
+                    f"_max_attempts 必须是 1 到 {max_retries} 之间的整数"
+                )
 
-            for attempt in range(max_retries):
-                if (
-                    isinstance(retry_deadline, (int, float))
-                    and time.monotonic() >= retry_deadline
-                ):
-                    raise requests.exceptions.Timeout(
-                        "LLM retry deadline exceeded"
-                    ) from last_exception
+            for attempt in range(attempt_limit):
+                attempt_kwargs = dict(kwargs)
+                if isinstance(retry_deadline, (int, float)):
+                    remaining = retry_deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise requests.exceptions.Timeout(
+                            "LLM retry deadline exceeded"
+                        ) from last_exception
+                    request_timeout = attempt_kwargs.get("timeout")
+                    if (
+                        isinstance(request_timeout, (int, float))
+                        and not isinstance(request_timeout, bool)
+                    ):
+                        attempt_kwargs["timeout"] = min(
+                            float(request_timeout),
+                            remaining,
+                        )
                 try:
-                    return func(*args, **kwargs)
+                    return func(*args, **attempt_kwargs)
                 except requests.exceptions.RequestException as e:
                     last_exception = e
 
@@ -231,18 +259,29 @@ def _retry_with_backoff(
                     elif 'timeout' in str(e).lower() or 'timed out' in str(e).lower():
                         is_timeout = True
 
+                    will_retry = attempt < attempt_limit - 1
                     if is_rate_limit:
                         delay = base_delay * (rate_limit_delay_mult ** attempt)
-                        logger.warning(f"Rate limited, retrying in {delay:.1f}s...")
+                        message = "Rate limited"
                     elif is_server_error:
                         delay = base_delay * (2 ** attempt)
-                        logger.warning(f"Server error ({e.response.status_code if hasattr(e, 'response') and e.response else '?'}), retrying in {delay:.1f}s...")
+                        status_code = (
+                            e.response.status_code
+                            if hasattr(e, "response") and e.response
+                            else "?"
+                        )
+                        message = f"Server error ({status_code})"
                     elif is_timeout:
                         delay = base_delay * (1.5 ** attempt)
-                        logger.warning(f"Timeout, retrying in {delay:.1f}s...")
+                        message = "Timeout"
                     else:
-                        logger.error(f"Request failed: {e}, retrying in {base_delay}s...")
                         delay = base_delay
+                        message = f"Request failed: {e}"
+
+                    if will_retry:
+                        logger.warning(f"{message}, retrying in {delay:.1f}s...")
+                    else:
+                        logger.warning(f"{message}; no retry attempts remain")
 
                     if isinstance(retry_deadline, (int, float)):
                         remaining = retry_deadline - time.monotonic()
@@ -251,7 +290,7 @@ def _retry_with_backoff(
                                 "LLM retry deadline exceeded"
                             ) from last_exception
                         delay = min(delay, remaining)
-                    if attempt < max_retries - 1:
+                    if will_retry:
                         time.sleep(delay)
 
             raise last_exception
@@ -277,7 +316,7 @@ def _with_circuit_breaker(circuit_key: str) -> Callable[[Callable], Callable]:
             except Exception as exc:
                 # 限流反映的是调用节奏，不代表供应商服务不可用。把它累计为
                 # 普通故障会使一个批次的瞬时拥塞熔断所有后续审核。
-                if not isinstance(exc, LLMRateLimitError):
+                if not isinstance(exc, (LLMRateLimitError, CallBudgetExceededError)):
                     breaker.record_failure()
                 raise
 

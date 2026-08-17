@@ -1,0 +1,28 @@
+{
+  "schema_version": "trigger-online-rate-single-v1",
+  "base_plan_sha256": "b93d46e2ea0efc916ff22404aa901b626a182aa494478fcc0015f088ad848d4d",
+  "evidence_protocol_version": "task-scoped-evidence-id-v1",
+  "case_id": "rate-adjustment-real-001",
+  "sample_id": "real-001",
+  "required_unit_ids": [
+    "regulation-unit:1eaabf6dcf068b4108d8268e9c317fcb4ff2dd7685be010dc21d7e179b1d32f1"
+  ],
+  "stages": {
+    "rate_dynamic_c": "rate-adjustment-real-001:C"
+  },
+  "allowed_endpoint_host": "open.bigmodel.cn",
+  "http_timeout_cap_seconds": 75,
+  "limits_per_stage": {
+    "max_seconds": 285,
+    "outer_watchdog_seconds": 300,
+    "max_total_tokens": 125000,
+    "max_physical_calls": 1,
+    "max_batch_units": 1
+  },
+  "pair_theoretical_limits": {
+    "max_seconds": 285,
+    "outer_watchdog_seconds": 300,
+    "max_total_tokens": 125000,
+    "max_physical_calls": 1
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": "trigger-online-rate-obligation-single-v1",
+  "base_plan_sha256": "b93d46e2ea0efc916ff22404aa901b626a182aa494478fcc0015f088ad848d4d",
+  "evidence_protocol_version": "task-scoped-evidence-id-v1",
+  "case_id": "rate-adjustment-real-001",
+  "sample_id": "real-001",
+  "required_unit_ids": [
+    "regulation-unit:1eaabf6dcf068b4108d8268e9c317fcb4ff2dd7685be010dc21d7e179b1d32f1"
+  ],
+  "stages": {
+    "rate_dynamic_c": "rate-adjustment-real-001:C"
+  },
+  "obligation_catalogs": [
+    {
+      "unit_id": "regulation-unit:1eaabf6dcf068b4108d8268e9c317fcb4ff2dd7685be010dc21d7e179b1d32f1",
+      "obligations": [
+        {"obligation_id": "OBL001", "requirement": "费率调整应以单个产品为单位"},
+        {"obligation_id": "OBL002", "requirement": "首次费率调整不得早于产品上市销售满3年"},
+        {"obligation_id": "OBL003", "requirement": "每次费率调整的时间间隔不得短于1年"},
+        {"obligation_id": "OBL004", "requirement": "不同被保险人组别可以采用不同调整幅度，但分组方式应与产品定价政策一致"},
+        {"obligation_id": "OBL005", "requirement": "费率调整幅度不得超过产品条款约定的调整上限"},
+        {"obligation_id": "OBL006", "requirement": "不得因单个被保险人身体状况差异实行差别化费率调整"}
+      ]
+    }
+  ],
+  "allowed_endpoint_host": "open.bigmodel.cn",
+  "http_timeout_cap_seconds": 75,
+  "limits_per_stage": {
+    "max_seconds": 285,
+    "outer_watchdog_seconds": 300,
+    "max_total_tokens": 125000,
+    "max_physical_calls": 1,
+    "max_batch_units": 1
+  },
+  "pair_theoretical_limits": {
+    "max_seconds": 285,
+    "outer_watchdog_seconds": 300,
+    "max_total_tokens": 125000,
+    "max_physical_calls": 1
+  }
+}

@@ -186,6 +186,41 @@ def test_resolves_all_unknowns_in_one_call_and_preserves_known_fact() -> None:
     assert result.facts[2] is facts[2]
 
 
+def test_policy_loan_resolution_accepts_controlled_pledge_borrowing_term() -> None:
+    fact = _fact(TriggerFactName.HAS_POLICY_LOAN)
+    clause = AuditClauseSnapshot(
+        clause_id="clause-pledge-loan",
+        number="5.3",
+        title="合同权益",
+        text="经审核同意，投保人可以申请保险单质押借款。",
+        block_type="clause",
+        topics=("policy.loan",),
+    )
+    client = _Client({
+        "results": [{
+            "fact_name": "has_policy_loan",
+            "truth": "true",
+            "confidence": 0.95,
+            "evidence": [{
+                "evidence_id": "P001",
+                "quote": "投保人可以申请保险单质押借款",
+            }],
+        }],
+    })
+
+    result = resolve_unknown_product_facts((fact,), (clause,), client)
+
+    assert result.validation_errors == ()
+    assert result.resolved_fact_names == (TriggerFactName.HAS_POLICY_LOAN,)
+    assert result.facts[0].truth is FactTruth.TRUE
+    assert result.facts[0].evidence == (
+        ProductFactEvidence(
+            "clause-pledge-loan",
+            "投保人可以申请保险单质押借款",
+        ),
+    )
+
+
 def test_missing_duplicate_and_added_tasks_do_not_change_unknowns() -> None:
     facts = (
         _fact(TriggerFactName.HAS_POLICY_LOAN),

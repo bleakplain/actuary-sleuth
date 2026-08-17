@@ -408,7 +408,7 @@ def select_clause_evidence(
                 topic_constraint_branches,
                 explicit_constraints,
             )
-            if matched_terms is None:
+            if not matched_terms:
                 continue
             matches.append(ClauseEvidenceMatch(
                 clause_id=clause.clause_id,

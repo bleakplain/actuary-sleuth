@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+import pytest
+
 from lib.compliance.clause_evidence import (
     EvidenceSourceLayer,
     FactEvidenceReference,
@@ -61,6 +63,35 @@ def test_policy_loan_business_object_phrase_is_selected() -> None:
         match.source_layer is EvidenceSourceLayer.BUSINESS_TERMS
         and match.selection_reason
         and match.score == 1.0
+        for match in result.matches
+    )
+
+
+@pytest.mark.parametrize(
+    "loan_term",
+    ("质押贷款", "保险单质押借款", "质押借款"),
+)
+def test_policy_loan_accepts_controlled_pledge_loan_phrase(
+    loan_term: str,
+) -> None:
+    result = select_clause_evidence(
+        ("policy.loan",),
+        "保单贷款比例不得超过现金价值的百分之八十",
+        (
+            _Clause(
+                "pledge-loan",
+                "6.2",
+                "合同权益",
+                f"投保人可以申请{loan_term}，贷款金额不得超过现金价值的80%。",
+            ),
+        ),
+        min_bm25_score=999.0,
+    )
+
+    assert result.selected_clause_ids == ("pledge-loan",)
+    assert any(
+        match.source_layer is EvidenceSourceLayer.BUSINESS_TERMS
+        and loan_term in match.matched_values
         for match in result.matches
     )
 
@@ -182,28 +213,36 @@ def test_bm25_candidate_must_reach_minimum_score() -> None:
 
 
 def test_one_topics_business_constraint_does_not_gate_other_topic_branch() -> None:
-    clause = _Clause(
+    waiting_clause = _Clause(
         "waiting-untagged",
         "2.1",
         "其他约定",
         "本合同等待期为三十日。",
     )
+    clauses = (
+        waiting_clause,
+        _Clause("unrelated", "2.2", "其他约定", "可以指定受益人。"),
+    )
 
     waiting_only = select_clause_evidence(
         ("coverage.waiting_period",),
         "等待期为三十日",
-        (clause,),
+        clauses,
         min_bm25_score=0.01,
     )
     with_loan_topic = select_clause_evidence(
         ("coverage.waiting_period", "policy.loan"),
         "等待期为三十日",
-        (clause,),
+        clauses,
         min_bm25_score=0.01,
     )
 
     assert waiting_only.selected_clause_ids == ("waiting-untagged",)
     assert with_loan_topic.selected_clause_ids == ("waiting-untagged",)
+    assert not any(
+        match.source_layer is EvidenceSourceLayer.BUSINESS_TERMS
+        for match in with_loan_topic.matches
+    )
 
 
 def test_empty_container_is_outline_only_even_when_title_and_topic_match() -> None:

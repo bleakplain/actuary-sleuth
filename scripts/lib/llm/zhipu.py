@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterator, List, Mapping, Optional, Tuple
 
 from .base import BaseLLMClient
+from .call_budget import CallBudgetController, CallBudgetLease, CallBudgetUsage
 from .metrics import (
     LLMRateLimitError,
     _track_timing,
@@ -30,9 +31,11 @@ class ZhipuUsage:
     total_tokens: int
 
 
-def _usage_value(usage: Mapping[str, object], name: str) -> int:
-    value = usage.get(name, 0)
-    return value if isinstance(value, int) else 0
+def _valid_usage_value(usage: Mapping[str, object], name: str) -> Optional[int]:
+    value = usage.get(name)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        return None
+    return value
 
 
 class ZhipuClient(BaseLLMClient):
@@ -47,7 +50,8 @@ class ZhipuClient(BaseLLMClient):
         api_key: str,
         model: str = "glm-z1-air",
         base_url: str = "https://open.bigmodel.cn/api/paas/v4/",
-        timeout: int = 120
+        timeout: int = 120,
+        call_budget: Optional[CallBudgetController] = None,
     ):
         super().__init__(model, timeout)
         self.api_key = api_key
@@ -56,6 +60,9 @@ class ZhipuClient(BaseLLMClient):
         self._session_lock = threading.Lock()
         self._usage_lock = threading.Lock()
         self._usage_records: List[ZhipuUsage] = []
+        self._call_budget = call_budget
+        self._retry_attempt_limit = 1 if call_budget is not None else None
+        self._budget_call_lock = threading.Lock()
         self._register_cleanup()
 
     @property
@@ -63,19 +70,69 @@ class ZhipuClient(BaseLLMClient):
         with self._usage_lock:
             return tuple(self._usage_records)
 
+    @property
+    def call_budget(self) -> Optional[CallBudgetController]:
+        return self._call_budget
+
     def _record_usage(self, result: object) -> None:
         if not isinstance(result, Mapping):
             return
         usage = result.get("usage")
         if not isinstance(usage, Mapping):
             return
+        prompt_tokens = _valid_usage_value(usage, "prompt_tokens")
+        completion_tokens = _valid_usage_value(usage, "completion_tokens")
+        total_tokens = _valid_usage_value(usage, "total_tokens")
+        if (
+            prompt_tokens is None
+            or completion_tokens is None
+            or total_tokens is None
+            or total_tokens != prompt_tokens + completion_tokens
+        ):
+            logger.warning("智谱响应未提供可核对的完整token usage，按调用前预留结算")
+            return
         record = ZhipuUsage(
-            prompt_tokens=_usage_value(usage, "prompt_tokens"),
-            completion_tokens=_usage_value(usage, "completion_tokens"),
-            total_tokens=_usage_value(usage, "total_tokens"),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
         )
         with self._usage_lock:
             self._usage_records.append(record)
+
+    def _settle_call_budget(
+        self,
+        lease: CallBudgetLease,
+        usage_start: int,
+    ) -> None:
+        if self._call_budget is None:
+            return
+        records = self.usage_records[usage_start:]
+        usage = (
+            CallBudgetUsage(
+                prompt_tokens=sum(record.prompt_tokens for record in records),
+                completion_tokens=sum(
+                    record.completion_tokens for record in records
+                ),
+            )
+            if records
+            else None
+        )
+        self._call_budget.settle(lease, usage)
+
+    def _budgeted_timeout(self, requested: object) -> float:
+        if self._call_budget is None:
+            return (
+                float(requested)
+                if isinstance(requested, (int, float))
+                else float(self.timeout)
+            )
+        remaining = self._call_budget.snapshot().remaining_seconds
+        timeout = (
+            float(requested)
+            if isinstance(requested, (int, float)) and not isinstance(requested, bool)
+            else float(self.timeout)
+        )
+        return max(0.001, min(timeout, remaining))
 
     def _get_session(self) -> requests.Session:
         if self._session is None:
@@ -182,7 +239,23 @@ class ZhipuClient(BaseLLMClient):
         rate_limit_delay_mult=LLMConstants.RATE_LIMIT_DELAY_MULT
     )
     def generate(self, prompt: str, **kwargs) -> str:
-        return super().generate(prompt, **kwargs)
+        if self._call_budget is None:
+            return super().generate(prompt, **kwargs)
+        with self._budget_call_lock:
+            max_tokens = kwargs.get("max_tokens", 8192)
+            if not isinstance(max_tokens, int) or isinstance(max_tokens, bool):
+                raise ValueError("max_tokens must be an integer")
+            messages = [{"role": "user", "content": prompt}]
+            lease = self._call_budget.reserve(messages, max_tokens)
+            usage_start = len(self.usage_records)
+            call_kwargs = dict(kwargs)
+            call_kwargs["timeout"] = self._budgeted_timeout(
+                call_kwargs.get("timeout", self.timeout)
+            )
+            try:
+                return super().generate(prompt, **call_kwargs)
+            finally:
+                self._settle_call_budget(lease, usage_start)
 
     def _do_chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
         url = f"{self.base_url}/chat/completions"
@@ -229,7 +302,31 @@ class ZhipuClient(BaseLLMClient):
         rate_limit_delay_mult=LLMConstants.RATE_LIMIT_DELAY_MULT
     )
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> str:
-        return super().chat(messages, **kwargs)
+        if self._call_budget is None:
+            return super().chat(messages, **kwargs)
+        with self._budget_call_lock:
+            max_tokens = kwargs.get("max_tokens", 8192)
+            if not isinstance(max_tokens, int) or isinstance(max_tokens, bool):
+                raise ValueError("max_tokens must be an integer")
+            lease = self._call_budget.reserve(messages, max_tokens)
+            usage_start = len(self.usage_records)
+            call_kwargs = dict(kwargs)
+            call_kwargs["timeout"] = self._budgeted_timeout(
+                call_kwargs.get("timeout", self.timeout)
+            )
+            try:
+                return super().chat(messages, **call_kwargs)
+            finally:
+                self._settle_call_budget(lease, usage_start)
+
+    def stream_chat(
+        self,
+        messages: List[Dict[str, str]],
+        **kwargs,
+    ) -> Iterator[str]:
+        if self._call_budget is not None:
+            raise RuntimeError("启用调用预算时不支持流式请求")
+        return super().stream_chat(messages, **kwargs)
 
     def _do_chat_stream(self, messages: List[Dict[str, str]], **kwargs) -> Iterator[str]:
         url = f"{self.base_url}/chat/completions"

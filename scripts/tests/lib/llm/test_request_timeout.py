@@ -5,6 +5,10 @@ import pytest
 
 from lib.llm.ollama import OllamaClient
 from lib.llm.zhipu import ZhipuClient
+from lib.llm.call_budget import (
+    CallBudgetSnapshot,
+    CallTokenBudgetExceededError,
+)
 from lib.llm.metrics import LLMRateLimitError, _get_circuit_breaker
 
 
@@ -106,5 +110,33 @@ def test_rate_limit_does_not_open_circuit_breaker() -> None:
             limited()
         except LLMRateLimitError:
             pass
+
+    assert breaker.can_attempt()
+
+
+def test_local_budget_rejection_does_not_open_provider_circuit() -> None:
+    from lib.llm.metrics import _with_circuit_breaker
+
+    key = "test-budget-isolation"
+    breaker = _get_circuit_breaker(key)
+    snapshot = CallBudgetSnapshot(
+        deadline=10,
+        observed_at=1,
+        max_total_tokens=1,
+        consumed_tokens=1,
+        reserved_tokens=0,
+        remaining_tokens=0,
+        max_physical_calls=1,
+        physical_calls=0,
+        active_leases=0,
+    )
+
+    @_with_circuit_breaker(key)
+    def rejected() -> None:
+        raise CallTokenBudgetExceededError(snapshot, 2)
+
+    for _ in range(5):
+        with pytest.raises(CallTokenBudgetExceededError):
+            rejected()
 
     assert breaker.can_attempt()

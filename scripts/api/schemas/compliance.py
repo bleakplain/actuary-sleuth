@@ -96,6 +96,15 @@ class RoutedClauseResponse(BaseModel):
     submitted: bool = True
 
 
+class RegulationObligationAssessmentResponse(BaseModel):
+    obligation_id: str
+    requirement: str
+    status: Literal["satisfied", "violated", "insufficient_information"]
+    reasoning: str
+    regulation_chunk_ids: List[str] = Field(default_factory=list)
+    product_clause_ids: List[str] = Field(default_factory=list)
+
+
 class RegulationDecisionResponse(BaseModel):
     task_id: str
     regulation_unit_id: str
@@ -113,6 +122,9 @@ class RegulationDecisionResponse(BaseModel):
     confidence: Optional[float] = None
     incomplete: bool = False
     error_code: str = ""
+    obligation_assessments: List[RegulationObligationAssessmentResponse] = Field(
+        default_factory=list,
+    )
     routed_clauses: List[RoutedClauseResponse] = Field(default_factory=list)
     facts: List[ExtractedFactResponse] = Field(default_factory=list)
     trigger_evaluation: Optional[Dict[str, object]] = None

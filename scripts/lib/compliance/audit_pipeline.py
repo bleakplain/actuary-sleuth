@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, replace
 from typing import Callable, Iterable, Mapping, Optional, Tuple
@@ -12,6 +13,8 @@ from lib.common.compliance_audit import (
     ExtractedFact,
     FactTruth,
     ProductFact,
+    ProductEvidenceCandidate,
+    ProductEvidenceStrength,
     RegulationTriggerSpec,
     RegulationAuditDecision,
     RegulationAuditPackage,
@@ -35,6 +38,7 @@ from lib.compliance.clause_routing import (
 )
 from lib.compliance.clause_evidence import (
     ClauseEvidenceSelection,
+    EvidenceSourceLayer,
     FactEvidenceReference,
     select_clause_evidence,
 )
@@ -219,6 +223,18 @@ def _required_fact_names(
     ))
 
 
+def _product_facts_for_unit(
+    unit: RegulationUnit,
+    product_facts: Tuple[ProductFact, ...],
+) -> Tuple[ProductFact, ...]:
+    required = frozenset(
+        fact_name
+        for spec in unit.trigger_specs
+        for fact_name in (spec.fact_name, *spec.required_facts)
+    )
+    return tuple(fact for fact in product_facts if fact.name in required)
+
+
 def _prepare_audit_context(
     request: AuditPipelineRequest,
     units: Tuple[RegulationUnit, ...],
@@ -390,6 +406,70 @@ def _routed_clauses(
     return tuple(routed_clauses)
 
 
+_STRONG_EVIDENCE_LAYERS = frozenset({
+    EvidenceSourceLayer.EXACT_TOPIC,
+    EvidenceSourceLayer.RELATED_TOPIC,
+    EvidenceSourceLayer.BUSINESS_TERMS,
+})
+
+
+def _has_substantive_evidence_body(clause: AuditClauseSnapshot) -> bool:
+    """Exclude containers and display-only headings from conclusion evidence."""
+    text = clause.text.strip()
+    if clause.container_only or not text:
+        return False
+    if len(re.sub(r"[\W_]+", "", text, flags=re.UNICODE)) < 6:
+        return False
+    if clause.number.strip() or clause.block_type != "unclassified":
+        return True
+    return any(marker in text for marker in (
+        "。", "；", ";", "：", ":", "\t", "%", "％",
+        "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+    ))
+
+
+def _product_evidence_candidates(
+    selection: Optional[ClauseEvidenceSelection],
+    routed_clauses: Tuple[RoutedClause, ...],
+) -> Tuple[ProductEvidenceCandidate, ...]:
+    """Compile a task-local catalog without promoting trigger-only noise."""
+    if selection is None or not selection.config_valid:
+        return ()
+    selected = frozenset(selection.selected_clause_ids)
+    if not selected:
+        return ()
+    layers_by_clause: dict[str, list[EvidenceSourceLayer]] = {}
+    for match in selection.matches:
+        if match.clause_id in selected:
+            layers_by_clause.setdefault(match.clause_id, []).append(
+                match.source_layer
+            )
+    candidates = []
+    for routed in routed_clauses:
+        clause = routed.clause
+        if (
+            clause.clause_id not in selected
+            or not routed.submitted
+            or not _has_substantive_evidence_body(clause)
+        ):
+            continue
+        layers = tuple(dict.fromkeys(layers_by_clause.get(clause.clause_id, ())))
+        layer_set = frozenset(layers)
+        has_strong_layer = bool(layer_set.intersection(_STRONG_EVIDENCE_LAYERS))
+        if has_strong_layer:
+            strength = ProductEvidenceStrength.STRONG
+        elif EvidenceSourceLayer.BM25 in layer_set:
+            strength = ProductEvidenceStrength.WEAK
+        else:
+            continue
+        candidates.append(ProductEvidenceCandidate(
+            clause_id=clause.clause_id,
+            strength=strength,
+            source_layers=tuple(layer.value for layer in layers),
+        ))
+    return tuple(candidates)
+
+
 def build_regulation_audit_packages(
     request: AuditPipelineRequest,
     units: Tuple[RegulationUnit, ...],
@@ -397,6 +477,9 @@ def build_regulation_audit_packages(
     audit_facts: Optional[Tuple[ExtractedFact, ...]] = None,
     product_facts: Optional[Tuple[ProductFact, ...]] = None,
     trigger_evaluations: Optional[Mapping[str, TriggerEvaluation]] = None,
+    evidence_selections: Optional[
+        Mapping[str, ClauseEvidenceSelection]
+    ] = None,
 ) -> Tuple[
     Tuple[RegulationAuditPackage, ...],
     Tuple[ClauseRoutingResult, ...],
@@ -422,6 +505,7 @@ def build_regulation_audit_packages(
     for index, unit in enumerate(units):
         routing = route_product_clauses(unit.regulation_topics, request.clauses)
         routed = _routed_clauses(request.clauses, routing)
+        evidence_selection = (evidence_selections or {}).get(unit.unit_id)
         if routing.warnings:
             warnings.extend(
                 f"{unit.unit_id}: {warning}" for warning in routing.warnings
@@ -435,11 +519,36 @@ def build_regulation_audit_packages(
             clauses=routed,
             facts=audit_facts,
             complete_document=request.coverage_attested,
-            product_facts=product_facts,
+            product_facts=_product_facts_for_unit(unit, product_facts),
             trigger_evaluation=trigger_evaluations.get(unit.unit_id),
+            product_evidence_candidates=_product_evidence_candidates(
+                evidence_selection,
+                routed,
+            ),
         ))
         routing_results.append(routing)
     return tuple(packages), tuple(routing_results), tuple(warnings)
+
+
+def _evidence_scope_for_spec(
+    unit: RegulationUnit,
+    spec: Optional[RegulationTriggerSpec],
+) -> Tuple[Tuple[str, ...], frozenset[TriggerFactName]]:
+    """保留贷款条件事实 trace，但不把现金价值正文当贷款审核证据。"""
+    if spec is None:
+        return unit.regulation_topics, frozenset()
+    fact_names = frozenset((spec.fact_name, *spec.required_facts))
+    target_topics = spec.target_topics or unit.regulation_topics
+    if spec.fact_name is not TriggerFactName.HAS_POLICY_LOAN:
+        return target_topics, fact_names
+    body_topics = tuple(
+        topic for topic in target_topics if topic != "policy.cash_value"
+    ) or tuple(
+        topic
+        for topic in unit.regulation_topics
+        if topic != "policy.cash_value"
+    ) or ("policy.loan",)
+    return body_topics, fact_names.difference((TriggerFactName.HAS_CASH_VALUE,))
 
 
 def _evidence_selection_for_spec(
@@ -449,11 +558,7 @@ def _evidence_selection_for_spec(
     spec: Optional[RegulationTriggerSpec],
 ) -> ClauseEvidenceSelection:
     known_clause_ids = {clause.clause_id for clause in request.clauses}
-    relevant_fact_names = (
-        frozenset((spec.fact_name, *spec.required_facts))
-        if spec is not None
-        else frozenset()
-    )
+    target_topics, relevant_fact_names = _evidence_scope_for_spec(unit, spec)
     fact_evidence = tuple(
         FactEvidenceReference(fact.name.value, evidence.clause_id)
         for fact in product_facts
@@ -462,11 +567,7 @@ def _evidence_selection_for_spec(
         if evidence.clause_id in known_clause_ids
     )
     return select_clause_evidence(
-        (
-            spec.target_topics or unit.regulation_topics
-            if spec is not None
-            else unit.regulation_topics
-        ),
+        target_topics,
         unit.content,
         request.clauses,
         fact_evidence=fact_evidence,
@@ -521,6 +622,35 @@ def _evidence_selection_for_unit(
     )
 
 
+def _fact_resolution_evidence_selection(
+    request: AuditPipelineRequest,
+    unit: RegulationUnit,
+    product_facts: Tuple[ProductFact, ...],
+    spec: RegulationTriggerSpec,
+    fact_name: TriggerFactName,
+) -> ClauseEvidenceSelection:
+    """按待求事实另选候选，避免审核正文范围遮蔽条件事实。"""
+    if (
+        fact_name is spec.fact_name
+        or fact_name is not TriggerFactName.HAS_CASH_VALUE
+    ):
+        return _evidence_selection_for_spec(request, unit, product_facts, spec)
+    known_clause_ids = {clause.clause_id for clause in request.clauses}
+    fact_evidence = tuple(
+        FactEvidenceReference(fact.name.value, evidence.clause_id)
+        for fact in product_facts
+        if fact.name is fact_name
+        for evidence in fact.evidence
+        if evidence.clause_id in known_clause_ids
+    )
+    return select_clause_evidence(
+        ("policy.cash_value",),
+        unit.content,
+        request.clauses,
+        fact_evidence=fact_evidence,
+    )
+
+
 def _fact_resolution_candidates(
     request: AuditPipelineRequest,
     units: Tuple[RegulationUnit, ...],
@@ -544,25 +674,30 @@ def _fact_resolution_candidates(
             )
             if not fact_names:
                 continue
-            try:
-                selection = _evidence_selection_for_spec(
-                    request,
-                    unit,
-                    product_facts,
-                    spec,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "产品事实候选条款选择失败: unit=%s error=%s",
-                    unit.unit_id,
-                    exc,
-                )
-                warnings.append(f"{unit.unit_id}: 产品事实候选条款选择失败")
-                continue
-            warnings.extend(
-                f"{unit.unit_id}: {warning}" for warning in selection.warnings
-            )
             for fact_name in fact_names:
+                try:
+                    selection = _fact_resolution_evidence_selection(
+                        request,
+                        unit,
+                        product_facts,
+                        spec,
+                        fact_name,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "产品事实候选条款选择失败: unit=%s fact=%s error=%s",
+                        unit.unit_id,
+                        fact_name.value,
+                        exc,
+                    )
+                    warnings.append(
+                        f"{unit.unit_id}: {fact_name.value} 候选条款选择失败"
+                    )
+                    continue
+                warnings.extend(
+                    f"{unit.unit_id}: {fact_name.value}: {warning}"
+                    for warning in selection.warnings
+                )
                 candidate_ids.setdefault(fact_name, []).extend(
                     selection.selected_clause_ids
                 )
@@ -757,6 +892,7 @@ def run_audit_pipeline(
         audit_facts=prepared.audit_facts,
         product_facts=prepared.product_facts,
         trigger_evaluations=trigger_evaluations,
+        evidence_selections=evidence_selections,
     )
     processing_warnings = tuple((*prepared.warnings, *package_warnings))
     degrading_warnings = tuple(

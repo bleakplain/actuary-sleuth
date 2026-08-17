@@ -28,6 +28,12 @@ class RegulationDecisionStatus(str, Enum):
     MANUAL_REVIEW = "manual_review"
 
 
+class RegulationObligationStatus(str, Enum):
+    SATISFIED = "satisfied"
+    VIOLATED = "violated"
+    INSUFFICIENT_INFORMATION = "insufficient_information"
+
+
 class FactKind(str, Enum):
     WAITING_PERIOD = "waiting_period"
     HESITATION_PERIOD = "hesitation_period"
@@ -168,6 +174,13 @@ class RoutedClauseRelation(str, Enum):
     NOT_RELEVANT = "not_relevant"
 
 
+class ProductEvidenceStrength(str, Enum):
+    """程序生成的产品证据候选强度，不代表最终合规结论。"""
+
+    STRONG = "strong"
+    WEAK = "weak"
+
+
 @dataclass(frozen=True)
 class AuditClauseSnapshot:
     clause_id: str
@@ -225,6 +238,23 @@ class RegulationUnitSnapshot:
 
 
 @dataclass(frozen=True)
+class RegulationObligation:
+    obligation_id: str
+    requirement: str
+    automated_decision_allowed: bool = False
+    insufficient_reason: str = "该项义务尚未通过自动证据充分性验收。"
+
+
+@dataclass(frozen=True)
+class ProductEvidenceCandidate:
+    """一个法规任务可引用的产品正文来源及其可审计选择层。"""
+
+    clause_id: str
+    strength: ProductEvidenceStrength
+    source_layers: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class RegulationAuditPackage:
     task_id: str
     input_index: int
@@ -236,6 +266,8 @@ class RegulationAuditPackage:
     complete_document: bool = False
     product_facts: Tuple[ProductFact, ...] = ()
     trigger_evaluation: Optional[TriggerEvaluation] = None
+    product_evidence_candidates: Tuple[ProductEvidenceCandidate, ...] = ()
+    obligations: Tuple[RegulationObligation, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -252,6 +284,16 @@ class ProductClauseEvidence:
 
 
 @dataclass(frozen=True)
+class RegulationObligationAssessment:
+    obligation_id: str
+    requirement: str
+    status: RegulationObligationStatus
+    reasoning: str
+    regulation_chunk_ids: Tuple[str, ...] = ()
+    product_clause_ids: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class RegulationAuditDecision:
     task_id: str
     regulation_unit_id: str
@@ -264,6 +306,7 @@ class RegulationAuditDecision:
     confidence: Optional[float] = None
     incomplete: bool = False
     error_code: str = ""
+    obligation_assessments: Tuple[RegulationObligationAssessment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -273,6 +316,10 @@ class BatchAuditAttemptTrace:
     returned_unit_ids: Tuple[str, ...]
     validation_errors: Tuple[str, ...]
     raw_response: str
+    stage: str = "primary"
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
 
 
 @dataclass(frozen=True)

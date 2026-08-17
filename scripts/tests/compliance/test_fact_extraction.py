@@ -177,6 +177,46 @@ def test_zero_keyword_hit_stays_unknown_without_closed_scan_proof() -> None:
 
 
 @pytest.mark.parametrize(
+    "text",
+    (
+        "投保人可以申请保险单借款。",
+        "投保人可以申请质押贷款。",
+        "投保人可以申请保险单质押贷款。",
+        "投保人可以申请质押借款。",
+        "投保人可以申请保险单质押借款。",
+    ),
+)
+def test_policy_loan_controlled_synonyms_are_explicit_presence(text: str) -> None:
+    fact = build_product_fact_ledger(
+        (_Block("c-loan", "合同权益", text),),
+        ProductTags(),
+        (TriggerFactName.HAS_POLICY_LOAN,),
+    )[0]
+
+    assert fact.truth is FactTruth.TRUE
+    assert fact.evidence[0].clause_id == "c-loan"
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "本合同不提供质押贷款。",
+        "本合同不提供质押借款。",
+        "本合同不提供保险单质押借款。",
+    ),
+)
+def test_pledge_loan_explicit_negation_is_not_presence(text: str) -> None:
+    fact = build_product_fact_ledger(
+        (_Block("c-no-loan", "合同权益", text),),
+        ProductTags(),
+        (TriggerFactName.HAS_POLICY_LOAN,),
+    )[0]
+
+    assert fact.truth is FactTruth.FALSE
+    assert fact.proof_strategy is ProofStrategy.EXPLICIT_NEGATION
+
+
+@pytest.mark.parametrize(
     ("fact_name", "title", "text"),
     [
         (

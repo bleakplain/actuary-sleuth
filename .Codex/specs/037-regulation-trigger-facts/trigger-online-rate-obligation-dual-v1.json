@@ -1,0 +1,54 @@
+{
+  "schema_version": "trigger-online-rate-obligation-dual-v1",
+  "base_plan_sha256": "b93d46e2ea0efc916ff22404aa901b626a182aa494478fcc0015f088ad848d4d",
+  "evidence_protocol_version": "task-scoped-evidence-id-v1",
+  "case_id": "rate-adjustment-real-001",
+  "sample_id": "real-001",
+  "required_unit_ids": [
+    "regulation-unit:1eaabf6dcf068b4108d8268e9c317fcb4ff2dd7685be010dc21d7e179b1d32f1",
+    "regulation-unit:2aeabccb65ebb8bf692709fb4de7e08ccef2880428ea0b931dbee600bdea917f"
+  ],
+  "stages": {
+    "rate_dynamic_c": "rate-adjustment-real-001:C"
+  },
+  "obligation_catalogs": [
+    {
+      "unit_id": "regulation-unit:1eaabf6dcf068b4108d8268e9c317fcb4ff2dd7685be010dc21d7e179b1d32f1",
+      "obligations": [
+        {"obligation_id": "OBL001", "requirement": "费率调整应以单个产品为单位"},
+        {"obligation_id": "OBL002", "requirement": "首次费率调整不得早于产品上市销售满3年"},
+        {"obligation_id": "OBL003", "requirement": "每次费率调整的时间间隔不得短于1年"},
+        {"obligation_id": "OBL004", "requirement": "不同被保险人组别可以采用不同调整幅度，但分组方式应与产品定价政策一致"},
+        {"obligation_id": "OBL005", "requirement": "费率调整幅度不得超过产品条款约定的调整上限"},
+        {"obligation_id": "OBL006", "requirement": "不得因单个被保险人身体状况差异实行差别化费率调整"}
+      ]
+    },
+    {
+      "unit_id": "regulation-unit:2aeabccb65ebb8bf692709fb4de7e08ccef2880428ea0b931dbee600bdea917f",
+      "obligations": [
+        {"obligation_id": "OBL001", "requirement": "条款首要位置应说明产品为费率可调的长期医疗保险，且保险期间或保证续保期内费率可能调整"},
+        {"obligation_id": "OBL002", "requirement": "前述首要位置说明应使用比正文至少大一号的黑体字"},
+        {"obligation_id": "OBL003", "requirement": "条款应详细说明费率调整的具体触发条件、具体指标和调整标准"},
+        {"obligation_id": "OBL004", "requirement": "条款应说明首次费率调整时间和后续调整的最短时间间隔"},
+        {"obligation_id": "OBL005", "requirement": "条款应说明每次费率调整的上限"},
+        {"obligation_id": "OBL006", "requirement": "条款应说明费率调整流程，包括公示方式和公示期间"},
+        {"obligation_id": "OBL007", "requirement": "条款应说明告知投保人的时间和方式，以及投保人对费率调整的权利与义务"}
+      ]
+    }
+  ],
+  "allowed_endpoint_host": "open.bigmodel.cn",
+  "http_timeout_cap_seconds": 75,
+  "limits_per_stage": {
+    "max_seconds": 285,
+    "outer_watchdog_seconds": 300,
+    "max_total_tokens": 175000,
+    "max_physical_calls": 1,
+    "max_batch_units": 2
+  },
+  "pair_theoretical_limits": {
+    "max_seconds": 285,
+    "outer_watchdog_seconds": 300,
+    "max_total_tokens": 175000,
+    "max_physical_calls": 1
+  }
+}

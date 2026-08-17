@@ -211,6 +211,15 @@ export interface RoutedClause {
   submitted: boolean;
 }
 
+export interface RegulationObligationAssessment {
+  obligation_id: string;
+  requirement: string;
+  status: 'satisfied' | 'violated' | 'insufficient_information';
+  reasoning: string;
+  regulation_chunk_ids: string[];
+  product_clause_ids: string[];
+}
+
 export interface RegulationDecision {
   task_id: string;
   regulation_unit_id: string;
@@ -223,6 +232,7 @@ export interface RegulationDecision {
   confidence?: number | null;
   incomplete: boolean;
   error_code: string;
+  obligation_assessments: RegulationObligationAssessment[];
   routed_clauses: RoutedClause[];
   facts: ExtractedFact[];
   trigger_evaluation?: TriggerEvaluationTrace | null;

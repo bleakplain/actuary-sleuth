@@ -57,6 +57,43 @@ def test_product_name_evidence_source_kind_survives_report_serialization() -> No
     )
 
 
+def test_obligation_assessments_survive_report_serialization() -> None:
+    report = ComplianceReportDataResponse.model_validate({
+        "decisions": [{
+            "task_id": "task-1",
+            "regulation_unit_id": "unit-1",
+            "status": "insufficient_information",
+            "reasoning": "存在当前审核包无法证明的义务。",
+            "obligation_assessments": [{
+                "obligation_id": "OBL004",
+                "requirement": "分组方式应与产品定价政策一致",
+                "status": "insufficient_information",
+                "reasoning": "审核包未包含产品定价政策。",
+                "regulation_chunk_ids": [],
+                "product_clause_ids": [],
+            }],
+        }],
+    })
+
+    assessment = report.model_dump()["decisions"][0]["obligation_assessments"][0]
+    assert assessment["obligation_id"] == "OBL004"
+    assert assessment["status"] == "insufficient_information"
+
+    with pytest.raises(ValueError):
+        ComplianceReportDataResponse.model_validate({
+            "decisions": [{
+                "task_id": "task-1",
+                "regulation_unit_id": "unit-1",
+                "status": "manual_review",
+                "reasoning": "无效状态测试。",
+                "obligation_assessments": [{
+                    **assessment,
+                    "status": "unknown",
+                }],
+            }],
+        })
+
+
 def test_document_request_accepts_structured_audit_blocks() -> None:
     request = DocumentCheckRequest.model_validate({
         "document_content": "等待期为30天",

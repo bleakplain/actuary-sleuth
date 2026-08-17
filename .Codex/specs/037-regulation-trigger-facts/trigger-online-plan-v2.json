@@ -1,0 +1,130 @@
+{
+  "schema_version": "trigger-online-probe-v2",
+  "kb_version": "v5",
+  "product_manifest_sha256": "1bd7d1fedd47746e66a23a4ff31d296bef666f18d76497b4c6eb5e68da7f1ad8",
+  "kb_build_manifest_sha256": "e1e45285220e2e1db995c45dee48fa45754fb6f97ffc4b18ae23f8e709edfc8c",
+  "kb_catalog_sha256": "8587c9bf7b7169229fc9ac4676338995aeb8629ce4f405ee956525686d92de34",
+  "provider": "zhipu",
+  "model": "glm-4-flash-250414",
+  "limits": {
+    "max_seconds": 285,
+    "outer_watchdog_seconds": 300,
+    "max_total_tokens": 250000,
+    "max_physical_calls": 10,
+    "max_batch_units": 3
+  },
+  "authorized_products": [
+    {
+      "sample_id": "real-001",
+      "sha256": "8b9a49e926a734ee8ec3ea32aaa805feeb65876ecec282d914be11b8b5d33ace"
+    },
+    {
+      "sample_id": "real-015",
+      "sha256": "4d6f1b6597852a971268623a42e2b76f4380fcaf824f012175c7bfe4ccdacfcd"
+    },
+    {
+      "sample_id": "real-019",
+      "sha256": "da5bf033921283a9c91ec4923b572e9ab904281d47368a5474ac77c256421bb7"
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "rate-adjustment-real-001",
+      "sample_id": "real-001",
+      "unit_ids": [
+        "regulation-unit:016cee60953e13b743abf40e0f8f64b7eb4edceb509a400be03038e21bafc5a5",
+        "regulation-unit:1eaabf6dcf068b4108d8268e9c317fcb4ff2dd7685be010dc21d7e179b1d32f1",
+        "regulation-unit:2aeabccb65ebb8bf692709fb4de7e08ccef2880428ea0b931dbee600bdea917f"
+      ],
+      "trigger_metadata": [
+        {
+          "unit_id": "regulation-unit:016cee60953e13b743abf40e0f8f64b7eb4edceb509a400be03038e21bafc5a5",
+          "draft_metadata": {
+            "触发事实": "is_rate_adjustable",
+            "触发运算符": "equals",
+            "触发期望值": true,
+            "目标条款主题": ["contract.name", "premium.rate_adjustment"],
+            "所需事实": ["has_renewal"],
+            "证明策略": "explicit_presence",
+            "触发条件说明": "识别为费率可调时检查定价、期间和名称。"
+          }
+        },
+        {
+          "unit_id": "regulation-unit:1eaabf6dcf068b4108d8268e9c317fcb4ff2dd7685be010dc21d7e179b1d32f1",
+          "draft_metadata": {
+            "触发事实": "is_rate_adjustable",
+            "触发运算符": "equals",
+            "触发期望值": true,
+            "目标条款主题": ["premium.rate_adjustment"],
+            "所需事实": ["first_rate_adjustment_interval_years", "subsequent_rate_adjustment_interval_years"],
+            "证明策略": "explicit_presence",
+            "触发条件说明": "提取首次及后续调整间隔供法规判断。"
+          }
+        },
+        {
+          "unit_id": "regulation-unit:2aeabccb65ebb8bf692709fb4de7e08ccef2880428ea0b931dbee600bdea917f",
+          "draft_metadata": {
+            "触发事实": "is_rate_adjustable",
+            "触发运算符": "equals",
+            "触发期望值": true,
+            "目标条款主题": ["premium.rate_adjustment", "disclosure.prominent_notice"],
+            "所需事实": ["first_rate_adjustment_interval_years", "subsequent_rate_adjustment_interval_years"],
+            "证明策略": "explicit_presence",
+            "触发条件说明": "费率可调产品重点路由调费及醒目提示条款。"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "cooling-off-real-015",
+      "sample_id": "real-015",
+      "unit_ids": [
+        "regulation-unit:5c0dfefa6ceb7b210ec209098389b1b1aec0c08bb17021b3cee2e8f3a3789332"
+      ],
+      "trigger_metadata": []
+    },
+    {
+      "case_id": "policy-loan-real-019",
+      "sample_id": "real-019",
+      "unit_ids": [
+        "regulation-unit:5003c66808cf0dfe694f3855c89bc7d0415ff246dcb0642ef78828992e108f6c"
+      ],
+      "trigger_metadata": [
+        {
+          "unit_id": "regulation-unit:5003c66808cf0dfe694f3855c89bc7d0415ff246dcb0642ef78828992e108f6c",
+          "draft_metadata": {
+            "触发事实": "has_policy_loan",
+            "触发运算符": "equals",
+            "触发期望值": true,
+            "目标条款主题": ["policy.loan"],
+            "所需事实": ["has_cash_value"],
+            "证明策略": "explicit_presence",
+            "触发条件说明": "提供保单贷款时检查比例是否明确且不超过80%。"
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "out-of-hospital-drug-canary-real-019",
+      "sample_id": "real-019",
+      "unit_ids": [
+        "regulation-unit:7a7e575629e47f10491cc70b49e5352ed6b27780b4ecbcbc5fb8a4544af9dbdd"
+      ],
+      "canary_dynamic_skip": true,
+      "trigger_metadata": [
+        {
+          "unit_id": "regulation-unit:7a7e575629e47f10491cc70b49e5352ed6b27780b4ecbcbc5fb8a4544af9dbdd",
+          "draft_metadata": {
+            "触发事实": "mentions_out_of_hospital_drug",
+            "触发运算符": "equals",
+            "触发期望值": true,
+            "目标条款主题": ["coverage.medical", "claim.assessment"],
+            "证明策略": "closed_phrase_scan",
+            "检索任一词组": ["院外购药", "药店"],
+            "触发条件说明": "出现院外购药或药店时检查处方及购药审核主体。"
+          }
+        }
+      ]
+    }
+  ]
+}
