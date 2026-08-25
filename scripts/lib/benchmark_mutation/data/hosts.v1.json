@@ -1,0 +1,60 @@
+{
+  "schema_version": "1.0.0",
+  "description": "038 v1 宿主清单（research.md §4）：按负面清单适用标签互补选择。",
+  "hosts": [
+    {
+      "host_id": "host-01",
+      "file_name": "《人保健康鸿利来两全保险（分红型）》条款.doc",
+      "display_name": "鸿利来两全保险（分红型）",
+      "tags": ["life", "endowment", "participating", "long_term"]
+    },
+    {
+      "host_id": "host-02",
+      "file_name": "农民工团体护理保险（万能型）条款.doc",
+      "display_name": "农民工团体护理保险（万能型）",
+      "tags": ["health", "nursing", "universal", "long_term"]
+    },
+    {
+      "host_id": "host-03",
+      "file_name": "125904《人保健康悠优保互联网医疗保险（费率可调）》条款v4.doc",
+      "display_name": "悠优保互联网医疗保险（费率可调）",
+      "tags": ["health", "medical", "has_renewal"]
+    },
+    {
+      "host_id": "host-04",
+      "file_name": "《人保健康玺悦一生互联网重大疾病保险（2025版）》条款.docx",
+      "display_name": "玺悦一生互联网重大疾病保险",
+      "tags": ["health", "disease", "long_term"]
+    },
+    {
+      "host_id": "host-05",
+      "file_name": "《人保健康城市定制型团体医疗保险（A款）》产品条款.docx",
+      "display_name": "城市定制型团体医疗保险（A款）",
+      "tags": ["health", "medical", "short_term"]
+    },
+    {
+      "host_id": "host-06",
+      "file_name": "《人保健康互联网失能收入损失保险（2025版）》条款.docx",
+      "display_name": "互联网失能收入损失保险",
+      "tags": ["health", "disability_income"]
+    },
+    {
+      "host_id": "host-07",
+      "file_name": "《人保健康惠享安行互联网意外伤害保险》条款.doc",
+      "display_name": "惠享安行互联网意外伤害保险",
+      "tags": ["accident"]
+    },
+    {
+      "host_id": "host-08",
+      "file_name": "《人保健康长期补充团体医疗保险（D款）》条款-无标记v3.docx",
+      "display_name": "长期补充团体医疗保险（D款）",
+      "tags": ["health", "medical", "long_term"]
+    },
+    {
+      "host_id": "host-09",
+      "file_name": "《人保健康长相依互联网终身护理保险》条款.doc",
+      "display_name": "长相依互联网终身护理保险",
+      "tags": ["health", "nursing", "long_term"]
+    }
+  ]
+}
