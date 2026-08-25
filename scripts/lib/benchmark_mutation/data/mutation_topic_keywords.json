@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "description": "变异定位专用主题关键词补充表。doc_parser 主题关键词注册表仅覆盖 27/59 主题（036 OPT-003 遗留），此表只补充变异算子需要但注册表缺失的主题，不复制已有条目。",
+  "keywords": {
+    "policy.account_value": ["保单账户", "账户价值", "个人账户"],
+    "coverage.death": ["身故保险金", "身故责任", "被保险人身故"],
+    "coverage.preexisting": ["既往症", "既往疾病"],
+    "coverage.survival": ["生存保险金", "生存金"],
+    "coverage.payment_limit": ["给付限额", "累计给付", "赔付限额"],
+    "renewal.guaranteed": ["保证续保"],
+    "premium.rate": ["保险费率", "费率"],
+    "claim.material": ["保险金申请", "申请材料", "证明和资料", "所需资料"]
+  }
+}

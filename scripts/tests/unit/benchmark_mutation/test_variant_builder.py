@@ -129,9 +129,20 @@ class TestVariantBuilder:
         mutated = {c.clause_id: c for c in record.clauses}
         assert "保单账户" in mutated["C1"].text
 
-    def test_topic_miss_raises_explicitly(self):
+    def test_topic_miss_raises_for_anchor_tiers(self):
+        op = _op(
+            tier="deletion", host_tags=["health"],
+            target_topics=["contract.dispute"],
+            payload={"anchor_text": "民事诉讼法"},
+        )
         with pytest.raises(VariantBuildError, match="未命中"):
-            build_variant_simple(("OP-T01",), (_op(),), (_clause(topics=("claim.payment",)),))
+            build_variant_simple(("OP-T01",), (op,), (_clause(topics=("claim.payment",)),))
+
+    def test_insertion_falls_back_to_responsibility_block(self):
+        record = build_variant_simple(
+            ("OP-T01",), (_op(target_topics=["policy.account_value"]),), (_clause(),)
+        )
+        assert record.diffs and "保单账户" in record.clauses[0].text
 
     def test_anchor_miss_on_rewrite_raises(self):
         op = _op(
