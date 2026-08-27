@@ -28,7 +28,6 @@ from lib.benchmark_mutation.host_planner import (  # noqa: E402
 )
 from lib.benchmark_mutation.operator_schema import load_operators  # noqa: E402
 from lib.benchmark_mutation.variant_builder import (  # noqa: E402
-    VariantBuildError,
     build_variant,
 )
 from lib.common.compliance_audit import AuditClauseSnapshot  # noqa: E402
@@ -48,13 +47,20 @@ def execute(params: dict) -> dict:
             build_errors.append({"host_id": host.host_id, "error": "解析失败或文件缺失"})
             continue
         for plan in plan_variants(host, operators):
-            try:
-                record = build_variant(plan, clauses, operators_by_id)
-            except VariantBuildError as exc:
-                build_errors.append({"variant_id": plan.variant_id, "error": str(exc)})
+            result = build_variant(plan, clauses, operators_by_id)
+            if result.skipped:
+                build_errors.extend(
+                    {"variant_id": plan.variant_id, "error": f"{op_id}: {reason}"}
+                    for op_id, reason in result.skipped
+                )
+            if not result.record.diffs:
+                build_errors.append({
+                    "variant_id": plan.variant_id,
+                    "error": "变体内全部算子被跳过",
+                })
                 continue
-            all_records.append(record)
-            all_labels.extend(build_golden_labels(record, operators_by_id))
+            all_records.append(result.record)
+            all_labels.extend(build_golden_labels(result.record, operators_by_id))
     record_by_variant = {record.variant_id: record for record in all_records}
     write_confirmation_sheet(
         tuple(all_labels), record_by_variant, operators_by_id,

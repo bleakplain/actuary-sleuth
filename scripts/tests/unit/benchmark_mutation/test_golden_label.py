@@ -39,7 +39,7 @@ def _record():
         topics=("coverage.responsibility",),
     )
     plan = VariantPlan(variant_id="VAR-T01", host_id="host-01", operator_ids=("OP-T01",))
-    return build_variant(plan, (clause,), {"OP-T01": _operator()})
+    return build_variant(plan, (clause,), {"OP-T01": _operator()}).record
 class TestGoldenLabels:
     def test_builds_draft_labels_from_diffs(self):
         record = _record()

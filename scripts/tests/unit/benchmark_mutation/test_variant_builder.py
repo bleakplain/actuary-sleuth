@@ -129,14 +129,25 @@ class TestVariantBuilder:
         mutated = {c.clause_id: c for c in record.clauses}
         assert "保单账户" in mutated["C1"].text
 
-    def test_topic_miss_raises_for_anchor_tiers(self):
+    def test_topic_miss_skips_operator(self):
         op = _op(
             tier="deletion", host_tags=["health"],
             target_topics=["contract.dispute"],
             payload={"anchor_text": "民事诉讼法"},
         )
-        with pytest.raises(VariantBuildError, match="未命中"):
-            build_variant_simple(("OP-T01",), (op,), (_clause(topics=("claim.payment",)),))
+        result = build_variant_full(("OP-T01",), (op,), (_clause(topics=("claim.payment",)),))
+        assert result.skipped and not result.record.diffs
+
+    def test_failed_operator_does_not_kill_variant(self):
+        good = _op(operator_id="OP-GOOD", target_topics=["coverage.responsibility"])
+        bad = _op(
+            operator_id="OP-BAD", tier="deletion", host_tags=["health"],
+            target_topics=["contract.dispute"],
+            payload={"anchor_text": "民事诉讼法"},
+        )
+        result = build_variant_full(("OP-BAD", "OP-GOOD"), (bad, good), (_clause(),))
+        assert result.record.diffs and result.record.diffs[0][0] == "OP-GOOD"
+        assert result.skipped and result.skipped[0][0] == "OP-BAD"
 
     def test_insertion_falls_back_to_responsibility_block(self):
         record = build_variant_simple(
@@ -144,14 +155,14 @@ class TestVariantBuilder:
         )
         assert record.diffs and "保单账户" in record.clauses[0].text
 
-    def test_anchor_miss_on_rewrite_raises(self):
+    def test_anchor_miss_on_rewrite_skips_operator(self):
         op = _op(
             tier="rewrite", host_tags=["health"],
             target_topics=["coverage.responsibility"],
             payload={"anchor_text": "既往症", "replace_text": "改写"},
         )
-        with pytest.raises(VariantBuildError, match="锚文本"):
-            build_variant_simple(("OP-T01",), (op,), (_clause(),))
+        result = build_variant_full(("OP-T01",), (op,), (_clause(),))
+        assert result.skipped and "锚文本" in result.skipped[0][1]
 
     def test_insertion_without_anchor_uses_topic_match(self):
         record = build_variant_simple(
@@ -159,7 +170,10 @@ class TestVariantBuilder:
         )
         assert record.diffs
 
-def build_variant_simple(operator_ids, operators, clauses):
+def build_variant_full(operator_ids, operators, clauses):
     from lib.benchmark_mutation.host_planner import VariantPlan
     plan = VariantPlan(variant_id="VAR-T01", host_id="h", operator_ids=operator_ids)
     return build_variant(plan, tuple(clauses), {op.operator_id: op for op in operators})
+
+def build_variant_simple(operator_ids, operators, clauses):
+    return build_variant_full(operator_ids, operators, clauses).record

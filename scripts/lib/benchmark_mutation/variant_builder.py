@@ -30,26 +30,34 @@ class VariantRecord:
             if diff[0] == operator_id:
                 return diff
         raise KeyError(operator_id)
+
+@dataclass(frozen=True)
+class _VariantBuildResult:
+    """构建产物：成功的变体记录 + 被跳过的算子及原因。"""
+    record: VariantRecord
+    skipped: Tuple[Tuple[str, str], ...] = ()
 def build_variant(
     plan: VariantPlan,
     clauses: Tuple[AuditClauseSnapshot, ...],
     operators_by_id,
-) -> VariantRecord:
+):
     """按计划对宿主条款应用算子，返回变体记录。
 
-    ``operators_by_id`` 是 {operator_id: MutationOperator} 映射。同一变体
-    内每个算子独立定位目标块；两个算子命中同一块时按顺序叠加，diff 记录
-    的是相对上一算子输出后的增量改写。
+    定位/执行失败的算子跳过并记入 skipped，不废弃整个变体——变体是
+    多算子打包的，单个算子在特定宿主上不适配是常态（宿主缺对应条款），
+    连坐丢弃会让产出率减半。其余算子照常应用。
     """
     mutated = {clause.clause_id: clause for clause in clauses}
     diffs: list[tuple[str, str, str, str]] = []
+    skipped: list[tuple[str, str]] = []
     for operator_id in plan.operator_ids:
         operator = operators_by_id[operator_id]
-        clause = _locate_clause(operator, mutated)
         try:
+            clause = _locate_clause(operator, mutated)
             diff = apply_mutation(clause.clause_id, clause.text, operator)
-        except MutationApplicationError as exc:
-            raise VariantBuildError(str(exc)) from exc
+        except (VariantBuildError, MutationApplicationError) as exc:
+            skipped.append((operator_id, str(exc)))
+            continue
         mutated[clause.clause_id] = replace(clause, text=diff.mutated_text)
         diffs.append((
             diff.operator_id,
@@ -57,11 +65,14 @@ def build_variant(
             diff.original_text,
             diff.mutated_text,
         ))
-    return VariantRecord(
-        variant_id=plan.variant_id,
-        host_id=plan.host_id,
-        clauses=tuple(mutated.values()),
-        diffs=tuple(diffs),
+    return _VariantBuildResult(
+        record=VariantRecord(
+            variant_id=plan.variant_id,
+            host_id=plan.host_id,
+            clauses=tuple(mutated.values()),
+            diffs=tuple(diffs),
+        ),
+        skipped=tuple(skipped),
     )
 
 def _locate_clause(operator: MutationOperator, mutated) -> AuditClauseSnapshot:
