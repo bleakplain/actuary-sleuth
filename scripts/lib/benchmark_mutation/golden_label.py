@@ -80,13 +80,37 @@ def write_confirmation_sheet(
             })
 
 def load_confirmations(path: Path) -> dict[tuple[str, str], tuple[str, str, str]]:
-    """读回确认结果：{(variant_id, operator_id): (confirmed, by, at)}。"""
+    """读回确认结果：{(variant_id, operator_id): (confirmed, by, at)}。
+
+    支持 CSV（utf-8-sig）与 xlsx（人工填写更方便的格式）。
+    """
+    if path.suffix.lower() == ".xlsx":
+        return _load_confirmations_xlsx(path)
     import csv
     results = {}
     with path.open(encoding="utf-8-sig") as handle:
         for row in csv.DictReader(handle):
             key = (row["variant_id"], row["operator_id"])
             results[key] = (row.get("confirmed", ""), row.get("confirmed_by", ""), row.get("confirmed_at", ""))
+    return results
+
+def _load_confirmations_xlsx(path: Path) -> dict[tuple[str, str], tuple[str, str, str]]:
+    from openpyxl import load_workbook
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    sheet = workbook.active
+    rows = iter(sheet.iter_rows(values_only=True))
+    header = [str(cell) for cell in next(rows)]
+    index = {name: header.index(name) for name in ("variant_id", "operator_id", "confirmed", "confirmed_by", "confirmed_at")}
+    results = {}
+    for row in rows:
+        if row is None or row[index["variant_id"]] is None:
+            continue
+        key = (str(row[index["variant_id"]]), str(row[index["operator_id"]]))
+        results[key] = tuple(
+            "" if row[index[field]] is None else str(row[index[field]])
+            for field in ("confirmed", "confirmed_by", "confirmed_at")
+        )
+    workbook.close()
     return results
 
 def apply_confirmations(
