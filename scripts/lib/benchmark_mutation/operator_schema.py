@@ -21,7 +21,7 @@ class MutationTier(str, Enum):
 
 _PAYLOAD_REQUIRED_KEYS: Mapping[MutationTier, Tuple[str, ...]] = {
     MutationTier.INSERTION: ("insert_text",),
-    MutationTier.NUMERIC: ("from_value", "to_value"),
+    MutationTier.NUMERIC: (),  # from_value 或 from_values 二选一，__post_init__ 细校
     MutationTier.DELETION: ("anchor_text",),
     MutationTier.REWRITE: ("anchor_text", "replace_text"),
 }
@@ -74,6 +74,15 @@ class MutationOperator:
             raise MutationOperatorError(
                 f"{self.operator_id}: tier={self.tier.value} 缺少 payload 字段 {missing}"
             )
+        if self.tier is MutationTier.NUMERIC:
+            if not (self.payload.get("from_value") or self.payload.get("from_values")):
+                raise MutationOperatorError(
+                    f"{self.operator_id}: numeric 算子需要 from_value 或 from_values"
+                )
+            if not str(self.payload.get("to_value", "")).strip():
+                raise MutationOperatorError(
+                    f"{self.operator_id}: numeric 算子缺少 to_value"
+                )
 def parse_operator(raw: Mapping[str, Any]) -> MutationOperator:
     """解析单个算子 JSON 对象，格式错误抛 MutationOperatorError。"""
     try:

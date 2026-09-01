@@ -158,7 +158,8 @@ _TOPIC_KEYWORDS = None
 
 def _anchor_of(operator: MutationOperator) -> str:
     if operator.tier is MutationTier.NUMERIC:
-        return str(operator.payload.get("from_value", ""))
+        candidates = operator.payload.get("from_values") or [operator.payload.get("from_value")]
+        return str(candidates[0])
     if operator.tier in (MutationTier.DELETION, MutationTier.REWRITE):
         return str(operator.payload.get("anchor_text", ""))
     return ""

@@ -6,8 +6,13 @@
       "operator_id": "OP-001",
       "rule_ref": "产品责任设计#原序号=22",
       "tier": "insertion",
-      "host_tags": ["participating"],
-      "target_topics": ["policy.account_value", "premium.rate"],
+      "host_tags": [
+        "participating"
+      ],
+      "target_topics": [
+        "policy.account_value",
+        "premium.rate"
+      ],
       "payload": {
         "insert_text": "本合同设立保单账户，保险公司按照保证利率不低于2.5%对账户价值进行结算，账户管理费从保单账户价值中扣除。"
       },
@@ -16,10 +21,15 @@
     },
     {
       "operator_id": "OP-002",
-      "rule_ref": "产品责任设计#原序号=24",
+      "rule_ref": "产品责任设计#原序号=23",
       "tier": "insertion",
-      "host_tags": ["health", "nursing"],
-      "target_topics": ["coverage.responsibility"],
+      "host_tags": [
+        "health",
+        "nursing"
+      ],
+      "target_topics": [
+        "coverage.responsibility"
+      ],
       "payload": {
         "insert_text": "本产品保险期间为终身，且为万能型保险，投保人交纳的保险费扣除初始费用后计入保单账户。"
       },
@@ -28,10 +38,15 @@
     },
     {
       "operator_id": "OP-003",
-      "rule_ref": "产品责任设计#原序号=25",
+      "rule_ref": "产品责任设计#原序号=24",
       "tier": "insertion",
-      "host_tags": ["health", "medical"],
-      "target_topics": ["coverage.amount"],
+      "host_tags": [
+        "health",
+        "medical"
+      ],
+      "target_topics": [
+        "coverage.amount"
+      ],
       "payload": {
         "insert_text": "本产品同时提供保险资金投资增值服务，投保人所交保险费在扣除风险保费后进入投资账户，按实际投资收益情况进行增值。"
       },
@@ -40,10 +55,15 @@
     },
     {
       "operator_id": "OP-004",
-      "rule_ref": "产品责任设计#原序号=26",
+      "rule_ref": "产品责任设计#原序号=25",
       "tier": "insertion",
-      "host_tags": ["health", "nursing"],
-      "target_topics": ["coverage.responsibility"],
+      "host_tags": [
+        "health",
+        "nursing"
+      ],
+      "target_topics": [
+        "coverage.responsibility"
+      ],
       "payload": {
         "insert_text": "本产品护理保险责任仅承担因意外伤害导致的护理责任，其他原因导致的护理需求不属于本合同保险责任范围。"
       },
@@ -54,8 +74,13 @@
       "operator_id": "OP-005",
       "rule_ref": "产品责任设计#原序号=28",
       "tier": "insertion",
-      "host_tags": ["health", "disease"],
-      "target_topics": ["coverage.survival"],
+      "host_tags": [
+        "health",
+        "disease"
+      ],
+      "target_topics": [
+        "coverage.survival"
+      ],
       "payload": {
         "insert_text": "被保险人生存至本合同约定的生存金给付日时，本公司按基本保险金额的20%给付生存保险金。"
       },
@@ -66,8 +91,13 @@
       "operator_id": "OP-006",
       "rule_ref": "产品责任设计#原序号=29",
       "tier": "insertion",
-      "host_tags": ["health", "nursing"],
-      "target_topics": ["coverage.death"],
+      "host_tags": [
+        "health",
+        "nursing"
+      ],
+      "target_topics": [
+        "coverage.death"
+      ],
       "payload": {
         "insert_text": "被保险人身故的，本公司按基本保险金额给付身故保险金，同时本合同终止。"
       },
@@ -76,10 +106,15 @@
     },
     {
       "operator_id": "OP-007",
-      "rule_ref": "产品责任设计#原序号=30",
+      "rule_ref": "产品条款表述#原序号=12",
       "tier": "insertion",
-      "host_tags": ["health", "disease"],
-      "target_topics": ["claim.application"],
+      "host_tags": [
+        "health",
+        "disease"
+      ],
+      "target_topics": [
+        "claim.application"
+      ],
       "payload": {
         "insert_text": "被保险人经医院确诊初次发生本合同约定的重大疾病的，需自确诊之日起生存满180日后，本公司方给付重大疾病保险金。"
       },
@@ -90,8 +125,13 @@
       "operator_id": "OP-008",
       "rule_ref": "产品责任设计#原序号=31",
       "tier": "insertion",
-      "host_tags": ["health", "disability_income"],
-      "target_topics": ["coverage.death"],
+      "host_tags": [
+        "health",
+        "disability_income"
+      ],
+      "target_topics": [
+        "coverage.death"
+      ],
       "payload": {
         "insert_text": "被保险人因意外伤害导致身故的，本公司按基本保险金额给付意外身故保险金。"
       },
@@ -100,10 +140,15 @@
     },
     {
       "operator_id": "OP-009",
-      "rule_ref": "产品责任设计#原序号=32",
+      "rule_ref": "产品责任设计#原序号=30",
       "tier": "insertion",
-      "host_tags": ["health", "medical"],
-      "target_topics": ["coverage.responsibility"],
+      "host_tags": [
+        "health",
+        "medical"
+      ],
+      "target_topics": [
+        "coverage.responsibility"
+      ],
       "payload": {
         "insert_text": "本产品仅承担安排就医、协调医疗资源等医疗服务责任，不承担医疗费用给付责任。"
       },
@@ -114,8 +159,15 @@
       "operator_id": "OP-010",
       "rule_ref": "产品费率厘定及精算假设#原序号=47",
       "tier": "insertion",
-      "host_tags": ["health", "medical", "short_term"],
-      "target_topics": ["coverage.payment_limit", "renewal.guaranteed"],
+      "host_tags": [
+        "health",
+        "medical",
+        "short_term"
+      ],
+      "target_topics": [
+        "coverage.payment_limit",
+        "renewal.guaranteed"
+      ],
       "payload": {
         "insert_text": "本产品给付限额为终身给付限额，且保险期间届满时投保人无需重新申请即可连续投保。"
       },
@@ -126,8 +178,12 @@
       "operator_id": "OP-011",
       "rule_ref": "产品条款表述#原序号=7",
       "tier": "insertion",
-      "host_tags": ["accident"],
-      "target_topics": ["claim.material"],
+      "host_tags": [
+        "accident"
+      ],
+      "target_topics": [
+        "claim.material"
+      ],
       "payload": {
         "insert_text": "申请意外伤害保险金时，申请人除提供交通管理部门出具的事故认定书外，还须提供当次交通工具客票（存根）原件。"
       },
@@ -138,8 +194,12 @@
       "operator_id": "OP-012",
       "rule_ref": "产品条款表述#原序号=8",
       "tier": "insertion",
-      "host_tags": ["life"],
-      "target_topics": ["claim.material"],
+      "host_tags": [
+        "life"
+      ],
+      "target_topics": [
+        "claim.material"
+      ],
       "payload": {
         "insert_text": "申请身故保险金时，申请人除提供死亡证明和户籍注销证明外，还须提供火化证明或丧葬证明。"
       },
@@ -150,8 +210,12 @@
       "operator_id": "OP-013",
       "rule_ref": "产品条款表述#原序号=9",
       "tier": "insertion",
-      "host_tags": ["accident", "health", "life"],
-      "target_topics": ["policy.beneficiary"],
+      "host_tags": [
+        "health"
+      ],
+      "target_topics": [
+        "policy.beneficiary"
+      ],
       "payload": {
         "insert_text": "本合同第一受益人为贷款发放机构，其受益金额以被保险人尚未偿还的贷款本息余额为限。"
       },
@@ -162,8 +226,13 @@
       "operator_id": "OP-014",
       "rule_ref": "产品条款表述#原序号=10",
       "tier": "rewrite",
-      "host_tags": ["health"],
-      "target_topics": ["coverage.exclusion", "coverage.waiting_period"],
+      "host_tags": [
+        "health"
+      ],
+      "target_topics": [
+        "coverage.exclusion",
+        "coverage.waiting_period"
+      ],
       "payload": {
         "anchor_text": "等待期内",
         "replace_text": "等待期内出现的症状或体征，在等待期后发生保险事故的"
@@ -175,8 +244,14 @@
       "operator_id": "OP-015",
       "rule_ref": "产品条款表述#原序号=11",
       "tier": "insertion",
-      "host_tags": ["health", "medical"],
-      "target_topics": ["coverage.responsibility", "policy.beneficiary"],
+      "host_tags": [
+        "health",
+        "medical"
+      ],
+      "target_topics": [
+        "coverage.responsibility",
+        "policy.beneficiary"
+      ],
       "payload": {
         "insert_text": "被保险人身故后，本公司不一次性全额给付身故保险金，而按本合同约定的标准分期给付生存金给保单受益人。"
       },
@@ -187,8 +262,14 @@
       "operator_id": "OP-016",
       "rule_ref": "产品条款表述#原序号=13",
       "tier": "insertion",
-      "host_tags": ["health", "medical"],
-      "target_topics": ["renewal.guaranteed", "renewal.general"],
+      "host_tags": [
+        "health",
+        "medical"
+      ],
+      "target_topics": [
+        "renewal.guaranteed",
+        "renewal.general"
+      ],
       "payload": {
         "insert_text": "保险期间或保证续保期间届满时，如本公司未收到投保人不续保申请，则视同续保。"
       },
@@ -199,8 +280,14 @@
       "operator_id": "OP-017",
       "rule_ref": "产品条款表述#原序号=14",
       "tier": "insertion",
-      "host_tags": ["health", "short_term"],
-      "target_topics": ["premium.rate_adjustment", "renewal.general"],
+      "host_tags": [
+        "health",
+        "short_term"
+      ],
+      "target_topics": [
+        "premium.rate_adjustment",
+        "renewal.general"
+      ],
       "payload": {
         "insert_text": "本公司保留在续保时调整本产品保险费率的权利，续保费率以续保时本公司公布的费率为准。"
       },
@@ -211,8 +298,13 @@
       "operator_id": "OP-018",
       "rule_ref": "产品条款表述#原序号=15",
       "tier": "insertion",
-      "host_tags": ["health", "rider"],
-      "target_topics": ["contract.termination"],
+      "host_tags": [
+        "health",
+        "rider"
+      ],
+      "target_topics": [
+        "contract.termination"
+      ],
       "payload": {
         "insert_text": "本附加险合同不得单独解除，且本附加险保险金给付以主险合同保险金是否给付为前提条件。"
       },
@@ -223,8 +315,13 @@
       "operator_id": "OP-019",
       "rule_ref": "产品条款表述#原序号=16",
       "tier": "insertion",
-      "host_tags": ["accident", "health", "life"],
-      "target_topics": ["disclosure.reading_guide", "disclosure.risk_notice"],
+      "host_tags": [
+        "health"
+      ],
+      "target_topics": [
+        "disclosure.reading_guide",
+        "disclosure.risk_notice"
+      ],
       "payload": {
         "insert_text": "本保险产品与信托、银行理财、基金等金融产品组合，实现保险+信托的一站页财富管理服务。"
       },
@@ -235,8 +332,12 @@
       "operator_id": "OP-020",
       "rule_ref": "产品条款表述#原序号=17",
       "tier": "insertion",
-      "host_tags": ["accident", "health", "life"],
-      "target_topics": ["coverage.exclusion"],
+      "host_tags": [
+        "health"
+      ],
+      "target_topics": [
+        "coverage.exclusion"
+      ],
       "payload": {
         "insert_text": "因细菌或病毒感染引发的保险事故，本公司不承担给付保险金的责任。"
       },
@@ -247,8 +348,13 @@
       "operator_id": "OP-021",
       "rule_ref": "产品条款表述#原序号=18",
       "tier": "insertion",
-      "host_tags": ["accident", "health", "life"],
-      "target_topics": ["contract.party", "contract.change"],
+      "host_tags": [
+        "health"
+      ],
+      "target_topics": [
+        "contract.party",
+        "contract.change"
+      ],
       "payload": {
         "insert_text": "投保人可在保险期间内经本公司同意后变更被保险人。"
       },
@@ -259,8 +365,12 @@
       "operator_id": "OP-022",
       "rule_ref": "产品条款表述#原序号=19",
       "tier": "rewrite",
-      "host_tags": ["health"],
-      "target_topics": ["coverage.preexisting"],
+      "host_tags": [
+        "health"
+      ],
+      "target_topics": [
+        "coverage.preexisting"
+      ],
       "payload": {
         "anchor_text": "既往症",
         "replace_text": "既往症指被保险人在本合同生效前患过的疾病"
@@ -272,8 +382,14 @@
       "operator_id": "OP-023",
       "rule_ref": "产品条款表述#原序号=21",
       "tier": "insertion",
-      "host_tags": ["health", "medical"],
-      "target_topics": ["claim.medical_institution", "claim.assessment"],
+      "host_tags": [
+        "health",
+        "medical"
+      ],
+      "target_topics": [
+        "claim.medical_institution",
+        "claim.assessment"
+      ],
       "payload": {
         "insert_text": "本产品处方审核由第三方服务商负责，保险公司不承担处方审核责任。"
       },
@@ -284,12 +400,24 @@
       "operator_id": "OP-024",
       "rule_ref": "产品费率厘定及精算假设#原序号=49",
       "tier": "numeric",
-      "host_tags": ["long_term"],
-      "target_topics": ["premium.payment"],
+      "host_tags": [
+        "long_term"
+      ],
+      "target_topics": [
+        "premium.payment"
+      ],
       "payload": {
-        "from_value": "10年",
         "to_value": "2年",
-        "context_hint": "交费期间"
+        "context_hint": "交费期间",
+        "from_values": [
+          "10年",
+          "15年",
+          "20年",
+          "5年",
+          "10 年",
+          "十五年",
+          "二十年"
+        ]
       },
       "expected_decision": "violated",
       "description": "长期保险交费期间数值改为2年交"
@@ -298,8 +426,12 @@
       "operator_id": "OP-025",
       "rule_ref": "产品费率厘定及精算假设#原序号=51",
       "tier": "rewrite",
-      "host_tags": ["universal"],
-      "target_topics": ["premium.payment"],
+      "host_tags": [
+        "universal"
+      ],
+      "target_topics": [
+        "premium.payment"
+      ],
       "payload": {
         "anchor_text": "追加保险费",
         "replace_text": "本产品保险费仅可一次性交付，投保人不得追加保险费"
@@ -311,8 +443,13 @@
       "operator_id": "OP-026",
       "rule_ref": "产品责任设计#原序号=23",
       "tier": "insertion",
-      "host_tags": ["health", "nursing"],
-      "target_topics": ["premium.amount"],
+      "host_tags": [
+        "health",
+        "nursing"
+      ],
+      "target_topics": [
+        "premium.amount"
+      ],
       "payload": {
         "insert_text": "本产品为万能型保险，护理责任风险保费占整体保费比例较低，投保人所交保险费主要进入投资账户。"
       },
@@ -323,8 +460,13 @@
       "operator_id": "OP-027",
       "rule_ref": "产品条款表述#原序号=2",
       "tier": "deletion",
-      "host_tags": ["accident", "health", "life"],
-      "target_topics": ["policy.reduction", "contract.change"],
+      "host_tags": [
+        "health"
+      ],
+      "target_topics": [
+        "policy.reduction",
+        "contract.change"
+      ],
       "payload": {
         "anchor_text": "减保"
       },
@@ -335,8 +477,12 @@
       "operator_id": "OP-028",
       "rule_ref": "产品条款表述#原序号=4",
       "tier": "deletion",
-      "host_tags": ["accident", "health", "life"],
-      "target_topics": ["contract.dispute"],
+      "host_tags": [
+        "health"
+      ],
+      "target_topics": [
+        "contract.dispute"
+      ],
       "payload": {
         "anchor_text": "民事诉讼法"
       },
@@ -347,8 +493,14 @@
       "operator_id": "OP-029",
       "rule_ref": "产品条款表述#原序号=5",
       "tier": "deletion",
-      "host_tags": ["health", "medical"],
-      "target_topics": ["coverage.preexisting", "coverage.responsibility"],
+      "host_tags": [
+        "health",
+        "medical"
+      ],
+      "target_topics": [
+        "coverage.preexisting",
+        "coverage.responsibility"
+      ],
       "payload": {
         "anchor_text": "社会保险法"
       },
@@ -359,8 +511,13 @@
       "operator_id": "OP-030",
       "rule_ref": "产品条款表述#原序号=6",
       "tier": "deletion",
-      "host_tags": ["health", "life"],
-      "target_topics": ["claim.material", "claim.application"],
+      "host_tags": [
+        "health"
+      ],
+      "target_topics": [
+        "claim.material",
+        "claim.application"
+      ],
       "payload": {
         "anchor_text": "生存证明"
       },
@@ -371,8 +528,13 @@
       "operator_id": "OP-031",
       "rule_ref": "产品条款表述#原序号=20",
       "tier": "rewrite",
-      "host_tags": ["accident", "health", "life"],
-      "target_topics": ["coverage.responsibility", "coverage.exclusion"],
+      "host_tags": [
+        "health"
+      ],
+      "target_topics": [
+        "coverage.responsibility",
+        "coverage.exclusion"
+      ],
       "payload": {
         "anchor_text": "伤残等级",
         "replace_text": "伤残等级参照相关评定标准确定"
@@ -384,13 +546,293 @@
       "operator_id": "OP-032",
       "rule_ref": "产品责任设计#原序号=27",
       "tier": "insertion",
-      "host_tags": ["life", "term_life"],
-      "target_topics": ["coverage.responsibility"],
+      "host_tags": [
+        "life",
+        "term_life"
+      ],
+      "target_topics": [
+        "coverage.responsibility"
+      ],
       "payload": {
         "insert_text": "投保人可附加意外伤残可选责任；被保险人经诊断达到生命终末期状态的，本公司提前给付生命终末期保险金。"
       },
       "expected_decision": "violated",
       "description": "定期寿险插入意外伤残可选责任与生命终末期提前给付（备用，v1 无定期寿险宿主）"
+    },
+    {
+      "operator_id": "OP-033",
+      "rule_ref": "产品责任设计#原序号=33",
+      "tier": "insertion",
+      "host_tags": [
+        "universal"
+      ],
+      "target_topics": [
+        "policy.account_value"
+      ],
+      "payload": {
+        "insert_text": "本合同万能账户以日为单位进行结算，每日计算并公布账户利息。"
+      },
+      "expected_decision": "violated",
+      "description": "万能险插入账户按日结算的约定"
+    },
+    {
+      "operator_id": "OP-034",
+      "rule_ref": "产品责任设计#原序号=34",
+      "tier": "insertion",
+      "host_tags": [
+        "health",
+        "disease"
+      ],
+      "target_topics": [
+        "premium.rate"
+      ],
+      "payload": {
+        "insert_text": "本公司可根据指定机构出具的基因检测结果调节本合同保险费率水平。"
+      },
+      "expected_decision": "violated",
+      "description": "疾病保险插入按基因检测结果调节费率的约定"
+    },
+    {
+      "operator_id": "OP-035",
+      "rule_ref": "产品责任设计#原序号=35",
+      "tier": "numeric",
+      "host_tags": [
+        "life"
+      ],
+      "target_topics": [
+        "policy.loan"
+      ],
+      "payload": {
+        "from_value": "80%",
+        "to_value": "90%",
+        "context_hint": "保单贷款"
+      },
+      "expected_decision": "violated",
+      "description": "保单贷款比例改写为超过现金价值80%"
+    },
+    {
+      "operator_id": "OP-036",
+      "rule_ref": "产品责任设计#原序号=36",
+      "tier": "insertion",
+      "host_tags": [
+        "health",
+        "disease"
+      ],
+      "target_topics": [
+        "coverage.responsibility"
+      ],
+      "payload": {
+        "insert_text": "被保险人发生急性病且因此身故的，或因传染病隔离导致损失的，本公司按合同约定给付保险金。"
+      },
+      "expected_decision": "violated",
+      "description": "疾病保险插入急性病身故给付及新冠隔离责任"
+    },
+    {
+      "operator_id": "OP-037",
+      "rule_ref": "产品责任设计#原序号=37",
+      "tier": "rewrite",
+      "host_tags": [
+        "health"
+      ],
+      "target_topics": [
+        "coverage.disease",
+        "coverage.responsibility"
+      ],
+      "payload": {
+        "anchor_text": "恶性肿瘤-重度",
+        "replace_text": "恶性肿瘤"
+      },
+      "expected_decision": "violated",
+      "description": "将恶性肿瘤-重度改写为恶性肿瘤混淆概念"
+    },
+    {
+      "operator_id": "OP-038",
+      "rule_ref": "产品责任设计#原序号=38",
+      "tier": "insertion",
+      "host_tags": [
+        "health",
+        "disease"
+      ],
+      "target_topics": [
+        "coverage.disease"
+      ],
+      "payload": {
+        "insert_text": "本产品恶性肿瘤保险责任仅包含恶性肿瘤-重度，且本公司自定义极重度恶性肿瘤，被保险人确诊极重度恶性肿瘤的按基本保险金额的两倍给付。"
+      },
+      "expected_decision": "violated",
+      "description": "恶性肿瘤险插入仅含重度责任并自定义极重度恶性肿瘤"
+    },
+    {
+      "operator_id": "OP-039",
+      "rule_ref": "产品责任设计#原序号=39",
+      "tier": "insertion",
+      "host_tags": [
+        "life",
+        "whole_life"
+      ],
+      "target_topics": [
+        "coverage.amount"
+      ],
+      "payload": {
+        "insert_text": "本合同基本保险金额每年按5%递增，递增比例不受定价利率限制。"
+      },
+      "expected_decision": "violated",
+      "description": "终身寿险插入保额递增比例超过定价利率的约定"
+    },
+    {
+      "operator_id": "OP-040",
+      "rule_ref": "产品责任设计#原序号=40",
+      "tier": "insertion",
+      "host_tags": [
+        "life",
+        "whole_life"
+      ],
+      "target_topics": [
+        "policy.reduction"
+      ],
+      "payload": {
+        "insert_text": "投保人可随时申请减少基本保险金额，减少比例不受任何限制，减保后合同继续有效。"
+      },
+      "expected_decision": "violated",
+      "description": "终身寿险插入无比例限制的减保约定"
+    },
+    {
+      "operator_id": "OP-041",
+      "rule_ref": "产品责任设计#原序号=41",
+      "tier": "insertion",
+      "host_tags": [
+        "health"
+      ],
+      "target_topics": [
+        "coverage.survival",
+        "coverage.responsibility"
+      ],
+      "payload": {
+        "insert_text": "本合同满期金留存于本公司的，按年利率4%累积生息。"
+      },
+      "expected_decision": "violated",
+      "description": "插入满期金累积生息责任"
+    },
+    {
+      "operator_id": "OP-042",
+      "rule_ref": "产品责任设计#原序号=42",
+      "tier": "insertion",
+      "host_tags": [
+        "health",
+        "medical"
+      ],
+      "target_topics": [
+        "coverage.exclusion"
+      ],
+      "payload": {
+        "insert_text": "被保险人用药时长符合慈善赠药申请条件，但因未提交相关申请、申请材料不全导致慈善赠药申请未通过，或申请通过后因个人原因未领取慈善赠药而发生的药品费用，本公司不承担给付责任。"
+      },
+      "expected_decision": "violated",
+      "description": "医疗险免责条款插入慈善赠药相关免责"
+    },
+    {
+      "operator_id": "OP-043",
+      "rule_ref": "产品责任设计#原序号=43",
+      "tier": "insertion",
+      "host_tags": [
+        "life",
+        "annuity"
+      ],
+      "target_topics": [
+        "coverage.responsibility",
+        "premium.amount"
+      ],
+      "payload": {
+        "insert_text": "本年金保险保险金额每年递增，属于增额型年金产品设计。"
+      },
+      "expected_decision": "violated",
+      "description": "年金保险插入增额形式设计（备用，v1 无年金宿主）"
+    },
+    {
+      "operator_id": "OP-044",
+      "rule_ref": "产品责任设计#原序号=44",
+      "tier": "insertion",
+      "host_tags": [
+        "life",
+        "endowment"
+      ],
+      "target_topics": [
+        "coverage.responsibility",
+        "premium.amount"
+      ],
+      "payload": {
+        "insert_text": "本两全保险保险金额每年递增，属于增额型产品设计。"
+      },
+      "expected_decision": "violated",
+      "description": "两全保险插入增额形式设计"
+    },
+    {
+      "operator_id": "OP-045",
+      "rule_ref": "产品责任设计#原序号=45",
+      "tier": "insertion",
+      "host_tags": [
+        "health",
+        "nursing"
+      ],
+      "target_topics": [
+        "coverage.responsibility",
+        "premium.amount"
+      ],
+      "payload": {
+        "insert_text": "本护理保险保险金额每年递增，属于增额型产品设计。"
+      },
+      "expected_decision": "violated",
+      "description": "非终身护理保险插入增额形式设计"
+    },
+    {
+      "operator_id": "OP-046",
+      "rule_ref": "产品责任设计#原序号=46",
+      "tier": "insertion",
+      "host_tags": [
+        "universal"
+      ],
+      "target_topics": [
+        "premium.payment"
+      ],
+      "payload": {
+        "insert_text": "投保人可申请追加保险费，追加后本合同自动终止。"
+      },
+      "expected_decision": "violated",
+      "description": "万能险插入不清晰的追加保费管理机制"
+    },
+    {
+      "operator_id": "OP-050",
+      "rule_ref": "产品费率厘定及精算假设#原序号=50",
+      "tier": "insertion",
+      "host_tags": [
+        "health",
+        "medical"
+      ],
+      "target_topics": [
+        "premium.rate"
+      ],
+      "payload": {
+        "insert_text": "本产品为费用补偿型医疗保险，赔付比例不区分被保险人是否享有社会医疗保险。"
+      },
+      "expected_decision": "violated",
+      "description": "医疗险插入定价不区分社保非社保的表述"
+    },
+    {
+      "operator_id": "OP-032B",
+      "rule_ref": "产品责任设计#原序号=32",
+      "tier": "insertion",
+      "host_tags": [
+        "health"
+      ],
+      "target_topics": [
+        "coverage.waiting_period",
+        "coverage.amount"
+      ],
+      "payload": {
+        "insert_text": "本公司可通过调整保险金额方式相应延长等待期，等待期内发生保险事故的按比例给付保险金。"
+      },
+      "expected_decision": "violated",
+      "description": "健康险插入变相延长等待期的约定"
     }
   ]
 }

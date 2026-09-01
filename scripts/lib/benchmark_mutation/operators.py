@@ -44,10 +44,14 @@ def _apply_insertion(text: str, payload: Mapping[str, object]) -> str:
     return f"{text.rstrip()}{inserted}" if text.strip() else inserted
 
 def _apply_numeric(text: str, payload: Mapping[str, object]) -> str:
-    from_value, to_value = str(payload["from_value"]), str(payload["to_value"])
-    if from_value not in text:
-        raise MutationApplicationError(f"数值 {from_value!r} 不在条款文本中")
-    return text.replace(from_value, to_value, 1)
+    to_value = str(payload["to_value"])
+    candidates = payload.get("from_values") or [payload.get("from_value")]
+    # 多个候选值依次尝试：宿主交费期间可能写 10年/15年/二十年 等不同形式
+    for candidate in candidates:
+        from_value = str(candidate)
+        if from_value in text:
+            return text.replace(from_value, to_value, 1)
+    raise MutationApplicationError(f"数值 {candidates} 均不在条款文本中")
 
 def _apply_deletion(text: str, payload: Mapping[str, object]) -> str:
     anchor = str(payload["anchor_text"])

@@ -47,16 +47,17 @@ class TestParseOperator:
             parse_operator(_valid_operator_raw(target_topics=[]))
 
     @pytest.mark.parametrize(
-        "tier,payload",
+        "tier,payload,pattern",
         [
-            (MutationTier.INSERTION, {}),
-            (MutationTier.NUMERIC, {"from_value": "10年"}),
-            (MutationTier.DELETION, {}),
-            (MutationTier.REWRITE, {"anchor_text": "既往症"}),
+            (MutationTier.INSERTION, {}, "payload"),
+            (MutationTier.NUMERIC, {"from_value": "10年", "to_value": ""}, "to_value"),
+            (MutationTier.NUMERIC, {"to_value": "2年"}, "from_value 或 from_values"),
+            (MutationTier.DELETION, {}, "payload"),
+            (MutationTier.REWRITE, {"anchor_text": "既往症"}, "payload"),
         ],
     )
-    def test_rejects_payload_missing_tier_fields(self, tier, payload):
-        with pytest.raises(MutationOperatorError, match="payload"):
+    def test_rejects_payload_missing_tier_fields(self, tier, payload, pattern):
+        with pytest.raises(MutationOperatorError, match=pattern):
             parse_operator(_valid_operator_raw(tier=tier.value, payload=payload))
 
     def test_rejects_unknown_tier(self):
