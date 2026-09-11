@@ -92,6 +92,7 @@ def _locate_clause(operator: MutationOperator, mutated) -> AuditClauseSnapshot:
         candidates = _keyword_fallback(operator, mutated)
     if not candidates and operator.tier is MutationTier.INSERTION:
         candidates = _responsibility_fallback(mutated)
+    candidates = _prefer_definition_blocks(candidates)
     if not candidates:
         raise VariantBuildError(
             f"{operator.operator_id}: 主题 {list(operator.target_topics)} "
@@ -113,23 +114,51 @@ def _keyword_fallback(operator: MutationOperator, mutated):
     terms = [kw for topic in operator.target_topics for kw in keywords.get(topic, ())]
     if not terms:
         return []
-    return [
+    hits = [
         clause for clause in mutated.values()
-        if not clause.container_only
+        if not clause.container_only and not _is_toc_like(clause)
         and any(term in clause.text or term in clause.title for term in terms)
     ]
+    return _prefer_definition_blocks(hits)
 
 def _responsibility_fallback(mutated):
     """插入型算子的最终兜底：落到"保险责任"段，退而取最长文本块。
 
     插入不依赖宿主现有文本（违规概念是外加的），宿主没有对应主题
     块时插进保险责任段在语义上仍然成立——审核系统应当扫到它。
+    目录式块（"2.1 保险期间 2.2 基本保险金额"）结构上不是正文，
+    必须排除，否则违规句会插进目录里。
     """
-    blocks = [c for c in mutated.values() if not c.container_only and c.text.strip()]
+    blocks = [
+        c for c in mutated.values()
+        if not c.container_only and c.text.strip() and not _is_toc_like(c)
+    ]
     titled = [c for c in blocks if "保险责任" in c.title or "责任" in c.title]
     if titled:
         return titled
     return [max(blocks, key=lambda c: len(c.text))] if blocks else []
+
+def _is_toc_like(clause: AuditClauseSnapshot) -> bool:
+    """识别目录式块：无句号且由多个短编号行组成，或标题含"目录"。"""
+    if "目录" in clause.title:
+        return True
+    text = clause.text.strip()
+    if "。" in text or len(text) > 120:
+        return False
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    numbered = sum(1 for line in lines if line[:1].isdigit())
+    return len(lines) >= 2 and numbered >= len(lines) - 1
+
+def _prefer_definition_blocks(candidates):
+    """改写定义类算子优先落在"释义/定义"块（用户确认反馈：既往症改写
+    应改在定义句里，而不是条款正文随便一处出现该词的地方）。"""
+    if not candidates:
+        return candidates
+    definitional = [
+        c for c in candidates
+        if "释义" in c.title or "定义" in c.title or "指" in c.text[:40]
+    ]
+    return definitional or candidates
 
 def _topic_keywords():
     """惰性加载主题关键词：doc_parser 注册表 + 本模块补充表。

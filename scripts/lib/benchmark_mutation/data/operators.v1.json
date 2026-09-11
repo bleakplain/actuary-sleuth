@@ -130,7 +130,7 @@
         "disability_income"
       ],
       "target_topics": [
-        "coverage.death"
+        "coverage.responsibility"
       ],
       "payload": {
         "insert_text": "被保险人因意外伤害导致身故的，本公司按基本保险金额给付意外身故保险金。"
@@ -182,7 +182,8 @@
         "accident"
       ],
       "target_topics": [
-        "claim.material"
+        "claim.material",
+        "claim.application"
       ],
       "payload": {
         "insert_text": "申请意外伤害保险金时，申请人除提供交通管理部门出具的事故认定书外，还须提供当次交通工具客票（存根）原件。"
@@ -757,8 +758,7 @@
         "endowment"
       ],
       "target_topics": [
-        "coverage.responsibility",
-        "premium.amount"
+        "coverage.amount"
       ],
       "payload": {
         "insert_text": "本两全保险保险金额每年递增，属于增额型产品设计。"
@@ -799,23 +799,6 @@
       },
       "expected_decision": "violated",
       "description": "万能险插入不清晰的追加保费管理机制"
-    },
-    {
-      "operator_id": "OP-050",
-      "rule_ref": "产品费率厘定及精算假设#原序号=50",
-      "tier": "insertion",
-      "host_tags": [
-        "health",
-        "medical"
-      ],
-      "target_topics": [
-        "premium.rate"
-      ],
-      "payload": {
-        "insert_text": "本产品为费用补偿型医疗保险，赔付比例不区分被保险人是否享有社会医疗保险。"
-      },
-      "expected_decision": "violated",
-      "description": "医疗险插入定价不区分社保非社保的表述"
     },
     {
       "operator_id": "OP-032B",
