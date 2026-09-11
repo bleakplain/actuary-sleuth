@@ -86,7 +86,8 @@ def _locate_clause(operator: MutationOperator, mutated) -> AuditClauseSnapshot:
     anchor = _anchor_of(operator)
     candidates = [
         clause for clause in mutated.values()
-        if set(operator.target_topics) & set(clause.topics) and not clause.container_only
+        if set(operator.target_topics) & set(clause.topics)
+        and not clause.container_only and not _is_toc_like(clause)
     ]
     if not candidates:
         candidates = _keyword_fallback(operator, mutated)
