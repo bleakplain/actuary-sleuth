@@ -84,17 +84,49 @@ def collect_outcomes(
 def resolve_rule_refs(result: AuditPipelineResult) -> Mapping[str, str]:
     """从管线结果构建 regulation_unit_id → rule_ref 映射。
 
-    规则：source_file 词干等于负面清单文件名且 section_path 中含
-    "原序号=N" 的单元，映射为 "<词干>#原序号=N"。
+    法规单元以"第N条检核规则"标识负面清单条目，而金标 rule_ref 用 KB
+    元数据的"原序号=M"。两者映射从 KB 参考文件读取（第N条块内含原序号），
+    由 unit 的 source_file 定位文件。
     """
+    ordinal_map = _load_ordinal_map()
     mapping = {}
     for record in result.records:
         snapshot = record.package.regulation
         file_stem = _file_stem(snapshot.source_file)
-        for match in re.finditer(r"原序号=\d+", snapshot.section_path):
-            mapping[record.decision.regulation_unit_id] = f"{file_stem}#{match.group()}"
-            break
+        section_ref = f"{file_stem}#{snapshot.section_path}"
+        rule_ref = ordinal_map.get(section_ref)
+        if rule_ref is None and snapshot.section_path.startswith("第"):
+            # 元数据式 section_path 缺失时退化为 article_number 兜底
+            rule_ref = ordinal_map.get(f"{file_stem}#{snapshot.article_number}")
+        if rule_ref:
+            mapping[record.decision.regulation_unit_id] = rule_ref
     return mapping
+
+_ORDINAL_MAP: dict[str, str] | None = None
+
+def _load_ordinal_map() -> Mapping[str, str]:
+    """构建 {文件#第N条检核规则: 文件#原序号=M}，从 KB 参考文件惰性加载。"""
+    global _ORDINAL_MAP
+    if _ORDINAL_MAP is None:
+        import os
+        import re
+        from pathlib import Path
+        refs_dir = Path(os.environ.get("DATA_PATHS_REGULATIONS_DIR", ""))
+        if not refs_dir.is_dir():
+            refs_dir = Path(__file__).resolve().parents[3] / "kb" / "references"
+        mapping: dict[str, str] = {}
+        if refs_dir.is_dir():
+            negative_dir = refs_dir / "01_负面清单检查"
+            for rule_file in (negative_dir.glob("*.md") if negative_dir.is_dir() else []):
+                for block in rule_file.read_text(encoding="utf-8").split("## 第")[1:]:
+                    section = re.match(r"(\d+条检核规则)", block)
+                    ordinal = re.search(r"原序号=(\d+)", block)
+                    if section and ordinal:
+                        mapping[f"{rule_file.stem}#{section.group(1)}"] = (
+                            f"{rule_file.stem}#原序号={ordinal.group(1)}"
+                        )
+        _ORDINAL_MAP = mapping
+    return _ORDINAL_MAP
 
 def _file_stem(source_file: str) -> str:
     name = source_file.rsplit("/", 1)[-1]
