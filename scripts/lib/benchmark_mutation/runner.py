@@ -105,26 +105,39 @@ def resolve_rule_refs(result: AuditPipelineResult) -> Mapping[str, str]:
 _ORDINAL_MAP: dict[str, str] | None = None
 
 def _load_ordinal_map() -> Mapping[str, str]:
-    """构建 {文件#第N条检核规则: 文件#原序号=M}，从 KB 参考文件惰性加载。"""
+    """构建 {文件#第N条检核规则: 文件#原序号=M}，从 KB 参考文件惰性加载。
+
+    法规目录优先取 config 解析值（benchmark_run 直跑不经 conftest 加载
+    .env 时环境变量可能缺失），回退到默认 data_root 布局。
+    """
     global _ORDINAL_MAP
     if _ORDINAL_MAP is None:
-        import os
         import re
         from pathlib import Path
-        refs_dir = Path(os.environ.get("DATA_PATHS_REGULATIONS_DIR", ""))
-        if not refs_dir.is_dir():
-            refs_dir = Path(__file__).resolve().parents[3] / "kb" / "references"
+        candidates = []
+        try:
+            from lib.config import get_config
+            candidates.append(Path(get_config().get_regulations_dir()))
+        except Exception:
+            pass
+        import os
+        if os.environ.get("DATA_PATHS_REGULATIONS_DIR"):
+            candidates.append(Path(os.environ["DATA_PATHS_REGULATIONS_DIR"]))
+        candidates.append(Path(__file__).resolve().parents[3] / "kb" / "references")
         mapping: dict[str, str] = {}
-        if refs_dir.is_dir():
+        for refs_dir in candidates:
             negative_dir = refs_dir / "01_负面清单检查"
-            for rule_file in (negative_dir.glob("*.md") if negative_dir.is_dir() else []):
+            if not negative_dir.is_dir():
+                continue
+            for rule_file in negative_dir.glob("*.md"):
                 for block in rule_file.read_text(encoding="utf-8").split("## 第")[1:]:
                     section = re.match(r"(\d+条检核规则)", block)
                     ordinal = re.search(r"原序号=(\d+)", block)
                     if section and ordinal:
-                        mapping[f"{rule_file.stem}#{section.group(1)}"] = (
+                        mapping[f"{rule_file.stem}#第{section.group(1)}"] = (
                             f"{rule_file.stem}#原序号={ordinal.group(1)}"
                         )
+            break
         _ORDINAL_MAP = mapping
     return _ORDINAL_MAP
 
