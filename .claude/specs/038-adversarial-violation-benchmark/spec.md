@@ -78,3 +78,10 @@
 - 显式优于隐式：金标与规则 ID、确认人、指纹显式绑定
 - 可追溯性：US1-US5 → 本 spec §3
 - 独立可测试：每个 US 独立交付
+
+## 7. 产物位置（2026-09-14 归档）
+
+评测集与 v1 基线结果归档在 `<data_root>/eval/benchmark038/`（actuary-assets 仓库）：
+- `confirmation.xlsx` 人工确认金标（92 条）
+- `run-checkpoint.jsonl` v1 基线评测原始判定（35 变体）
+- `benchmark-report.md` v1 基线报告（检出率 0%，未决率 99%，宽松漏检 1/91）
