@@ -1,0 +1,20 @@
+{
+  "origin": "current_codex_conversation_assistant",
+  "model_id": null,
+  "api_benchmark": false,
+  "blind_test": false,
+  "expert_review": "pending",
+  "latency_seconds": null,
+  "token_usage": null,
+  "caveat": "助手已见历史开发探针及失败分析；这是同证据参考作答，不是独立模型稳定性、性能或专家准确率测试。未读取封存题。",
+  "cases": [
+    {
+      "id": "development_oracle_age_ratio",
+      "question": "个人定期寿险等产品的死亡保险金额与累计已交保费或账户价值的比例下限按什么年龄划分？到达年龄怎么算？",
+      "source_sha256": "oracle:ae86ddc2b7a32776fbab8f12cbd7bce60304157af8ed99ed481825cd36508902",
+      "source_selection": "outputs/qa-quality-20261021/candidate-sources-v2 的 chapter-50 文件，按已有 oracle_generation.py 提取 frontmatter 后正文首次 ## 二、之前的完整内容",
+      "answer": "按所给资料，这组比例是下限，按到达年龄分三档，并非统一为160%。适用对象是个人定期寿险、个人两全保险、个人终身寿险和个人护理保险；比较的是死亡保险金额或护理责任保险金额与累计已交保费或账户价值的比例。[来源1]\n\n| 到达年龄 | 比例下限 |\n| --- | --- |\n| 18—40周岁 | 160% |\n| 41—60周岁 | 140% |\n| 61周岁以上 | 120% |\n\n上述各档应满足相应比例下限，而不是把比例固定为该数值。[来源1]\n\n到达年龄＝原始投保年龄＋当时保单年度数－1。这里不是只看首次投保时的年龄。[来源1]\n\n这段资料未列出未满18周岁的比例档位，不能将成人三档直接套用；资料的现行效力尚未核定，以上是对所提供条文的解读。",
+      "human_score": null
+    }
+  ]
+}
